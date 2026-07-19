@@ -1,0 +1,9 @@
+export const DEFAULT_PAGE_WIDTH = 820;
+export const MIN_PAGE_WIDTH = 520;
+export const NOTE_PANE_WIDTH = 390;
+export const PDF_RAIL_WIDTH = 48;
+export const PDF_VIEWPORT_PADDING = 48;
+export const PDF_MIN_ZOOM = 0.3;
+export const PDF_MAX_ZOOM = 1.45;
+export const PDF_ZOOM_STEP = 0.1;
+export const SEGMENT_FLASH_DURATION_MS = 2600;

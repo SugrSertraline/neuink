@@ -1,0 +1,37 @@
+[
+  {
+    "id": "highlight",
+    "label": "高亮",
+    "description": "标记 PDF 中选中的文字，可附加说明。"
+  },
+  {
+    "id": "summary",
+    "label": "摘要",
+    "description": "压缩这段材料的核心信息，方便之后快速回看。"
+  },
+  {
+    "id": "question",
+    "label": "疑问",
+    "description": "记录没想通、要追问，或还需要验证的问题。"
+  },
+  {
+    "id": "insight",
+    "label": "洞见",
+    "description": "写下你认为真正有价值的理解、启发或判断。"
+  },
+  {
+    "id": "connection",
+    "label": "关联",
+    "description": "连接到别的论文、概念、实验、项目或任务。"
+  },
+  {
+    "id": "critique",
+    "label": "质疑",
+    "description": "指出论证的薄弱处、限制条件、反例或风险。"
+  },
+  {
+    "id": "evidence",
+    "label": "证据",
+    "description": "标记关键论据、数据点或值得引用的依据。"
+  }
+]

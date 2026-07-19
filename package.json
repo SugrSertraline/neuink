@@ -1,0 +1,22 @@
+{
+  "name": "neuink",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "apps/desktop",
+    "packages/*"
+  ],
+  "scripts": {
+    "desktop:dev": "npm --workspace apps/desktop run dev",
+    "desktop:tauri": "npm --workspace apps/desktop run tauri",
+    "desktop:build": "npm --workspace apps/desktop run build",
+    "desktop:release:portable": "npm --workspace apps/desktop run release:portable",
+    "check": "cargo check --workspace",
+    "fmt": "cargo fmt --all",
+    "test": "cargo test --workspace"
+  },
+  "devDependencies": {
+    "shadcn": "^4.11.1"
+  }
+}

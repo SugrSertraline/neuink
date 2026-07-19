@@ -1,0 +1,74 @@
+# === Dependencies ===
+node_modules/
+**/node_modules/
+
+# === Rust / Tauri build ===
+target/
+**/target/
+src-tauri/target/
+**/src-tauri/target/
+src-tauri/gen/schemas/
+**/src-tauri/gen/schemas/
+
+# === Build output (will be added when we set up Tailwind CLI / Vite) ===
+dist/
+build/
+release/
+**/dist/
+**/build/
+*.tsbuildinfo
+coverage/
+.vitest/
+.cache/
+
+# === Local Claude config (per-user permissions, not project config) ===
+.claude/
+
+# === Logs ===
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# === Environment / secrets ===
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa
+id_ed25519
+
+# === Local databases / temporary files ===
+*.sqlite
+*.sqlite3
+*.db
+*.tmp
+*.bak
+
+# === OS artifacts ===
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
+# === IDE / Editor ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# === Tauri dev artifacts ===
+src-tauri/WixTools/
+src-tauri/.cargo/
+**/resources/embedding-models/default/*
+!**/resources/embedding-models/default/README.md
+**/resources/embedding-models/**/.cache/

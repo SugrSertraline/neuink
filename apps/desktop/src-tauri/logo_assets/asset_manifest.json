@@ -1,0 +1,30 @@
+{
+  "name": "neuink Logo Assets",
+  "brand_blue": "#0B55A6",
+  "files": {
+    "app_icon_source": "neuink_app_icon.svg",
+    "svg_transparent": "neuink_logo_vector.svg",
+    "svg_white_background": "neuink_logo_vector_whitebg.svg",
+    "png_transparent": [
+      "neuink_icon_16x16.png",
+      "neuink_icon_32x32.png",
+      "neuink_icon_48x48.png",
+      "neuink_icon_64x64.png",
+      "neuink_icon_128x128.png",
+      "neuink_icon_256x256.png",
+      "neuink_icon_512x512.png",
+      "neuink_icon_1024x1024.png"
+    ],
+    "png_white_background": [
+      "neuink_icon_whitebg_16x16.png",
+      "neuink_icon_whitebg_32x32.png",
+      "neuink_icon_whitebg_48x48.png",
+      "neuink_icon_whitebg_64x64.png",
+      "neuink_icon_whitebg_128x128.png",
+      "neuink_icon_whitebg_256x256.png",
+      "neuink_icon_whitebg_512x512.png",
+      "neuink_icon_whitebg_1024x1024.png"
+    ],
+    "ico": "neuink_favicon_multi_size.ico"
+  }
+}
