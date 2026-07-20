@@ -88,6 +88,7 @@ type MineruPdfReaderProps = {
   workspaceRoot: string | null;
   markdownNoteRefreshById: Record<string, number>;
   jumpRequest: PdfJumpRequest | null;
+  recordReloadKey: number;
   reloadKey: number;
   pairedMarkdownNoteTarget: MarkdownNoteTarget | null;
   sharedSegmentNoteDrafts: Record<string, string>;
@@ -201,6 +202,7 @@ export function MineruPdfReader({
   workspaceRoot,
   markdownNoteRefreshById,
   jumpRequest,
+  recordReloadKey,
   reloadKey,
   pairedMarkdownNoteTarget,
   sharedSegmentNoteDrafts,
@@ -246,6 +248,7 @@ export function MineruPdfReader({
   } = usePdfReaderData({
     entry,
     onReadPdfReader,
+    recordReloadKey,
     reloadKey,
   });
   const [hoveredSegmentUid, setHoveredSegmentUid] = useState<string | null>(

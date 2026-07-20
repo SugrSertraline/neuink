@@ -657,10 +657,8 @@ export function ReaderPane({
         tabValue={tabId}
         markdownNoteRefreshById={markdownNoteRefreshById}
         pdfJumpRequest={linkedPdfJump ?? externalPdfJump}
-        pdfReaderReloadKey={
-          (pdfReaderReloadByEntryId[parsed.entryId] ?? 0) +
-          (segmentNoteReloadByEntryId[parsed.entryId] ?? 0)
-        }
+        pdfReaderReloadKey={pdfReaderReloadByEntryId[parsed.entryId] ?? 0}
+        segmentRecordReloadKey={segmentNoteReloadByEntryId[parsed.entryId] ?? 0}
         pairedMarkdownNoteTarget={pairedMarkdownNoteTarget}
         focusedSegmentUid={focusedSegmentUid}
         initialRecordMode={initialRecordMode}

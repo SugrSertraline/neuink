@@ -76,6 +76,7 @@ type EntryWorkspaceViewProps = {
   markdownNoteRefreshById: Record<string, number>;
   pdfJumpRequest: PdfJumpRequest | null;
   pdfReaderReloadKey: number;
+  segmentRecordReloadKey: number;
   pairedMarkdownNoteTarget: MarkdownNoteTarget | null;
   focusedSegmentUid?: string;
   initialRecordMode: 'note' | 'annotation';
@@ -174,6 +175,7 @@ export function EntryWorkspaceView({
   markdownNoteRefreshById,
   pdfJumpRequest,
   pdfReaderReloadKey,
+  segmentRecordReloadKey,
   pairedMarkdownNoteTarget,
   focusedSegmentUid,
   initialRecordMode,
@@ -257,7 +259,14 @@ export function EntryWorkspaceView({
       if (!cancelled) setReaderData(null);
     });
     return () => { cancelled = true; };
-  }, [activeContentId, entry.id, entry.pdfFileName, onReadPdfReader, pdfReaderReloadKey]);
+  }, [
+    activeContentId,
+    entry.id,
+    entry.pdfFileName,
+    onReadPdfReader,
+    pdfReaderReloadKey,
+    segmentRecordReloadKey
+  ]);
 
   const content = (
       <div className="grid h-full min-h-0 min-w-0 gap-3">
@@ -271,6 +280,7 @@ export function EntryWorkspaceView({
                   workspaceRoot={workspaceRoot}
                   markdownNoteRefreshById={markdownNoteRefreshById}
                   jumpRequest={pdfJumpRequest}
+                  recordReloadKey={segmentRecordReloadKey}
                   reloadKey={pdfReaderReloadKey}
                   pairedMarkdownNoteTarget={pairedMarkdownNoteTarget}
                   sharedSegmentNoteDrafts={sharedSegmentNoteDrafts}
