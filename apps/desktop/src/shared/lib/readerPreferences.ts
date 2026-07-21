@@ -9,6 +9,7 @@ export type ReaderPreferences = {
   hoverPreviewShowAnnotation: boolean;
   hoverPreviewShowTranslation: boolean;
   leftClickOpensNotePane: boolean;
+  segmentNoteOpenGesture: 'button' | 'single' | 'modifier';
   reflowTranslationMode: 'source' | 'translation' | 'bilingual';
   reflowHoverSourceEnabled: boolean;
   showRegions: boolean;
@@ -26,7 +27,8 @@ const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
   hoverPreviewShowNote: true,
   hoverPreviewShowAnnotation: true,
   hoverPreviewShowTranslation: true,
-  leftClickOpensNotePane: true,
+  leftClickOpensNotePane: false,
+  segmentNoteOpenGesture: 'button',
   reflowTranslationMode: 'source',
   reflowHoverSourceEnabled: true,
   showRegions: false
@@ -73,6 +75,7 @@ export function equalReaderPreferences(left: ReaderPreferences, right: ReaderPre
     left.hoverPreviewShowAnnotation === right.hoverPreviewShowAnnotation &&
     left.hoverPreviewShowTranslation === right.hoverPreviewShowTranslation &&
     left.leftClickOpensNotePane === right.leftClickOpensNotePane &&
+    left.segmentNoteOpenGesture === right.segmentNoteOpenGesture &&
     left.reflowTranslationMode === right.reflowTranslationMode &&
     left.reflowHoverSourceEnabled === right.reflowHoverSourceEnabled &&
     left.showRegions === right.showRegions
@@ -127,6 +130,14 @@ function normalizeReaderPreferences(value: unknown): ReaderPreferences {
       typeof candidate.leftClickOpensNotePane === 'boolean'
         ? candidate.leftClickOpensNotePane
         : DEFAULT_READER_PREFERENCES.leftClickOpensNotePane,
+    segmentNoteOpenGesture:
+      candidate.segmentNoteOpenGesture === 'single' || candidate.segmentNoteOpenGesture === 'modifier'
+        ? candidate.segmentNoteOpenGesture
+        : (candidate.segmentNoteOpenGesture as unknown) === 'double'
+          ? 'button'
+        : candidate.leftClickOpensNotePane === true
+          ? 'single'
+          : DEFAULT_READER_PREFERENCES.segmentNoteOpenGesture,
     reflowTranslationMode:
       candidate.reflowTranslationMode === 'translation' || candidate.reflowTranslationMode === 'bilingual'
         ? candidate.reflowTranslationMode

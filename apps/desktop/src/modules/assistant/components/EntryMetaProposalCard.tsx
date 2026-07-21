@@ -20,7 +20,7 @@ export function EntryMetaProposalCard({
       <div className="flex items-center gap-1.5">
         <PencilLine className="text-primary" size={13} aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate font-medium">
-          Edit Entry metadata: {proposal.entryTitle}
+          编辑条目元数据：{proposal.entryTitle}
         </span>
         <ProposalStatus proposal={proposal} />
       </div>
@@ -34,14 +34,14 @@ export function EntryMetaProposalCard({
           <MetadataDiff
             after={proposal.afterTitle}
             before={proposal.beforeTitle}
-            label="Title"
+            label="标题"
           />
         ) : null}
         {proposal.fields.includes('description') ? (
           <MetadataDiff
             after={proposal.afterDescription}
             before={proposal.beforeDescription}
-            label="Description"
+            label="描述"
           />
         ) : null}
       </div>
@@ -82,7 +82,7 @@ export function EntryMetaProposalCard({
             onClick={() => onReject?.(proposal)}
           >
             <X size={12} aria-hidden="true" />
-            Ignore
+            忽略
           </Button>
           <Button
             disabled={proposal.status !== 'pending'}
@@ -95,7 +95,7 @@ export function EntryMetaProposalCard({
             ) : (
               <Check size={12} aria-hidden="true" />
             )}
-            Apply
+            应用
           </Button>
         </div>
       ) : null}
@@ -112,8 +112,8 @@ function MetadataDiff({ after, before, label }: {
     <div className="grid gap-1 rounded-sm border bg-background p-1.5">
       <div className="text-[10px] font-medium text-muted-foreground">{label}</div>
       <div className="grid gap-1 sm:grid-cols-2">
-        <DiffValue label="Before" text={before} />
-        <DiffValue after label="After" text={after} />
+        <DiffValue label="修改前" text={before} />
+        <DiffValue after label="修改后" text={after} />
       </div>
     </div>
   );

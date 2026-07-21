@@ -5,6 +5,8 @@ import type {
 import type {
   AssistantContext,
   AssistantContextPlan,
+  AssistantActiveSegment,
+  AssistantActiveSurfaceSnapshot,
   AssistantTaskPlan
 } from '@/shared/types/assistant';
 
@@ -13,6 +15,8 @@ export type AssistantHarnessIntent = 'lookup' | 'note_edit' | 'qa';
 export type AssistantObservedContext = {
   activeEntryId: string | null;
   activeNote: { entryId: string; noteId: string } | null;
+  activeSegment: AssistantActiveSegment | null;
+  activeSurface: AssistantActiveSurfaceSnapshot | null;
   pinnedSegments: AssistantContextSnapshotPinnedSegment[];
   summary: string;
 };
@@ -20,11 +24,17 @@ export type AssistantObservedContext = {
 export function observeAssistantContext({
   assistantContext,
   contextPlan = null,
+  activeSegment = null,
+  activeSurface = null,
+  preferFocusedSurface = false,
   fallbackEntryId = null,
   fallbackNote = null
 }: {
   assistantContext?: AssistantContext | null;
   contextPlan?: AssistantContextPlan | null;
+  activeSegment?: AssistantActiveSegment | null;
+  activeSurface?: AssistantActiveSurfaceSnapshot | null;
+  preferFocusedSurface?: boolean;
   fallbackEntryId?: string | null;
   fallbackNote?: { entryId: string; noteId: string } | null;
 }): AssistantObservedContext {
@@ -40,9 +50,11 @@ export function observeAssistantContext({
         (item) => item.id === contextPlan.editTarget?.attachmentId && item.contentKind === 'note'
       )
     : null;
-  const activeEntryId =
-    selectedEntryIds.length === 1 ? selectedEntryIds[0] : fallbackEntryId;
-  const pinnedSegments = uniquePinnedSegments(
+  const focusedEntryId = activeSurface?.entryId ?? fallbackEntryId;
+  const activeEntryId = preferFocusedSurface
+    ? focusedEntryId
+    : selectedEntryIds.length === 1 ? selectedEntryIds[0] : focusedEntryId;
+  const explicitPinnedSegments = uniquePinnedSegments(
     (assistantContext?.items ?? [])
       .filter((item) => item.kind === 'segment')
       .map((item) => ({
@@ -50,6 +62,12 @@ export function observeAssistantContext({
         segmentUid: item.segmentUid
       }))
   );
+  const focusedSegment = activeSegment && activeSegment.entryId === focusedEntryId
+    ? activeSegment
+    : null;
+  const pinnedSegments = explicitPinnedSegments.length > 0 || !focusedSegment
+    ? explicitPinnedSegments
+    : [{ entryId: focusedSegment.entryId, segmentUid: focusedSegment.segmentUid }];
   const activeNote =
     plannedNoteTarget?.contentId
       ? { entryId: plannedNoteTarget.entryId, noteId: plannedNoteTarget.contentId }
@@ -60,6 +78,8 @@ export function observeAssistantContext({
   return {
     activeEntryId,
     activeNote,
+    activeSegment: focusedSegment,
+    activeSurface,
     pinnedSegments,
     summary: [
       contextEntries.length > 0
@@ -67,6 +87,9 @@ export function observeAssistantContext({
         : 'no selected context entries',
       activeEntryId ? `single selected entry ${activeEntryId}` : 'no single selected entry',
       activeNote ? `selected note ${activeNote.noteId}` : 'no selected note',
+      activeSurface
+        ? `focused ${activeSurface.pane} tab ${activeSurface.surfaceKey}`
+        : 'no focused tab snapshot',
       `${pinnedSegments.length} pinned segment${pinnedSegments.length === 1 ? '' : 's'}`
     ].join(', ')
   };

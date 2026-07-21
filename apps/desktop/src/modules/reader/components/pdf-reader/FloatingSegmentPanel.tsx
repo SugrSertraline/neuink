@@ -13,9 +13,10 @@ import { cn } from "@/lib/utils";
 
 const EDGE_GAP = 8;
 const SNAP_DISTANCE = 20;
-const DEFAULT_FRAME = { width: 460, height: 480 };
+const PANEL_LAYOUT_VERSION = 2;
+const DEFAULT_FRAME = { width: 640, height: 680 };
 const MAX_FRAME = { width: 960, height: 900 };
-const MIN_FRAME = { width: 280, height: 260 };
+const MIN_FRAME = { width: 460, height: 420 };
 
 type Bounds = { width: number; height: number };
 type Frame = { left: number; top: number; width: number; height: number };
@@ -23,6 +24,7 @@ type StoredFrame = {
   height: number;
   leftRatio: number;
   topRatio: number;
+  version: number;
   width: number;
 };
 
@@ -59,6 +61,7 @@ export function FloatingSegmentPanel({
         height: next.height,
         leftRatio: maxLeft === 0 ? 0 : (next.left - EDGE_GAP) / maxLeft,
         topRatio: maxTop === 0 ? 0 : (next.top - EDGE_GAP) / maxTop,
+        version: PANEL_LAYOUT_VERSION,
         width: next.width,
       };
       window.localStorage.setItem(storageKey, JSON.stringify(stored));
@@ -343,7 +346,8 @@ function frameFromStorage(storageKey: string, bounds: Bounds): Frame {
       !Number.isFinite(stored.width) ||
       !Number.isFinite(stored.height) ||
       !Number.isFinite(stored.leftRatio) ||
-      !Number.isFinite(stored.topRatio)
+      !Number.isFinite(stored.topRatio) ||
+      stored.version !== PANEL_LAYOUT_VERSION
     ) {
       return defaultFrame(bounds);
     }

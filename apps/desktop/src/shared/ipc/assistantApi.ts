@@ -70,13 +70,72 @@ export type ScopeSnapshot = {
   entry_titles: string[];
 };
 
-export type ConversationSourceLink = {
+export type LocalConversationSourceLink = {
+  provider?: 'local';
   entry_id: EntryId;
   entry_title: string;
   segment_uid: string;
   page_idx: number;
   quote: string;
 };
+
+export type SciverseConversationSourceLink = {
+  provider: 'sciverse';
+  doc_id: string;
+  chunk_id?: string | null;
+  title: string;
+  quote: string;
+  offset?: number | null;
+  page_no?: number | null;
+  score?: number | null;
+  abstract?: string | null;
+  authors?: string[];
+  publication_year?: number | null;
+  venue?: string | null;
+  citation_count?: number | null;
+  primary_topic?: string | null;
+  doi?: string | null;
+  access_is_oa?: boolean | null;
+  access_oa_url?: string | null;
+  access_license?: string | null;
+  source_type?: string | null;
+  resource_file_name?: string | null;
+};
+
+export type SciverseLibraryImportResult = {
+  entryId: string;
+  message: string;
+  pdfPath?: string;
+  remoteContentNoteTitle?: string;
+  resourceAttempts?: string[];
+  status:
+    | 'already_exists'
+    | 'created_metadata_only'
+    | 'created_with_pdf'
+    | 'created_with_remote_content';
+};
+
+export type ConversationSourceLink =
+  | LocalConversationSourceLink
+  | SciverseConversationSourceLink;
+
+export function isSciverseConversationSource(
+  source: ConversationSourceLink
+): source is SciverseConversationSourceLink {
+  return source.provider === 'sciverse';
+}
+
+export function isLocalConversationSource(
+  source: ConversationSourceLink
+): source is LocalConversationSourceLink {
+  return !isSciverseConversationSource(source);
+}
+
+export function conversationSourceKey(source: ConversationSourceLink) {
+  return isSciverseConversationSource(source)
+    ? `sciverse:${source.doc_id}:${source.chunk_id ?? ''}:${source.offset ?? ''}`
+    : `local:${source.entry_id}:${source.segment_uid}`;
+}
 
 export type ConversationRole = 'user' | 'assistant';
 

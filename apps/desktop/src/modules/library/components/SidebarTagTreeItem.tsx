@@ -1,27 +1,53 @@
 import { ChevronDown, ChevronRight, Hash } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { cn } from '@/lib/utils';
+import {
+  getEntryTagDragState,
+  isEntryTagDropTargetActive,
+  registerEntryTagDropTarget,
+  subscribeEntryTagDrag
+} from '@/shared/lib/entryDragData';
 
 import type { TagNode } from '../utils/tagTree';
 
 type SidebarTagTreeItemProps = {
   activeTag: string | null;
   node: TagNode;
+  onAssignEntryToTag: (entryId: string, tagPath: string) => Promise<unknown> | unknown;
   onSelectTag: (tag: string | null) => void;
 };
 
-export function SidebarTagTreeItem({ activeTag, node, onSelectTag }: SidebarTagTreeItemProps) {
+export function SidebarTagTreeItem({ activeTag, node, onAssignEntryToTag, onSelectTag }: SidebarTagTreeItemProps) {
   const [open, setOpen] = useState(true);
+  const [dragState, setDragState] = useState(getEntryTagDragState);
+  const targetRef = useRef<HTMLDivElement>(null);
   const active = activeTag === node.id;
   const hasChildren = node.children.length > 0;
+  const dragOver = targetRef.current ? isEntryTagDropTargetActive(targetRef.current, dragState) : false;
+
+  useEffect(() => subscribeEntryTagDrag(() => setDragState(getEntryTagDragState())), []);
+
+  useEffect(() => {
+    const element = targetRef.current;
+    if (!element) {
+      return;
+    }
+    return registerEntryTagDropTarget({
+      element,
+      onDrop: (entryId) => onAssignEntryToTag(entryId, node.path)
+    });
+  }, [node.path, onAssignEntryToTag]);
 
   return (
     <div>
       <div
+        ref={targetRef}
         className={cn(
           'group/tag flex min-h-7 w-full items-center rounded-md border border-transparent text-xs transition-colors',
-          active
+          dragOver
+            ? 'border-primary bg-primary/10 text-foreground'
+            : active
             ? 'border-primary/20 bg-accent font-bold text-primary'
             : 'text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground'
         )}
@@ -62,7 +88,13 @@ export function SidebarTagTreeItem({ activeTag, node, onSelectTag }: SidebarTagT
       {hasChildren && open ? (
         <div className="ml-3 border-l border-border pl-1">
           {node.children.map((child) => (
-            <SidebarTagTreeItem activeTag={activeTag} key={child.id} node={child} onSelectTag={onSelectTag} />
+            <SidebarTagTreeItem
+              activeTag={activeTag}
+              key={child.id}
+              node={child}
+              onAssignEntryToTag={onAssignEntryToTag}
+              onSelectTag={onSelectTag}
+            />
           ))}
         </div>
       ) : null}

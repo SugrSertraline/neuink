@@ -519,7 +519,7 @@ fn mineru_task_message(data: &Value) -> Option<String> {
         .map(|url| format!("full_zip_url: {url}"))
 }
 
-fn normalize_mineru_zip(zip_bytes: &[u8]) -> Result<NeuinkDocument, ParserError> {
+pub fn normalize_mineru_zip(zip_bytes: &[u8]) -> Result<NeuinkDocument, ParserError> {
     let mut archive = ZipArchive::new(Cursor::new(zip_bytes))?;
     let names = (0..archive.len())
         .filter_map(|index| {

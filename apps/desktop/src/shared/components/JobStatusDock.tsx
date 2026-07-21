@@ -154,6 +154,9 @@ function summarizeJobs(jobs: Job[], activeCount: number) {
 }
 
 function jobTitle(job: Job) {
+  if (job.id.startsWith('sciverse-import:')) {
+    return 'Sciverse 论文保存';
+  }
   const labelByKind: Record<Job['kind'], string> = {
     index_build: '索引构建',
     llm: 'LLM 任务',

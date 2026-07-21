@@ -17,6 +17,15 @@ import {
 
 import { Button } from '@/components/ui/button';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -41,11 +50,14 @@ import {
   type ConversationMessage,
   type ConversationMeta,
   type ConversationSourceLink,
+  type SciverseConversationSourceLink,
   type LlmProfile
 } from '@/shared/ipc/assistantApi';
+import { isSciverseConversationSource } from '@/shared/ipc/assistantApi';
 import type {
   AssistantActiveNote,
   AssistantActiveSegment,
+  AssistantActiveSurfaceSnapshot,
   AssistantComposerSnapshot,
   AssistantContext,
   AssistantContextInput,
@@ -62,6 +74,7 @@ import {
   AssistantMessageList
 } from './assistantPanelViews';
 import { AssistantExternalContextItems } from './AssistantExternalContextItems';
+import { SciversePaperDetailDrawer } from '@/modules/sciverse/components/SciversePaperDetailDrawer';
 import {
   getAssistantBackgroundRun,
   runAssistantPanelTask,
@@ -107,6 +120,7 @@ type AssistantPanelProps = {
   composerDraft: AssistantComposerDraft | null;
   activeNote: AssistantActiveNote | null;
   activeSegment: AssistantActiveSegment | null;
+  activeSurface: AssistantActiveSurfaceSnapshot;
   draftQuestion: string | null;
   entries: LibraryEntry[];
   root: string | null;
@@ -123,6 +137,9 @@ type AssistantPanelProps = {
   onExportConversation: (conversation: Conversation) => Promise<void>;
   onOpenSettings: () => void;
   onOpenSource: (source: ConversationSourceLink) => void;
+  onAddSciverseSource: (
+    source: Extract<ConversationSourceLink, { provider: 'sciverse' }>
+  ) => Promise<import('@/shared/ipc/assistantApi').SciverseLibraryImportResult>;
   onReplaceAssistantContext: (items: AssistantContextInput[]) => void;
   onRemoveAssistantContextItem: (itemId: string) => void;
 };
@@ -138,6 +155,7 @@ export function AssistantPanel({
   composerDraft,
   activeNote,
   activeSegment,
+  activeSurface,
   draftQuestion,
   entries,
   root,
@@ -154,6 +172,7 @@ export function AssistantPanel({
   onExportConversation,
   onOpenSettings,
   onOpenSource,
+  onAddSciverseSource,
   onReplaceAssistantContext,
   onRemoveAssistantContextItem
 }: AssistantPanelProps) {
@@ -165,6 +184,11 @@ export function AssistantPanel({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [conversationPendingDelete, setConversationPendingDelete] = useState<ConversationMeta | null>(null);
+  const [conversationPendingRename, setConversationPendingRename] = useState<ConversationMeta | null>(null);
+  const [conversationRenameValue, setConversationRenameValue] = useState('');
+  const [sciverseDetailSource, setSciverseDetailSource] =
+    useState<SciverseConversationSourceLink | null>(null);
   const [messageRenderLimit, setMessageRenderLimit] = useState(INITIAL_MESSAGE_RENDER_LIMIT);
   const [composerResetKey, setComposerResetKey] = useState(0);
   const [composerSnapshot, setComposerSnapshot] = useState<AssistantComposerSnapshot>(() =>
@@ -378,6 +402,7 @@ export function AssistantPanel({
         activeEntry: activeEntry ? { id: activeEntry.id, title: activeEntry.title } : null,
         activeNote: activeNote ? { ...activeNote } : null,
         activeSegment: activeSegment ? { ...activeSegment } : null,
+        activeSurface: { ...activeSurface, capturedAt: new Date().toISOString() },
         contextItems,
         contextPlan: planAssistantContext({
           composerSnapshot: snapshot,
@@ -418,6 +443,9 @@ export function AssistantPanel({
         : null;
     const runNote = queued ? queued.activeNote : activeNote;
     const runSegment = queued ? queued.activeSegment : activeSegment;
+    const runSurface = queued
+      ? queued.activeSurface
+      : { ...activeSurface, capturedAt: new Date().toISOString() };
     await runAssistantPanelTask({
       conversation,
       entries,
@@ -433,6 +461,7 @@ export function AssistantPanel({
       runEntry,
       runNote,
       runSegment,
+      runSurface,
       scope,
       selectedProfile,
       setBusy,
@@ -542,11 +571,6 @@ export function AssistantPanel({
       return;
     }
 
-    const confirmed = window.confirm(`确定要删除对话“${item.title}”吗？此操作不可撤销。`);
-    if (!confirmed) {
-      return;
-    }
-
     setBusy(true);
     setError(null);
     try {
@@ -582,16 +606,18 @@ export function AssistantPanel({
       });
     } finally {
       setBusy(false);
+      setConversationPendingDelete(null);
     }
   };
 
-  const renameConversationHistory = async (item: ConversationMeta) => {
+  const renameConversationHistory = async (item: ConversationMeta, nextTitle: string) => {
     if (!root || busy) {
       return;
     }
 
-    const title = window.prompt('重命名对话', item.title)?.trim();
+    const title = nextTitle.trim();
     if (!title || title === item.title) {
+      setConversationPendingRename(null);
       return;
     }
 
@@ -618,6 +644,7 @@ export function AssistantPanel({
       });
     } finally {
       setBusy(false);
+      setConversationPendingRename(null);
     }
   };
 
@@ -884,7 +911,13 @@ export function AssistantPanel({
   const handleMessageApplyTagProposal = useStableEvent((proposal: AssistantTagProposal) => {
     void applyTagProposal(proposal);
   });
-  const handleMessageOpenSource = useStableEvent(onOpenSource);
+  const handleMessageOpenSource = useStableEvent((source: ConversationSourceLink) => {
+    if (isSciverseConversationSource(source)) {
+      setSciverseDetailSource(source);
+      return;
+    }
+    onOpenSource(source);
+  });
   const handleMessageRejectNoteProposal = useStableEvent(rejectNoteProposal);
   const handleMessageRejectEntryMetaProposal = useStableEvent(rejectEntryMetaProposal);
   const handleMessageRejectTagProposal = useStableEvent(rejectTagProposal);
@@ -989,40 +1022,61 @@ export function AssistantPanel({
             loading={historyLoading}
             open={historyOpen}
             onClose={() => setHistoryOpen(false)}
-            onDelete={(item) => void deleteConversationHistory(item)}
+            onDelete={setConversationPendingDelete}
             onExport={(item) => void exportConversationHistory(item)}
             onOpen={(conversationId) => void openConversation(conversationId)}
-            onRename={(item) => void renameConversationHistory(item)}
+            onRename={(item) => {
+              setConversationRenameValue(item.title);
+              setConversationPendingRename(item);
+            }}
           />
         </div>
 
-        <AssistantMessageList
-          contentRef={messagesContentRef}
-          endRef={messagesEndRef}
-          hiddenMessageCount={hiddenMessageCount}
-          messageBatchSize={INITIAL_MESSAGE_RENDER_LIMIT}
-          messagesAtBottom={messagesAtBottom}
-          noteProposalsByMessageId={noteProposalsByMessageId}
-          renderedMessages={renderedMessages}
-          scrollRef={messagesScrollRef}
-          streamingMessageId={streamingMessageId}
-          toolEventsByMessageId={toolEventsByMessageId}
-          visibleMessageCount={visibleMessages.length}
-          onApplyEntryMetaProposal={handleMessageApplyEntryMetaProposal}
-          onApplyNoteProposal={handleMessageApplyNoteProposal}
-          onApplyTagProposal={handleMessageApplyTagProposal}
-          onLoadEarlier={() =>
-            setMessageRenderLimit((current) => current + INITIAL_MESSAGE_RENDER_LIMIT)
-          }
-          onOpenSource={handleMessageOpenSource}
-          onRegenerateNoteProposal={handleMessageRegenerateNoteProposal}
-          onRejectEntryMetaProposal={handleMessageRejectEntryMetaProposal}
-          onRejectNoteProposal={handleMessageRejectNoteProposal}
-          onRejectTagProposal={handleMessageRejectTagProposal}
-          onRetryAgentRun={handleMessageRetryAgentRun}
-          onReturnToLatest={forceNextScroll}
-          onScroll={handleMessagesScroll}
-        />
+        <div className="relative min-h-0 min-w-0 overflow-hidden">
+          <AssistantMessageList
+            contentRef={messagesContentRef}
+            endRef={messagesEndRef}
+            hiddenMessageCount={hiddenMessageCount}
+            messageBatchSize={INITIAL_MESSAGE_RENDER_LIMIT}
+            messagesAtBottom={messagesAtBottom}
+            noteProposalsByMessageId={noteProposalsByMessageId}
+            renderedMessages={renderedMessages}
+            scrollRef={messagesScrollRef}
+            streamingMessageId={streamingMessageId}
+            toolEventsByMessageId={toolEventsByMessageId}
+            visibleMessageCount={visibleMessages.length}
+            onApplyEntryMetaProposal={handleMessageApplyEntryMetaProposal}
+            onApplyNoteProposal={handleMessageApplyNoteProposal}
+            onApplyTagProposal={handleMessageApplyTagProposal}
+            onLoadEarlier={() =>
+              setMessageRenderLimit((current) => current + INITIAL_MESSAGE_RENDER_LIMIT)
+            }
+            onOpenSource={handleMessageOpenSource}
+            onAddSciverseSource={onAddSciverseSource}
+            onRegenerateNoteProposal={handleMessageRegenerateNoteProposal}
+            onRejectEntryMetaProposal={handleMessageRejectEntryMetaProposal}
+            onRejectNoteProposal={handleMessageRejectNoteProposal}
+            onRejectTagProposal={handleMessageRejectTagProposal}
+            onRetryAgentRun={handleMessageRetryAgentRun}
+            onReturnToLatest={forceNextScroll}
+            onScroll={handleMessagesScroll}
+          />
+          {sciverseDetailSource ? (
+            <>
+              <button
+                aria-label="关闭 Sciverse 论文详情"
+                className="absolute inset-y-0 right-0 z-10 w-[10%] cursor-default bg-black/45"
+                type="button"
+                onClick={() => setSciverseDetailSource(null)}
+              />
+              <SciversePaperDetailDrawer
+                source={sciverseDetailSource}
+                onClose={() => setSciverseDetailSource(null)}
+                onImport={onAddSciverseSource}
+              />
+            </>
+          ) : null}
+        </div>
 
         <div className="min-w-0 border-t p-2">
           {longConversation.isLong ? (
@@ -1129,6 +1183,73 @@ export function AssistantPanel({
           </div>
         </div>
       </div>
+
+      <Dialog
+        open={Boolean(conversationPendingDelete)}
+        onOpenChange={(open) => {
+          if (!open && !busy) setConversationPendingDelete(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>永久删除对话</DialogTitle>
+            <DialogDescription>
+              将删除“{conversationPendingDelete?.title}”及其关联的执行记录。对话记录暂不支持回收站恢复。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button disabled={busy} type="button" variant="outline" onClick={() => setConversationPendingDelete(null)}>
+              取消
+            </Button>
+            <Button
+              disabled={busy || !conversationPendingDelete}
+              type="button"
+              variant="destructive"
+              onClick={() => conversationPendingDelete && void deleteConversationHistory(conversationPendingDelete)}
+            >
+              永久删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(conversationPendingRename)}
+        onOpenChange={(open) => {
+          if (!open && !busy) setConversationPendingRename(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>重命名对话</DialogTitle>
+            <DialogDescription>新名称会同步显示在聊天历史中。</DialogDescription>
+          </DialogHeader>
+          <Input
+            autoFocus
+            disabled={busy}
+            value={conversationRenameValue}
+            onChange={(event) => setConversationRenameValue(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && conversationPendingRename) {
+                event.preventDefault();
+                void renameConversationHistory(conversationPendingRename, conversationRenameValue);
+              }
+            }}
+          />
+          <DialogFooter>
+            <Button disabled={busy} type="button" variant="outline" onClick={() => setConversationPendingRename(null)}>
+              取消
+            </Button>
+            <Button
+              disabled={busy || !conversationPendingRename || !conversationRenameValue.trim()}
+              type="button"
+              onClick={() => conversationPendingRename && void renameConversationHistory(conversationPendingRename, conversationRenameValue)}
+            >
+              保存名称
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </aside>
   );
 }

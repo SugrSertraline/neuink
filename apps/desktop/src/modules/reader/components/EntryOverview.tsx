@@ -1,8 +1,9 @@
-import { FileText, Highlighter, Link2, Tags } from 'lucide-react';
-import { useMemo } from 'react';
+import { FileText, Highlighter, Link2, Pencil, Tags } from 'lucide-react';
+import { useMemo, useState } from 'react';
 
-import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { EntryEditDialog } from '@/modules/library/components/EntryEditDialog';
 import { buildTagPathById } from '@/modules/library/utils/tagTree';
 import type { TagMeta } from '@/shared/types/domain';
 
@@ -13,13 +14,19 @@ import { ReaderSection, ReaderSurfaceBody } from './ReaderSurfacePrimitives';
 
 export function EntryOverview({
   entry,
+  onUpdateEntry,
   sourceBacklinksBySegmentUid,
   tags
 }: {
   entry: LibraryEntry;
+  onUpdateEntry: (
+    entryId: string,
+    request: { fields: Record<string, string>; tagPaths: string[]; title: string }
+  ) => Promise<unknown> | unknown;
   sourceBacklinksBySegmentUid: SourceBacklinksBySegmentUid;
   tags: TagMeta[];
 }) {
+  const [editOpen, setEditOpen] = useState(false);
   const tagPaths = useMemo(() => {
     const pathById = buildTagPathById(tags);
     const resolved = entry.tagIds
@@ -29,9 +36,9 @@ export function EntryOverview({
       left.localeCompare(right, 'zh-CN')
     );
   }, [entry.tagIds, entry.tags, tags]);
-  const description = entry.fields.description?.trim() ?? '';
+  const description = entry.fields.description?.trim() || entry.fields['描述']?.trim() || '';
   const customFields = Object.entries(entry.fields)
-    .filter(([key, value]) => key.toLowerCase() !== 'description' && value.trim())
+    .filter(([key, value]) => key.toLowerCase() !== 'description' && key !== '描述' && value.trim())
     .sort(([left], [right]) => left.localeCompare(right, 'zh-CN'));
   const sourceLinkCount = Object.values(sourceBacklinksBySegmentUid)
     .flat()
@@ -40,7 +47,17 @@ export function EntryOverview({
 
   return (
     <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
-      <EntryContentHeader contentTitle="条目概览" entryTitle={entry.title} />
+      <EntryContentHeader contentTitle="条目概览" entryTitle={entry.title}>
+        <Button
+          size="icon-sm"
+          title="编辑条目"
+          type="button"
+          variant="outline"
+          onClick={() => setEditOpen(true)}
+        >
+          <Pencil size={14} aria-hidden="true" />
+        </Button>
+      </EntryContentHeader>
       <ReaderSurfaceBody>
         <section className="rounded-lg border bg-card px-5 py-5 sm:px-6">
           <div className="text-xs font-medium text-muted-foreground">条目标题</div>
@@ -50,9 +67,7 @@ export function EntryOverview({
           <div className="mt-4 border-t pt-4">
             <div className="text-xs font-medium text-muted-foreground">描述</div>
             {description ? (
-              <p className="mt-1.5 whitespace-pre-wrap break-words text-sm leading-7 text-foreground">
-                {description}
-              </p>
+              <p className="mt-1.5 whitespace-pre-wrap break-words text-sm leading-6 text-foreground">{description}</p>
             ) : (
               <p className="mt-1.5 text-sm text-muted-foreground">暂无描述。</p>
             )}
@@ -72,16 +87,9 @@ export function EntryOverview({
 
         <ReaderSection title="标签" description="显示条目当前关联的完整标签路径">
           {tagPaths.length > 0 ? (
-            <div className="flex flex-wrap items-start gap-2">
+            <div className="flex flex-wrap gap-1.5">
               {tagPaths.map((path) => (
-                <Badge
-                  className="h-auto max-w-full whitespace-normal break-all px-2.5 py-1 text-left leading-5"
-                  key={path}
-                  title={path}
-                  variant="secondary"
-                >
-                  {path}
-                </Badge>
+                <span className="rounded-md border bg-muted/30 px-2 py-1 text-sm" key={path}>{path}</span>
               ))}
             </div>
           ) : (
@@ -95,9 +103,7 @@ export function EntryOverview({
               {customFields.map(([key, value]) => (
                 <div className="min-w-0" key={key}>
                   <dt className="text-xs font-medium text-muted-foreground">{key}</dt>
-                  <dd className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-foreground">
-                    {value}
-                  </dd>
+                  <dd className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-foreground">{value}</dd>
                 </div>
               ))}
             </dl>
@@ -113,6 +119,15 @@ export function EntryOverview({
           </dl>
         </ReaderSection>
       </ReaderSurfaceBody>
+      {editOpen ? (
+        <EntryEditDialog
+          entry={entry}
+          open={editOpen}
+          tags={tags}
+          onOpenChange={setEditOpen}
+          onUpdateEntry={onUpdateEntry}
+        />
+      ) : null}
     </div>
   );
 }

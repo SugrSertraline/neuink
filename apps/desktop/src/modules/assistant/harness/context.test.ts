@@ -13,6 +13,24 @@ describe('observeAssistantContext', () => {
     expect(observed.activeEntryId).toBe('paper-entry');
   });
 
+  it('uses the focused tab instead of a selected library Entry for current-document tasks', () => {
+    const observed = observeAssistantContext({
+      activeSurface: {
+        capturedAt: '2026-07-20T00:00:00Z', entryId: 'focused-entry', kind: 'pdf',
+        noteId: null, pane: 'right', segmentUid: null, surfaceKey: 'pdf:focused-entry'
+      },
+      assistantContext: {
+        items: [{
+          addedAt: '', contentKind: 'entry', entryId: 'selected-entry', entryTitle: 'Selected',
+          id: 'entry:selected-entry', kind: 'entry'
+        }]
+      },
+      preferFocusedSurface: true
+    });
+
+    expect(observed.activeEntryId).toBe('focused-entry');
+  });
+
   it('does not hydrate a selected Markdown reference as the edit target', () => {
     const assistantContext: AssistantContext = {
       items: [

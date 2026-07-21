@@ -32,7 +32,7 @@ import {
   Trash2,
   Undo2
 } from 'lucide-react';
-import { forwardRef, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { forwardRef, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 
 import { Badge } from '@/components/ui/badge';
@@ -58,9 +58,11 @@ import { EditableBlockMath, EditableInlineMath } from '../editor/EditableMathNod
 import { MarkdownTextStyle } from '../editor/MarkdownTextStyle';
 import { NoteImage } from '../editor/NoteImage';
 import {
+  clearMarkdownNoteDirty,
   registerMarkdownNoteSaveHandler,
   setMarkdownNoteDirty
 } from '../editor/noteDirtyRegistry';
+import { acquireNoteEditLease, clearNoteEditDraft, getNoteEditDraft, getNoteEditDraftRevision, ownsNoteEditLease, publishNoteEditDraft, releaseNoteEditLease, subscribeNoteEditLease } from '../editor/noteEditLease';
 import {
   dematerializeMarkdownSourceLinks,
   SourceLinkNode,
@@ -82,6 +84,14 @@ import { SourceLinksPanel } from './SourceLinksPanel';
 
 const DRAG_HANDLE_SIZE = 24;
 const DRAG_HOVER_GUTTER = 44;
+
+function persistedMarkdownFromEditor(editor: Editor, links: SourceLink[]) {
+  const markdown = getMarkdownWithSourceLinks(editor);
+  return dematerializeMarkdownSourceLinks(
+    markdown,
+    pruneUnusedSourceLinks(markdown, links)
+  );
+}
 
 type TableContextMenuState = {
   anchorPos: number;
@@ -206,6 +216,9 @@ export function MarkdownNoteEditor({
   // that save must never write the document back into the editor.
   const dirtyRef = useRef(false);
   const dirtyRegistryOwnerId = useRef(`markdown-note-editor-${Math.random().toString(36).slice(2)}`);
+  const editLeaseOwnerId = useRef(`markdown-note-lease-${Math.random().toString(36).slice(2)}`);
+  const canEdit = useSyncExternalStore(subscribeNoteEditLease, () => ownsNoteEditLease(entryId, noteId, editLeaseOwnerId.current), () => false);
+  const sharedDraftRevision = useSyncExternalStore(subscribeNoteEditLease, () => getNoteEditDraftRevision(entryId, noteId), () => 0);
   const changeVersionRef = useRef(0);
   const savingRef = useRef(false);
   const suppressEditorUpdateRef = useRef(false);
@@ -256,16 +269,32 @@ export function MarkdownNoteEditor({
   }, [pdfDocument]);
 
   useEffect(() => {
-    return () => setMarkdownNoteDirty(entryId, noteId, dirtyRegistryOwnerId.current, false);
+    acquireNoteEditLease(entryId, noteId, editLeaseOwnerId.current);
+    return () => { setMarkdownNoteDirty(entryId, noteId, dirtyRegistryOwnerId.current, false); releaseNoteEditLease(entryId, noteId, editLeaseOwnerId.current); };
   }, [entryId, noteId]);
 
   const markEditorDirty = () => {
     // Markdown/source-link serialization temporarily replaces source-link nodes
     // and hydrates them again. Those internal transactions are not user edits.
-    if (suppressEditorUpdateRef.current) {
+    if (suppressEditorUpdateRef.current || !ownsNoteEditLease(entryId, noteId, editLeaseOwnerId.current)) {
+      return;
+    }
+    const currentEditor = editorRef.current;
+    if (!currentEditor) return;
+    const markdown = getMarkdownWithSourceLinks(currentEditor);
+    const persistedMarkdown = persistedMarkdownFromEditor(currentEditor, noteLinksRef.current);
+    const persisted = lastPersistedMarkdownRef.current;
+    if (
+      persisted?.identity === `${workspaceRoot ?? ''}:${entryId}:${noteId}` &&
+      persisted.markdown === persistedMarkdown
+    ) {
+      dirtyRef.current = false;
+      setMarkdownNoteDirty(entryId, noteId, dirtyRegistryOwnerId.current, false);
+      setDirty(false);
       return;
     }
     dirtyRef.current = true;
+    publishNoteEditDraft(entryId, noteId, markdown);
     setMarkdownNoteDirty(entryId, noteId, dirtyRegistryOwnerId.current, true);
     changeVersionRef.current += 1;
     setDirty(true);
@@ -634,6 +663,19 @@ export function MarkdownNoteEditor({
   }, [editor]);
 
   useEffect(() => {
+    editor?.setEditable(canEdit && !loading && !saving);
+  }, [canEdit, editor, loading, saving]);
+
+  useEffect(() => {
+    if (canEdit || !editor || loading) return;
+    const draft = getNoteEditDraft(entryId, noteId);
+    if (!draft) return;
+    suppressEditorUpdateRef.current = true;
+    try { editor.commands.setContent(draft.markdown, { contentType: 'markdown', emitUpdate: false }); }
+    finally { suppressEditorUpdateRef.current = false; }
+  }, [canEdit, editor, entryId, loading, noteId, sharedDraftRevision]);
+
+  useEffect(() => {
     noteLinksRef.current = noteLinks;
   }, [noteLinks]);
 
@@ -797,9 +839,20 @@ export function MarkdownNoteEditor({
         setNoteLinks(note.links);
         noteLinksRef.current = note.links;
         loadedNoteIdentityRef.current = noteIdentity;
-        lastPersistedMarkdownRef.current = { identity: noteIdentity, markdown: incomingMarkdown };
+        // Tiptap normalizes Markdown while loading (blank lines, list spacing,
+        // source-link nodes, and similar syntax). Dirty checks must compare
+        // against the editor's canonical form, not the raw file string.
+        const canonicalMarkdown = editor
+          ? persistedMarkdownFromEditor(editor, note.links)
+          : incomingMarkdown;
+        lastPersistedMarkdownRef.current = { identity: noteIdentity, markdown: canonicalMarkdown };
         dirtyRef.current = false;
-        setMarkdownNoteDirty(entryId, noteId, dirtyRegistryOwnerId.current, false);
+        if (ownsNoteEditLease(entryId, noteId, editLeaseOwnerId.current)) {
+          clearMarkdownNoteDirty(entryId, noteId);
+          clearNoteEditDraft(entryId, noteId);
+        } else {
+          setMarkdownNoteDirty(entryId, noteId, dirtyRegistryOwnerId.current, false);
+        }
         setDirty(false);
       } catch (caught) {
         if (!cancelled) {
@@ -849,6 +902,10 @@ export function MarkdownNoteEditor({
   }, [editor, loading, noteImageToInsert, notify]);
 
   const save = async (options: { quiet?: boolean; titleOverride?: string } = {}) => {
+    if (!ownsNoteEditLease(entryId, noteId, editLeaseOwnerId.current)) {
+      if (!options.quiet) notify({ tone: 'default', title: '此笔记正在另一侧编辑' });
+      return false;
+    }
     if (!editor) {
       return false;
     }
@@ -861,7 +918,6 @@ export function MarkdownNoteEditor({
 	    setSaving(true);
 	    setError(null);
 	    try {
-	      const changeVersionWhenSaveStarted = changeVersionRef.current;
 	      suppressEditorUpdateRef.current = true;
 	      let markdown: string;
 	      try {
@@ -883,10 +939,17 @@ export function MarkdownNoteEditor({
 	        identity: `${workspaceRoot ?? ''}:${entryId}:${noteId}`,
 	        markdown: persistedMarkdown
 	      };
-      if (changeVersionRef.current === changeVersionWhenSaveStarted) {
+      const currentPersistedMarkdown = persistedMarkdownFromEditor(editor, saved.links);
+      if (currentPersistedMarkdown === persistedMarkdown) {
         dirtyRef.current = false;
-        setMarkdownNoteDirty(entryId, noteId, dirtyRegistryOwnerId.current, false);
+        clearMarkdownNoteDirty(entryId, noteId);
+        clearNoteEditDraft(entryId, noteId);
         setDirty(false);
+      } else {
+        dirtyRef.current = true;
+        publishNoteEditDraft(entryId, noteId, getMarkdownWithSourceLinks(editor));
+        setMarkdownNoteDirty(entryId, noteId, dirtyRegistryOwnerId.current, true);
+        setDirty(true);
       }
       if (!options.quiet) {
         notify({
@@ -1493,6 +1556,20 @@ export function MarkdownNoteEditor({
 
         <div className="flex min-h-6 min-w-0 flex-wrap items-center gap-2 bg-white px-3 py-1.5 text-xs text-muted-foreground">
           {loading ? <Badge variant="outline">加载中</Badge> : null}
+          {!loading && !canEdit ? (
+            <Button size="xs" type="button" variant="outline" onClick={() => {
+              const draft = getNoteEditDraft(entryId, noteId);
+              if (draft && editor) {
+                suppressEditorUpdateRef.current = true;
+                try { editor.commands.setContent(draft.markdown, { contentType: 'markdown', emitUpdate: false }); }
+                finally { suppressEditorUpdateRef.current = false; }
+              }
+              acquireNoteEditLease(entryId, noteId, editLeaseOwnerId.current, true);
+            }}>
+              在此处继续编辑
+            </Button>
+          ) : null}
+          {!loading && !canEdit ? <Badge variant="secondary">另一处正在编辑</Badge> : null}
           {!loading && dirty ? <Badge variant="secondary">未保存，请手动保存</Badge> : null}
           {!loading ? <span>自动保存已关闭 · Ctrl/Cmd + S 保存</span> : null}
           {!loading && noteLinks.length > 0 ? (

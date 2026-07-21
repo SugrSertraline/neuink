@@ -5,6 +5,7 @@ import {
   BookOpen,
   Database,
   Palette,
+  PlugZap,
   Server,
   Workflow
 } from 'lucide-react';
@@ -28,6 +29,7 @@ import type {
 } from '@/shared/types/agentRuntime';
 
 import { DataSettingsSection } from './DataSettingsSection';
+import { ExternalToolsSettingsSection } from './ExternalToolsSettingsSection';
 import { GeneralSettingsSections } from './GeneralSettingsSections';
 import { ModelSettingsSection } from './ModelSettingsSection';
 import type { ModelPreset, ProviderPreset } from './providerPresets';
@@ -70,6 +72,7 @@ type SettingsTab =
   | 'data'
   | 'appearance'
   | 'reader'
+  | 'external-tools'
   | 'main-agent'
   | 'subagents'
   | 'skills';
@@ -185,6 +188,7 @@ const SETTINGS_SECTIONS = [
   { value: 'data' as const, icon: Database, title: '数据与解析' },
   { value: 'appearance' as const, icon: Palette, title: '外观主题' },
   { value: 'reader' as const, icon: BookOpen, title: '阅读' },
+  { value: 'external-tools' as const, icon: PlugZap, title: '外部工具' },
   { value: 'main-agent' as const, icon: Bot, title: '主 Agent' },
   { value: 'subagents' as const, icon: Workflow, title: '子 Agent' },
   { value: 'skills' as const, icon: Archive, title: 'Skills' }
@@ -198,11 +202,6 @@ export function SettingsPanelLayout(props: SettingsPanelLayoutProps) {
       ? 'rounded-none border-0 border-t'
       : 'rounded-lg'
   );
-  const settingsContentClassName =
-    'm-0 min-h-0 overflow-auto bg-background px-5 py-4';
-  const settingsContentInnerClassName = (className: string) =>
-    cn('settings-panel-content-inner', className);
-
   return (
     <section
       className={cn(
@@ -275,6 +274,7 @@ export function SettingsPanelLayout(props: SettingsPanelLayoutProps) {
         <ModelSettingsSection props={props} />
         <GeneralSettingsSections props={props} />
         <DataSettingsSection props={props} />
+        <ExternalToolsSettingsSection props={props} />
       </Tabs>
     </section>
   );

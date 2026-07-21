@@ -5,6 +5,7 @@ import {
   applyEntryMetaProposal,
   createAnnotation,
   createEntry,
+  createFromMineruClientResult,
   createNote,
   createNoteSourceLink,
   createTag,
@@ -13,6 +14,7 @@ import {
   deleteTag,
   getNoteFilePath,
   importNoteSegmentAsset,
+  importMineruClientResult,
   listAnnotations,
   listEntries,
   listTrashedEntries,
@@ -40,6 +42,7 @@ import {
   upsertSegmentNote,
   type AnnotationCatalogRecord
 } from '../ipc/workspaceApi';
+import { readAutoParseOnPdfImport } from '../lib/parserSettings';
 import type {
   Annotation,
   AnnotationId,
@@ -199,6 +202,13 @@ export function useWorkspaceResourceActions({
         }
         setTags(nextTags);
 
+        if (request.mineruZipPath) {
+          const imported = await createFromMineruClientResult(root, title, fields, tagIds, request.mineruZipPath);
+          setEntries((current) => [imported.entry, ...current.filter((entry) => entry.id !== imported.entry.id)]);
+          setSelectedEntryId(imported.entry.id);
+          return { createdWithPdf: true, entryId: imported.entry.id, importedMineruClientResult: true, parseSubmissionFailed: false, parseMessage: imported.entry.pdf?.parse.message ?? null };
+        }
+
         const created = await createEntry(root, title, fields, tagIds);
         createdEntryId = created.id;
         setEntries((current) => [created, ...current.filter((item) => item.id !== created.id)]);
@@ -211,7 +221,9 @@ export function useWorkspaceResourceActions({
             queued,
             ...current.filter((entry) => entry.id !== queued.id)
           ]);
-          submitQueuedParse(root, queued.id, endpoint, apiKey);
+          if (readAutoParseOnPdfImport()) {
+            submitQueuedParse(root, queued.id, endpoint, apiKey);
+          }
           return {
             createdWithPdf: true,
             entryId: created.id,
@@ -239,24 +251,36 @@ export function useWorkspaceResourceActions({
     [ensureTagPath, refreshEntries, root, submitQueuedParse, tags]
   );
 
-  const importPdfForSelectedEntry = useCallback(
-    async (pdfPath: string, endpoint: string, apiKey?: string) => {
-      if (!root || !selectedEntryId) {
+  const importPdfForEntry = useCallback(
+    async (entryId: string, pdfPath: string, endpoint: string, apiKey?: string) => {
+      if (!root) {
         return;
       }
       try {
-        const queued = await queuePdfParse(root, selectedEntryId, pdfPath);
+        const queued = await queuePdfParse(root, entryId, pdfPath);
         setEntries((current) =>
           current.map((entry) => (entry.id === queued.id ? queued : entry))
         );
-        submitQueuedParse(root, queued.id, endpoint, apiKey);
+        if (readAutoParseOnPdfImport()) {
+          submitQueuedParse(root, queued.id, endpoint, apiKey);
+        }
         setError(null);
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : String(caught));
         await refreshEntries(root);
       }
     },
-    [refreshEntries, root, selectedEntryId, submitQueuedParse]
+    [refreshEntries, root, submitQueuedParse]
+  );
+
+  const importPdfForSelectedEntry = useCallback(
+    async (pdfPath: string, endpoint: string, apiKey?: string) => {
+      if (!selectedEntryId) {
+        return;
+      }
+      return importPdfForEntry(selectedEntryId, pdfPath, endpoint, apiKey);
+    },
+    [importPdfForEntry, selectedEntryId]
   );
 
   const retryPdfParseForEntry = useCallback(
@@ -281,6 +305,29 @@ export function useWorkspaceResourceActions({
       }
     },
     [refreshEntries, root]
+  );
+
+  const startQueuedPdfParseForEntry = useCallback(
+    async (entryId: string, endpoint: string, apiKey?: string) => {
+      if (!root) return;
+      const response = await submitQueuedPdfParse(root, entryId, endpoint, apiKey);
+      setEntries((current) =>
+        current.map((entry) => (entry.id === response.entry.id ? response.entry : entry))
+      );
+      setError(response.entry.pdf?.parse.status === 'failed' ? response.entry.pdf.parse.message : null);
+    },
+    [root]
+  );
+
+  const importMineruClientResultForEntry = useCallback(
+    async (entryId: string, zipPath: string) => {
+      if (!root) return;
+      const response = await importMineruClientResult(root, entryId, zipPath);
+      setEntries((current) => current.map((entry) => entry.id === response.entry.id ? response.entry : entry));
+      setError(null);
+      return response;
+    },
+    [root]
   );
 
   const createMarkdownNote = useCallback(
@@ -572,7 +619,12 @@ export function useWorkspaceResourceActions({
         await refreshTrashItems(root);
         return restored;
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : String(caught));
+        const message = caught instanceof Error ? caught.message : String(caught);
+        setError(
+          message.includes('entry already exists')
+            ? '无法恢复：原位置已有同一条目。恢复不会覆盖现有 PDF 或条目，请保留当前条目并从回收站复制所需内容。'
+            : message
+        );
         await refreshEntries(root);
         throw caught;
       }
@@ -792,8 +844,11 @@ export function useWorkspaceResourceActions({
     createWorkspaceEntry,
     submitQueuedParse,
     createLibraryEntry,
+    importPdfForEntry,
     importPdfForSelectedEntry,
     retryPdfParseForEntry,
+    startQueuedPdfParseForEntry,
+    importMineruClientResultForEntry,
     createMarkdownNote,
     deleteMarkdownNote,
     createTagPath,

@@ -9,6 +9,7 @@ import {
   Server,
   X
 } from 'lucide-react';
+import { useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -17,6 +18,10 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { TabsContent } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
+import {
+  persistAutoParseOnPdfImport,
+  readAutoParseOnPdfImport
+} from '@/shared/lib/parserSettings';
 
 import type { SettingsPanelLayoutProps } from './SettingsPanelLayout';
 
@@ -77,6 +82,7 @@ export function DataSettingsSection({ props }: { props: SettingsPanelLayoutProps
     
                   <div className="grid gap-3 xl:grid-cols-2">
                     <button
+                      hidden
                       className={`rounded-lg border px-4 py-4 text-left transition-colors ${
                         parserSourceIntent === 'cloud'
                           ? 'border-primary/35 bg-primary/6'
@@ -195,6 +201,7 @@ export function DataSettingsSection({ props }: { props: SettingsPanelLayoutProps
                           onChange={(event) => onParserApiKeyChange(event.target.value)}
                         />
                       </div>
+                      <AutoParseOnImportSetting />
                     </>
                   ) : null}
     
@@ -384,6 +391,27 @@ export function DataSettingsSection({ props }: { props: SettingsPanelLayoutProps
     
               </div>
             </TabsContent>
+  );
+}
+
+function AutoParseOnImportSetting() {
+  const [enabled, setEnabled] = useState(readAutoParseOnPdfImport);
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 px-3 py-2.5">
+      <div className="min-w-0">
+        <Label className="text-sm">上传 PDF 后自动开始解析</Label>
+        <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
+          关闭后只将 PDF 保存到本地文库；可在 PDF 阅读页手动开始解析。
+        </p>
+      </div>
+      <Switch
+        checked={enabled}
+        onCheckedChange={(checked) => {
+          setEnabled(checked);
+          persistAutoParseOnPdfImport(checked);
+        }}
+      />
+    </div>
   );
 }
 

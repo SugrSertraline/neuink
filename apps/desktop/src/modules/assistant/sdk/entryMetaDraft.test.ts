@@ -7,7 +7,10 @@ import type { AssistantTaskPlan } from '@/shared/types/assistant';
 import { extractExplicitTitle, generateEntryMetaDraftProposal } from './entryMetaDraft';
 
 vi.mock('ai', () => ({ generateText: vi.fn() }));
-vi.mock('@/shared/ipc/assistantApi', () => ({ readEntryAssistantContext: vi.fn() }));
+vi.mock('@/shared/ipc/assistantApi', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/shared/ipc/assistantApi')>(),
+  readEntryAssistantContext: vi.fn()
+}));
 
 beforeEach(() => vi.clearAllMocks());
 

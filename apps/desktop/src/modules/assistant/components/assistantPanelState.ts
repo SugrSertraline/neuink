@@ -49,6 +49,7 @@ import type { LibraryEntry } from '@/modules/library/components/LibrarySidebar';
 import { collectDescendantTagIds } from '@/modules/library/utils/tagTree';
 import {
   appendConversationMessages,
+  conversationSourceKey,
   createConversation,
   deleteAgentRun,
   deleteConversation,
@@ -174,6 +175,9 @@ type AssistantPanelProps = {
   onExportConversation: (conversation: Conversation) => Promise<void>;
   onOpenSettings: () => void;
   onOpenSource: (source: ConversationSourceLink) => void;
+  onAddSciverseSource: (
+    source: Extract<ConversationSourceLink, { provider: 'sciverse' }>
+  ) => Promise<import('@/shared/ipc/assistantApi').SciverseLibraryImportResult>;
   onReplaceAssistantContext: (items: AssistantContextInput[]) => void;
   onRemoveAssistantContextItem: (itemId: string) => void;
 };
@@ -615,7 +619,7 @@ export function uniqueSourceLinks(sources: ConversationSourceLink[]) {
   const seen = new Set<string>();
   const unique: ConversationSourceLink[] = [];
   for (const source of sources) {
-    const key = `${source.entry_id}:${source.segment_uid}`;
+    const key = conversationSourceKey(source);
     if (seen.has(key)) {
       continue;
     }

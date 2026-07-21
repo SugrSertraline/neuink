@@ -77,6 +77,7 @@ function PdfSourcePageImpl({
   onCreateTextSelectionAnnotation,
   onTranslateTextSelection,
   onToggleSegment,
+  altClickOpensNote = false,
 }: {
   autoTranslateTextSelection?: boolean;
   flashSegmentUid: string | null;
@@ -123,6 +124,7 @@ function PdfSourcePageImpl({
   }) => Promise<void> | void;
   onTranslateTextSelection?: (input: { segment: SourceSegment; text: string }) => Promise<string>;
   onToggleSegment: (segment: SourceSegment) => void;
+  altClickOpensNote?: boolean;
 }) {
   const pointerDownRef = useRef<{
     selectingText: boolean;
@@ -228,6 +230,16 @@ function PdfSourcePageImpl({
       previewSuppressUntilRef.current = Date.now() + PREVIEW_SUPPRESS_MS;
     }
   };
+
+  useEffect(() => {
+    const closeSelectionUi = () => clearFloatingSegmentUi(true);
+    window.addEventListener('neuink:reader-surface-change', closeSelectionUi);
+    window.addEventListener('blur', closeSelectionUi);
+    return () => {
+      window.removeEventListener('neuink:reader-surface-change', closeSelectionUi);
+      window.removeEventListener('blur', closeSelectionUi);
+    };
+  }, []);
 
   const clearListPreviewAfterPointerExit = () => {
     if (previewClearTimerRef.current !== null) {
@@ -338,8 +350,13 @@ function PdfSourcePageImpl({
 
     const nextGroupUid = region?.hoverGroupUid ?? null;
     const nextRegionId = region?.id ?? null;
-    const nextPreviewPosition =
-      region && buttons === 0 ? { x: clientX, y: clientY } : null;
+    const hitLayerRect = element.getBoundingClientRect();
+    const nextPreviewPosition = region && buttons === 0
+      ? {
+          x: hitLayerRect.left + (region.bbox[0] / 1000) * hitLayerRect.width,
+          y: hitLayerRect.top + (region.bbox[1] / 1000) * hitLayerRect.height
+        }
+      : null;
     if (
       hoveredGroupUidRef.current === nextGroupUid &&
       previewRegionIdRef.current === nextRegionId
@@ -411,6 +428,13 @@ function PdfSourcePageImpl({
       event.clientX,
       event.clientY,
     );
+
+    if (altClickOpensNote && event.altKey && region) {
+      event.preventDefault();
+      pointerDownRef.current = null;
+      onOpenSegmentNote(region.sourceSegment);
+      return;
+    }
 
     const startedOnTextLayer = isPdfTextLayerTarget(event.target);
     pointerDownRef.current = {

@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import {
   ClipboardCopy,
@@ -59,17 +59,28 @@ export function SegmentActionMenu({
   onOpenSourceBacklink: (backlink: SourceBacklink) => void;
   onClose: () => void;
 }) {
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
   useEffect(() => {
+    const closeOnOutsidePointerDown = (event: PointerEvent) => {
+      if (menuRef.current?.contains(event.target as Node)) {
+        return;
+      }
+      onClose();
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
     const close = () => onClose();
-    window.addEventListener("click", close);
+    document.addEventListener("pointerdown", closeOnOutsidePointerDown);
     window.addEventListener("blur", close);
-    window.addEventListener("keydown", close);
+    window.addEventListener("keydown", closeOnEscape);
     window.addEventListener("scroll", close, true);
 
     return () => {
-      window.removeEventListener("click", close);
+      document.removeEventListener("pointerdown", closeOnOutsidePointerDown);
       window.removeEventListener("blur", close);
-      window.removeEventListener("keydown", close);
+      window.removeEventListener("keydown", closeOnEscape);
       window.removeEventListener("scroll", close, true);
     };
   }, [onClose]);
@@ -80,6 +91,7 @@ export function SegmentActionMenu({
 
   return createPortal(
     <div
+      ref={menuRef}
       className="fixed z-[var(--z-menu)] min-w-56 overflow-hidden rounded-md border bg-popover p-1 text-xs text-popover-foreground shadow-xl"
       data-allow-context-menu="true"
       style={{

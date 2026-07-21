@@ -74,7 +74,11 @@ export function ReflowEntryReader({
   onReadPdfReader,
   onSaveSegmentNote,
   onOpenSegmentNotesSurface,
-  onOpenAnnotationsSurface
+  onOpenAnnotationsSurface,
+  syncSegmentUid,
+  syncRequestKey,
+  onSegmentClick
+  , suppressClickOverlay = false
 }: {
   entry: LibraryEntry;
   editorScopeKey: string;
@@ -101,6 +105,10 @@ export function ReflowEntryReader({
   onSaveSegmentNote: (entryId: string, segmentUid: string, text: string) => Promise<SegmentBlockNote[]>;
   onOpenSegmentNotesSurface: (segmentUid: string) => void;
   onOpenAnnotationsSurface: (segmentUid: string) => void;
+  syncSegmentUid?: string | null;
+  syncRequestKey?: number;
+  onSegmentClick?: (segment: SourceSegment) => void;
+  suppressClickOverlay?: boolean;
 }) {
   const { notify } = useToast();
   const { annotations, loadState, segmentNotes, setAnnotations, setSegmentNotes } = usePdfReaderData({
@@ -394,12 +402,23 @@ export function ReflowEntryReader({
   };
   const activateSegmentFromClick = useGuardedSegmentAction((segment) => {
     if (!activateSegment(segment)) return;
-    if (readerPreferences.leftClickOpensNotePane) {
+    onSegmentClick?.(segment);
+    if (readerPreferences.segmentNoteOpenGesture === 'single' && !suppressClickOverlay) {
       setSegmentOverlayMode('segment');
       setNotePopoverSegmentUid(segment.uid);
       setSegmentOverlayOpen(true);
     }
   });
+
+  useEffect(() => {
+    if (!syncSegmentUid) return;
+    const segment = segments.find((item) => item.uid === syncSegmentUid || item.continuation_group_id === syncSegmentUid);
+    if (!segment) return;
+    setSelectedSegmentUid(segment.uid);
+    setFlashSegmentUid(segment.uid);
+    const timer = window.setTimeout(() => setFlashSegmentUid(null), SEGMENT_FLASH_DURATION_MS);
+    return () => window.clearTimeout(timer);
+  }, [segments, syncRequestKey, syncSegmentUid]);
 
   const addSourceLink = async (segment: SourceSegment) => {
     if (!pairedMarkdownNoteTarget || sourceLinkBusySegmentUid) return;
@@ -603,9 +622,14 @@ export function ReflowEntryReader({
           segments={segments}
           sourceLinkCountBySegmentUid={sourceLinkCountBySegmentUid}
           sourceBacklinksBySegmentUid={sourceBacklinksBySegmentUid}
+          scrollRequestKey={syncRequestKey}
+          scrollToSegmentUid={syncSegmentUid}
           translationBySegmentUid={translationBySegmentUid}
           workspaceRoot={workspaceRoot}
           onActivateSegment={activateSegmentFromClick}
+          altClickOpensNote={
+            readerPreferences.segmentNoteOpenGesture === 'modifier' && !suppressClickOverlay
+          }
           onOpenSegmentAnnotation={(segment) => {
             setPdfDocumentRequested(true);
             if (!activateSegment(segment)) return;

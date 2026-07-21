@@ -1,5 +1,6 @@
 import { AlertTriangle, Eye, FilePlus2, FilterX, PanelRight, RefreshCw, RotateCcw, Search, Trash2 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -25,6 +26,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TabsContent } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
+import {
+  beginEntryTagDrag,
+  cancelEntryTagDrag,
+  finishEntryTagDrag,
+  updateEntryTagDrag
+} from '@/shared/lib/entryDragData';
 import type { TagMeta, TrashItem } from '@/shared/types/domain';
 
 import type { LibraryEntry, LibraryView } from '../../library/components/LibrarySidebar';
@@ -40,10 +47,12 @@ type EntryLibraryViewProps = {
   trashItems: TrashItem[];
   isRefreshingParseStatus: boolean;
   libraryView: LibraryView;
+  filterResetKey: number;
   recentReadingEntryIds: string[];
   selectedEntryId: string | null;
   status: 'loading' | 'ready' | 'error';
   tags: TagMeta[];
+  workspaceRoot: string | null;
   onDeleteEntry: (entryId: string) => Promise<void> | void;
   onOpenCreateEntryTab: () => void;
   onOpenEntryExplorer: (entryId: string) => void;
@@ -64,10 +73,12 @@ export function EntryLibraryView({
   trashItems,
   isRefreshingParseStatus,
   libraryView,
+  filterResetKey,
   recentReadingEntryIds,
   selectedEntryId,
   status,
   tags,
+  workspaceRoot,
   onDeleteEntry,
   onOpenCreateEntryTab,
   onOpenEntryExplorer,
@@ -84,9 +95,17 @@ export function EntryLibraryView({
   const [sortBy, setSortBy] = useState('recent');
   const [dialog, setDialog] = useState<{ action: 'move-to-trash' | 'purge'; entry: LibraryEntry } | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
+  const [draggingEntryId, setDraggingEntryId] = useState<string | null>(null);
+  const [entryDragPreview, setEntryDragPreview] = useState<{ title: string; x: number; y: number } | null>(null);
+  const entryDragRef = useRef<{ dragging: boolean; entryId: string; pointerId: number; startX: number; startY: number } | null>(null);
+  const suppressEntryClickRef = useRef(false);
   const [emptyTrashConfirmOpen, setEmptyTrashConfirmOpen] = useState(false);
   const [emptyTrashBusy, setEmptyTrashBusy] = useState(false);
   const isTrashView = libraryView === 'trash';
+  useEffect(() => {
+    setQuery('');
+    setSortBy('recent');
+  }, [filterResetKey]);
   const visibleEntries = isTrashView ? trashedEntries : entries;
   const tagPathById = useMemo(() => buildTagPathById(tags), [tags]);
   const activeTagIds = useMemo(
@@ -218,6 +237,7 @@ export function EntryLibraryView({
           {isTrashView ? (
             <div className="p-3">
               <TrashItemsView
+                fixedHeight
                 items={trashItems}
                 onPurgeEntry={onPurgeEntry}
                 onPurgeItem={onPurgeTrashItem}
@@ -265,21 +285,89 @@ export function EntryLibraryView({
                 <ContextMenu key={item.id}>
                   <ContextMenuTrigger asChild>
                     <TableRow
-                      className={cn(!isTrashView && 'cursor-pointer', item.id === selectedEntryId && !isTrashView && 'bg-accent/70')}
+                      className={cn(
+                        !isTrashView && 'cursor-pointer',
+                        item.id === selectedEntryId && !isTrashView && 'bg-accent/70',
+                        item.id === draggingEntryId && 'opacity-55'
+                      )}
                       data-allow-context-menu="true"
+                      title={!isTrashView ? '拖动到左侧标签以添加标签' : undefined}
                       onClick={() => {
-                        if (!isTrashView) {
-                          onSelectEntry(item.id);
+                        if (suppressEntryClickRef.current) {
+                          suppressEntryClickRef.current = false;
+                          return;
                         }
-                      }}
-                      onDoubleClick={() => {
                         if (!isTrashView) {
-                          onOpenEntryExplorer(item.id);
+                          openEntryDetails(item.id);
                         }
                       }}
                       onContextMenu={() => {
                         if (!isTrashView) {
                           onSelectEntry(item.id);
+                        }
+                      }}
+                      onPointerCancel={(event) => {
+                        if (entryDragRef.current?.pointerId !== event.pointerId) {
+                          return;
+                        }
+                        cancelEntryTagDrag();
+                        entryDragRef.current = null;
+                        setDraggingEntryId(null);
+                        setEntryDragPreview(null);
+                        document.body.style.cursor = '';
+                        document.body.style.userSelect = '';
+                      }}
+                      onPointerDown={(event) => {
+                        if (isTrashView || event.button !== 0 || (event.target instanceof Element && event.target.closest('button'))) {
+                          return;
+                        }
+                        entryDragRef.current = {
+                          dragging: false,
+                          entryId: item.id,
+                          pointerId: event.pointerId,
+                          startX: event.clientX,
+                          startY: event.clientY
+                        };
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                      }}
+                      onPointerMove={(event) => {
+                        const drag = entryDragRef.current;
+                        if (!drag || drag.pointerId !== event.pointerId) {
+                          return;
+                        }
+                        if (!drag.dragging) {
+                          const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+                          if (distance < 6) {
+                            return;
+                          }
+                          drag.dragging = true;
+                          suppressEntryClickRef.current = true;
+                          beginEntryTagDrag(drag.entryId, event.clientX, event.clientY);
+                          setDraggingEntryId(drag.entryId);
+                          setEntryDragPreview({ title: item.title, x: event.clientX, y: event.clientY });
+                          document.body.style.cursor = 'grabbing';
+                          document.body.style.userSelect = 'none';
+                        } else {
+                          updateEntryTagDrag(event.clientX, event.clientY);
+                          setEntryDragPreview((current) => current ? { ...current, x: event.clientX, y: event.clientY } : current);
+                        }
+                        event.preventDefault();
+                      }}
+                      onPointerUp={(event) => {
+                        const drag = entryDragRef.current;
+                        if (!drag || drag.pointerId !== event.pointerId) {
+                          return;
+                        }
+                        if (drag.dragging) {
+                          finishEntryTagDrag(event.clientX, event.clientY);
+                        }
+                        entryDragRef.current = null;
+                        setDraggingEntryId(null);
+                        setEntryDragPreview(null);
+                        document.body.style.cursor = '';
+                        document.body.style.userSelect = '';
+                        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                          event.currentTarget.releasePointerCapture(event.pointerId);
                         }
                       }}
                     >
@@ -339,32 +427,18 @@ export function EntryLibraryView({
                               </Button>
                             </>
                           ) : (
-                            <>
-                              <Button
-                                size="icon-xs"
-                                title="详情"
-                                type="button"
-                                variant="outline"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  openEntryDetails(item.id);
-                                }}
-                              >
-                                <Eye size={13} aria-hidden="true" />
-                              </Button>
-                              <Button
-                                size="icon-xs"
-                                title="删除"
-                                type="button"
-                                variant="destructive"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setDialog({ action: 'move-to-trash', entry: item });
-                                }}
-                              >
-                                <Trash2 size={14} aria-hidden="true" />
-                              </Button>
-                            </>
+                            <Button
+                              size="icon-xs"
+                              title="移到回收站"
+                              type="button"
+                              variant="destructive"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setDialog({ action: 'move-to-trash', entry: item });
+                              }}
+                            >
+                              <Trash2 size={14} aria-hidden="true" />
+                            </Button>
                           )}
                         </div>
                       </TableCell>
@@ -413,6 +487,7 @@ export function EntryLibraryView({
         action={dialog?.action ?? 'move-to-trash'}
         busy={actionBusy}
         entry={dialog?.entry ?? null}
+        workspaceRoot={workspaceRoot}
         onConfirm={() => void confirmEntryAction()}
         onOpenChange={(open) => {
           if (!open && !actionBusy) {
@@ -459,6 +534,19 @@ export function EntryLibraryView({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {entryDragPreview && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              aria-hidden="true"
+              className="pointer-events-none fixed z-[2147483000] flex h-8 max-w-72 -translate-x-1/2 -translate-y-1/2 items-center rounded-none border bg-popover px-2.5 text-xs font-medium text-popover-foreground shadow-lg"
+              data-entry-tag-drag-preview="true"
+              style={{ left: entryDragPreview.x, top: entryDragPreview.y }}
+            >
+              <span className="truncate">{entryDragPreview.title}</span>
+            </div>,
+            document.body
+          )
+        : null}
     </>
   );
 

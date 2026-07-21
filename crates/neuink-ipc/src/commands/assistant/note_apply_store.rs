@@ -43,6 +43,26 @@ pub(super) enum MarkdownPatchOperation {
     InsertBefore { anchor_text: String, text: String },
     #[serde(rename = "append")]
     Append { text: String },
+    #[serde(rename = "replace_lines")]
+    ReplaceLines {
+        start_line: usize,
+        end_line: usize,
+        expected_text: String,
+        new_text: String,
+    },
+    #[serde(rename = "delete_lines")]
+    DeleteLines {
+        start_line: usize,
+        end_line: usize,
+        expected_text: String,
+    },
+    #[serde(rename = "insert_lines")]
+    InsertLines {
+        line: usize,
+        position: String,
+        expected_text: String,
+        text: String,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

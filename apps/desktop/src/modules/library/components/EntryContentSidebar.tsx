@@ -1,4 +1,5 @@
-import { ArrowLeft, FileText, FileType, LayoutDashboard, Link2, PanelRightOpen, Pencil, Plus, ScrollText, StickyNote, Trash2 } from 'lucide-react';
+import { open } from '@tauri-apps/plugin-dialog';
+import { ArrowLeft, CopyPlus, FilePlus2, FileText, FileType, LayoutDashboard, Link2, Loader2, PanelRightOpen, Pencil, Plus, ScrollText, StickyNote, Trash2 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -20,6 +21,11 @@ import type { TagMeta } from '@/shared/types/domain';
 
 import { StatusBadge } from '../../reader/components/EntryDisplay';
 import { EntryEditDialog } from './EntryEditDialog';
+import {
+  CompactEntryDescription,
+  CompactEntryFields,
+  CompactEntryTags
+} from './EntryMetadataPreviews';
 import type { LibraryEntry } from './LibrarySidebar';
 
 type EntryContentSidebarProps = {
@@ -29,6 +35,9 @@ type EntryContentSidebarProps = {
   onBack: () => void;
   onCreateMarkdownNote: () => Promise<void> | void;
   onDeleteMarkdownNote: (entryId: string, noteId: string) => Promise<void> | void;
+  onAttachPdf: (entryId: string, pdfPath: string) => Promise<void> | void;
+  onCreatePdfVersion: (entryId: string, pdfPath: string) => Promise<void> | void;
+  onImportMineruClientResult: (entryId: string, zipPath: string) => Promise<unknown> | unknown;
   onOpenMarkdownInPdfPane: (noteId: string) => void;
   onOpenContentInRight: (contentId: string) => void;
   onRenameMarkdownNote: (entryId: string, noteId: string, title: string) => Promise<unknown> | unknown;
@@ -51,6 +60,9 @@ export function EntryContentSidebar({
   onBack,
   onCreateMarkdownNote,
   onDeleteMarkdownNote,
+  onAttachPdf,
+  onCreatePdfVersion,
+  onImportMineruClientResult,
   onOpenMarkdownInPdfPane,
   onOpenContentInRight,
   onRenameMarkdownNote,
@@ -59,6 +71,7 @@ export function EntryContentSidebar({
   onUpdateEntry
 }: EntryContentSidebarProps) {
   const [creating, setCreating] = useState(false);
+  const [pdfAction, setPdfAction] = useState<'attach' | 'version' | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [notePendingDelete, setNotePendingDelete] = useState<{
     noteId: string;
@@ -112,6 +125,18 @@ export function EntryContentSidebar({
       await onCreateMarkdownNote();
     } finally {
       setCreating(false);
+    }
+  };
+
+  const choosePdf = async (action: 'attach' | 'version') => {
+    if (pdfAction) return;
+    const selected = await open({ multiple: false, directory: false, filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+    if (typeof selected !== 'string') return;
+    setPdfAction(action);
+    try {
+      await (action === 'attach' ? onAttachPdf(entry.id, selected) : onCreatePdfVersion(entry.id, selected));
+    } finally {
+      setPdfAction(null);
     }
   };
 
@@ -206,7 +231,7 @@ export function EntryContentSidebar({
             返回条目库
           </button>
 
-          <section className="min-w-0 overflow-hidden space-y-3 rounded-md border bg-muted/25 p-2">
+          <section className="min-w-0 space-y-3 rounded-md border bg-muted/25 p-2">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1 overflow-hidden">
                 <div className="break-all text-sm font-semibold">{entry.title}</div>
@@ -228,7 +253,7 @@ export function EntryContentSidebar({
 
             <InfoBlock label="描述">
               {entry.fields.description ? (
-                <p className="whitespace-pre-wrap break-words">{entry.fields.description}</p>
+                <CompactEntryDescription description={entry.fields.description} />
               ) : (
                 <span className="text-muted-foreground">暂无描述</span>
               )}
@@ -236,13 +261,7 @@ export function EntryContentSidebar({
 
             <InfoBlock label="标签">
               {entry.tags.length > 0 ? (
-                <div className="flex flex-wrap gap-1">
-                  {entry.tags.map((tag) => (
-                    <Badge key={tag} variant="secondary">
-                      {tag}
-                    </Badge>
-                  ))}
-                </div>
+                <CompactEntryTags tags={entry.tags} />
               ) : (
                 <span className="text-muted-foreground">暂无标签</span>
               )}
@@ -250,18 +269,7 @@ export function EntryContentSidebar({
 
             <InfoBlock label="属性">
               {fields.length > 0 ? (
-                <div className="grid gap-1">
-                  {fields.map(([key, value]) => (
-                    <div className="grid grid-cols-[0.8fr_1fr] gap-2 text-xs" key={key}>
-                      <span className="truncate font-medium text-foreground" title={key}>
-                        {key}
-                      </span>
-                      <span className="truncate text-muted-foreground" title={value}>
-                        {value}
-                      </span>
-                    </div>
-                  ))}
-                </div>
+                <CompactEntryFields fields={fields} />
               ) : (
                 <span className="text-muted-foreground">暂无属性</span>
               )}
@@ -294,6 +302,13 @@ export function EntryContentSidebar({
 
             {entry.pdfFileName ? (
               <>
+                <div className="flex items-center justify-between gap-2 rounded-md bg-muted/45 px-2 py-1.5 text-xs">
+                  <span className="min-w-0 truncate text-muted-foreground">原 PDF 保持不变</span>
+                  <Button disabled={pdfAction !== null} size="xs" type="button" variant="outline" onClick={() => void choosePdf('version')}>
+                    {pdfAction === 'version' ? <Loader2 className="animate-spin" size={13} /> : <CopyPlus size={13} />}
+                    创建新版 PDF
+                  </Button>
+                </div>
                 <ContentRow
                   active={activeContentId === 'pdf'}
                   icon={<FileType size={14} />}
@@ -361,8 +376,12 @@ export function EntryContentSidebar({
                 />
               </>
             ) : (
-              <div className="rounded-md px-2 py-1.5 text-xs text-muted-foreground">
-                未附带 PDF
+              <div className="flex items-center justify-between gap-2 rounded-md bg-muted/45 px-2 py-1.5 text-xs text-muted-foreground">
+                <span>未附带 PDF</span>
+                <Button disabled={pdfAction !== null} size="xs" type="button" variant="outline" onClick={() => void choosePdf('attach')}>
+                  {pdfAction === 'attach' ? <Loader2 className="animate-spin" size={13} /> : <FilePlus2 size={13} />}
+                  补充 PDF
+                </Button>
               </div>
             )}
 
@@ -518,6 +537,9 @@ export function EntryContentSidebar({
         open={editOpen}
         tags={tags}
         onOpenChange={setEditOpen}
+        onAttachPdf={onAttachPdf}
+        onCreatePdfVersion={onCreatePdfVersion}
+        onImportMineruClientResult={onImportMineruClientResult}
         onUpdateEntry={onUpdateEntry}
       />
 

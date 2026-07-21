@@ -8,7 +8,7 @@ import UnderlineExtension from '@tiptap/extension-underline';
 import { Markdown } from '@tiptap/markdown';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
-import { ChevronDown, ChevronRight, Loader2, MousePointer2, Save, Trash2, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileText, Languages, Loader2, MousePointer2, Save, Trash2, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
@@ -141,6 +141,7 @@ export function SegmentNoteEditor({
   }, [editor, noteText, segment?.uid]);
 
   const translationPreviewText = translatedText?.trim() || null;
+  const [contextExpanded, setContextExpanded] = useState(sourceInitiallyExpanded);
   const {
     collapsed: translationCollapsed,
     toggleCollapsed: toggleTranslationCollapsed
@@ -222,59 +223,67 @@ export function SegmentNoteEditor({
       <div className="flex min-h-0 min-w-0 flex-col overflow-hidden p-3">
         {segment ? (
           <div className="flex h-full min-h-0 min-w-0 flex-col gap-3">
-            <div className="grid max-h-[22rem] shrink-0 min-w-0 gap-3 overflow-y-auto overscroll-contain xl:grid-cols-2 xl:items-start">
-              <SegmentSourceContextPreview
-                defaultExpanded={sourceInitiallyExpanded}
-                highlightSelections={highlightSelections}
-                pdfDocument={pdfDocument}
-                segment={segment}
-                sourceEntryId={sourceEntryId}
-                workspaceRoot={workspaceRoot}
-              />
-
-              <section className="grid min-w-0 gap-2 rounded-md border bg-white px-3 py-2">
-                <div className="flex min-w-0 items-center justify-between gap-2">
-                  <div className="flex min-w-0 items-start gap-1.5">
+            <section className="shrink-0 rounded-md border bg-muted/30 px-3 py-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <div className="min-w-[11rem] flex-1">
+                  <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-xs font-semibold text-foreground">
+                    <FileText size={13} aria-hidden="true" />
+                    <span>来源上下文</span>
+                    <span className="font-normal text-muted-foreground">第 {segment.page_idx + 1} 页 · {segmentTypeLabel(segment.segment_type)}</span>
+                  </div>
+                  <p className="mt-0.5 truncate text-[11px] text-muted-foreground" title={segment.text.trim() || segment.markdown?.trim() || undefined}>
+                    {segment.text.trim() || segment.markdown?.trim() || '暂无解析文本'}
+                  </p>
+                </div>
+                <div className="ml-auto flex shrink-0 items-center gap-1">
+                  {translationPreviewText ? (
                     <Button
-                      className="-ml-1 mt-0.5 shrink-0"
-                      size="icon-xs"
-                      title={translationCollapsed ? '展开翻译' : '折叠翻译'}
+                      size="sm"
                       type="button"
                       variant="ghost"
                       onClick={toggleTranslationCollapsed}
                     >
-                      {translationCollapsed ? (
-                        <ChevronRight size={13} aria-hidden="true" />
-                      ) : (
-                        <ChevronDown size={13} aria-hidden="true" />
-                      )}
+                      <Languages size={13} aria-hidden="true" />
+                      {translationCollapsed ? '查看译文' : '收起译文'}
                     </Button>
-                    <div className="text-xs font-semibold text-foreground">翻译</div>
-                  </div>
-                  {!translationPreviewText ? (
-                    <span className="shrink-0 text-[11px] text-muted-foreground">暂无译文</span>
                   ) : null}
-                </div>
-
-                {!translationCollapsed ? (
-                  <div
-                    className="max-h-44 min-w-0 max-w-full overflow-auto overscroll-contain rounded-md bg-muted/30 px-2.5 py-2 text-xs leading-5 text-muted-foreground"
-                    title={translationPreviewText ?? '暂无译文'}
+                  <Button
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setContextExpanded((current) => !current)}
                   >
-                    {translationPreviewText ? (
-                      <SourceSnapshotPreview
-                        allowScroll
-                        compact
-                        markdown={translationPreviewText}
-                        segmentType={segment.segment_type}
-                      />
-                    ) : (
-                      <span className="text-muted-foreground">暂无译文</span>
-                    )}
-                  </div>
-                ) : null}
-              </section>
-            </div>
+                    {contextExpanded ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronRight size={13} aria-hidden="true" />}
+                    {contextExpanded ? '收起原文' : '查看原文'}
+                  </Button>
+                </div>
+              </div>
+
+              {contextExpanded ? (
+                <div className="mt-2 min-w-0">
+                  <SegmentSourceContextPreview
+                    defaultExpanded
+                    embeddedOriginal
+                    highlightSelections={highlightSelections}
+                    pdfDocument={pdfDocument}
+                    segment={segment}
+                    sourceEntryId={sourceEntryId}
+                    workspaceRoot={workspaceRoot}
+                  />
+                </div>
+              ) : null}
+
+              {translationPreviewText && !translationCollapsed ? (
+                <div className="mt-2 max-h-40 min-w-0 overflow-y-auto overscroll-contain rounded-md border bg-white px-2.5 py-2 text-xs leading-5 text-muted-foreground">
+                  <SourceSnapshotPreview
+                    allowScroll={false}
+                    compact
+                    markdown={translationPreviewText}
+                    segmentType={segment.segment_type}
+                  />
+                </div>
+              ) : null}
+            </section>
 
             <div className="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden border-t border-border pt-3">
               <TipTapToolbar editor={editor} disabled={false} />

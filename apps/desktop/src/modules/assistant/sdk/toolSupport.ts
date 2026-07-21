@@ -11,7 +11,17 @@ import type {
   ReadSegmentContentResponse,
   ScopeSnapshot
 } from '@/shared/ipc/assistantApi';
-import { invokeAssistantTool, listTools } from '@/shared/ipc/assistantApi';
+import type {
+  SciverseAgenticSearchResponse,
+  SciverseContentResponse,
+  SciverseJsonResponse
+} from '@/modules/sciverse/types';
+import {
+  conversationSourceKey,
+  invokeAssistantTool,
+  isLocalConversationSource,
+  listTools
+} from '@/shared/ipc/assistantApi';
 import type {
   AgentInvocationPlan,
   AssistantActiveNote,
@@ -29,6 +39,7 @@ import type {
 import { readNote } from '@/shared/ipc/workspaceApi';
 import type { SearchHit, SearchResults } from '@/shared/ipc/workspaceApi';
 import type { AgentExecutionSelection, AgentRuntimeSettings, AgentToolId } from '@/shared/types/agentRuntime';
+import { stableHash } from '../runtime/evidenceLedger';
 import {
   auditAgentToolPermissions,
   buildAgentSystemPrompt,
@@ -48,7 +59,13 @@ import {
 const SUPPORTED_TOOL_NAMES = new Set([
   'search_segments',
   'read_segment_content',
-  'read_entry_assistant_context'
+  'read_entry_assistant_context',
+  'search_sciverse_evidence',
+  'read_sciverse_content',
+  'search_sciverse_metadata',
+  'get_sciverse_metadata_catalog',
+  'search_sciverse_paper_schema',
+  'get_sciverse_paper_schema'
 ]);
 
 export function scopedEnabledToolIds(
@@ -190,6 +207,46 @@ export function normalizeToolInput(
     };
   }
 
+  if (toolName === 'search_sciverse_evidence') {
+    return {
+      query: requiredString(object.query, 'query'),
+      top_k: clampNumber(object.top_k, 1, 20, 8),
+      sub_queries: clampNumber(object.sub_queries, 0, 4, 0)
+    };
+  }
+
+  if (toolName === 'read_sciverse_content') {
+    return {
+      doc_id: requiredString(object.doc_id, 'doc_id'),
+      offset: clampNumber(object.offset, 0, Number.MAX_SAFE_INTEGER, 0),
+      limit: clampNumber(object.limit, 100, 12_000, 2_000),
+      title: optionalString(object.title),
+      chunk_id: optionalString(object.chunk_id),
+      page_no: optionalNumber(object.page_no)
+    };
+  }
+
+  if (toolName === 'search_sciverse_metadata') {
+    return {
+      fields: stringArray(object.fields).slice(0, 20),
+      page: clampNumber(object.page, 1, 100, 1),
+      page_size: clampNumber(object.page_size, 1, 20, 10),
+      query: requiredString(object.query, 'query')
+    };
+  }
+
+  if (toolName === 'search_sciverse_paper_schema') {
+    return {
+      page: clampNumber(object.page, 1, 100, 1),
+      page_size: clampNumber(object.page_size, 1, 20, 10),
+      query: requiredString(object.query, 'query')
+    };
+  }
+
+  if (toolName === 'get_sciverse_metadata_catalog' || toolName === 'get_sciverse_paper_schema') {
+    return {};
+  }
+
   throw new Error(`Unsupported assistant tool: ${toolName}`);
 }
 
@@ -270,6 +327,31 @@ export async function executeTool(
     return formatReadEntryOutput(result, addSource, contextBudget);
   }
 
+  if (toolName === 'search_sciverse_evidence') {
+    const result = await invokeAssistantTool<SciverseAgenticSearchResponse>(toolName, input);
+    return formatSciverseSearchOutput(result, addSource, String(input.query));
+  }
+
+  if (toolName === 'read_sciverse_content') {
+    const result = await invokeAssistantTool<SciverseContentResponse>(toolName, input);
+    return formatSciverseContentOutput(result, input, addSource, contextBudget);
+  }
+
+  if (toolName === 'search_sciverse_metadata' || toolName === 'search_sciverse_paper_schema' || toolName === 'get_sciverse_metadata_catalog' || toolName === 'get_sciverse_paper_schema') {
+    const result = await invokeAssistantTool<SciverseJsonResponse>(toolName, input);
+    return {
+      modelOutput: trimSciverseJson(result, contextBudget),
+      sources: [],
+      summary: toolName === 'search_sciverse_metadata'
+        ? `Searched Sciverse structured metadata for "${String(input.query)}".`
+        : toolName === 'search_sciverse_paper_schema'
+          ? `Searched Sciverse Paper Schema for "${String(input.query)}".`
+          : toolName === 'get_sciverse_metadata_catalog'
+            ? 'Read the Sciverse metadata field catalog.'
+            : 'Read the Sciverse Paper Schema.'
+    };
+  }
+
   throw new Error(`Unsupported assistant tool: ${toolName}`);
 }
 
@@ -284,28 +366,16 @@ export async function readCurrentNoteOutput({
   currentNote?: AssistantActiveNote | null;
   root: string;
 }) {
-  if (contextSnapshot?.active_note) {
-    const note = contextSnapshot.active_note;
-    return {
-      modelOutput: {
-        available: true,
-        entry_id: note.entry_id,
-        entry_title: note.entry_title,
-        kind: 'read_current_note',
-        markdown: note.markdown,
-        markdown_char_count: note.markdown_char_count,
-        note_id: note.note_id,
-        note_title: note.note_title,
-        source_link_count: note.source_link_count,
-        truncated: note.truncated
-      },
-      summary: note.truncated
-        ? `Read hydrated selected note "${note.note_title}" with truncation.`
-        : `Read hydrated selected note "${note.note_title}".`
-    };
-  }
-
-  if (!currentNote) {
+  const hydrated = contextSnapshot?.active_note;
+  const target = currentNote ?? (hydrated
+    ? {
+        entryId: hydrated.entry_id,
+        entryTitle: hydrated.entry_title,
+        noteId: hydrated.note_id,
+        noteTitle: hydrated.note_title
+      }
+    : null);
+  if (!target) {
     return {
       modelOutput: {
         available: false,
@@ -317,27 +387,41 @@ export async function readCurrentNoteOutput({
   }
 
   const budget = Math.min(36_000, contextBudget);
-  const note = await readNote(root, currentNote.entryId, currentNote.noteId);
+  const note = await readNote(root, target.entryId, target.noteId);
   const truncated = note.markdown.length > budget;
   const markdown = trimToBudget(note.markdown, budget);
 
   return {
     modelOutput: {
       available: true,
-      entry_id: currentNote.entryId,
-      entry_title: currentNote.entryTitle,
+      content_hash: stableHash(note.markdown),
+      entry_id: target.entryId,
+      entry_title: target.entryTitle,
       kind: 'read_current_note',
       markdown,
       markdown_char_count: note.markdown.length,
-      note_id: currentNote.noteId,
-      note_title: note.title || currentNote.noteTitle,
+      note_id: target.noteId,
+      note_title: note.title || target.noteTitle,
+      numbered_markdown: numberMarkdownLines(markdown),
       source_link_count: note.links.length,
       truncated
     },
+    snapshot: {
+      markdown: note.markdown,
+      title: note.title || target.noteTitle
+    },
     summary: truncated
-      ? `Read selected note "${note.title || currentNote.noteTitle}" with truncation.`
-      : `Read selected note "${note.title || currentNote.noteTitle}".`
+      ? `Read selected note "${note.title || target.noteTitle}" with truncation.`
+      : `Read selected note "${note.title || target.noteTitle}".`
   };
+}
+
+export function numberMarkdownLines(markdown: string) {
+  return markdown
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line, index) => `${index + 1}: ${line}`)
+    .join('\n');
 }
 
 export function formatSearchSegmentsOutput(
@@ -423,6 +507,127 @@ export function formatReadSegmentOutput(
   };
 }
 
+export function formatSciverseSearchOutput(
+  result: SciverseAgenticSearchResponse,
+  addSource: (source: ConversationSourceLink) => number,
+  query: string
+) {
+  const evidence = (result.hits ?? []).slice(0, 12).map((hit) => {
+    const source: ConversationSourceLink = {
+      provider: 'sciverse',
+      doc_id: hit.doc_id,
+      chunk_id: hit.chunk_id,
+      title: hit.title || 'Sciverse document',
+      quote: compactQuote(hit.chunk),
+      offset: hit.offset,
+      page_no: hit.page_no,
+      score: hit.score,
+      abstract: hit.abstract,
+      authors: hit.author,
+      publication_year: hit.publication_published_year,
+      venue: hit.publication_venue_name_unified,
+      citation_count: hit.citation_count,
+      primary_topic: hit.primary_topic,
+      doi: hit.doi,
+      access_is_oa: hit.access_is_oa,
+      access_oa_url: hit.access_oa_url,
+      access_license: hit.access_license,
+      source_type: hit.source_type,
+      resource_file_name: hit.file_name
+    };
+    const marker = addSource(source);
+    return {
+      chunk_id: hit.chunk_id,
+      doc_id: hit.doc_id,
+      marker: `[S${marker}]`,
+      offset: hit.offset,
+      page_no: hit.page_no,
+      score: hit.score,
+      snippet: hit.chunk,
+      title: source.title,
+      abstract: hit.abstract,
+      authors: hit.author,
+      publication_year: hit.publication_published_year,
+      venue: hit.publication_venue_name_unified,
+      citation_count: hit.citation_count,
+      primary_topic: hit.primary_topic,
+      doi: hit.doi,
+      access_is_oa: hit.access_is_oa,
+      access_oa_url: hit.access_oa_url,
+      access_license: hit.access_license,
+      source_type: hit.source_type,
+      resource_file_name: hit.file_name
+    };
+  });
+  return {
+    modelOutput: {
+      evidence,
+      kind: 'search_sciverse_evidence',
+      query,
+      source: 'sciverse'
+    },
+    sources: evidence.map((item) => ({
+      provider: 'sciverse' as const,
+      doc_id: item.doc_id,
+      chunk_id: item.chunk_id,
+      title: item.title,
+      quote: compactQuote(item.snippet),
+      offset: item.offset,
+      page_no: item.page_no,
+      score: item.score,
+      abstract: item.abstract,
+      authors: item.authors,
+      publication_year: item.publication_year,
+      venue: item.venue,
+      citation_count: item.citation_count,
+      primary_topic: item.primary_topic,
+      doi: item.doi,
+      access_is_oa: item.access_is_oa,
+      access_oa_url: item.access_oa_url,
+      access_license: item.access_license,
+      source_type: item.source_type,
+      resource_file_name: item.resource_file_name
+    })),
+    summary: evidence.length
+      ? `Found ${evidence.length} Sciverse evidence chunk${evidence.length === 1 ? '' : 's'} for "${query}".`
+      : `No Sciverse evidence matched "${query}".`
+  };
+}
+
+export function formatSciverseContentOutput(
+  result: SciverseContentResponse,
+  input: JsonObject,
+  addSource: (source: ConversationSourceLink) => number,
+  contextBudget: number
+) {
+  const text = trimToBudget(result.text, Math.min(12_000, contextBudget));
+  const source: ConversationSourceLink = {
+    provider: 'sciverse',
+    doc_id: String(input.doc_id),
+    chunk_id: optionalString(input.chunk_id),
+    title: optionalString(input.title) ?? `Sciverse document ${String(input.doc_id)}`,
+    quote: compactQuote(text),
+    offset: optionalNumber(input.offset),
+    page_no: optionalNumber(input.page_no)
+  };
+  const marker = addSource(source);
+  return {
+    modelOutput: {
+      chars_returned: result.chars_returned,
+      doc_id: source.doc_id,
+      kind: 'read_sciverse_content',
+      marker: `[S${marker}]`,
+      more: result.more,
+      next_offset: result.next_offset,
+      offset: source.offset ?? 0,
+      text,
+      truncated_for_context: text.length < result.text.length
+    },
+    sources: [source],
+    summary: `Read ${result.chars_returned} characters from Sciverse document ${source.doc_id}.`
+  };
+}
+
 export function formatReadEntryOutput(
   result: ReadEntryAssistantContextResponse,
   addSource: (source: ConversationSourceLink) => number,
@@ -502,13 +707,27 @@ export function noteProposalInputSchema(): JSONSchema7 {
       },
       patch_operations: {
         description:
-          'Exact local Markdown edits for action=patch. Each old_text or anchor_text must be copied from read_note or read_current_note and should match exactly once.',
+          'Line-precise Markdown edits for action=patch or delete. Prefer replace_lines, delete_lines, and insert_lines using 1-based logical Markdown lines plus expected_text copied from read_note or read_current_note.',
         items: {
           additionalProperties: false,
           properties: {
             anchor_text: {
               description: 'Exact Markdown anchor text for insert_before or insert_after.',
               type: 'string'
+            },
+            end_line: {
+              description: 'Inclusive 1-based ending logical Markdown line for replace_lines or delete_lines.',
+              minimum: 1,
+              type: 'number'
+            },
+            expected_text: {
+              description: 'Exact text currently present in the addressed line or line range.',
+              type: 'string'
+            },
+            line: {
+              description: '1-based logical Markdown line for insert_lines.',
+              minimum: 1,
+              type: 'number'
             },
             new_text: {
               description: 'Replacement Markdown for replace_exact.',
@@ -518,12 +737,25 @@ export function noteProposalInputSchema(): JSONSchema7 {
               description: 'Exact Markdown text to replace. Must match exactly once.',
               type: 'string'
             },
+            position: {
+              description: 'Whether insert_lines inserts before or after the addressed line.',
+              enum: ['before', 'after'],
+              type: 'string'
+            },
+            start_line: {
+              description: 'Inclusive 1-based starting logical Markdown line for replace_lines or delete_lines.',
+              minimum: 1,
+              type: 'number'
+            },
             text: {
               description: 'Markdown text to insert or append.',
               type: 'string'
             },
             type: {
-              enum: ['replace_exact', 'insert_after', 'insert_before', 'append'],
+              enum: [
+                'replace_lines', 'delete_lines', 'insert_lines',
+                'replace_exact', 'insert_after', 'insert_before', 'append'
+              ],
               type: 'string'
             }
           },
@@ -813,11 +1045,30 @@ export function buildNoteProposal(
     optionalString(object.title) ??
     noteTitle ??
     (action === 'create' ? 'AI note' : 'Updated note');
-  const patchOperations = action === 'patch' ? markdownPatchOperations(object.patch_operations) : undefined;
+  const patchOperations = action === 'patch' || action === 'delete'
+    ? markdownPatchOperations(object.patch_operations)
+    : undefined;
   const markdown =
-    action === 'patch'
+    action === 'patch' || action === 'delete'
       ? optionalString(object.markdown) ?? patchOperationsPreview(patchOperations ?? [])
       : requiredString(object.markdown, 'markdown');
+  if (
+    (plan?.needsCurrentNote || plan?.editCoordinatePolicy === 'line_and_hash') &&
+    patchOperations?.some((operation) =>
+      operation.type !== 'replace_lines' &&
+      operation.type !== 'delete_lines' &&
+      operation.type !== 'insert_lines'
+    )
+  ) {
+    throw new Error('This note task requires line-precise patch operations with expected_text.');
+  }
+  if (
+    plan?.editCoordinatePolicy === 'line_and_hash' &&
+    noteId &&
+    !readNoteSnapshots.has(noteSnapshotKey(entryId, noteId))
+  ) {
+    throw new Error('Read the current target note before creating a line-precise patch proposal.');
+  }
   const sourceMarkers = [
     ...stringArray(object.source_markers),
     ...markersFromMarkdown(markdown)
@@ -907,7 +1158,7 @@ export function proposalAfterMarkdown({
     return markdown;
   }
 
-  if (action === 'patch' && beforeMarkdown !== null && patchOperations) {
+  if ((action === 'patch' || action === 'delete') && beforeMarkdown !== null && patchOperations) {
     try {
       return applyMarkdownPatchPreview(beforeMarkdown, patchOperations);
     } catch {
@@ -975,6 +1226,15 @@ export function applyMarkdownPatchPreview(
       continue;
     }
 
+    if (
+      operation.type === 'replace_lines' ||
+      operation.type === 'delete_lines' ||
+      operation.type === 'insert_lines'
+    ) {
+      nextMarkdown = applyLinePatchPreview(nextMarkdown, operation);
+      continue;
+    }
+
     const matchCount = countOccurrences(nextMarkdown, operation.anchorText);
     if (matchCount !== 1) {
       throw new Error('Patch anchor text must match exactly once.');
@@ -988,6 +1248,48 @@ export function applyMarkdownPatchPreview(
   }
 
   return ensureTrailingNewlinePreview(nextMarkdown);
+}
+
+function applyLinePatchPreview(
+  markdown: string,
+  operation: Extract<
+    AssistantMarkdownPatchOperation,
+    { type: 'delete_lines' | 'insert_lines' | 'replace_lines' }
+  >
+) {
+  const lines = markdown.replace(/\r\n/g, '\n').split('\n');
+  if (lines[lines.length - 1] === '') lines.pop();
+
+  if (operation.type === 'insert_lines') {
+    if (operation.line > lines.length) {
+      throw new Error(`Patch line ${operation.line} is outside the current Markdown.`);
+    }
+    const currentLine = lines[operation.line - 1] ?? '';
+    if (currentLine !== operation.expectedText) {
+      throw new Error(`Patch line ${operation.line} no longer matches expected_text.`);
+    }
+    const insertion = operation.text.replace(/\r\n/g, '\n').split('\n');
+    const index = operation.position === 'before' ? operation.line - 1 : operation.line;
+    lines.splice(index, 0, ...insertion);
+    return lines.join('\n');
+  }
+
+  if (operation.endLine < operation.startLine || operation.endLine > lines.length) {
+    throw new Error(
+      `Patch line range ${operation.startLine}-${operation.endLine} is outside the current Markdown.`
+    );
+  }
+  const currentText = lines.slice(operation.startLine - 1, operation.endLine).join('\n');
+  if (currentText !== operation.expectedText.replace(/\r\n/g, '\n')) {
+    throw new Error(
+      `Patch line range ${operation.startLine}-${operation.endLine} no longer matches expected_text.`
+    );
+  }
+  const replacement = operation.type === 'replace_lines'
+    ? operation.newText.replace(/\r\n/g, '\n').split('\n')
+    : [];
+  lines.splice(operation.startLine - 1, operation.endLine - operation.startLine + 1, ...replacement);
+  return lines.join('\n');
 }
 
 export function countOccurrences(haystack: string, needle: string) {
@@ -1130,6 +1432,48 @@ export function markdownPatchOperations(value: unknown): AssistantMarkdownPatchO
       } satisfies AssistantMarkdownPatchOperation;
     }
 
+    if (type === 'replace_lines') {
+      return {
+        endLine: requiredPositiveLine(object.end_line, `patch_operations[${index}].end_line`),
+        expectedText: requiredStringAllowEmpty(
+          object.expected_text,
+          `patch_operations[${index}].expected_text`
+        ),
+        newText: requiredStringAllowEmpty(object.new_text, `patch_operations[${index}].new_text`),
+        startLine: requiredPositiveLine(object.start_line, `patch_operations[${index}].start_line`),
+        type
+      } satisfies AssistantMarkdownPatchOperation;
+    }
+
+    if (type === 'delete_lines') {
+      return {
+        endLine: requiredPositiveLine(object.end_line, `patch_operations[${index}].end_line`),
+        expectedText: requiredStringAllowEmpty(
+          object.expected_text,
+          `patch_operations[${index}].expected_text`
+        ),
+        startLine: requiredPositiveLine(object.start_line, `patch_operations[${index}].start_line`),
+        type
+      } satisfies AssistantMarkdownPatchOperation;
+    }
+
+    if (type === 'insert_lines') {
+      return {
+        expectedText: requiredStringAllowEmpty(
+          object.expected_text,
+          `patch_operations[${index}].expected_text`
+        ),
+        line: requiredPositiveLine(object.line, `patch_operations[${index}].line`),
+        position: requiredEnum(
+          object.position,
+          `patch_operations[${index}].position`,
+          ['before', 'after']
+        ),
+        text: requiredStringAllowEmpty(object.text, `patch_operations[${index}].text`),
+        type
+      } satisfies AssistantMarkdownPatchOperation;
+    }
+
     throw new Error(`Unsupported patch operation type at patch_operations[${index}].`);
   });
 
@@ -1149,6 +1493,8 @@ export function patchOperationsPreview(operations: AssistantMarkdownPatchOperati
       if (operation.type === 'append') {
         return operation.text;
       }
+      if (operation.type === 'replace_lines') return operation.newText;
+      if (operation.type === 'delete_lines') return '';
       return operation.text;
     })
     .filter((text) => text.trim().length > 0)
@@ -1240,7 +1586,7 @@ export function sourcesFromMarkers(
     }
 
     const source = sourceByMarker.get(markerNumber);
-    if (!source) {
+    if (!source || !isLocalConversationSource(source)) {
       continue;
     }
 
@@ -1305,6 +1651,12 @@ export function modelInputSchema(descriptor: AssistantToolDescriptor): JSONSchem
   describeProperty(objectSchema, 'top_k', 'Optional maximum number of segment hits to return.');
   describeProperty(objectSchema, 'entry_id', 'Required Entry id for explicit Entry or segment reads.');
   describeProperty(objectSchema, 'segment_uid', 'Segment uid returned by search_segments.');
+  describeProperty(objectSchema, 'doc_id', 'Sciverse document id returned by search_sciverse_evidence.');
+  describeProperty(objectSchema, 'offset', 'Optional Unicode character offset for Sciverse content.');
+  describeProperty(objectSchema, 'limit', 'Maximum Sciverse content characters to read.');
+  describeProperty(objectSchema, 'title', 'Optional Sciverse paper title from the search result.');
+  describeProperty(objectSchema, 'chunk_id', 'Optional Sciverse chunk id from the search result.');
+  describeProperty(objectSchema, 'page_no', 'Optional Sciverse page number from the search result.');
 
   return objectSchema;
 }
@@ -1341,6 +1693,12 @@ export function toolDescription(descriptor: AssistantToolDescriptor) {
   }
   if (descriptor.name === 'read_entry_assistant_context') {
     return `${descriptor.description} Use this only for an explicitly selected, named, or confirmed Entry.`;
+  }
+  if (descriptor.name === 'search_sciverse_evidence') {
+    return `${descriptor.description} Preserve every returned marker and source identifier in the answer.`;
+  }
+  if (descriptor.name === 'read_sciverse_content') {
+    return `${descriptor.description} Use bounded reads and continue with next_offset only when more context is necessary.`;
   }
   return descriptor.description;
 }
@@ -1379,6 +1737,16 @@ export function clampTopK(value: unknown) {
   return Math.min(12, Math.max(1, Math.floor(numberValue)));
 }
 
+export function clampNumber(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+  fallback: number
+) {
+  const numberValue = typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+  return Math.min(maximum, Math.max(minimum, Math.floor(numberValue)));
+}
+
 export function searchMode(value: unknown) {
   return value === 'keyword' || value === 'semantic' || value === 'hybrid' ? value : 'hybrid';
 }
@@ -1389,6 +1757,12 @@ export function runningSummary(toolName: string, input: JsonObject) {
   }
   if (toolName === 'read_segment_content') {
     return `Reading segment ${String(input.segment_uid)}.`;
+  }
+  if (toolName === 'search_sciverse_evidence') {
+    return `Searching Sciverse for "${String(input.query)}".`;
+  }
+  if (toolName === 'read_sciverse_content') {
+    return `Reading Sciverse document ${String(input.doc_id)}.`;
   }
   if (toolName === 'read_entry_assistant_context') {
     return `Reading parsed markdown for Entry ${String(input.entry_id)}.`;
@@ -1436,6 +1810,13 @@ export function requiredStringAllowEmpty(value: unknown, name: string) {
   return value;
 }
 
+export function requiredPositiveLine(value: unknown, name: string) {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+    throw new Error(`${name} must be a positive 1-based line number.`);
+  }
+  return value;
+}
+
 export function requiredEnum<const T extends string>(
   value: unknown,
   name: string,
@@ -1466,7 +1847,7 @@ export function maxMarker(sourceByMarker: Map<number, ConversationSourceLink>) {
 }
 
 export function sourceKey(source: ConversationSourceLink) {
-  return `${source.entry_id}:${source.segment_uid}`;
+  return conversationSourceKey(source);
 }
 
 export function noteSnapshotKey(entryId: string, noteId: string) {
@@ -1497,6 +1878,18 @@ export function trimToBudget(text: string, budget: number) {
   }
 
   return `${text.slice(0, budget)}\n\n[Context truncated because it exceeds the configured model context length.]`;
+}
+
+export function trimSciverseJson(value: SciverseJsonResponse, budget: number) {
+  const text = JSON.stringify(value);
+  if (text.length <= Math.min(16_000, budget)) {
+    return value;
+  }
+  return {
+    ...value,
+    _neuink_truncated: true,
+    _neuink_preview: trimToBudget(text, Math.min(16_000, budget))
+  };
 }
 
 export function errorMessage(error: unknown) {

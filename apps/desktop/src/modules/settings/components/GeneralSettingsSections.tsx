@@ -318,17 +318,29 @@ export function GeneralSettingsSections({ props }: { props: SettingsPanelLayoutP
                           })
                         }
                       />
-                      <ReaderSettingRow
-                        checked={readerPreferences.leftClickOpensNotePane}
-                        description="左键点击 PDF 区域时，直接打开右侧笔记或批注面板。"
-                        label="左键打开笔记"
-                        onCheckedChange={(checked) =>
-                          onReaderPreferencesChange({
-                            ...readerPreferences,
-                            leftClickOpensNotePane: checked
-                          })
-                        }
-                      />
+                      <div className="flex items-center justify-between gap-4 border-t pt-3">
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium">打开片段笔记</div>
+                          <div className="mt-0.5 text-xs leading-5 text-muted-foreground">选择单击或双击片段后打开笔记；PDF 与重排分屏时单击始终只用于定位。</div>
+                        </div>
+                        <Select
+                          value={readerPreferences.segmentNoteOpenGesture}
+                          onValueChange={(value) =>
+                            onReaderPreferencesChange({
+                              ...readerPreferences,
+                              leftClickOpensNotePane: value === 'single',
+                              segmentNoteOpenGesture: value as ReaderPreferences['segmentNoteOpenGesture']
+                            })
+                          }
+                        >
+                          <SelectTrigger className="w-28" size="sm"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="button">选中后操作</SelectItem>
+                            <SelectItem value="single">单击</SelectItem>
+                            <SelectItem value="modifier">Alt + 单击</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
                       <ReaderSettingRow
                         checked={readerPreferences.closeSegmentOverlayOnBlankClick}
                         description="片段笔记或批注打开后，点击 PDF 正文空白区域会关闭面板。"
@@ -396,7 +408,13 @@ export function GeneralSettingsSections({ props }: { props: SettingsPanelLayoutP
                       </Select>
                     </div>
                     <ReaderSettingRow checked={readerPreferences.showRegions} label="默认显示区域" description="默认显示 PDF 上的分段区域框。" onCheckedChange={(checked) => onReaderPreferencesChange({ ...readerPreferences, showRegions: checked })} />
-                    <ReaderSettingRow checked={readerPreferences.leftClickOpensNotePane} label="左键打开笔记" description="在 PDF 或重排视图点击片段时打开对应笔记。" onCheckedChange={(checked) => onReaderPreferencesChange({ ...readerPreferences, leftClickOpensNotePane: checked })} />
+                    <div className="flex items-center justify-between gap-4 border-t pt-3">
+                      <div className="min-w-0"><div className="text-sm font-medium">打开片段笔记</div><div className="mt-0.5 text-xs leading-5 text-muted-foreground">分屏 PDF/重排时单击始终只定位对侧，不打开笔记。</div></div>
+                      <Select value={readerPreferences.segmentNoteOpenGesture} onValueChange={(value) => onReaderPreferencesChange({ ...readerPreferences, leftClickOpensNotePane: value === 'single', segmentNoteOpenGesture: value as ReaderPreferences['segmentNoteOpenGesture'] })}>
+                        <SelectTrigger className="w-28" size="sm"><SelectValue /></SelectTrigger>
+                        <SelectContent><SelectItem value="button">选中后操作</SelectItem><SelectItem value="single">单击</SelectItem><SelectItem value="modifier">Alt + 单击</SelectItem></SelectContent>
+                      </Select>
+                    </div>
                     <ReaderSettingRow checked={readerPreferences.closeSegmentOverlayOnBlankClick} label="空白处关闭片段浮层" description="在 PDF 或重排视图点击空白区域时关闭笔记或批注浮层。" onCheckedChange={(checked) => onReaderPreferencesChange({ ...readerPreferences, closeSegmentOverlayOnBlankClick: checked })} />
                     <ReaderSettingRow checked={readerPreferences.closeSegmentOverlayOnSameSegmentClick} label="再次点击片段关闭" description="在 PDF 或重排视图再次点击已打开的片段时关闭浮层。" onCheckedChange={(checked) => onReaderPreferencesChange({ ...readerPreferences, closeSegmentOverlayOnSameSegmentClick: checked })} />
                   </div>

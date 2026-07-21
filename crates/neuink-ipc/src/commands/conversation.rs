@@ -72,12 +72,73 @@ pub enum ConversationRole {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ConversationSourceLink {
+#[serde(untagged)]
+pub enum ConversationSourceLink {
+    Sciverse(SciverseConversationSourceLink),
+    Local(LocalConversationSourceLink),
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct LocalConversationSourceLink {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<LocalSourceProvider>,
     pub entry_id: EntryId,
     pub entry_title: String,
     pub segment_uid: String,
     pub page_idx: u32,
     pub quote: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalSourceProvider {
+    Local,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SciverseConversationSourceLink {
+    pub provider: SciverseSourceProvider,
+    pub doc_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chunk_id: Option<String>,
+    pub title: String,
+    pub quote: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_no: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score: Option<f64>,
+    #[serde(rename = "abstract", default, skip_serializing_if = "Option::is_none")]
+    pub abstract_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub authors: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publication_year: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub venue: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub citation_count: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_topic: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doi: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_is_oa: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_oa_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_license: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource_file_name: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SciverseSourceProvider {
+    Sciverse,
 }
 
 #[derive(Debug, Deserialize)]
@@ -460,7 +521,53 @@ fn normalize_title(title: String) -> String {
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use serde_json::json;
+
     use super::*;
+
+    #[test]
+    fn conversation_sources_accept_legacy_local_and_sciverse_shapes() {
+        let local: ConversationSourceLink = serde_json::from_value(json!({
+            "entry_id": "entry-1",
+            "entry_title": "Local paper",
+            "segment_uid": "segment-2",
+            "page_idx": 3,
+            "quote": "Local evidence"
+        }))
+        .expect("deserialize legacy local source");
+        assert!(matches!(local, ConversationSourceLink::Local(_)));
+
+        let sciverse: ConversationSourceLink = serde_json::from_value(json!({
+            "provider": "sciverse",
+            "doc_id": "doc-42",
+            "chunk_id": "chunk-7",
+            "title": "Remote paper",
+            "quote": "Remote evidence",
+            "offset": 1200,
+            "page_no": 8,
+            "score": 0.91,
+            "abstract": "Remote abstract",
+            "authors": ["A. Author", "B. Author"],
+            "publication_year": 2026,
+            "doi": "10.1000/example",
+            "access_is_oa": true,
+            "access_oa_url": "https://example.com/paper.pdf",
+            "resource_file_name": "papers/doc-42.pdf"
+        }))
+        .expect("deserialize Sciverse source");
+        assert!(matches!(
+            &sciverse,
+            ConversationSourceLink::Sciverse(source)
+                if source.authors.len() == 2 && source.publication_year == Some(2026)
+        ));
+        assert_eq!(
+            serde_json::to_value(sciverse)
+                .expect("serialize Sciverse source")
+                .get("provider")
+                .and_then(|value| value.as_str()),
+            Some("sciverse")
+        );
+    }
 
     #[test]
     fn conversation_index_rebuilds_and_tracks_mutations() {

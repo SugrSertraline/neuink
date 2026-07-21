@@ -67,7 +67,8 @@ export function PdfReaderDocumentPane({
   onCloseSegmentOverlay,
   onCreateTextSelectionAnnotation,
   onTranslateTextSelection,
-  onToggleSegment
+  onToggleSegment,
+  altClickOpensNote = false
 }: {
   autoTranslateTextSelection?: boolean;
   entry: LibraryEntry;
@@ -122,6 +123,7 @@ export function PdfReaderDocumentPane({
   }) => Promise<void> | void;
   onTranslateTextSelection?: (input: { segment: SourceSegment; text: string }) => Promise<string>;
   onToggleSegment: (segment: SourceSegment) => void;
+  altClickOpensNote?: boolean;
 }) {
   const { renderPageIndexes, visiblePageIndexes } = useVisiblePdfPages({
     pageCount: pages.length,
@@ -214,6 +216,7 @@ export function PdfReaderDocumentPane({
                 onCreateTextSelectionAnnotation={onCreateTextSelectionAnnotation}
                 onTranslateTextSelection={onTranslateTextSelection}
                 onToggleSegment={onToggleSegment}
+                altClickOpensNote={altClickOpensNote}
               />
             );
           })}

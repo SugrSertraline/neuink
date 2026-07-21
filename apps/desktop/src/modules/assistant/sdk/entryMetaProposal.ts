@@ -1,4 +1,8 @@
-import type { ConversationSourceLink } from '@/shared/ipc/assistantApi';
+import {
+  isLocalConversationSource,
+  type ConversationSourceLink,
+  type LocalConversationSourceLink
+} from '@/shared/ipc/assistantApi';
 import type {
   AssistantEntryMetaProposal,
   AssistantEntryMetaTarget,
@@ -80,7 +84,7 @@ function sourcesFromMarkers(
   for (const marker of markers) {
     const markerNumber = Number(marker.replace(/[[\]S\s]/gi, ''));
     const source = sourceByMarker.get(markerNumber);
-    if (!source || seen.has(markerNumber)) continue;
+    if (!source || !isLocalConversationSource(source) || seen.has(markerNumber)) continue;
     seen.add(markerNumber);
     sources.push({
       entryId: source.entry_id,
@@ -103,7 +107,9 @@ function bestTargetSource(
     .filter((value): value is string => Boolean(value))
     .join(' ');
   const candidates = [...sourceByMarker.entries()]
-    .filter(([, source]) => source.entry_id === entryId)
+    .filter((candidate): candidate is [number, LocalConversationSourceLink] =>
+      isLocalConversationSource(candidate[1]) && candidate[1].entry_id === entryId
+    )
     .map((candidate) => ({
       candidate,
       score: sourceMatchScore(candidate[1].quote, metadataText)

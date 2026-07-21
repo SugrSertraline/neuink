@@ -6,6 +6,7 @@ pub mod embedding_resources;
 pub mod entry;
 pub mod job;
 pub mod pdf_reader;
+pub mod sciverse;
 pub mod search;
 pub mod settings;
 pub mod tag;

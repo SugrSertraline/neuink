@@ -24,6 +24,7 @@ type ChatMessageCallbacks = Pick<
   | 'onApplyEntryMetaProposal'
   | 'onApplyNoteProposal'
   | 'onApplyTagProposal'
+  | 'onAddSciverseSource'
   | 'onOpenSource'
   | 'onRegenerateNoteProposal'
   | 'onRejectEntryMetaProposal'
@@ -186,6 +187,7 @@ export function AssistantMessageList({
   onApplyEntryMetaProposal,
   onApplyNoteProposal,
   onApplyTagProposal,
+  onAddSciverseSource,
   onLoadEarlier,
   onOpenSource,
   onRegenerateNoteProposal,
@@ -202,7 +204,7 @@ export function AssistantMessageList({
   visibleMessageCount
 }: AssistantMessageListProps) {
   return (
-    <div className="relative min-h-0 min-w-0">
+    <div className="relative size-full min-h-0 min-w-0">
       <div
         className="size-full min-h-0 min-w-0 overflow-auto p-2"
         ref={scrollRef}
@@ -230,6 +232,7 @@ export function AssistantMessageList({
                   onApplyNoteProposal={onApplyNoteProposal}
                   onApplyEntryMetaProposal={onApplyEntryMetaProposal}
                   onApplyTagProposal={onApplyTagProposal}
+                  onAddSciverseSource={onAddSciverseSource}
                   onOpenSource={onOpenSource}
                   onRegenerateNoteProposal={onRegenerateNoteProposal}
                   onRejectNoteProposal={onRejectNoteProposal}

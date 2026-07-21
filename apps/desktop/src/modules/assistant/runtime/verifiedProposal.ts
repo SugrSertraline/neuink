@@ -53,6 +53,32 @@ function canonicalPatchOperations(proposal: AssistantNoteProposal) {
     if (operation.type === 'append') {
       return { type: operation.type, text: operation.text };
     }
+    if (operation.type === 'replace_lines') {
+      return {
+        type: operation.type,
+        startLine: operation.startLine,
+        endLine: operation.endLine,
+        expectedText: operation.expectedText,
+        newText: operation.newText
+      };
+    }
+    if (operation.type === 'delete_lines') {
+      return {
+        type: operation.type,
+        startLine: operation.startLine,
+        endLine: operation.endLine,
+        expectedText: operation.expectedText
+      };
+    }
+    if (operation.type === 'insert_lines') {
+      return {
+        type: operation.type,
+        line: operation.line,
+        position: operation.position,
+        expectedText: operation.expectedText,
+        text: operation.text
+      };
+    }
     return {
       type: operation.type,
       anchorText: operation.anchorText,

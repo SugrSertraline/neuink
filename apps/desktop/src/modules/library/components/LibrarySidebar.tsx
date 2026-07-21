@@ -4,6 +4,7 @@ import {
   ChevronRight,
   FileText,
   FolderTree,
+  FilterX,
   History,
   Pencil,
   Plus,
@@ -65,6 +66,9 @@ type LibrarySidebarProps = {
   onBackToLibraryExplorer: () => void;
   onCreateMarkdownNote: () => Promise<void> | void;
   onDeleteMarkdownNote: (entryId: string, noteId: string) => Promise<void> | void;
+  onAttachPdf: (entryId: string, pdfPath: string) => Promise<void> | void;
+  onCreatePdfVersion: (entryId: string, pdfPath: string) => Promise<void> | void;
+  onImportMineruClientResult: (entryId: string, zipPath: string) => Promise<unknown> | unknown;
   onOpenMarkdownInPdfPane: (noteId: string) => void;
   onOpenContentInRight: (contentId: string) => void;
   onRenameMarkdownNote: (entryId: string, noteId: string, title: string) => Promise<unknown> | unknown;
@@ -74,6 +78,7 @@ type LibrarySidebarProps = {
   onSelectContent: (contentId: string) => void;
   onSelectTag: (tag: string | null) => void;
   onSelectView: (view: LibraryView) => void;
+  onClearFilters: () => void;
   onUpdateEntry: (
     entryId: string,
     request: {
@@ -117,6 +122,9 @@ export function LibrarySidebar({
   onBackToLibraryExplorer,
   onCreateMarkdownNote,
   onDeleteMarkdownNote,
+  onAttachPdf,
+  onCreatePdfVersion,
+  onImportMineruClientResult,
   onOpenMarkdownInPdfPane,
   onOpenContentInRight,
   onRenameMarkdownNote,
@@ -126,6 +134,7 @@ export function LibrarySidebar({
   onSelectContent,
   onSelectTag,
   onSelectView,
+  onClearFilters,
   onUpdateEntry
 }: LibrarySidebarProps) {
   const [openSections, setOpenSections] = useState<Record<SectionKey, boolean>>(readStoredSectionState);
@@ -143,10 +152,23 @@ export function LibrarySidebar({
     });
   };
 
+  const assignEntryToTag = (entryId: string, tagPath: string) => {
+    const entry = entries.find((item) => item.id === entryId);
+    if (!entry || entry.tags.includes(tagPath)) {
+      return;
+    }
+
+    return onUpdateEntry(entry.id, {
+      fields: entry.fields,
+      tagPaths: [...entry.tags, tagPath],
+      title: entry.title
+    });
+  };
+
   return (
     <aside className="app-sidebar">
       <div className="side-head">
-        <span>{entryExplorerOpen ? '条目详情' : '条目库'}</span>
+        <span>{entryExplorerOpen ? '条目内容' : '条目库'}</span>
         {!entryExplorerOpen ? (
           <Button
             disabled={status !== 'ready'}
@@ -169,6 +191,9 @@ export function LibrarySidebar({
           onBack={onBackToLibraryExplorer}
           onCreateMarkdownNote={onCreateMarkdownNote}
           onDeleteMarkdownNote={onDeleteMarkdownNote}
+          onAttachPdf={onAttachPdf}
+          onCreatePdfVersion={onCreatePdfVersion}
+          onImportMineruClientResult={onImportMineruClientResult}
           onOpenMarkdownInPdfPane={onOpenMarkdownInPdfPane}
           onOpenContentInRight={onOpenContentInRight}
           onRenameMarkdownNote={onRenameMarkdownNote}
@@ -179,7 +204,27 @@ export function LibrarySidebar({
       ) : (
         <ScrollArea className="side-body">
           <div className="space-y-3 p-2">
-            <SidebarSection open={openSections.quick} title="快速视图" onToggle={() => toggleSection('quick')}>
+            <SidebarSection
+              action={
+                <Button
+                  className="h-6 px-1.5 text-[10px]"
+                  size="xs"
+                  title="清理所有筛选并显示全部条目"
+                  type="button"
+                  variant="ghost"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onClearFilters();
+                  }}
+                >
+                  <FilterX size={12} aria-hidden="true" />
+                  显示全部
+                </Button>
+              }
+              open={openSections.quick}
+              title="快速视图"
+              onToggle={() => toggleSection('quick')}
+            >
               <SidebarRow active={activeView === 'all'} icon={<FolderTree size={14} />} label="全部" value={entries.length} onClick={() => onSelectView('all')} />
               <SidebarRow active={activeView === 'recent'} icon={<History size={14} />} label="最近阅读" value={recentReadingEntryIds.filter((id) => entries.some((entry) => entry.id === id)).length} onClick={() => onSelectView('recent')} />
               <SidebarRow active={activeView === 'trash'} icon={<Trash2 size={14} />} label="回收站" value={trashItemCount} onClick={() => onSelectView('trash')} />
@@ -235,7 +280,13 @@ export function LibrarySidebar({
               {tagTree.length > 0 ? (
                 <div className="space-y-0.5">
                   {tagTree.map((node) => (
-                    <SidebarTagTreeItem activeTag={activeTag} key={node.id} node={node} onSelectTag={onSelectTag} />
+                    <SidebarTagTreeItem
+                      activeTag={activeTag}
+                      key={node.id}
+                      node={node}
+                      onAssignEntryToTag={assignEntryToTag}
+                      onSelectTag={onSelectTag}
+                    />
                   ))}
                 </div>
               ) : (

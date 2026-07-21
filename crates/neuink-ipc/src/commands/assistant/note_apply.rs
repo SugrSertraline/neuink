@@ -250,9 +250,14 @@ fn materialize_patch_markers(
             }
             MarkdownPatchOperation::InsertAfter { text, .. }
             | MarkdownPatchOperation::InsertBefore { text, .. }
-            | MarkdownPatchOperation::Append { text } => {
+            | MarkdownPatchOperation::Append { text }
+            | MarkdownPatchOperation::InsertLines { text, .. } => {
                 *text = text.replace(marker, anchor);
             }
+            MarkdownPatchOperation::ReplaceLines { new_text, .. } => {
+                *new_text = new_text.replace(marker, anchor);
+            }
+            MarkdownPatchOperation::DeleteLines { .. } => {}
         }
     }
 }

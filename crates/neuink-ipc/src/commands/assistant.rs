@@ -11,6 +11,11 @@ use neuink_workspace::Workspace;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use super::sciverse::{
+    assistant_tools_enabled, sciverse_agentic_search, sciverse_meta_catalog, sciverse_meta_search,
+    sciverse_paper_schema, sciverse_paper_schema_search, sciverse_read_content,
+    SciverseJsonRequest,
+};
 use super::search::{search_segments, SearchSegmentsRequest};
 use super::settings::read_assistant_profile;
 
@@ -196,8 +201,8 @@ pub struct AssistantContextSnapshotResponse {
 }
 
 #[tauri::command]
-pub fn list_tools() -> Vec<ToolDescriptor> {
-    vec![
+pub fn list_tools<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Vec<ToolDescriptor> {
+    let mut tools = vec![
         ToolDescriptor {
             name: "search_segments".to_string(),
             description: "Search parsed PDF source segments within an optional Entry scope. Hybrid mode is preferred and falls back to keyword until local embedding resources are bundled."
@@ -240,7 +245,77 @@ pub fn list_tools() -> Vec<ToolDescriptor> {
                 "required": ["root", "entry_id"]
             }),
         },
-    ]
+    ];
+    if assistant_tools_enabled(&app) {
+        tools.extend([
+            ToolDescriptor {
+                name: "search_sciverse_evidence".to_string(),
+                description: "Search Sciverse's remote scientific literature index for citable evidence chunks. Use this for external literature discovery, not for files already in the Neuink workspace."
+                    .to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "query": {"type": "string", "minLength": 1, "maxLength": 4096},
+                        "top_k": {"type": "integer", "minimum": 1, "maximum": 20},
+                        "sub_queries": {"type": "integer", "minimum": 0, "maximum": 4}
+                    },
+                    "required": ["query"]
+                }),
+            },
+            ToolDescriptor {
+                name: "search_sciverse_metadata".to_string(),
+                description: "Search Sciverse's structured paper metadata. Use this for bibliographic filtering, identifiers, venues, authors, and citation metadata; it never writes to the local library.".to_string(),
+                parameters_schema: json!({
+                    "type": "object", "additionalProperties": false,
+                    "properties": {
+                        "query": {"type": "string", "minLength": 1, "maxLength": 4096},
+                        "fields": {"type": "array", "items": {"type": "string"}, "maxItems": 20},
+                        "page": {"type": "integer", "minimum": 1, "maximum": 100},
+                        "page_size": {"type": "integer", "minimum": 1, "maximum": 20}
+                    }, "required": ["query"]
+                }),
+            },
+            ToolDescriptor {
+                name: "get_sciverse_metadata_catalog".to_string(),
+                description: "Get the live Sciverse metadata field catalog before constructing unusual structured metadata requests. This is read-only.".to_string(),
+                parameters_schema: json!({"type": "object", "additionalProperties": false, "properties": {}}),
+            },
+            ToolDescriptor {
+                name: "search_sciverse_paper_schema".to_string(),
+                description: "Search Sciverse Paper Schema definitions and structured research concepts. Use it to clarify available schema fields or domain concepts; this is read-only.".to_string(),
+                parameters_schema: json!({
+                    "type": "object", "additionalProperties": false,
+                    "properties": {"query": {"type": "string", "minLength": 1, "maxLength": 4096}, "page": {"type": "integer", "minimum": 1, "maximum": 100}, "page_size": {"type": "integer", "minimum": 1, "maximum": 20}},
+                    "required": ["query"]
+                }),
+            },
+            ToolDescriptor {
+                name: "get_sciverse_paper_schema".to_string(),
+                description: "Get the Sciverse Paper Schema document. This is read-only and should be used only when the schema definition itself is needed.".to_string(),
+                parameters_schema: json!({"type": "object", "additionalProperties": false, "properties": {}}),
+            },
+            ToolDescriptor {
+                name: "read_sciverse_content".to_string(),
+                description: "Read a bounded text range from a Sciverse document by doc_id. Use this after search_sciverse_evidence when the returned chunk needs surrounding context."
+                    .to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "doc_id": {"type": "string", "minLength": 1},
+                        "offset": {"type": "integer", "minimum": 0},
+                        "limit": {"type": "integer", "minimum": 100, "maximum": 12000},
+                        "title": {"type": "string"},
+                        "chunk_id": {"type": "string"},
+                        "page_no": {"type": "integer", "minimum": 0}
+                    },
+                    "required": ["doc_id"]
+                }),
+            },
+        ]);
+    }
+    tools
 }
 
 #[tauri::command]
@@ -461,6 +536,62 @@ pub fn load_prompt(request: LoadPromptRequest) -> Result<String, String> {
     }
 }
 
+fn normalized_sciverse_metadata_payload(value: Value) -> Result<Value, String> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| "Sciverse metadata search input must be an object.".to_string())?;
+    let query = object
+        .get("query")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|query| !query.is_empty())
+        .ok_or_else(|| "query is required for Sciverse metadata search.".to_string())?;
+    let fields = object
+        .get("fields")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .take(20)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| {
+            vec![
+                "unique_id",
+                "doc_id",
+                "title",
+                "abstract",
+                "author",
+                "doi",
+                "publication_published_year",
+                "publication_venue_name_unified",
+                "citation_count",
+                "access_oa_url",
+                "access_license",
+                "file_name",
+            ]
+        });
+    Ok(json!({"query": query, "filters": [], "fields": fields,
+        "page": object.get("page").and_then(Value::as_u64).unwrap_or(1).clamp(1, 100),
+        "page_size": object.get("page_size").and_then(Value::as_u64).unwrap_or(10).clamp(1, 20)}))
+}
+
+fn normalized_sciverse_schema_payload(value: Value) -> Result<Value, String> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| "Sciverse Paper Schema search input must be an object.".to_string())?;
+    let query = object
+        .get("query")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|query| !query.is_empty())
+        .ok_or_else(|| "query is required for Sciverse Paper Schema search.".to_string())?;
+    Ok(json!({"query": query,
+        "page": object.get("page").and_then(Value::as_u64).unwrap_or(1).clamp(1, 100),
+        "page_size": object.get("page_size").and_then(Value::as_u64).unwrap_or(10).clamp(1, 20)}))
+}
+
 #[tauri::command]
 pub async fn invoke_tool<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -468,6 +599,30 @@ pub async fn invoke_tool<R: tauri::Runtime>(
 ) -> Result<Value, String> {
     match request.name.as_str() {
         "search_segments" => invoke_search_segments(app, request.args).await,
+        "search_sciverse_evidence" => {
+            let args: neuink_sciverse::AgenticSearchRequest =
+                serde_json::from_value(request.args).map_err(|error| error.to_string())?;
+            let result = sciverse_agentic_search(app, args).await?;
+            serde_json::to_value(result).map_err(|error| error.to_string())
+        }
+        "read_sciverse_content" => {
+            let args: neuink_sciverse::ContentRequest =
+                serde_json::from_value(request.args).map_err(|error| error.to_string())?;
+            let result = sciverse_read_content(app, args).await?;
+            serde_json::to_value(result).map_err(|error| error.to_string())
+        }
+        "search_sciverse_metadata" => {
+            let payload = normalized_sciverse_metadata_payload(request.args)?;
+            let result = sciverse_meta_search(app, SciverseJsonRequest { payload }).await?;
+            Ok(result)
+        }
+        "get_sciverse_metadata_catalog" => sciverse_meta_catalog(app).await,
+        "search_sciverse_paper_schema" => {
+            let payload = normalized_sciverse_schema_payload(request.args)?;
+            let result = sciverse_paper_schema_search(app, SciverseJsonRequest { payload }).await?;
+            Ok(result)
+        }
+        "get_sciverse_paper_schema" => sciverse_paper_schema(app).await,
         "read_segment_content" => {
             let args: ReadSegmentContentRequest =
                 serde_json::from_value(request.args).map_err(|error| error.to_string())?;

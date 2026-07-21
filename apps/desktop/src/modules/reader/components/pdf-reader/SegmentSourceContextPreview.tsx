@@ -22,6 +22,7 @@ import { useStoredCollapseState } from './useStoredCollapseState';
 
 export function SegmentSourceContextPreview({
   defaultExpanded = false,
+  embeddedOriginal = false,
   highlightSelections = [],
   pdfDocument,
   segment,
@@ -29,6 +30,7 @@ export function SegmentSourceContextPreview({
   workspaceRoot
 }: {
   defaultExpanded?: boolean;
+  embeddedOriginal?: boolean;
   highlightSelections?: AnnotationTextSelection[];
   pdfDocument?: PDFDocumentProxy | null;
   segment: SourceSegment;
@@ -58,6 +60,7 @@ export function SegmentSourceContextPreview({
     : null;
   const localOriginalUrl = pdfFallbackUrl ?? originalImageUrl;
   const originalPreviewIsPdf = Boolean(pdfFallbackUrl);
+  const displayMode = embeddedOriginal ? 'original' : mode;
   const originalHighlights = useMemo(
     () => buildPdfOriginalHighlights(segment, highlightSelections),
     [highlightSelections, segment]
@@ -67,7 +70,7 @@ export function SegmentSourceContextPreview({
     let cancelled = false;
 
     setPdfFallbackUrl(null);
-    if (mode !== 'original' || !pdfDocument) {
+    if (displayMode !== 'original' || !pdfDocument) {
       setPdfFallbackLoading(false);
       return () => {
         cancelled = true;
@@ -90,7 +93,69 @@ export function SegmentSourceContextPreview({
     return () => {
       cancelled = true;
     };
-  }, [mode, pdfDocument, segment, originalImageUrl]);
+  }, [displayMode, pdfDocument, segment, originalImageUrl]);
+
+  const sourceContent = displayMode === 'parsed' ? (
+    highlightSelections.length > 0 ? (
+      <HighlightedSegmentText
+        selections={highlightSelections}
+        text={segment.text.trim() || markdown || '暂无解析内容'}
+      />
+    ) : (
+      <SourceSnapshotPreview
+        allowScroll={!embeddedOriginal}
+        compact
+        markdown={markdown || '暂无解析内容'}
+        relatedImagePath={originalImagePath}
+        segmentType={segment.segment_type}
+        sourceEntryId={sourceEntryId}
+        workspaceRoot={workspaceRoot}
+      />
+    )
+  ) : localOriginalUrl ? (
+    <div className="grid gap-1.5">
+      {!embeddedOriginal ? (
+        <div className="flex items-center justify-between px-0.5 text-[11px] text-muted-foreground">
+          <span>{originalPreviewIsPdf ? 'PDF 原文' : '原始版面'}</span>
+          {highlightSelections.length > 0 ? <span>已叠加高亮位置</span> : null}
+        </div>
+      ) : null}
+      {embeddedOriginal ? (
+        <div className="flex w-full justify-center overflow-hidden rounded-md border bg-white p-1">
+          <PdfOriginalImage
+            alt="Segment PDF original"
+            className="max-h-56"
+            highlights={originalPreviewIsPdf ? originalHighlights : []}
+            src={localOriginalUrl}
+          />
+        </div>
+      ) : (
+        <button
+          className="flex w-full cursor-zoom-in justify-center overflow-hidden rounded-md border bg-white p-1 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+          title="单击查看完整 PDF 原文"
+          type="button"
+          onClick={() => setOriginalPreviewOpen(true)}
+        >
+          <PdfOriginalImage
+            alt="Segment PDF original"
+            className="max-h-56"
+            highlights={originalPreviewIsPdf ? originalHighlights : []}
+            src={localOriginalUrl}
+          />
+        </button>
+      )}
+    </div>
+  ) : (
+    <div className="rounded-md border border-dashed bg-white px-3 py-6 text-center text-muted-foreground">
+      {pdfFallbackLoading
+        ? '正在从本地 PDF 读取原图...'
+        : '暂无可用原图。当前片段仍可查看解析后的原文内容。'}
+    </div>
+  );
+
+  if (embeddedOriginal) {
+    return <div className="min-w-0 text-xs leading-5">{sourceContent}</div>;
+  }
 
   return (
     <section className="grid min-w-0 gap-2 rounded-md border bg-white px-3 py-2">
@@ -138,50 +203,7 @@ export function SegmentSourceContextPreview({
 
       {!collapsed ? (
       <div className="max-h-48 min-w-0 overflow-auto overscroll-contain rounded-md bg-muted/30 px-2.5 py-2 text-xs leading-5">
-        {mode === 'parsed' ? (
-          highlightSelections.length > 0 ? (
-            <HighlightedSegmentText
-              selections={highlightSelections}
-              text={segment.text.trim() || markdown || '暂无解析内容'}
-            />
-          ) : (
-            <SourceSnapshotPreview
-              allowScroll
-              compact
-              markdown={markdown || '暂无解析内容'}
-              relatedImagePath={originalImagePath}
-              segmentType={segment.segment_type}
-              sourceEntryId={sourceEntryId}
-              workspaceRoot={workspaceRoot}
-            />
-          )
-        ) : localOriginalUrl ? (
-          <div className="grid gap-1.5">
-            <div className="flex items-center justify-between px-0.5 text-[11px] text-muted-foreground">
-              <span>{originalPreviewIsPdf ? 'PDF 原文' : '原始版面'}</span>
-              {highlightSelections.length > 0 ? <span>已叠加高亮位置</span> : null}
-            </div>
-            <button
-              className="flex w-full cursor-zoom-in justify-center overflow-hidden rounded-md border bg-white p-1 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-              title="单击查看完整 PDF 原文"
-              type="button"
-              onClick={() => setOriginalPreviewOpen(true)}
-            >
-              <PdfOriginalImage
-                alt="Segment PDF original"
-                className="max-h-56"
-                highlights={originalPreviewIsPdf ? originalHighlights : []}
-                src={localOriginalUrl}
-              />
-            </button>
-          </div>
-        ) : (
-          <div className="rounded-md border border-dashed bg-white px-3 py-6 text-center text-muted-foreground">
-            {pdfFallbackLoading
-              ? '正在从本地 PDF 读取原图...'
-              : '暂无可用原图。当前片段仍可查看解析后的原文内容。'}
-          </div>
-        )}
+        {sourceContent}
       </div>
       ) : null}
       <Dialog open={originalPreviewOpen} onOpenChange={setOriginalPreviewOpen}>

@@ -99,9 +99,113 @@ fn apply_patch_operations(
                 replace_unique(&markdown, anchor_text, &format!("{text}{anchor_text}"))?
             }
             MarkdownPatchOperation::Append { text } => join_markdown(&markdown, text),
+            MarkdownPatchOperation::ReplaceLines {
+                start_line,
+                end_line,
+                expected_text,
+                new_text,
+            } => apply_line_range(
+                &markdown,
+                *start_line,
+                *end_line,
+                expected_text,
+                Some(new_text),
+            )?,
+            MarkdownPatchOperation::DeleteLines {
+                start_line,
+                end_line,
+                expected_text,
+            } => apply_line_range(&markdown, *start_line, *end_line, expected_text, None)?,
+            MarkdownPatchOperation::InsertLines {
+                line,
+                position,
+                expected_text,
+                text,
+            } => insert_at_line(&markdown, *line, position, expected_text, text)?,
         };
     }
     Ok(markdown)
+}
+
+fn apply_line_range(
+    markdown: &str,
+    start_line: usize,
+    end_line: usize,
+    expected_text: &str,
+    replacement: Option<&str>,
+) -> Result<String, String> {
+    let (mut lines, trailing_newline) = logical_lines(markdown);
+    if start_line == 0 || end_line < start_line || end_line > lines.len() {
+        return Err(format!(
+            "patch line range {start_line}-{end_line} is outside the current markdown"
+        ));
+    }
+    let current = lines[start_line - 1..end_line].join("\n");
+    if current != expected_text.replace("\r\n", "\n") {
+        return Err(format!(
+            "patch line range {start_line}-{end_line} no longer matches expected_text"
+        ));
+    }
+    let replacement_lines = replacement
+        .map(|value| {
+            value
+                .replace("\r\n", "\n")
+                .split('\n')
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_else(Vec::new);
+    lines.splice(start_line - 1..end_line, replacement_lines);
+    Ok(join_logical_lines(lines, trailing_newline))
+}
+
+fn insert_at_line(
+    markdown: &str,
+    line: usize,
+    position: &str,
+    expected_text: &str,
+    text: &str,
+) -> Result<String, String> {
+    let (mut lines, trailing_newline) = logical_lines(markdown);
+    if line == 0 || line > lines.len() {
+        return Err(format!("patch line {line} is outside the current markdown"));
+    }
+    if lines[line - 1] != expected_text {
+        return Err(format!("patch line {line} no longer matches expected_text"));
+    }
+    let index = match position {
+        "before" => line - 1,
+        "after" => line,
+        _ => return Err("insert_lines position must be before or after".to_string()),
+    };
+    let inserted = text
+        .replace("\r\n", "\n")
+        .split('\n')
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    lines.splice(index..index, inserted);
+    Ok(join_logical_lines(lines, trailing_newline))
+}
+
+fn logical_lines(markdown: &str) -> (Vec<String>, bool) {
+    let normalized = markdown.replace("\r\n", "\n");
+    let trailing_newline = normalized.ends_with('\n');
+    let mut lines = normalized
+        .split('\n')
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if trailing_newline {
+        lines.pop();
+    }
+    (lines, trailing_newline)
+}
+
+fn join_logical_lines(lines: Vec<String>, trailing_newline: bool) -> String {
+    let mut joined = lines.join("\n");
+    if trailing_newline && !joined.is_empty() {
+        joined.push('\n');
+    }
+    joined
 }
 
 fn replace_unique(markdown: &str, old: &str, new: &str) -> Result<String, String> {
@@ -186,5 +290,34 @@ mod tests {
             apply_markdown_action("prepend", "", "# New", &[]).expect("empty note"),
             "# New"
         );
+    }
+
+    #[test]
+    fn line_patches_validate_coordinates_and_expected_content() {
+        let replace = [MarkdownPatchOperation::ReplaceLines {
+            start_line: 2,
+            end_line: 3,
+            expected_text: "first\nsecond".to_string(),
+            new_text: "updated".to_string(),
+        }];
+        let replaced = apply_patch_operations("# Title\nfirst\nsecond\nlast\n", &replace)
+            .expect("replace lines");
+        assert_eq!(replaced, "# Title\nupdated\nlast\n");
+
+        let insert = [MarkdownPatchOperation::InsertLines {
+            line: 2,
+            position: "after".to_string(),
+            expected_text: "updated".to_string(),
+            text: "added".to_string(),
+        }];
+        let inserted = apply_patch_operations(&replaced, &insert).expect("insert lines");
+        assert_eq!(inserted, "# Title\nupdated\nadded\nlast\n");
+
+        let stale_delete = [MarkdownPatchOperation::DeleteLines {
+            start_line: 3,
+            end_line: 3,
+            expected_text: "stale".to_string(),
+        }];
+        assert!(apply_patch_operations(&inserted, &stale_delete).is_err());
     }
 }

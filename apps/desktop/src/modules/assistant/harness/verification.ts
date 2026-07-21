@@ -1,4 +1,5 @@
 import type { AssistantContextSnapshot } from '@/shared/ipc/assistantApi';
+import { isLocalConversationSource, isSciverseConversationSource } from '@/shared/ipc/assistantApi';
 import type { AgentInvocationPlan, AssistantTaskPlan } from '@/shared/types/assistant';
 import type { AgentExecutionSelection } from '@/shared/types/agentRuntime';
 
@@ -63,6 +64,28 @@ export function verifyHarnessResult({
   if (plan.deliverables.includes('chat_answer') &&
     plan.citationPolicy === 'required' && grounded.sources.length === 0) {
     errors.push('A paper-grounded answer was produced without a valid source citation.');
+  }
+  if (
+    invocationPlan.sourcePolicy === 'sciverse_only' &&
+    (grounded.sources.length === 0 || grounded.sources.some((source) => !isSciverseConversationSource(source)))
+  ) {
+    errors.push('The task required Sciverse-only evidence, but the final sources did not satisfy that policy.');
+  }
+  if (
+    invocationPlan.sourcePolicy === 'workspace_only' &&
+    grounded.sources.some((source) => !isLocalConversationSource(source))
+  ) {
+    errors.push('The task required workspace-only evidence, but an external source was included.');
+  }
+  if (
+    invocationPlan.sourcePolicy === 'active_context_only' &&
+    (plan.intent === 'paper_qa' || plan.intent === 'paper_summary') &&
+    plan.target.entryId &&
+    !grounded.sources.some(
+      (source) => isLocalConversationSource(source) && source.entry_id === plan.target.entryId
+    )
+  ) {
+    errors.push('The current-paper answer has no citation from the frozen active Entry.');
   }
   if (plan.needsNoteProposal && plan.citationPolicy === 'required' &&
     proposals.some((proposal) => proposal.sources.length === 0)) {

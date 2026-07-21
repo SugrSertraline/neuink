@@ -59,12 +59,14 @@ type WorkspaceStatus = 'loading' | 'ready' | 'error';
 
 export type CreateEntryRequest = {
   pdfPath?: string;
+  mineruZipPath?: string;
   title: string;
   fields?: Record<string, string>;
   tagPaths?: string[];
 };
 
 export type CreateEntryResult = {
+  importedMineruClientResult?: boolean;
   entryId: string;
   createdWithPdf: boolean;
   parseSubmissionFailed: boolean;
@@ -243,8 +245,11 @@ export function useWorkspace() {
     createWorkspaceEntry,
     submitQueuedParse,
     createLibraryEntry,
+    importPdfForEntry,
     importPdfForSelectedEntry,
     retryPdfParseForEntry,
+    startQueuedPdfParseForEntry,
+    importMineruClientResultForEntry,
     createMarkdownNote,
     deleteMarkdownNote,
     createTagPath,
@@ -428,6 +433,7 @@ export function useWorkspace() {
     deleteMarkdownNote,
     deleteWorkspaceEntry,
     deleteWorkspaceTag,
+    importPdfForEntry,
     importPdfForSelectedEntry,
     isParsingPdf: parseSubmissionCount > 0,
     isRefreshingParseStatus,
@@ -448,6 +454,8 @@ export function useWorkspace() {
     purgeWorkspaceTrashItem,
     emptyWorkspaceEntryTrash,
     retryPdfParseForEntry,
+    startQueuedPdfParseForEntry,
+    importMineruClientResultForEntry,
     saveAnnotation,
     saveSegmentNote,
     removeSegmentNote,

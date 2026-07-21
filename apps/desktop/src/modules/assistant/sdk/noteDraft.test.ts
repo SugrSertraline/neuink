@@ -8,7 +8,10 @@ import { readNote } from '@/shared/ipc/workspaceApi';
 import { citedEvidenceSources, generateNoteDraftProposal } from './noteDraft';
 
 vi.mock('ai', () => ({ generateText: vi.fn() }));
-vi.mock('@/shared/ipc/assistantApi', () => ({ readEntryAssistantContext: vi.fn() }));
+vi.mock('@/shared/ipc/assistantApi', () => ({
+  isLocalConversationSource: (source: ConversationSourceLink) => source.provider !== 'sciverse',
+  readEntryAssistantContext: vi.fn()
+}));
 vi.mock('@/shared/ipc/workspaceApi', () => ({ readNote: vi.fn() }));
 
 beforeEach(() => {

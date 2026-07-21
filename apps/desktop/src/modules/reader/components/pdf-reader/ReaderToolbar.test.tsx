@@ -39,7 +39,8 @@ describe('ReaderToolbar', () => {
           hoverPreviewShowOriginal: true,
           hoverPreviewShowRegion: true,
           hoverPreviewShowTranslation: true,
-          leftClickOpensNotePane: true,
+      leftClickOpensNotePane: true,
+      segmentNoteOpenGesture: 'single',
           reflowHoverSourceEnabled: true,
           reflowTranslationMode: 'source',
           showRegions: false

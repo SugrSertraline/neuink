@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  BookPlus,
   Brain,
   Check,
   CheckCircle2,
@@ -7,6 +8,7 @@ import {
   FilePlus2,
   FileText,
   Loader2,
+  Library,
   Route,
   Search,
   X
@@ -22,7 +24,12 @@ import type {
   AssistantMessagePart,
   AssistantToolTraceEvent,
   ConversationMessage,
-  ConversationSourceLink
+  ConversationSourceLink,
+  SciverseLibraryImportResult
+} from '@/shared/ipc/assistantApi';
+import {
+  conversationSourceKey,
+  isSciverseConversationSource
 } from '@/shared/ipc/assistantApi';
 import type {
   AssistantContextItem,
@@ -45,6 +52,9 @@ type ChatMessageProps = {
   onApplyEntryMetaProposal?: (proposal: AssistantEntryMetaProposal) => void;
   onApplyTagProposal?: (proposal: AssistantTagProposal) => void;
   onOpenSource: (source: ConversationSourceLink) => void;
+  onAddSciverseSource?: (
+    source: Extract<ConversationSourceLink, { provider: 'sciverse' }>
+  ) => Promise<SciverseLibraryImportResult>;
   onRegenerateNoteProposal?: (proposal: AssistantNoteProposal) => void;
   onRejectNoteProposal?: (proposal: AssistantNoteProposal) => void;
   onRejectEntryMetaProposal?: (proposal: AssistantEntryMetaProposal) => void;
@@ -61,6 +71,7 @@ function ChatMessageComponent({
   onApplyEntryMetaProposal,
   onApplyTagProposal,
   onOpenSource,
+  onAddSciverseSource,
   onRegenerateNoteProposal,
   onRejectNoteProposal,
   onRejectEntryMetaProposal,
@@ -82,13 +93,15 @@ function ChatMessageComponent({
   const contextPlan = contextPlanFromParts(messageParts);
   const sourceLinks =
     message.source_links.length > 0 ? message.source_links : sourceLinksFromParts(messageParts);
+  const discoveredSciverseSources = sciverseSourcesFromToolParts(messageParts);
 
   return (
-    <div
-      className={`assistant-chat-message mb-2 rounded-md border p-2 text-xs leading-5 ${
-        message.role === 'user' ? 'bg-muted/40' : 'bg-background'
-      }`}
-    >
+    <>
+      <div
+        className={`assistant-chat-message mb-2 rounded-md border p-2 text-xs leading-5 ${
+          message.role === 'user' ? 'bg-muted/40' : 'bg-background'
+        }`}
+      >
       <div className="mb-1 font-medium">{message.role === 'user' ? 'You' : 'Neuink'}</div>
       {message.role === 'assistant' && resolvedAgentRun ? (
         <AgentRunSummary run={resolvedAgentRun} onRetry={onRetryAgentRun} />
@@ -101,7 +114,12 @@ function ChatMessageComponent({
         <ToolTrace events={resolvedToolEvents} />
       ) : null}
       {contextItems.length > 0 ? <ContextSummary items={contextItems} plan={contextPlan} /> : null}
-      <MarkdownMessageContent content={content} streaming={streaming} />
+      <MarkdownMessageContent
+        content={content}
+        sources={sourceLinks}
+        streaming={streaming}
+        onOpenSource={onOpenSource}
+      />
       {message.role === 'assistant' && resolvedNoteProposals.length > 0 ? (
         <NoteProposalList
           proposals={resolvedNoteProposals}
@@ -131,10 +149,16 @@ function ChatMessageComponent({
           ))}
         </div>
       ) : null}
-      {sourceLinks.length > 0 ? (
-        <SourceLinkList onOpenSource={onOpenSource} sources={sourceLinks} />
-      ) : null}
-    </div>
+        {sourceLinks.length > 0 || discoveredSciverseSources.length > 0 ? (
+          <SourceLinkList
+            discoveredSciverseSources={discoveredSciverseSources}
+            onAddSciverseSource={onAddSciverseSource}
+            onOpenSource={onOpenSource}
+            sources={sourceLinks}
+          />
+        ) : null}
+      </div>
+    </>
   );
 }
 
@@ -143,42 +167,255 @@ export const ChatMessage = memo(ChatMessageComponent);
 const COLLAPSED_SOURCE_LIMIT = 10;
 
 function SourceLinkList({
+  discoveredSciverseSources,
+  onAddSciverseSource,
   onOpenSource,
   sources
 }: {
+  discoveredSciverseSources: Array<Extract<ConversationSourceLink, { provider: 'sciverse' }>>;
+  onAddSciverseSource?: (
+    source: Extract<ConversationSourceLink, { provider: 'sciverse' }>
+  ) => Promise<SciverseLibraryImportResult>;
   onOpenSource: (source: ConversationSourceLink) => void;
   sources: ConversationSourceLink[];
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const collapsible = sources.length > COLLAPSED_SOURCE_LIMIT;
-  const visibleSources = expanded ? sources : sources.slice(0, COLLAPSED_SOURCE_LIMIT);
+  const [localExpanded, setLocalExpanded] = useState(false);
+  const [paperExpanded, setPaperExpanded] = useState(false);
+  const numbered = sources.map((source, index) => ({ marker: index + 1, source }));
+  const localSources = numbered.filter(({ source }) => !isSciverseConversationSource(source));
+  const paperGroups = groupSciverseSources(numbered, discoveredSciverseSources);
+  const localCollapsible = localSources.length > COLLAPSED_SOURCE_LIMIT;
+  const visibleLocalSources = localExpanded
+    ? localSources
+    : localSources.slice(0, COLLAPSED_SOURCE_LIMIT);
+  const visiblePaperGroups = paperExpanded ? paperGroups : paperGroups.slice(0, 5);
 
   return (
-    <div className="mt-2">
-      <div className="flex flex-wrap gap-1">
-        {visibleSources.map((source, index) => (
+    <section aria-label="回答来源" className="mt-2 grid gap-2 border-t pt-2">
+      <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+        <Library size={12} aria-hidden="true" />
+        引用来源 {sources.length}
+        {paperGroups.length > 0 ? ` · 检索论文 ${paperGroups.length}` : ''}
+        {localSources.length > 0 ? ` · 本地片段 ${localSources.length}` : ''}
+      </div>
+      {visiblePaperGroups.length > 0 ? (
+        <div className="grid gap-1.5">
+          {visiblePaperGroups.map((group) => (
+            <SciversePaperSourceCard
+              group={group}
+              key={group.docId}
+              onAddSciverseSource={onAddSciverseSource}
+              onOpenSource={onOpenSource}
+            />
+          ))}
+        </div>
+      ) : null}
+      {paperGroups.length > 5 ? (
+        <Button
+          aria-expanded={paperExpanded}
+          className="h-6 w-fit px-1.5 text-[11px]"
+          size="xs"
+          type="button"
+          variant="ghost"
+          onClick={() => setPaperExpanded((current) => !current)}
+        >
+          {paperExpanded ? '收起论文来源' : `展开全部论文（+${paperGroups.length - 5}）`}
+        </Button>
+      ) : null}
+      {visibleLocalSources.length > 0 ? (
+        <div className="flex flex-wrap gap-1">
+          {visibleLocalSources.map(({ marker, source }) => (
           <button
             className="rounded-md border px-1.5 py-0.5 text-[11px] text-primary hover:bg-muted"
-            key={`${source.entry_id}:${source.segment_uid}:${index}`}
+            key={`${conversationSourceKey(source)}:${marker}`}
             title={source.quote}
             type="button"
             onClick={() => onOpenSource(source)}
           >
-            S{index + 1} · p.{source.page_idx + 1}
+            {sourceButtonLabel(source, marker)}
           </button>
-        ))}
-      </div>
-      {collapsible ? (
+          ))}
+        </div>
+      ) : null}
+      {localCollapsible ? (
         <Button
-          aria-expanded={expanded}
-          className="mt-1 h-6 px-1.5 text-[11px]"
+          aria-expanded={localExpanded}
+          className="h-6 w-fit px-1.5 text-[11px]"
           size="xs"
           type="button"
           variant="ghost"
-          onClick={() => setExpanded((current) => !current)}
+          onClick={() => setLocalExpanded((current) => !current)}
         >
-          {expanded ? '收起来源' : `展开全部来源（+${sources.length - COLLAPSED_SOURCE_LIMIT}）`}
+          {localExpanded
+            ? '收起来源'
+            : `展开全部来源（+${localSources.length - COLLAPSED_SOURCE_LIMIT}）`}
         </Button>
+      ) : null}
+    </section>
+  );
+}
+
+type NumberedSource = { marker: number; source: ConversationSourceLink };
+type SciversePaperGroup = {
+  docId: string;
+  items: Array<{
+    marker: number | null;
+    source: Extract<ConversationSourceLink, { provider: 'sciverse' }>;
+  }>;
+};
+
+function groupSciverseSources(
+  sources: NumberedSource[],
+  discoveredSources: Array<Extract<ConversationSourceLink, { provider: 'sciverse' }>>
+) {
+  const groups = new Map<string, SciversePaperGroup>();
+  const seen = new Set<string>();
+  for (const item of sources) {
+    if (!isSciverseConversationSource(item.source)) continue;
+    const group = groups.get(item.source.doc_id) ?? { docId: item.source.doc_id, items: [] };
+    group.items.push({ marker: item.marker, source: item.source });
+    groups.set(item.source.doc_id, group);
+    seen.add(conversationSourceKey(item.source));
+  }
+  for (const source of discoveredSources) {
+    const key = conversationSourceKey(source);
+    if (seen.has(key)) continue;
+    const group = groups.get(source.doc_id) ?? { docId: source.doc_id, items: [] };
+    group.items.push({ marker: null, source });
+    groups.set(source.doc_id, group);
+    seen.add(key);
+  }
+  return [...groups.values()];
+}
+
+function SciversePaperSourceCard({
+  group,
+  onAddSciverseSource,
+  onOpenSource
+}: {
+  group: SciversePaperGroup;
+  onAddSciverseSource?: (
+    source: Extract<ConversationSourceLink, { provider: 'sciverse' }>
+  ) => Promise<SciverseLibraryImportResult>;
+  onOpenSource: (source: ConversationSourceLink) => void;
+}) {
+  const representative = group.items.reduce((best, item) =>
+    (item.source.score ?? -1) > (best.source.score ?? -1) ? item : best
+  ).source;
+  const metadata = [
+    representative.publication_year,
+    representative.venue,
+    representative.authors?.slice(0, 2).join(', '),
+    representative.citation_count != null ? `被引 ${representative.citation_count}` : null
+  ].filter(Boolean);
+
+  return (
+    <article className="min-w-0 rounded-md border bg-muted/15 p-2">
+      <button
+        className="block w-full min-w-0 text-left"
+        title={representative.title}
+        type="button"
+        onClick={() => onOpenSource(representative)}
+      >
+        <span className="line-clamp-2 font-medium leading-4 text-foreground">
+          {representative.title}
+        </span>
+        {metadata.length > 0 ? (
+          <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">
+            {metadata.join(' · ')}
+          </span>
+        ) : null}
+      </button>
+      <div className="mt-1.5 flex flex-wrap gap-1">
+        {group.items.map(({ marker, source }) => marker != null ? (
+          <button
+            className="rounded border bg-background px-1.5 py-0.5 text-[10px] text-primary hover:bg-muted"
+            key={`${conversationSourceKey(source)}:${marker}`}
+            title={source.quote}
+            type="button"
+            onClick={() => onOpenSource(source)}
+          >
+            S{marker} · {sourceLocationLabel(source)}
+          </button>
+        ) : null)}
+      </div>
+      {representative.quote ? (
+        <p className="mt-1.5 line-clamp-3 text-[11px] leading-4 text-muted-foreground">
+          {representative.quote}
+        </p>
+      ) : null}
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+        {onAddSciverseSource ? (
+          <SciverseImportButton source={representative} onImport={onAddSciverseSource} />
+        ) : null}
+        <code className="min-w-0 flex-1 truncate text-[9px] text-muted-foreground" title={group.docId}>
+          doc_id: {group.docId}
+        </code>
+      </div>
+    </article>
+  );
+}
+
+function SciverseImportButton({
+  onImport,
+  source
+}: {
+  onImport: (
+    source: Extract<ConversationSourceLink, { provider: 'sciverse' }>
+  ) => Promise<SciverseLibraryImportResult>;
+  source: Extract<ConversationSourceLink, { provider: 'sciverse' }>;
+}) {
+  const [state, setState] = useState<
+    | { status: 'idle' }
+    | { status: 'loading' }
+    | { status: 'done'; result: SciverseLibraryImportResult }
+    | { status: 'error'; message: string }
+  >({ status: 'idle' });
+  const label =
+    state.status === 'loading'
+      ? '正在加入…'
+      : state.status === 'done'
+        ? state.result.status === 'created_with_pdf'
+          ? '已加入并解析'
+          : state.result.status === 'created_with_remote_content'
+            ? '已保存远程全文'
+          : state.result.status === 'already_exists'
+            ? '已在文库'
+            : '已加入（元数据）'
+        : '一键加入文库';
+
+  return (
+    <div className="min-w-0">
+      <Button
+        className="h-6 px-2 text-[10px]"
+        disabled={state.status === 'loading' || state.status === 'done'}
+        size="xs"
+        title={state.status === 'error' ? state.message : undefined}
+        type="button"
+        variant="outline"
+        onClick={() => {
+          setState({ status: 'loading' });
+          void onImport(source)
+            .then((result) => setState({ result, status: 'done' }))
+            .catch((error) =>
+              setState({
+                message: error instanceof Error ? error.message : String(error),
+                status: 'error'
+              })
+            );
+        }}
+      >
+        {state.status === 'loading' ? (
+          <Loader2 className="animate-spin" size={11} aria-hidden="true" />
+        ) : (
+          <BookPlus size={11} aria-hidden="true" />
+        )}
+        {label}
+      </Button>
+      {state.status === 'error' ? (
+        <div className="mt-0.5 max-w-52 truncate text-[9px] text-destructive" title={state.message}>
+          {state.message}
+        </div>
       ) : null}
     </div>
   );
@@ -511,7 +748,7 @@ function sourceLinksFromParts(parts: AssistantMessagePart[]) {
     if (!source) {
       continue;
     }
-    const key = `${source.entry_id}:${source.segment_uid}`;
+    const key = conversationSourceKey(source);
     if (seen.has(key)) {
       continue;
     }
@@ -519,6 +756,42 @@ function sourceLinksFromParts(parts: AssistantMessagePart[]) {
     links.push(source);
   }
   return links;
+}
+
+function sciverseSourcesFromToolParts(parts: AssistantMessagePart[]) {
+  const sources: Array<Extract<ConversationSourceLink, { provider: 'sciverse' }>> = [];
+  const seen = new Set<string>();
+  for (const part of parts) {
+    if (part.type !== 'tool-result' || !part.sourceLinks) continue;
+    for (const source of part.sourceLinks) {
+      if (!isSciverseConversationSource(source)) continue;
+      const key = conversationSourceKey(source);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      sources.push(source);
+    }
+  }
+  return sources;
+}
+
+function sourceButtonLabel(source: ConversationSourceLink, marker: number) {
+  if (isSciverseConversationSource(source)) {
+    return `S${marker} · ${sourceLocationLabel(source)}`;
+  }
+  return `S${marker} · p.${source.page_idx + 1}`;
+}
+
+function sourceLocationLabel(source: ConversationSourceLink) {
+  if (!isSciverseConversationSource(source)) {
+    return `p.${source.page_idx + 1}`;
+  }
+  if (source.page_no != null) {
+    return `p.${source.page_no}`;
+  }
+  if (source.offset != null) {
+    return `offset ${source.offset}`;
+  }
+  return source.chunk_id ? `chunk ${source.chunk_id.slice(0, 8)}` : 'Sciverse';
 }
 
 function NoteProposalList({
@@ -840,9 +1113,13 @@ function statusLabel(status: AssistantToolTraceEvent['status']) {
 
 const MarkdownMessageContent = memo(function MarkdownMessageContent({
   content,
+  onOpenSource,
+  sources,
   streaming
 }: {
   content: string;
+  onOpenSource: (source: ConversationSourceLink) => void;
+  sources: ConversationSourceLink[];
   streaming: boolean;
 }) {
   const markdown = normalizeMathDelimiters(content);
@@ -856,24 +1133,157 @@ const MarkdownMessageContent = memo(function MarkdownMessageContent({
     >
       <ReactMarkdown
         components={{
-          a: ({ children, href }) => (
-            <a href={href} rel="noreferrer" target="_blank">
-              {children}
-            </a>
-          ),
+          a: ({ children, href }) => {
+            const citation = citationFromHref(href);
+            const source = citation == null ? undefined : sources[citation.marker - 1];
+            if (citation != null) {
+              return source ? (
+                <InlineSourceCitation
+                  marker={citation.marker}
+                  onOpenSource={onOpenSource}
+                  source={source}
+                />
+              ) : (
+                <span className="text-muted-foreground">[S{citation.marker}]</span>
+              );
+            }
+            return (
+              <a href={href} rel="noreferrer" target="_blank">
+                {children}
+              </a>
+            );
+          },
           code: ({ children, className }) => (
             <code className={className}>{children}</code>
           ),
           pre: ({ children }) => <pre>{children}</pre>
         }}
         rehypePlugins={[[rehypeKatex, { strict: false, throwOnError: false }]]}
-        remarkPlugins={[remarkGfm, remarkMath]}
+        remarkPlugins={[remarkGfm, remarkMath, remarkSourceCitations]}
       >
         {markdown || ' '}
       </ReactMarkdown>
     </div>
   );
 });
+
+function InlineSourceCitation({
+  marker,
+  onOpenSource,
+  source
+}: {
+  marker: number;
+  onOpenSource: (source: ConversationSourceLink) => void;
+  source: ConversationSourceLink;
+}) {
+  const title = isSciverseConversationSource(source) ? source.title : source.entry_title;
+  return (
+    <InlineCitationButton
+      marker={marker}
+      source={source}
+      title={title}
+      onClick={() => onOpenSource(source)}
+    />
+  );
+}
+
+function InlineCitationButton({
+  marker,
+  onClick,
+  source,
+  title
+}: {
+  marker: number;
+  onClick: () => void;
+  source: ConversationSourceLink;
+  title: string;
+}) {
+  return (
+    <button
+      aria-label={`来源 S${marker}：${title}，${sourceLocationLabel(source)}`}
+      className="mx-0.5 inline-flex min-h-5 translate-y-[-1px] items-center rounded border border-primary/30 bg-primary/5 px-1.5 py-0.5 text-[0.72em] font-medium leading-[1.35] text-primary hover:bg-primary/10"
+      type="button"
+      onClick={onClick}
+    >
+      S{marker}
+    </button>
+  );
+}
+
+type MarkdownAstNode = {
+  children?: MarkdownAstNode[];
+  type?: string;
+  url?: string;
+  value?: string;
+};
+
+function remarkSourceCitations() {
+  return (tree: MarkdownAstNode) => transformCitationTextNodes(tree, { current: 0 });
+}
+
+function transformCitationTextNodes(
+  node: MarkdownAstNode,
+  occurrence: { current: number }
+) {
+  if (
+    !node.children ||
+    node.type === 'link' ||
+    node.type === 'linkReference' ||
+    node.type === 'code' ||
+    node.type === 'inlineCode'
+  ) {
+    return;
+  }
+
+  const transformed: MarkdownAstNode[] = [];
+  for (const child of node.children) {
+    if (child.type !== 'text' || !child.value) {
+      transformCitationTextNodes(child, occurrence);
+      transformed.push(child);
+      continue;
+    }
+
+    const expression = /\[S([1-9]\d*)\]/g;
+    let cursor = 0;
+    let match: RegExpExecArray | null;
+    while ((match = expression.exec(child.value)) !== null) {
+      if (match.index > cursor) {
+        transformed.push({ type: 'text', value: child.value.slice(cursor, match.index) });
+      }
+      const marker = Number(match[1]);
+      occurrence.current += 1;
+      transformed.push({
+        children: [{ type: 'text', value: `S${marker}` }],
+        type: 'link',
+        url: `#neuink-source-S${marker}-O${occurrence.current}`
+      });
+      cursor = expression.lastIndex;
+    }
+    if (cursor < child.value.length) {
+      transformed.push({ type: 'text', value: child.value.slice(cursor) });
+    }
+  }
+  node.children = transformed;
+}
+
+function citationFromHref(href?: string) {
+  const match = href?.match(/^#neuink-source-S(\d+)-O(\d+)$/);
+  if (!match) return null;
+  const marker = Number(match[1]);
+  const occurrence = Number(match[2]);
+  if (
+    !Number.isSafeInteger(marker) ||
+    marker <= 0 ||
+    !Number.isSafeInteger(occurrence) ||
+    occurrence <= 0
+  ) {
+    return null;
+  }
+  return {
+    key: `S${marker}-O${occurrence}`,
+    marker
+  };
+}
 
 function normalizeMathDelimiters(markdown: string) {
   return markdown

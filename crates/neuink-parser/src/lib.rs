@@ -4,7 +4,7 @@ pub mod error;
 mod mineru_middle;
 pub mod normalizer;
 
-pub use cloud_mineru::{MineruQiniuParserProvider, MineruQiniuTaskResult};
+pub use cloud_mineru::{normalize_mineru_zip, MineruQiniuParserProvider, MineruQiniuTaskResult};
 pub use custom_endpoint::{
     CustomEndpointParserProvider, CustomParseResult, ParseTask, ParseTaskState,
 };

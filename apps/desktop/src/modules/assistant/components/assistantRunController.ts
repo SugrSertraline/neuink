@@ -21,6 +21,7 @@ import {
 import type {
   AssistantActiveNote,
   AssistantActiveSegment,
+  AssistantActiveSurfaceSnapshot,
   AssistantComposerSnapshot,
   AssistantContext,
   AssistantContextInput,
@@ -55,6 +56,7 @@ export type QueuedAssistantDraft = {
   activeEntry: { id: string; title: string } | null;
   activeNote: AssistantActiveNote | null;
   activeSegment: AssistantActiveSegment | null;
+  activeSurface: AssistantActiveSurfaceSnapshot;
   contextItems: AssistantContextItem[];
   contextPlan: AssistantContextPlan | null;
   question: string;
@@ -155,6 +157,7 @@ type AssistantRunControllerOptions = {
   runEntry: { id: string; title: string } | null;
   runNote: AssistantActiveNote | null;
   runSegment: AssistantActiveSegment | null;
+  runSurface: AssistantActiveSurfaceSnapshot;
   scope: ScopeSnapshot;
   selectedProfile: LlmProfile;
   setBusy: (busy: boolean) => void;
@@ -193,6 +196,7 @@ export async function runAssistantPanelTask({
   runEntry,
   runNote,
   runSegment,
+  runSurface,
   scope,
   selectedProfile,
   setBusy,
@@ -445,6 +449,7 @@ export async function runAssistantPanelTask({
       currentEntry: runEntry,
       currentNote: runNote,
       currentSegment: runSegment,
+      currentSurface: runSurface,
       destinationEntryId: null,
       mentionScope: runScope,
       tagMentionScopes: buildTagMentionScopes({

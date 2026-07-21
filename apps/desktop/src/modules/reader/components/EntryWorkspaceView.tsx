@@ -86,6 +86,8 @@ type EntryWorkspaceViewProps = {
     segmentUid: string;
     source: 'pdf' | 'segment-notes' | 'reflow';
   } | null;
+  reflowSyncSegment: { requestKey: number; segmentUid: string } | null;
+  splitReaderLinked: boolean;
   segmentNotesLinkedToPdf: boolean;
   sharedSegmentNoteDrafts: Record<string, string>;
   pendingSourceLinkInsertion: {
@@ -108,6 +110,10 @@ type EntryWorkspaceViewProps = {
   trashItems: TrashItem[];
   onReaderPreferencesChange: (preferences: ReaderPreferences) => void;
   onApplyEntryTagPaths: (entryId: string, tagPaths: string[]) => Promise<unknown> | unknown;
+  onUpdateEntry: (
+    entryId: string,
+    request: { fields: Record<string, string>; tagPaths: string[]; title: string }
+  ) => Promise<unknown> | unknown;
   onCreateMarkdownSourceLink: (
     entryId: string,
     noteId: string,
@@ -123,6 +129,7 @@ type EntryWorkspaceViewProps = {
   onReadMarkdownNote: (entryId: string, noteId: string) => Promise<NoteDocument>;
   onReadPdfReader: (entryId: string) => Promise<PdfReaderResponse>;
   onRetryPdfParse: (entryId: string) => Promise<void> | void;
+  onStartPdfParse: (entryId: string) => Promise<void> | void;
   onCloseSidePane: () => void;
   onOpenSourceLink: (target: SourceLinkOpenTarget) => void;
   onOpenSourceBacklink: (backlink: SourceBacklink) => void;
@@ -134,6 +141,7 @@ type EntryWorkspaceViewProps = {
     options?: AssistantContextAddOptions
   ) => void;
   onActiveSegmentChange?: (segment: AssistantActiveSegment | null) => void;
+  onReflowSegmentClick?: (segmentUid: string, pageIdx: number) => void;
   onFocusLinkedSegment: (segmentUid: string, mode?: 'note' | 'annotation') => void;
   onSharedSegmentNoteDraftChange: (segmentUid: string, text: string | null) => void;
   onLocateSegmentInPdf: (segmentUid: string, pageIdx: number) => void;
@@ -180,6 +188,8 @@ export function EntryWorkspaceView({
   focusedSegmentUid,
   initialRecordMode,
   linkedSegment,
+  reflowSyncSegment,
+  splitReaderLinked,
   segmentNotesLinkedToPdf,
   sharedSegmentNoteDrafts,
   pendingSourceLinkInsertion,
@@ -192,11 +202,13 @@ export function EntryWorkspaceView({
   trashItems,
   onReaderPreferencesChange,
   onApplyEntryTagPaths,
+  onUpdateEntry,
   onCreateMarkdownSourceLink,
   onImportMarkdownNoteSegmentAsset,
   onReadMarkdownNote,
   onReadPdfReader,
   onRetryPdfParse,
+  onStartPdfParse,
   onCloseSidePane,
   onOpenSourceLink,
   onOpenSourceBacklink,
@@ -205,6 +217,7 @@ export function EntryWorkspaceView({
   onShowAllSegmentNotes,
   onAddAssistantContext,
   onActiveSegmentChange,
+  onReflowSegmentClick,
   onFocusLinkedSegment,
   onSharedSegmentNoteDraftChange,
   onLocateSegmentInPdf,
@@ -297,6 +310,7 @@ export function EntryWorkspaceView({
                   onReadMarkdownNote={onReadMarkdownNote}
                   onReadPdfReader={onReadPdfReader}
                   onRetryPdfParse={onRetryPdfParse}
+                  onStartPdfParse={onStartPdfParse}
 	                  onCloseSidePane={onCloseSidePane}
 	                  onOpenSourceLink={onOpenSourceLink}
                   onOpenSourceBacklink={onOpenSourceBacklink}
@@ -315,6 +329,7 @@ export function EntryWorkspaceView({
                   onSaveAnnotation={onSaveAnnotation}
                   onSaveSegmentNote={onSaveSegmentNote}
                   onSharedSegmentNoteDraftChange={onSharedSegmentNoteDraftChange}
+                  syncOnlyOnSegmentClick={splitReaderLinked}
                 />
               </div>
             ) : null}
@@ -339,6 +354,10 @@ export function EntryWorkspaceView({
                   onOpenSegmentNotesSurface={onOpenSegmentNotesSurface}
                   onOpenAnnotationsSurface={onOpenAnnotationsSurface}
                   onSaveSegmentNote={onSaveSegmentNote}
+                  suppressClickOverlay={splitReaderLinked}
+                  syncSegmentUid={reflowSyncSegment?.segmentUid}
+                  syncRequestKey={reflowSyncSegment?.requestKey}
+                  onSegmentClick={(segment) => onReflowSegmentClick?.(segment.uid, segment.page_idx)}
                 />
               </div>
             ) : null}
@@ -375,6 +394,7 @@ export function EntryWorkspaceView({
                 entry={entry}
                 sourceBacklinksBySegmentUid={sourceBacklinksBySegmentUid}
                 tags={tags}
+                onUpdateEntry={onUpdateEntry}
               />
             ) : null}
             {activeContentId === 'segment-notes' ? (
@@ -392,7 +412,7 @@ export function EntryWorkspaceView({
                 onFocusSegment={onFocusLinkedSegment}
                 onLocateSegment={onLocateSegmentInPdf}
                 onDeleteAnnotation={onDeleteAnnotation}
-                onSaveSegmentNote={onSaveSegmentNote}
+                  onSaveSegmentNote={onSaveSegmentNote}
                 onDeleteSegmentNote={onDeleteSegmentNote}
                 onSaveAnnotation={onSaveAnnotation}
                 onSharedDraftChange={onSharedSegmentNoteDraftChange}
@@ -485,7 +505,10 @@ function SegmentNotesOverview({
 }) {
   const { notify } = useToast();
   const noteDraftOwnerId = `segment-record-note:${useId()}`;
-  const notes = useMemo(() => readerData?.segment_notes ?? [], [readerData?.segment_notes]);
+  const [notes, setNotes] = useState<SegmentBlockNote[]>(() => readerData?.segment_notes ?? []);
+  useEffect(() => {
+    setNotes(readerData?.segment_notes ?? []);
+  }, [readerData?.segment_notes]);
   const sourceSegments = useMemo(() => readerData?.segments ?? [], [readerData?.segments]);
   const sourceAnnotations = useMemo(() => readerData?.annotations ?? [], [readerData?.annotations]);
   const [followPdf, setFollowPdf] = useState(true);
@@ -685,7 +708,8 @@ function SegmentNotesOverview({
     if (!dirty) return true;
     setBusy(true);
     try {
-      await onSaveSegmentNote(entry.id, selectedLogicalUid, draft);
+      const nextNotes = await onSaveSegmentNote(entry.id, selectedLogicalUid, draft);
+      setNotes(nextNotes);
       setBaseline(draft);
       onSharedDraftChange(selectedLogicalUid, null);
       notify({ tone: 'success', title: '已保存', description: '片段笔记已更新' });
@@ -715,7 +739,8 @@ function SegmentNotesOverview({
     }
     setBusy(true);
     try {
-      await onDeleteSegmentNote(entry.id, selectedLogicalUid);
+      const nextNotes = await onDeleteSegmentNote(entry.id, selectedLogicalUid);
+      setNotes(nextNotes);
       setDraft('');
       setBaseline('');
       onSharedDraftChange(selectedLogicalUid, null);

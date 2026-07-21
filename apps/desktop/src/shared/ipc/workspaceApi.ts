@@ -312,6 +312,23 @@ export async function deleteEntry(root: string, entryId: EntryId): Promise<void>
   });
 }
 
+export type EntryDeletionImpact = {
+  has_pdf: boolean;
+  parsed_block_count: number;
+  note_count: number;
+  annotation_count: number;
+  incoming_source_link_count: number;
+};
+
+export async function getEntryDeletionImpact(
+  root: string,
+  entryId: EntryId
+): Promise<EntryDeletionImpact> {
+  return invoke<EntryDeletionImpact>('get_entry_deletion_impact', {
+    request: { root, entry_id: entryId }
+  });
+}
+
 export async function restoreEntry(root: string, entryId: EntryId): Promise<EntryMeta> {
   return invoke<EntryMeta>('restore_entry', {
     request: {
@@ -763,6 +780,24 @@ export async function queuePdfParse(
       entry_id: entryId,
       pdf_path: pdfPath
     }
+  });
+}
+
+export async function importMineruClientResult(
+  root: string,
+  entryId: EntryId,
+  zipPath: string
+): Promise<ImportAndParsePdfResponse> {
+  return invoke<ImportAndParsePdfResponse>('import_mineru_client_result', {
+    request: { root, entry_id: entryId, zip_path: zipPath }
+  });
+}
+
+export async function createFromMineruClientResult(
+  root: string, title: string, fields: Record<string, string>, tags: string[], zipPath: string
+): Promise<ImportAndParsePdfResponse> {
+  return invoke<ImportAndParsePdfResponse>('create_from_mineru_client_result', {
+    request: { root, title, fields, tags, zip_path: zipPath }
   });
 }
 

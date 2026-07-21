@@ -1,4 +1,8 @@
-import type { ConversationSourceLink } from '@/shared/ipc/assistantApi';
+import {
+  isLocalConversationSource,
+  type ConversationSourceLink,
+  type LocalConversationSourceLink
+} from '@/shared/ipc/assistantApi';
 import type { AssistantEvidenceLedger, AssistantEvidenceRecord } from '@/shared/types/assistant';
 
 export function registerEvidence(
@@ -9,6 +13,7 @@ export function registerEvidence(
     ledger.evidence.map((item) => [sourceKey(item.entryId, item.segmentUid), item])
   );
   for (const source of sources) {
+    if (!isLocalConversationSource(source)) continue;
     const key = sourceKey(source.entry_id, source.segment_uid);
     if (bySource.has(key)) continue;
     bySource.set(key, toEvidenceRecord(ledger.taskId, source));
@@ -22,7 +27,7 @@ export function registerEvidence(
 
 function toEvidenceRecord(
   taskId: string,
-  source: ConversationSourceLink
+  source: LocalConversationSourceLink
 ): AssistantEvidenceRecord {
   const quoteHash = stableHash(source.quote);
   return {

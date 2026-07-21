@@ -45,6 +45,7 @@ import type { LibraryEntry, LibraryView } from '../../library/components/Library
 import { TagEditorPage } from '../../library/components/TagEditorPage';
 import { SettingsPanel } from '../../settings/components/SettingsPanel';
 import { CreateEntryPanel } from './CreateEntryPanel';
+import { MineruClientImportGuide } from './MineruClientImportGuide';
 import { EntryLibraryView } from './EntryLibraryView';
 import { EntryContentHeader } from './EntryContentHeader';
 import { EntryWorkspaceView } from './EntryWorkspaceView';
@@ -75,6 +76,7 @@ type ReaderPaneProps = {
   trashItems: TrashItem[];
   isRefreshingParseStatus: boolean;
   libraryView: LibraryView;
+  libraryFilterResetKey: number;
   recentReadingEntryIds: string[];
   selectedEntryId: string | null;
   status: 'loading' | 'ready' | 'error';
@@ -85,6 +87,7 @@ type ReaderPaneProps = {
   workspaceRoot: string | null;
   onCreateEntry: (request: CreateEntryRequest) => Promise<CreateEntryResult | undefined>;
   onCreateEntryFinished: (result: CreateEntryResult) => void;
+  onOpenMineruClientGuide: () => void;
   onCreateMarkdownSourceLink: (
     entryId: string,
     noteId: string,
@@ -126,6 +129,7 @@ type ReaderPaneProps = {
   onRenameTag: (tagId: string, name: string) => Promise<void> | void;
   onRefreshParseStatus: () => Promise<void> | void;
   onRetryPdfParse: (entryId: string) => Promise<void> | void;
+  onStartPdfParse: (entryId: string) => Promise<void> | void;
   onRefreshAnnotations: () => Promise<unknown> | unknown;
   onBeforeWorkspaceChange: () => Promise<void>;
   onCreateWorkspaceRoot: (root: string) => Promise<void>;
@@ -141,6 +145,10 @@ type ReaderPaneProps = {
   ) => void;
   onActiveSegmentChange?: (segment: AssistantActiveSegment | null) => void;
   onApplyEntryTagPaths: (entryId: string, tagPaths: string[]) => Promise<unknown> | unknown;
+  onUpdateEntry: (
+    entryId: string,
+    request: { fields: Record<string, string>; tagPaths: string[]; title: string }
+  ) => Promise<unknown> | unknown;
   onExportTranslationNote: (entryId: string, title: string, markdown: string) => Promise<void>;
   onSaveSegmentNote: (entryId: string, segmentUid: string, text: string) => Promise<SegmentBlockNote[]>;
   onDeleteSegmentNote: (entryId: string, segmentUid: string) => Promise<SegmentBlockNote[]>;
@@ -184,6 +192,7 @@ export function ReaderPane({
   trashItems,
   isRefreshingParseStatus,
   libraryView,
+  libraryFilterResetKey,
   recentReadingEntryIds,
   selectedEntryId,
   status,
@@ -194,6 +203,7 @@ export function ReaderPane({
   workspaceRoot,
   onCreateEntry,
   onCreateEntryFinished,
+  onOpenMineruClientGuide,
   onCreateMarkdownSourceLink,
   onImportMarkdownNoteSegmentAsset,
   onCreateTagPath,
@@ -225,6 +235,7 @@ export function ReaderPane({
   onRenameTag,
   onRefreshParseStatus,
   onRetryPdfParse,
+  onStartPdfParse,
   onRefreshAnnotations,
   onBeforeWorkspaceChange,
   onCreateWorkspaceRoot,
@@ -237,6 +248,7 @@ export function ReaderPane({
   onAddAssistantContext,
   onActiveSegmentChange,
   onApplyEntryTagPaths,
+  onUpdateEntry,
   onExportTranslationNote,
   onSaveSegmentNote,
   onDeleteSegmentNote,
@@ -267,6 +279,9 @@ export function ReaderPane({
   >({});
   const [linkedPdfJumpByEntryId, setLinkedPdfJumpByEntryId] = useState<
     Record<string, PdfJumpRequest | null>
+  >({});
+  const [linkedReflowSegmentByEntryId, setLinkedReflowSegmentByEntryId] = useState<
+    Record<string, { requestKey: number; segmentUid: string } | null>
   >({});
   const [segmentNoteReloadByEntryId, setSegmentNoteReloadByEntryId] = useState<
     Record<string, number>
@@ -423,6 +438,10 @@ export function ReaderPane({
     workspaceSplitResizeCleanupRef.current = null;
   }, []);
 
+  useEffect(() => {
+    window.dispatchEvent(new Event('neuink:reader-surface-change'));
+  }, [surfaceLayout.focusedPane, surfaceLayout.left, surfaceLayout.right]);
+
   const startWorkspaceSplitResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) {
       return;
@@ -547,10 +566,12 @@ export function ReaderPane({
         trashItems={trashItems}
         isRefreshingParseStatus={isRefreshingParseStatus}
         libraryView={libraryView}
+        filterResetKey={libraryFilterResetKey}
         recentReadingEntryIds={recentReadingEntryIds}
         selectedEntryId={selectedEntryId}
         status={status}
         tags={tags}
+        workspaceRoot={workspaceRoot}
         onDeleteEntry={onDeleteEntry}
         onOpenCreateEntryTab={onOpenCreateEntryTab}
         onOpenEntryExplorer={onOpenEntryExplorer}
@@ -645,6 +666,9 @@ export function ReaderPane({
     const pairedPdfPane = Boolean(
       siblingParsed?.entryId === openEntry.id && siblingParsed.contentId === 'pdf'
     );
+    const pairedReflowPane = Boolean(
+      siblingParsed?.entryId === openEntry.id && siblingParsed.contentId === 'reflow'
+    );
     const linkedPdfJump = linkedPdfJumpByEntryId[parsed.entryId] ?? null;
     const externalPdfJump = pdfJumpByEntryId[parsed.entryId] ?? null;
 
@@ -663,6 +687,8 @@ export function ReaderPane({
         focusedSegmentUid={focusedSegmentUid}
         initialRecordMode={initialRecordMode}
         linkedSegment={linkedSegment}
+        reflowSyncSegment={linkedReflowSegmentByEntryId[openEntry.id] ?? null}
+        splitReaderLinked={pairedPdfPane || pairedReflowPane}
         segmentNotesLinkedToPdf={pairedPdfPane}
         sharedSegmentNoteDrafts={segmentNoteDraftsByEntryId[openEntry.id] ?? {}}
 	        pendingSourceLinkInsertion={pendingSourceLinkInsertion}
@@ -677,11 +703,13 @@ export function ReaderPane({
         )}
         onReaderPreferencesChange={onReaderPreferencesChange}
         onApplyEntryTagPaths={onApplyEntryTagPaths}
+        onUpdateEntry={onUpdateEntry}
         onCreateMarkdownSourceLink={onCreateMarkdownSourceLink}
         onImportMarkdownNoteSegmentAsset={onImportMarkdownNoteSegmentAsset}
         onReadMarkdownNote={onReadMarkdownNote}
         onReadPdfReader={onReadPdfReader}
         onRetryPdfParse={onRetryPdfParse}
+        onStartPdfParse={onStartPdfParse}
         onCloseSidePane={onCloseSidePane}
 	        onOpenSourceLink={onOpenSourceLink}
 	        onOpenSourceBacklink={(backlink) => onOpenEntryNote(backlink.noteEntryId, backlink.noteId)}
@@ -710,7 +738,25 @@ export function ReaderPane({
           onActiveSegmentChange?.(segment);
           if (segment) {
             focusLinkedSegment(segment.entryId, segment.segmentUid, 'pdf');
+            if (pairedReflowPane) {
+              setLinkedReflowSegmentByEntryId((current) => ({
+                ...current,
+                [segment.entryId]: { requestKey: nextLinkedRequestKey(), segmentUid: segment.segmentUid }
+              }));
+            }
           }
+        }}
+        onReflowSegmentClick={(segmentUid, pageIdx) => {
+          if (!pairedPdfPane) return;
+          setLinkedPdfJumpByEntryId((current) => ({
+            ...current,
+            [openEntry.id]: {
+              kind: 'segment',
+              pageIdx,
+              requestKey: nextLinkedRequestKey(),
+              segmentUid
+            }
+          }));
         }}
         onFocusLinkedSegment={(segmentUid, mode) =>
           focusLinkedSegment(openEntry.id, segmentUid, 'segment-notes', mode)
@@ -765,6 +811,7 @@ export function ReaderPane({
       tags={tags}
       onCreateEntry={onCreateEntry}
       onCreateEntryFinished={onCreateEntryFinished}
+      onOpenMineruClientGuide={onOpenMineruClientGuide}
     />
   );
   const renderTagEditorPage = () => (
@@ -870,6 +917,8 @@ export function ReaderPane({
         return <div className="h-full min-h-0 overflow-hidden">{renderSettingsPanel()}</div>;
       case 'create-entry':
         return <div className="h-full min-h-0 overflow-y-auto">{renderCreateEntryPanel()}</div>;
+      case 'mineru-client-guide':
+        return <div className="h-full min-h-0 overflow-y-auto"><MineruClientImportGuide /></div>;
       case 'tag-editor':
         return <TagEditorPage standalone activeTag={activeTag} entries={entries} tags={tags} onCreateTagPath={onCreateTagPath} onDeleteTag={onDeleteTag} onRenameTag={onRenameTag} onSelectTag={onSelectTag} />;
       default:

@@ -31,7 +31,6 @@ import {
   resolveActiveActivityPanel,
   type SidePanel
 } from './activityBarState';
-import { WorkspaceTabsBar } from './WorkspaceTabsBar';
 import {
   clampWorkspaceSplitLeftWidth,
   WORKSPACE_SPLIT_DIVIDER_WIDTH,
@@ -70,6 +69,7 @@ import {
 } from '../shared/lib/parserSettings';
 import {
   applyNoteProposal,
+  isSciverseConversationSource,
   type Conversation,
   type ConversationSourceLink
 } from '../shared/ipc/assistantApi';
@@ -113,7 +113,7 @@ export const RECENT_READING_STORAGE_KEY = 'neuink.recentReading';
 export const PARSE_POLL_INTERVAL_MS = 6000;
 export const ACTIVE_PARSE_STATUSES = new Set(['queued', 'uploading', 'uploaded', 'parsing']);
 export const SIDEBAR_MIN_WIDTH = 220;
-export const SIDEBAR_MAX_WIDTH = 520;
+export const SIDEBAR_MAX_WIDTH = 820;
 export const DEFAULT_SIDEBAR_WIDTH = 280;
 export const WORKSPACE_SPLIT_WIDTH_STORAGE_KEY = 'neuink.workspaceSplitLeftWidth';
 export const ENTRY_CONTENT_TAB_PREFIX = 'entry-content:';
@@ -297,7 +297,7 @@ export function surfaceLabel(surface: WorkspaceSurface, entries: LibraryEntry[])
     case 'tag-editor': return '标签管理';
     case 'entry-overview': return (entryTitle ?? '条目') + ' · 概览';
     case 'pdf': return (entryTitle ?? '条目') + ' · PDF';
-    case 'reflow': return (entryTitle ?? '条目') + ' · 重排版';
+    case 'reflow': return (entryTitle ?? '条目') + ' · 重排视图';
     case 'note': return (entryTitle ?? '条目') + ' · 笔记';
     case 'segment-notes': case 'annotations': return (entryTitle ?? '条目') + ' · 片段记录';
     case 'source-links': return (entryTitle ?? '条目') + ' · 来源链接';
@@ -435,5 +435,13 @@ export function messageMarkdownWithFootnotes(
 
 export function sourceFootnoteText(source: ConversationSourceLink) {
   const quote = source.quote.trim() ? ' "' + source.quote.replace(/\s+/g, ' ') + '"' : '';
+  if (isSciverseConversationSource(source)) {
+    const location = source.page_no != null
+      ? `p.${source.page_no}`
+      : source.offset != null
+        ? `offset ${source.offset}`
+        : `doc ${source.doc_id}`;
+    return `${source.title}, Sciverse, ${location}.${quote}`;
+  }
   return source.entry_title + ', p.' + (source.page_idx + 1) + ', segment ' + source.segment_uid + '.' + quote;
 }

@@ -46,6 +46,7 @@ import {
   noteProposalInputSchema,
   noteProposalSummary,
   noteSnapshotKey,
+  numberMarkdownLines,
   optionalString,
   proposalToolDescription,
   proposalToolInput,
@@ -76,6 +77,7 @@ import {
 
 import { assistantContextCharBudget } from './contextBudget';
 import { runSubagentTask } from '../runtime/subagent';
+import { stableHash } from '../runtime/evidenceLedger';
 import type { AgentLoopGuard } from '../agent-core';
 import { buildEntryMetaProposal } from './entryMetaProposal';
 import {
@@ -87,7 +89,13 @@ import {
 const SUPPORTED_TOOL_NAMES = new Set([
   'search_segments',
   'read_segment_content',
-  'read_entry_assistant_context'
+  'read_entry_assistant_context',
+  'search_sciverse_evidence',
+  'read_sciverse_content',
+  'search_sciverse_metadata',
+  'get_sciverse_metadata_catalog',
+  'search_sciverse_paper_schema',
+  'get_sciverse_paper_schema'
 ]);
 
 export function scopedEnabledToolIds(
@@ -361,6 +369,7 @@ export async function createAssistantTools({
 
         try {
           const normalizedInput = normalizeToolInput(toolName, input, { root, scope });
+          assertToolPrerequisites(toolName, normalizedInput, observations);
           fingerprint = loopGuard?.beforeToolCall(toolName, normalizedInput);
           emit({
             id: toolCallId,
@@ -426,7 +435,16 @@ export async function createAssistantTools({
           currentNote,
           root
         });
-        rememberReadNote(readNoteSnapshots, output.modelOutput);
+        if ('snapshot' in output && output.snapshot) {
+          const modelOutput = asObject(output.modelOutput);
+          const entryId = optionalString(modelOutput.entry_id);
+          const noteId = optionalString(modelOutput.note_id);
+          if (entryId && noteId) {
+            readNoteSnapshots.set(noteSnapshotKey(entryId, noteId), output.snapshot);
+          }
+        } else {
+          rememberReadNote(readNoteSnapshots, output.modelOutput);
+        }
         observations.push({ output: output.modelOutput, toolName: 'read_current_note' });
         loopGuard?.recordSuccess(output.modelOutput);
 
@@ -485,12 +503,14 @@ export async function createAssistantTools({
           title: note.title
         });
         const output = {
+          content_hash: stableHash(note.markdown),
           entry_id: entryId,
           kind: 'read_note',
           markdown,
           markdown_char_count: note.markdown.length,
           note_id: noteId,
           note_title: note.title,
+          numbered_markdown: numberMarkdownLines(markdown),
           source_link_count: note.links.length,
           truncated: markdown.length < note.markdown.length
         };
@@ -786,3 +806,30 @@ export async function createAssistantTools({
 }
 
 export { entryIdOrSingleScope, modelToolName } from './toolSupport';
+
+function assertToolPrerequisites(
+  toolName: string,
+  input: Record<string, unknown>,
+  observations: Array<{ output: unknown; toolName: string }>
+) {
+  if (toolName !== 'read_sciverse_content') return;
+  const searchedDocIds = new Set(
+    observations
+      .filter((observation) => observation.toolName === 'search_sciverse_evidence')
+      .flatMap((observation) => {
+        const output = asObject(observation.output);
+        return Array.isArray(output.evidence)
+          ? output.evidence.flatMap((item) => {
+              const docId = optionalString(asObject(item).doc_id);
+              return docId ? [docId] : [];
+            })
+          : [];
+      })
+  );
+  const docId = requiredString(input.doc_id, 'doc_id');
+  if (!searchedDocIds.has(docId)) {
+    throw new Error(
+      'read_sciverse_content requires a doc_id returned by search_sciverse_evidence earlier in this run.'
+    );
+  }
+}

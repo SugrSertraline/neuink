@@ -3,6 +3,7 @@ const CLOUD_PARSER_UNLOCK_HASH =
 
 export const CLOUD_PARSER_ENDPOINT = 'mineru-cloud';
 export const CLOUD_PARSER_UNLOCK_STORAGE_KEY = 'neuink.cloudParserUnlocked';
+export const PARSER_AUTO_PARSE_STORAGE_KEY = 'neuink.parser.autoParseOnPdfImport';
 const CLOUD_PARSER_ENDPOINT_ALIASES = new Set([
   CLOUD_PARSER_ENDPOINT,
   'mineru-qiniu',
@@ -10,6 +11,16 @@ const CLOUD_PARSER_ENDPOINT_ALIASES = new Set([
 ]);
 
 export type ParserSourceMode = 'cloud' | 'custom';
+
+export function readAutoParseOnPdfImport() {
+  if (typeof window === 'undefined') return true;
+  return window.localStorage.getItem(PARSER_AUTO_PARSE_STORAGE_KEY) !== '0';
+}
+
+export function persistAutoParseOnPdfImport(enabled: boolean) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(PARSER_AUTO_PARSE_STORAGE_KEY, enabled ? '1' : '0');
+}
 
 export function readStoredCloudUnlockState() {
   if (typeof window === 'undefined') {

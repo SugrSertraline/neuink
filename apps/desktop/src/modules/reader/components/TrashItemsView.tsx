@@ -1,9 +1,15 @@
 import { AlertTriangle, FileText, Highlighter, MessageSquareText, RotateCcw, StickyNote, Trash2 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger
+} from '@/components/ui/hover-card';
+import { cn } from '@/lib/utils';
 import {
   Dialog,
   DialogContent,
@@ -18,6 +24,7 @@ import type { TrashItem, TrashItemKind } from '@/shared/types/domain';
 
 type TrashItemsViewProps = {
   items: TrashItem[];
+  fixedHeight?: boolean;
   showEntry?: boolean;
   onEmpty?: () => Promise<void> | void;
   onPurgeEntry: (entryId: string) => Promise<void> | void;
@@ -28,6 +35,7 @@ type TrashItemsViewProps = {
 
 export function TrashItemsView({
   items,
+  fixedHeight = false,
   showEntry = true,
   onEmpty,
   onPurgeEntry,
@@ -40,6 +48,8 @@ export function TrashItemsView({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pendingPurge, setPendingPurge] = useState<TrashItem | null>(null);
   const [emptyConfirmOpen, setEmptyConfirmOpen] = useState(false);
+  const headCellClass = 'h-7 border-r border-border bg-muted/45 px-2 text-center text-[11px] font-semibold last:border-r-0';
+  const bodyCellClass = 'h-9 border-r border-border px-2 py-1 align-middle last:border-r-0';
   const visibleItems = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
     return items.filter((item) => {
@@ -100,15 +110,22 @@ export function TrashItemsView({
         ) : null}
       </div>
 
-      <div className="min-w-0 overflow-auto rounded-md border">
-        <Table>
+      <div className={`entry-library-table-shell min-w-0 overflow-y-auto overflow-x-hidden border border-border ${fixedHeight ? 'max-h-[min(60vh,34rem)]' : ''}`}>
+        <Table className="table-fixed border-collapse">
+          <colgroup>
+            <col className="w-[14%]" />
+            <col className={showEntry ? 'w-[40%]' : 'w-[54%]'} />
+            {showEntry ? <col className="w-[20%]" /> : null}
+            <col className="w-[16%]" />
+            <col className="w-[10%]" />
+          </colgroup>
           <TableHeader>
             <TableRow>
-              <TableHead>类型</TableHead>
-              <TableHead>名称与摘要</TableHead>
-              {showEntry ? <TableHead>原所属条目</TableHead> : null}
-              <TableHead>删除时间</TableHead>
-              <TableHead className="w-28 text-center">操作</TableHead>
+              <TableHead className={headCellClass}>类型</TableHead>
+              <TableHead className={cn(headCellClass, 'text-left')}>名称与摘要</TableHead>
+              {showEntry ? <TableHead className={cn(headCellClass, 'text-left')}>原所属条目</TableHead> : null}
+              <TableHead className={headCellClass}>删除时间</TableHead>
+              <TableHead className={headCellClass}>操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -123,26 +140,33 @@ export function TrashItemsView({
               const itemBusy = busyId === item.trash_id;
               return (
                 <TableRow key={`${item.entry_id}:${item.trash_id}`}>
-                  <TableCell>
+                  <TableCell className={cn(bodyCellClass, 'text-center')}>
                     <Badge className="gap-1" variant="outline">
                       {trashKindIcon(item.kind)}
                       {trashKindLabel(item.kind)}
                     </Badge>
                   </TableCell>
-                  <TableCell>
-                    <div className="max-w-xl">
-                      <div className="truncate text-sm font-medium">{item.title}</div>
-                      <div className="line-clamp-2 text-xs text-muted-foreground">{item.preview || '暂无摘要'}</div>
-                      {item.parent_entry_trashed && item.kind !== 'entry' ? (
-                        <div className="mt-1 text-[11px] text-amber-700">所属条目也在回收站中</div>
-                      ) : null}
-                    </div>
+                  <TableCell className={bodyCellClass}>
+                    <TrashTextHoverCard preview={item.preview} title={item.title}>
+                      <div className="flex h-10 min-w-0 flex-col justify-center gap-0.5">
+                        <div className="truncate text-sm font-medium leading-5">{item.title}</div>
+                        <div className="truncate text-[11px] leading-4 text-muted-foreground">{trashPreview(item)}</div>
+                      </div>
+                    </TrashTextHoverCard>
                   </TableCell>
-                  {showEntry ? <TableCell className="max-w-56 truncate">{item.entry_title}</TableCell> : null}
-                  <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                    {formatTrashDate(item.deleted_at)}
+                  {showEntry ? (
+                    <TableCell className={bodyCellClass}>
+                      <TrashTextHoverCard title={item.entry_title}>
+                        <div className="truncate text-xs">{item.entry_title}</div>
+                      </TrashTextHoverCard>
+                    </TableCell>
+                  ) : null}
+                  <TableCell className={cn(bodyCellClass, 'text-center text-xs text-muted-foreground')}>
+                    <TrashTextHoverCard title={formatTrashDate(item.deleted_at)}>
+                      <div className="truncate">{formatTrashDate(item.deleted_at)}</div>
+                    </TrashTextHoverCard>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className={bodyCellClass}>
                     <div className="flex justify-center gap-1">
                       <Button
                         disabled={itemBusy}
@@ -255,6 +279,35 @@ export function TrashItemsView({
     </Dialog>
     </>
   );
+}
+
+function TrashTextHoverCard({
+  children,
+  preview,
+  title
+}: {
+  children: ReactNode;
+  preview?: string | null;
+  title: string;
+}) {
+  return (
+    <HoverCard closeDelay={120} openDelay={220}>
+      <HoverCardTrigger asChild>
+        <div className="min-w-0 cursor-default">{children}</div>
+      </HoverCardTrigger>
+      <HoverCardContent align="start" className="w-80 break-words" side="top">
+        <div className="text-sm font-medium">{title}</div>
+        {preview?.trim() ? <div className="mt-1 text-xs leading-5 text-muted-foreground">{preview}</div> : null}
+      </HoverCardContent>
+    </HoverCard>
+  );
+}
+
+function trashPreview(item: TrashItem) {
+  if (item.parent_entry_trashed && item.kind !== 'entry') {
+    return '所属条目也在回收站中';
+  }
+  return item.preview?.trim() || '暂无摘要';
 }
 
 function trashKindLabel(kind: TrashItemKind) {

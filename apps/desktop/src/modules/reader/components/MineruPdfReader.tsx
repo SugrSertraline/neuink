@@ -3,6 +3,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { saveNoteAssetBytes, type PdfReaderResponse } from "@/shared/ipc/workspaceApi";
+import { Button } from "@/components/ui/button";
 import { useToast } from "@/shared/hooks/useToast";
 import type { ReaderPreferences } from "@/shared/lib/readerPreferences";
 import type {
@@ -131,6 +132,7 @@ type MineruPdfReaderProps = {
   ) => Promise<NoteDocument>;
   onReadPdfReader: (entryId: string) => Promise<PdfReaderResponse>;
   onRetryPdfParse: (entryId: string) => Promise<void> | void;
+  onStartPdfParse: (entryId: string) => Promise<void> | void;
   onCloseSidePane: () => void;
   onOpenSourceLink: (target: SourceLinkOpenTarget) => void;
   onOpenSourceBacklink: (backlink: SourceBacklink) => void;
@@ -141,6 +143,7 @@ type MineruPdfReaderProps = {
     options?: AssistantContextAddOptions,
   ) => void;
   onActiveSegmentChange?: (segment: AssistantActiveSegment | null) => void;
+  syncOnlyOnSegmentClick?: boolean;
   onConsumePendingSourceLinkInsertion: (
     entryId: string,
     noteId: string,
@@ -219,6 +222,7 @@ export function MineruPdfReader({
   onReadMarkdownNote,
   onReadPdfReader,
   onRetryPdfParse,
+  onStartPdfParse,
   onCloseSidePane,
   onOpenSourceLink,
   onOpenSourceBacklink,
@@ -226,6 +230,7 @@ export function MineruPdfReader({
   onOpenAnnotationsSurface,
   onAddAssistantContext,
   onActiveSegmentChange,
+  syncOnlyOnSegmentClick = false,
   onConsumePendingSourceLinkInsertion,
   onConsumePendingNoteImageInsertion,
   onDeleteAnnotation,
@@ -475,7 +480,7 @@ export function MineruPdfReader({
   const parseMessage = entry.parseMessage;
   useEffect(() => {
     const currentToast = parseStatusToastRef.current;
-    if (entry.status === "Parsed") {
+    if (entry.status === "Parsed" || entry.status !== "Failed") {
       if (currentToast) {
         dismiss(currentToast.id);
         parseStatusToastRef.current = null;
@@ -487,7 +492,7 @@ export function MineruPdfReader({
       return;
     }
 
-    const isFailed = entry.status === "Failed";
+    const isFailed = true;
     const key = `${entry.id}:${parseStatus}:${parseMessage ?? ""}`;
     if (currentToast?.key === key) {
       return;
@@ -498,12 +503,10 @@ export function MineruPdfReader({
     }
 
     const id = notify({
-      durationMs: Infinity,
-      tone: isFailed ? "danger" : "default",
-      title: isFailed ? "PDF 解析失败" : "PDF 正在解析",
-      description: isFailed
-        ? parseMessage || "解析任务失败，请检查解析服务配置后重新提交。"
-        : `当前解析状态为 ${formatPdfParseStatus(parseStatus)}。解析成功后才会显示完整区域热区。`,
+      durationMs: 8000,
+      tone: 'danger',
+      title: 'PDF 解析失败',
+      description: parseMessage || '解析任务失败，请检查解析服务配置后重新提交。',
     });
     parseStatusToastRef.current = { id, key };
 
@@ -601,7 +604,7 @@ export function MineruPdfReader({
     if (!activateSegment(segment, {
       mode: noteMode === "annotation" ? "annotation" : "segment",
     })) return;
-    if (readerPreferences.leftClickOpensNotePane) {
+    if (readerPreferences.segmentNoteOpenGesture === 'single' && !syncOnlyOnSegmentClick) {
       setSegmentOverlayOpen(true);
     }
   };
@@ -867,6 +870,19 @@ export function MineruPdfReader({
     }
   };
 
+  const startPdfParse = async () => {
+    if (parseRetryBusy) return;
+    setParseRetryBusy(true);
+    try {
+      await onStartPdfParse(entry.id);
+      notify({ title: '已开始解析', description: 'PDF 已提交给自定义 MinerU 服务。' });
+    } catch (caught) {
+      notify({ tone: 'danger', title: '开始解析失败', description: caught instanceof Error ? caught.message : String(caught) });
+    } finally {
+      setParseRetryBusy(false);
+    }
+  };
+
   if (!entry.pdfFileName) {
     return (
       <ReaderMessage title="无 PDF" description="这个条目还没有导入 PDF。" />
@@ -879,6 +895,16 @@ export function MineruPdfReader({
         busy={parseRetryBusy}
         message={parseMessage}
         onRetry={() => void retryPdfParse()}
+      />
+    );
+  }
+
+  if (entry.status === "Queued") {
+    return (
+      <ReaderMessage
+        title="等待开始解析"
+        description="PDF 已保存到本地文库。当前未自动提交解析，可随时开始。"
+        action={<Button disabled={parseRetryBusy} size="sm" type="button" variant="outline" onClick={() => void startPdfParse()}>{parseRetryBusy ? <Loader2 className="animate-spin" size={14} /> : null}开始解析</Button>}
       />
     );
   }
@@ -1099,6 +1125,9 @@ export function MineruPdfReader({
             onCreateTextSelectionAnnotation={createTextSelectionAnnotation}
             onTranslateTextSelection={translateSelectedText}
             onToggleSegment={guardedToggleSegment}
+            altClickOpensNote={
+              readerPreferences.segmentNoteOpenGesture === 'modifier' && !syncOnlyOnSegmentClick
+            }
           />
         </SegmentRailLayout>
 

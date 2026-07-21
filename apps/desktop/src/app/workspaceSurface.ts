@@ -4,6 +4,7 @@ export type WorkspaceSurface =
   | { kind: 'library' }
   | { kind: 'settings' }
   | { kind: 'create-entry' }
+  | { kind: 'mineru-client-guide' }
   | { kind: 'tag-editor' }
   | { kind: 'entry-overview'; entryId: string }
   | { kind: 'pdf'; entryId: string }
@@ -35,8 +36,11 @@ export type WorkspaceSurfaceAction =
   | { type: 'focus'; pane: WorkspacePaneId }
   | { type: 'open'; pane?: WorkspacePaneId; surface: WorkspaceSurface }
   | { type: 'close'; pane: WorkspacePaneId; key: string }
+  | { type: 'closeOthers'; pane: WorkspacePaneId; key: string }
+  | { type: 'closePane'; pane: WorkspacePaneId }
   | { type: 'move'; key: string; pane: WorkspacePaneId; targetIndex?: number }
   | { type: 'removeEntry'; entryId: string }
+  | { type: 'removeNote'; entryId: string; noteId: string }
   | { type: 'closeRight' }
   | { type: 'swap' };
 
@@ -162,6 +166,41 @@ export function workspaceSurfaceReducer(
         rightTabs
       };
     }
+    case 'closeOthers': {
+      const tabs = action.pane === 'left' ? state.leftTabs : state.rightTabs;
+      const surface = tabs.find((tab) => surfaceKey(tab) === action.key);
+      if (!surface) return state;
+      return action.pane === 'left'
+        ? { ...state, focusedPane: 'left', left: surface, leftTabs: [surface] }
+        : { ...state, focusedPane: 'right', right: surface, rightTabs: [surface] };
+    }
+    case 'closePane':
+      return action.pane === 'right'
+        ? { ...state, focusedPane: 'left', right: null, rightTabs: [] }
+        : { ...state, focusedPane: 'left', left: { kind: 'library' }, leftTabs: [{ kind: 'library' }] };
+    case 'removeNote': {
+      const isDeletedNote = (surface: WorkspaceSurface) =>
+        surface.kind === 'note' && surface.entryId === action.entryId && surface.noteId === action.noteId;
+      const remainingLeftTabs = state.leftTabs.filter((surface) => !isDeletedNote(surface));
+      const leftTabs = remainingLeftTabs.length > 0
+        ? remainingLeftTabs
+        : [{ kind: 'library' } as WorkspaceSurface];
+      const left = isDeletedNote(state.left) ? leftTabs[leftTabs.length - 1] : state.left;
+      const rightTabs = state.rightTabs.filter((surface) => !isDeletedNote(surface));
+      const right = rightTabs.length === 0
+        ? null
+        : state.right && !isDeletedNote(state.right)
+          ? state.right
+          : rightTabs[rightTabs.length - 1];
+      return {
+        ...state,
+        focusedPane: state.focusedPane === 'right' && !right ? 'left' : state.focusedPane,
+        left,
+        leftTabs,
+        right,
+        rightTabs
+      };
+    }
     case 'closeRight':
       return { ...state, focusedPane: 'left', right: null, rightTabs: [] };
     case 'swap':
@@ -196,7 +235,7 @@ export function surfaceKey(surface: WorkspaceSurface) {
   switch (surface.kind) {
     case 'note': return `note:${surface.entryId}:${surface.noteId}`;
     case 'segment-notes': case 'annotations': return `segment-records:${surface.entryId}`;
-    case 'library': case 'settings': case 'create-entry': case 'tag-editor': return surface.kind;
+    case 'library': case 'settings': case 'create-entry': case 'mineru-client-guide': case 'tag-editor': return surface.kind;
     default: return `${surface.kind}:${surface.entryId}`;
   }
 }

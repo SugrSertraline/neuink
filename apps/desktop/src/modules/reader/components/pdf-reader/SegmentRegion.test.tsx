@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SegmentRegion, buildPreviewLayout } from './SegmentRegion';
@@ -179,8 +179,53 @@ describe('PDF segment preview layout', () => {
 
     expect(document.querySelector('[title="片段笔记"]')?.className).toContain('-translate-x-full');
     expect(document.querySelector('[title="批注"]')?.className).toContain('translate-x-full');
-    expect(document.querySelector('[title="1 source backlinks"]')?.className).toContain('-translate-x-full');
-    expect(document.querySelector('[title="Add source link"]')?.className).toContain('translate-x-[calc(100%+0.5rem)]');
+    expect(document.querySelector('[title="1 个来源链接"]')?.className).toContain('-translate-x-full');
+  });
+
+  it('uses a single click only to select the segment', () => {
+    const onToggleSegment = vi.fn();
+    const { container } = render(
+      <SegmentRegion
+        active={false}
+        flashed={false}
+        hasAnnotation={false}
+        hasNote={false}
+        hovered={false}
+        isContinuation={false}
+        pageIdx={0}
+        previewAnnotations={[]}
+        previewNote={null}
+        previewPosition={null}
+        previewShowAnnotation={false}
+        previewShowNote={false}
+        previewShowOriginal={false}
+        previewShowRegion={false}
+        previewShowTranslation={false}
+        regionBbox={[100, 320, 900, 500]}
+        regionId="double-click-segment"
+        relatedImagePath={null}
+        segment={{
+          bbox: [100, 320, 900, 500],
+          markdown: 'Source paragraph',
+          page_idx: 0,
+          segment_type: 'paragraph',
+          text: 'Source paragraph',
+          uid: 'double-click-segment'
+        }}
+        showRegions={true}
+        sourceBacklinkCount={0}
+        sourceEntryId="entry-1"
+        translatedSegment={null}
+        translationMode="hover"
+        translationStatus={null}
+        translationVisible={false}
+        workspaceRoot={null}
+        onToggleSegment={onToggleSegment}
+      />
+    );
+
+    fireEvent.click(container.querySelector('[data-segment-uid="double-click-segment"]')!);
+    expect(onToggleSegment).toHaveBeenCalledWith(expect.objectContaining({ uid: 'double-click-segment' }));
   });
 
   it('tracks pointer movement while there is room beside it', () => {
@@ -209,7 +254,7 @@ describe('PDF segment preview layout', () => {
       text: 'short list item',
     });
 
-    expect(layout.left + layout.width).toBe(906);
+    expect(layout.left + layout.width).toBe(912);
     expect(layout.top).toBeLessThan(720);
   });
 });

@@ -78,13 +78,17 @@ describe('PdfSourcePage performance boundaries', () => {
       '3px solid var(--primary)',
     );
   });
+
 });
 
 function renderPdfSourcePage(page: PageSegments) {
   return render(pdfSourcePage(page));
 }
 
-function pdfSourcePage(page: PageSegments, flashSegmentUid: string | null = null) {
+function pdfSourcePage(
+  page: PageSegments,
+  flashSegmentUid: string | null = null,
+) {
   return (
     <PdfSourcePage
       annotationsBySegmentUid={new Map()}
@@ -116,6 +120,7 @@ function pdfSourcePage(page: PageSegments, flashSegmentUid: string | null = null
       onOpenSegmentNote={() => undefined}
       onOpenSourceBacklink={() => undefined}
       onToggleSegment={() => undefined}
+      altClickOpensNote
     />
   );
 }

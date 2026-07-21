@@ -108,4 +108,18 @@ describe('workspaceSurfaceReducer', () => {
     expect(next.rightTabs).toEqual([pdfB]);
     expect(next.right).toEqual(pdfB);
   });
+
+  it('closes every tab for a deleted note while preserving its entry surfaces', () => {
+    const next = workspaceSurfaceReducer(layout({
+      left: noteA,
+      leftTabs: [library, pdfA, noteA],
+      right: noteA,
+      rightTabs: [noteA, pdfB]
+    }), { type: 'removeNote', entryId: 'a', noteId: 'n1' });
+
+    expect(next.leftTabs).toEqual([library, pdfA]);
+    expect(next.left).toEqual(pdfA);
+    expect(next.rightTabs).toEqual([pdfB]);
+    expect(next.right).toEqual(pdfB);
+  });
 });

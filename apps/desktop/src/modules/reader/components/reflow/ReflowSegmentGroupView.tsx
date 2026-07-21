@@ -62,6 +62,7 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
   sourceBacklinksBySegmentUid,
   workspaceRoot,
   onActivateSegment,
+  altClickOpensNote = false,
   onOpenSegmentAnnotation,
   onOpenSegmentNote,
   onPreviewChange,
@@ -91,6 +92,7 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
     segment: SourceSegment,
     options?: { jumpToPdf?: boolean },
   ) => void;
+  altClickOpensNote?: boolean;
   onOpenSegmentAnnotation: (segment: SourceSegment) => void;
   onOpenSegmentNote: (segment: SourceSegment) => void;
   onPreviewChange: (next: ReflowPreviewPointerState | null) => void;
@@ -179,7 +181,13 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
       )}
       id={`reflow-segment-${segmentGroup.body.uid}`}
       tabIndex={0}
-      onClick={() => onActivateSegment(segmentGroup.body, { jumpToPdf: true })}
+      onClick={(event) => {
+        if (altClickOpensNote && event.altKey) {
+          onOpenSegmentNote(segmentGroup.body);
+          return;
+        }
+        onActivateSegment(segmentGroup.body, { jumpToPdf: true });
+      }}
       onContextMenu={(event) => {
         event.preventDefault();
         setMenuPosition({ x: event.clientX, y: event.clientY });
@@ -212,7 +220,7 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
       />
       <button
         className="pointer-events-none absolute left-0 top-4 z-[2] grid size-6 -translate-x-[calc(100%+0.75rem)] place-items-center rounded-sm border bg-background/95 text-muted-foreground opacity-0 shadow-sm ring-1 ring-foreground/5 transition-[opacity,background-color,color] duration-150 hover:bg-muted hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
-        title="Hide this reflow element"
+        title="隐藏此重排元素"
         type="button"
         onClick={(event) => {
           event.stopPropagation();

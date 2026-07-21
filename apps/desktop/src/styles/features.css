@@ -483,6 +483,31 @@
   gap: 2px;
 }
 
+.workspace-tabsbar-split-drop-target {
+  position: absolute;
+  top: 4px;
+  right: var(--app-editor-padding);
+  z-index: 3;
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 6px;
+  border: 1px dashed color-mix(in srgb, var(--primary) 45%, var(--border));
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--muted-foreground);
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.workspace-tabsbar-split-drop-target.is-drop-target {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, var(--card));
+  color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 14%, transparent);
+}
+
 .workspace-tabsbar-side-drop-target {
   display: inline-flex;
   align-items: center;

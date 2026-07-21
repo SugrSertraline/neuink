@@ -269,7 +269,15 @@ export function SettingsPanel({
     draftAgentRuntimeSettings.skillPackages[0]?.id ?? null
   );
   const [activeSettingsTab, setActiveSettingsTab] = useState<
-    'models' | 'tasks' | 'data' | 'appearance' | 'reader' | 'main-agent' | 'subagents' | 'skills'
+    | 'models'
+    | 'tasks'
+    | 'data'
+    | 'appearance'
+    | 'reader'
+    | 'external-tools'
+    | 'main-agent'
+    | 'subagents'
+    | 'skills'
   >(
     'models'
   );

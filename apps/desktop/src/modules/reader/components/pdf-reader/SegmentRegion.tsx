@@ -274,27 +274,13 @@ function SegmentRegionImpl({
             segmentIndicatorClassName('bottom-left', indicatorsExpanded),
             'bg-success text-white ring-success/20'
           )}
-          title={`${sourceBacklinkCount} source backlinks`}
+          title={`${sourceBacklinkCount} 个来源链接`}
         >
           <Link2 size={11} aria-hidden="true" />
           {indicatorsExpanded ? <span className="pr-0.5">{sourceBacklinkCount}</span> : null}
         </span>
       ) : null}
 
-      {active && interactive && onAddSourceLink ? (
-        <button
-          className="pointer-events-auto absolute bottom-0 right-0 z-[4] inline-flex h-6 translate-x-[calc(100%+0.5rem)] translate-y-6 items-center gap-1 rounded-sm border border-primary/25 bg-popover px-1.5 text-[10px] font-semibold text-primary shadow-sm transition-transform duration-150 ease-out hover:bg-muted"
-          title="Add source link"
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            onAddSourceLink(segment);
-          }}
-        >
-          <Link2 size={11} aria-hidden="true" />
-          Link
-        </button>
-      ) : null}
 
       {active && previewPosition ? (
         <SegmentPreview
@@ -325,6 +311,7 @@ function SegmentRegionImpl({
     </div>
   );
 }
+
 
 export const SegmentRegion = memo(
   SegmentRegionImpl,
@@ -774,7 +761,7 @@ export function buildPreviewLayout({ hasFooter, position, preferScrollable, text
     measuredCandidates[measuredCandidates.length - 1];
 
   const safeHeight = Math.min(selected.estimatedHeight, maxHeight);
-  const pointerGap = 14;
+  const pointerGap = 8;
   const rightSpace = viewportWidth - PREVIEW_MARGIN - position.x - pointerGap;
   const leftSpace = position.x - pointerGap - PREVIEW_MARGIN;
   const placeRight = rightSpace >= selected.width || rightSpace >= leftSpace;

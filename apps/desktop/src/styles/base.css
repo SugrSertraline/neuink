@@ -23,6 +23,13 @@
   select {
     font: inherit;
   }
+
+  /* WebView2 adds its own password reveal control. Sciverse provides a
+     consistent reveal/copy control, so suppress only the native duplicate. */
+  .sciverse-token-input::-ms-reveal,
+  .sciverse-token-input::-ms-clear {
+    display: none;
+  }
 }
 
 .app {

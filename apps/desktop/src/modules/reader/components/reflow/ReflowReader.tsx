@@ -67,9 +67,12 @@ export function ReflowReader({
   segments,
   sourceLinkCountBySegmentUid,
   sourceBacklinksBySegmentUid,
+  scrollToSegmentUid,
+  scrollRequestKey,
   translationBySegmentUid,
   workspaceRoot,
   onActivateSegment,
+  altClickOpensNote = false,
   onOpenSegmentAnnotation,
   onOpenSegmentNote,
   onRequirePdfDocument,
@@ -97,12 +100,15 @@ export function ReflowReader({
   segments: SourceSegment[];
   sourceLinkCountBySegmentUid: Map<string, number>;
   sourceBacklinksBySegmentUid: SourceBacklinksBySegmentUid;
+  scrollToSegmentUid?: string | null;
+  scrollRequestKey?: number;
   translationBySegmentUid: Map<string, TranslatedSegment>;
   workspaceRoot: string | null;
   onActivateSegment: (
     segment: SourceSegment,
     options?: { jumpToPdf?: boolean },
   ) => void;
+  altClickOpensNote?: boolean;
   onOpenSegmentAnnotation: (segment: SourceSegment) => void;
   onOpenSegmentNote: (segment: SourceSegment) => void;
   onRequirePdfDocument: () => void;
@@ -158,6 +164,13 @@ export function ReflowReader({
     getScrollElement: () => reflowScrollRef.current,
     overscan: 6,
   });
+  useEffect(() => {
+    if (!scrollToSegmentUid) return;
+    const groupIndex = groupIndexBySegmentUid.get(scrollToSegmentUid);
+    if (groupIndex !== undefined) {
+      rowVirtualizer.scrollToIndex(groupIndex, { align: 'center' });
+    }
+  }, [groupIndexBySegmentUid, rowVirtualizer, scrollRequestKey, scrollToSegmentUid]);
   const updatePreview = useCallback(
     (next: ReflowPreviewPointerState | null) => {
       if (!hoverPreviewEnabled || !next) {
@@ -238,6 +251,7 @@ export function ReflowReader({
                   sourceBacklinksBySegmentUid={sourceBacklinksBySegmentUid}
                   workspaceRoot={workspaceRoot}
                   onActivateSegment={onActivateSegment}
+                  altClickOpensNote={altClickOpensNote}
                   onOpenSegmentAnnotation={onOpenSegmentAnnotation}
                   onOpenSegmentNote={onOpenSegmentNote}
                   onPreviewChange={updatePreview}

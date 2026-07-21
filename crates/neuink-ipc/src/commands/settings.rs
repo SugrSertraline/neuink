@@ -181,7 +181,7 @@ pub fn set_task_llm_profile<R: Runtime>(
     Ok(settings_state(&settings))
 }
 
-fn read_settings<R: Runtime>(app: &AppHandle<R>) -> Result<AppSettings, String> {
+pub(crate) fn read_settings<R: Runtime>(app: &AppHandle<R>) -> Result<AppSettings, String> {
     let path = settings_path(app)?;
     if !path.exists() {
         return Ok(AppSettings::default());
@@ -210,7 +210,10 @@ pub(crate) fn read_assistant_profile<R: Runtime>(
     Ok(profile)
 }
 
-fn write_settings<R: Runtime>(app: &AppHandle<R>, settings: &AppSettings) -> Result<(), String> {
+pub(crate) fn write_settings<R: Runtime>(
+    app: &AppHandle<R>,
+    settings: &AppSettings,
+) -> Result<(), String> {
     let path = settings_path(app)?;
     atomic_write_json(path, settings).map_err(|error| error.to_string())
 }

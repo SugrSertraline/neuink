@@ -31,6 +31,7 @@ describe('EntryOverview', () => {
           status: 'Parsed',
           progress: 100
         }}
+        onUpdateEntry={async () => undefined}
         sourceBacklinksBySegmentUid={{}}
         tags={[
           { id: 'tag-root', name: '研究', parent_id: null, created_at: '', updated_at: '' },

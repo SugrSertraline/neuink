@@ -13,6 +13,7 @@ import {
 import type {
   AssistantActiveNote,
   AssistantActiveSegment,
+  AssistantActiveSurfaceSnapshot,
   AssistantAgentRun,
   AssistantContext,
   AssistantContextPlan,
@@ -35,7 +36,13 @@ import { registerEvidence } from '../runtime/evidenceLedger';
 import { createCompiledTaskState, transitionTaskState } from '../runtime/taskState';
 import { finalizeVerifiedProposals } from '../runtime/verifiedProposal';
 import { AssistantVerificationError } from './verification';
+import { verifyHarnessResult } from './verification';
 import { observeAssistantContext } from './context';
+import {
+  buildInvocationPlanForContract,
+  compileAssistantExecutionContract,
+  referencesCurrentDocument
+} from './executionContract';
 import {
   AssistantHarnessError,
   createAgentRun,
@@ -65,6 +72,7 @@ type RunAssistantHarnessOptions = {
   currentEntry?: { id: string; title: string } | null;
   currentNote?: AssistantActiveNote | null;
   currentSegment?: AssistantActiveSegment | null;
+  currentSurface?: AssistantActiveSurfaceSnapshot | null;
   destinationEntryId?: string | null;
   mentionScope?: ScopeSnapshot | null;
   tagMentionScopes?: Record<string, ScopeSnapshot>;
@@ -93,6 +101,8 @@ export async function runAssistantHarness(options: RunAssistantHarnessOptions): 
     conversationId,
     currentEntry,
     currentNote,
+    currentSegment,
+    currentSurface,
     mentionScope,
     tagMentionScopes,
     onCreateEntry,
@@ -119,12 +129,15 @@ export async function runAssistantHarness(options: RunAssistantHarnessOptions): 
   try {
     throwIfAborted(abortSignal);
     const observed = observeAssistantContext({
+      activeSegment: currentSegment,
+      activeSurface: currentSurface,
       assistantContext,
       contextPlan,
       fallbackEntryId: currentEntry?.id ?? null,
       fallbackNote: currentNote
         ? { entryId: currentNote.entryId, noteId: currentNote.noteId }
-        : null
+        : null,
+      preferFocusedSurface: referencesCurrentDocument(question)
     });
     recordNode(agentRun, onToolEvent, {
       id: `${runId}-observe`,
@@ -151,17 +164,51 @@ export async function runAssistantHarness(options: RunAssistantHarnessOptions): 
     throwIfAborted(abortSignal);
 
     const runtimeSettings = await loadWorkspaceAgentRuntimeSettings(root);
-    const plan = modelDrivenPlan(question, contextPlan, snapshot);
-    const invocationPlan = {
-      enabledToolIds: [...runtimeSettings.mainAssistant.enabledToolIds],
-      mainAssistantId: preferredAgentId ?? runtimeSettings.mainAssistant.id,
-      missing: [],
-      mode: 'agent_execute' as const,
-      rationale: 'The model policy chooses the next action from conversation and observations.',
-      skillIdsToLoad: [],
-      subagentTasks: [],
-      writePolicy: 'workspace_write' as const
-    };
+    const contract = compileAssistantExecutionContract({
+      activeSegment: observed.activeSegment,
+      activeSurface: observed.activeSurface,
+      contextPlan,
+      question,
+      snapshot
+    });
+    const plan = contract.plan;
+    const invocationPlan = buildInvocationPlanForContract(
+      contract,
+      runtimeSettings,
+      preferredAgentId
+    );
+    activeTaskState = createCompiledTaskState({
+      conversationId: conversationId ?? 'local',
+      request: question,
+      spec: plan
+    });
+    recordNode(agentRun, onToolEvent, {
+      id: `${runId}-plan`,
+      kind: 'planner',
+      summary: `intent=${plan.intent}, requiredTools=${contract.requiredToolIds.join(',') || 'none'}, sourcePolicy=${contract.sourcePolicy}`,
+      title: 'Compile execution contract'
+    });
+    if (plan.missing.length > 0) {
+      const answer = plan.clarificationQuestion ?? `当前任务缺少必要上下文：${plan.missing.join(', ')}。`;
+      const awaitingTaskState = transitionTaskState(
+        activeTaskState,
+        'awaiting_user',
+        'compile'
+      );
+      onDelta?.(answer);
+      return {
+        agentRun: finishAgentRun(agentRun, 'succeeded'),
+        answer,
+        plan,
+        sources: [],
+        taskState: awaitingTaskState
+      };
+    }
+    if (invocationPlan.missing.length > 0) {
+      throw new Error(
+        `当前 Agent 未启用完成此任务所需的工具：${invocationPlan.missing.join(', ')}。请在 Agent 工具配置中启用后重试。`
+      );
+    }
     const activeExecution = selectAgentExecution(
       runtimeSettings,
       question,
@@ -171,11 +218,6 @@ export async function runAssistantHarness(options: RunAssistantHarnessOptions): 
     );
     const executionProfile =
       profiles.find((profile) => profile.id === activeExecution.agent.llmProfileId) ?? settings;
-    activeTaskState = createCompiledTaskState({
-      conversationId: conversationId ?? 'local',
-      request: question,
-      spec: plan
-    });
     agentRun.invocationMode = 'agent_execute';
     agentRun.mainAssistantId = activeExecution.agent.id;
     upsertRunNode(agentRun, {
@@ -224,6 +266,16 @@ export async function runAssistantHarness(options: RunAssistantHarnessOptions): 
       settings: executionProfile
     });
     throwIfAborted(abortSignal);
+    const verification = verifyHarnessResult({
+      activeExecution,
+      grounded,
+      invocationPlan,
+      plan,
+      snapshot
+    });
+    if (verification.errors.length > 0) {
+      throw new AssistantVerificationError(verification.errors);
+    }
     verifyGroundedProposals({
       composerSnapshot,
       history: conversationHistory,
@@ -296,44 +348,6 @@ export async function runAssistantHarness(options: RunAssistantHarnessOptions): 
       : undefined;
     throw new AssistantHarnessError(message, agentRun, error, failedTask);
   }
-}
-
-function modelDrivenPlan(
-  question: string,
-  contextPlan: AssistantContextPlan | null | undefined,
-  snapshot: AssistantContextSnapshot
-): AssistantTaskPlan {
-  const activeNoteSnapshot = snapshot.active_note;
-  return {
-    attachments: contextPlan?.items ?? [],
-    capabilities: [
-      'read_document', 'read_note', 'search_evidence', 'synthesize',
-      'propose_note', 'propose_entry_meta_change', 'propose_tag_change'
-    ],
-    citationPolicy: 'preserve',
-    confidence: 1,
-    deliverables: ['chat_answer'],
-    evidencePolicy: 'optional',
-    intent: 'general_qa',
-    missing: [],
-    needsCurrentNote: false,
-    needsDocumentContext: false,
-    needsNoteProposal: false,
-    needsSegmentSearch: false,
-    rationale: 'Semantic routing is delegated to the Agent policy.',
-    request: question,
-    target: activeNoteSnapshot
-      ? {
-          entryId: activeNoteSnapshot.entry_id,
-          kind: 'markdown_note',
-          noteId: activeNoteSnapshot.note_id
-        }
-      : {
-          entryId: snapshot.active_entry?.entry_id,
-          kind: 'chat_only'
-        },
-    steps: []
-  };
 }
 
 export function modelDrivenBrief({
@@ -453,7 +467,7 @@ function recordNode(
   onToolEvent: ((event: AssistantToolTraceEvent) => void) | undefined,
   event: {
     id: string;
-    kind: 'hydrate' | 'observe';
+    kind: 'hydrate' | 'observe' | 'planner';
     sourceCount?: number;
     summary: string;
     title: string;

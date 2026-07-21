@@ -1,12 +1,13 @@
 import { generateText } from 'ai';
 
-import { readEntryAssistantContext } from '@/shared/ipc/assistantApi';
-import type {
-  AssistantContextSnapshot,
-  ConversationMessage,
-  ConversationSourceLink,
-  LlmProfile,
-  ScopeSnapshot
+import {
+  isLocalConversationSource,
+  readEntryAssistantContext,
+  type AssistantContextSnapshot,
+  type ConversationMessage,
+  type ConversationSourceLink,
+  type LlmProfile,
+  type ScopeSnapshot
 } from '@/shared/ipc/assistantApi';
 import { readNote } from '@/shared/ipc/workspaceApi';
 import type {
@@ -153,6 +154,7 @@ async function collectNoteEvidence({
   const seen = new Set<string>();
 
   for (const source of seedEvidence) {
+    if (!isLocalConversationSource(source)) continue;
     const key = `segment:${source.entry_id}:${source.segment_uid}`;
     if (seen.has(key)) continue;
     seen.add(key);

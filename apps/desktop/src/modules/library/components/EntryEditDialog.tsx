@@ -1,4 +1,5 @@
-import { Loader2, Save, X } from 'lucide-react';
+import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
+import { CopyPlus, FilePlus2, Loader2, Save, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -33,6 +34,9 @@ type EntryEditDialogProps = {
   open: boolean;
   tags: TagMeta[];
   onOpenChange: (open: boolean) => void;
+  onAttachPdf?: (entryId: string, pdfPath: string) => Promise<void> | void;
+  onCreatePdfVersion?: (entryId: string, pdfPath: string) => Promise<void> | void;
+  onImportMineruClientResult?: (entryId: string, zipPath: string) => Promise<unknown> | unknown;
   onUpdateEntry: (
     entryId: string,
     request: {
@@ -48,12 +52,17 @@ export function EntryEditDialog({
   open,
   tags,
   onOpenChange,
+  onAttachPdf,
+  onCreatePdfVersion,
+  onImportMineruClientResult,
   onUpdateEntry
 }: EntryEditDialogProps) {
   const { notify } = useToast();
   const [saving, setSaving] = useState(false);
+  const [pdfAction, setPdfAction] = useState<'attach' | 'version' | null>(null);
+  const [importingMineru, setImportingMineru] = useState(false);
   const [title, setTitle] = useState(entry.title);
-  const [description, setDescription] = useState(entry.fields.description ?? '');
+  const [description, setDescription] = useState(entry.fields.description ?? entry.fields['描述'] ?? '');
   const [fields, setFields] = useState<EntryFieldDraft[]>(() =>
     fieldsFromRecord(entry.fields)
   );
@@ -64,7 +73,7 @@ export function EntryEditDialog({
   );
   const dirty =
     title !== entry.title ||
-    description !== (entry.fields.description ?? '') ||
+    description !== (entry.fields.description ?? entry.fields['描述'] ?? '') ||
     tagInput !== entry.tags.join(', ') ||
     JSON.stringify(fieldsToRecord(fields)) !==
       JSON.stringify(fieldsToRecord(fieldsFromRecord(entry.fields)));
@@ -75,7 +84,7 @@ export function EntryEditDialog({
     }
 
     setTitle(entry.title);
-    setDescription(entry.fields.description ?? '');
+    setDescription(entry.fields.description ?? entry.fields['描述'] ?? '');
     setFields(fieldsFromRecord(entry.fields));
     setTagInput(entry.tags.join(', '));
   }, [entry, open]);
@@ -90,7 +99,9 @@ export function EntryEditDialog({
       await onUpdateEntry(entry.id, {
         title: title.trim(),
         fields: {
-          ...fieldsToRecord(fields),
+          ...Object.fromEntries(
+            Object.entries(fieldsToRecord(fields)).filter(([key]) => key !== '描述')
+          ),
           ...(description.trim() ? { description: description.trim() } : {})
         },
         tagPaths: selectedTagPaths
@@ -108,9 +119,54 @@ export function EntryEditDialog({
     }
   };
 
+  const choosePdf = async () => {
+    const action = entry.pdfFileName ? 'version' : 'attach';
+    const handler = action === 'attach' ? onAttachPdf : onCreatePdfVersion;
+    if (!handler || pdfAction) return;
+
+    const selected = await openFileDialog({
+      directory: false,
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      multiple: false
+    });
+    if (typeof selected !== 'string') return;
+
+    setPdfAction(action);
+    try {
+      await handler(entry.id, selected);
+      notify({
+        tone: 'success',
+        title: action === 'attach' ? 'PDF 已加入并开始解析' : '已创建新版 PDF 条目'
+      });
+    } catch (caught) {
+      notify({
+        tone: 'danger',
+        title: action === 'attach' ? '上传 PDF 失败' : '创建新版 PDF 失败',
+        description: caught instanceof Error ? caught.message : String(caught)
+      });
+    } finally {
+      setPdfAction(null);
+    }
+  };
+
+  const chooseMineruResult = async () => {
+    if (!entry.pdfFileName || !onImportMineruClientResult || importingMineru) return;
+    const selected = await openFileDialog({ directory: false, filters: [{ name: 'MinerU 客户端结果', extensions: ['zip'] }], multiple: false });
+    if (typeof selected !== 'string') return;
+    setImportingMineru(true);
+    try {
+      await onImportMineruClientResult(entry.id, selected);
+      notify({ tone: 'success', title: 'MinerU 客户端结果已导入' });
+    } catch (caught) {
+      notify({ tone: 'danger', title: '导入 MinerU 客户端结果失败', description: caught instanceof Error ? caught.message : String(caught) });
+    } finally {
+      setImportingMineru(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[min(46rem,calc(100vh-2rem))] overflow-hidden sm:max-w-2xl">
+      <DialogContent className="flex max-h-[min(46rem,calc(100vh-2rem))] flex-col overflow-hidden sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>编辑条目</DialogTitle>
           <DialogDescription>
@@ -118,7 +174,7 @@ export function EntryEditDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid max-h-[calc(100vh-12rem)] gap-4 overflow-auto pr-1">
+        <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto pr-1">
           <div className="grid gap-2">
             <Label htmlFor="entry-edit-title">标题</Label>
             <Input
@@ -138,6 +194,29 @@ export function EntryEditDialog({
               onChange={(event) => setDescription(event.target.value)}
             />
           </div>
+
+          {onAttachPdf && onCreatePdfVersion ? (
+            <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/25 px-3 py-2.5">
+              <div className="min-w-0">
+                <Label className="text-sm">PDF 文件</Label>
+                <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
+                  {entry.pdfFileName
+                    ? `当前文件：${entry.pdfFileName}。新版会创建为独立条目，原文件不会被覆盖。`
+                    : '尚未上传 PDF。选择后将自动导入并开始解析。'}
+                </p>
+              </div>
+              <Button disabled={pdfAction !== null} size="sm" type="button" variant="outline" onClick={() => void choosePdf()}>
+                {pdfAction ? <Loader2 className="animate-spin" size={14} /> : entry.pdfFileName ? <CopyPlus size={14} /> : <FilePlus2 size={14} />}
+                {entry.pdfFileName ? '创建新版 PDF' : '上传 PDF'}
+              </Button>
+            </div>
+          ) : null}
+          {entry.pdfFileName && onImportMineruClientResult ? (
+            <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/25 px-3 py-2.5">
+              <div className="min-w-0"><Label className="text-sm">MinerU 客户端结果</Label><p className="mt-0.5 text-xs leading-5 text-muted-foreground">导入包含 content_list、images 等产物的完整 ZIP；将替换当前解析结果，不会覆盖 PDF。</p></div>
+              <Button disabled={importingMineru} size="sm" type="button" variant="outline" onClick={() => void chooseMineruResult()}>{importingMineru ? <Loader2 className="animate-spin" size={14} /> : <FilePlus2 size={14} />}从客户端导入</Button>
+            </div>
+          ) : null}
 
           <div className="grid gap-2">
             <Label htmlFor="entry-edit-tags">标签</Label>
@@ -177,7 +256,7 @@ export function EntryEditDialog({
           <EntryFieldsEditor fields={fields} onFieldsChange={setFields} />
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="shrink-0 border-t pt-4">
           <Button
             disabled={saving}
             type="button"

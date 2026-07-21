@@ -21,6 +21,8 @@ const DEFAULT_MAIN_TOOL_IDS: AgentToolId[] = [
   'search_segments',
   'read_segment_content',
   'read_entry_assistant_context',
+  'search_sciverse_evidence',
+  'read_sciverse_content',
   'read_current_note',
   'read_note',
   'note.propose_create',
@@ -37,6 +39,8 @@ const EVIDENCE_TOOL_IDS: AgentToolId[] = [
   'search_segments',
   'read_segment_content',
   'read_entry_assistant_context',
+  'search_sciverse_evidence',
+  'read_sciverse_content',
   'skill.search',
   'skill.load'
 ];

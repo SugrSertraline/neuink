@@ -28,6 +28,12 @@ export function setMarkdownNoteDirty(
   }
 }
 
+// A successful persisted save is the canonical clean point for every mounted
+// view of the same note. Old panes may otherwise retain a stale owner token.
+export function clearMarkdownNoteDirty(entryId: string, noteId: string) {
+  dirtyNoteOwners.delete(noteKey(entryId, noteId));
+}
+
 export function hasUnsavedMarkdownNote(entryId: string, noteId: string) {
   return (dirtyNoteOwners.get(noteKey(entryId, noteId))?.size ?? 0) > 0;
 }
