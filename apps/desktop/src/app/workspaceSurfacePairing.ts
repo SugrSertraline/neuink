@@ -1,4 +1,4 @@
-import type { WorkspaceSurface } from './workspaceSurface';
+import { surfaceNoteTarget, type WorkspaceSurface } from './workspaceSurface';
 
 export type WorkspaceReaderSurfaceKind = 'pdf' | 'reflow';
 
@@ -35,14 +35,14 @@ export function resolveWorkspaceSurfacePair(
   ) {
     relation = 'record-sync';
   } else if (
-    (leftReader && right.kind === 'note') ||
-    (rightReader && left.kind === 'note')
+    (leftReader && surfaceNoteTarget(right)) ||
+    (rightReader && surfaceNoteTarget(left))
   ) {
     // A note may intentionally collect evidence from another entry.
     relation = 'citation';
   } else if (
-    (left.kind === 'source-links' && right.kind === 'note') ||
-    (right.kind === 'source-links' && left.kind === 'note')
+    (left.kind === 'source-links' && surfaceNoteTarget(right)) ||
+    (right.kind === 'source-links' && surfaceNoteTarget(left))
   ) {
     relation = 'backlink-navigation';
   } else if (
@@ -65,8 +65,8 @@ export function workspaceSurfacePairRelationLabel(relation: WorkspaceSurfacePair
     case 'reader-sync': return '阅读位置双向联动';
     case 'record-sync': return '原文与片段记录联动';
     case 'citation': return '原文与笔记引用联动';
-    case 'backlink-navigation': return '来源链接与笔记导航联动';
-    case 'source-navigation': return '来源链接与原文定位联动';
+    case 'backlink-navigation': return '引用清单与笔记导航联动';
+    case 'source-navigation': return '引用清单与原文定位联动';
     case 'independent': return null;
   }
 }

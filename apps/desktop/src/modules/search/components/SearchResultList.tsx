@@ -108,18 +108,14 @@ export function SearchResultList({
                 return (
                   <HoverCard
                     key={key}
-                    closeDelay={120}
-                    openDelay={180}
                   >
                     <HoverCardTrigger asChild>
                       <div className="block">{item}</div>
                     </HoverCardTrigger>
                     <HoverCardContent
                       align="start"
-                      className="w-[min(30rem,calc(100vw-2rem))] shadow-2xl"
-                      collisionPadding={12}
+                      className="w-[30rem]"
                       side="right"
-                      sideOffset={8}
                       sticky="always"
                     >
                       <SearchResultPreview

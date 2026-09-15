@@ -140,12 +140,13 @@ export function clampSidebarWidth(value: number) {
   return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(value)));
 }
 
-export function readStoredSidebarWidth() {
+export function readStoredSidebarWidth(key = SIDEBAR_WIDTH_STORAGE_KEY, fallback = DEFAULT_SIDEBAR_WIDTH) {
   if (typeof window === 'undefined') {
-    return DEFAULT_SIDEBAR_WIDTH;
+    return fallback;
   }
-  const saved = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
-  return Number.isFinite(saved) ? clampSidebarWidth(saved) : DEFAULT_SIDEBAR_WIDTH;
+  const raw = window.localStorage.getItem(key);
+  const saved = raw === null ? NaN : Number(raw);
+  return Number.isFinite(saved) ? clampSidebarWidth(saved) : fallback;
 }
 
 export function readStoredBoolean(key: string, fallback: boolean) {
@@ -157,7 +158,7 @@ export function readStoredBoolean(key: string, fallback: boolean) {
 export function readStoredSidePanel(): SidePanel {
   if (typeof window === 'undefined') return 'library';
   const value = window.localStorage.getItem(SIDE_PANEL_STORAGE_KEY);
-  return value === 'assistant' || value === 'search' || value === 'library' ? value : 'library';
+  return value === 'assistant' || value === 'search' || value === 'library' || value === 'same-tag' ? value : 'library';
 }
 
 export function readStoredLibraryView(): LibraryView {

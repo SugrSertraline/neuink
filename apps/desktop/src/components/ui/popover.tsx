@@ -4,6 +4,7 @@ import * as React from "react"
 import { Popover as PopoverPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
+import { ViewportOverlay } from "./viewport-overlay"
 
 function Popover({
   ...props
@@ -20,14 +21,18 @@ function PopoverTrigger({
 function PopoverContent({
   className,
   container,
+  viewportAligned,
   align = "center",
   sideOffset = 4,
   ...props
 }: React.ComponentProps<typeof PopoverPrimitive.Content> & {
   container?: HTMLElement | null
+  /** Account for CSS UI scaling; nested popovers inherit this opt-in. */
+  viewportAligned?: boolean
 }) {
   return (
     <PopoverPrimitive.Portal container={container}>
+      <ViewportOverlay enabled={viewportAligned}>
       <PopoverPrimitive.Content
         data-slot="popover-content"
         align={align}
@@ -38,6 +43,7 @@ function PopoverContent({
         )}
         {...props}
       />
+      </ViewportOverlay>
     </PopoverPrimitive.Portal>
   )
 }

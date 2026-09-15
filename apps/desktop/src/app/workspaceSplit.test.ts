@@ -4,7 +4,8 @@ import {
   clampWorkspaceSplitLeftWidth,
   getWorkspaceSplitMinimums,
   getWorkspaceSplitWidthBounds,
-  WORKSPACE_SPLIT_DIVIDER_WIDTH
+  WORKSPACE_SPLIT_DIVIDER_WIDTH,
+  WORKSPACE_SPLIT_MIN_RESIZE_RANGE
 } from './workspaceSplit';
 
 describe('workspace split sizing', () => {
@@ -33,15 +34,24 @@ describe('workspace split sizing', () => {
     expect(clampWorkspaceSplitLeftWidth(120, 1000, noteOnLeft)).toBe(224);
   });
 
-  it('shrinks panes proportionally instead of clipping a narrow workspace', () => {
+  it('shrinks panes proportionally while keeping the divider operable in a narrow workspace', () => {
     const containerWidth = 500;
     const minimums = { left: 224, right: 320 };
     const bounds = getWorkspaceSplitWidthBounds(containerWidth, minimums);
-    const left = clampWorkspaceSplitLeftWidth(900, containerWidth, minimums);
-    const right = containerWidth - WORKSPACE_SPLIT_DIVIDER_WIDTH - left;
+    const leftAtMinimum = clampWorkspaceSplitLeftWidth(0, containerWidth, minimums);
+    const leftAtMaximum = clampWorkspaceSplitLeftWidth(900, containerWidth, minimums);
+    const rightAtMaximum = containerWidth - WORKSPACE_SPLIT_DIVIDER_WIDTH - leftAtMaximum;
 
-    expect(bounds).toEqual({ minLeftWidth: 201, maxLeftWidth: 201 });
-    expect(left).toBe(201);
-    expect(right).toBe(289);
+    expect(bounds).toEqual({ minLeftWidth: 162, maxLeftWidth: 258 });
+    expect(leftAtMaximum - leftAtMinimum).toBe(WORKSPACE_SPLIT_MIN_RESIZE_RANGE);
+    expect(rightAtMaximum).toBe(232);
+  });
+
+  it('keeps useful horizontal travel when target minimums only just fit', () => {
+    const bounds = getWorkspaceSplitWidthBounds(650);
+
+    expect(bounds).toEqual({ minLeftWidth: 272, maxLeftWidth: 368 });
+    expect(clampWorkspaceSplitLeftWidth(280, 650)).toBe(280);
+    expect(clampWorkspaceSplitLeftWidth(350, 650)).toBe(350);
   });
 });

@@ -1,3 +1,5 @@
+import { buildSegmentNoteLookup } from './pdf-reader/segmentNoteLookup';
+import { useReadingSession } from '../parallel-reading/ReadingSessionContext';
 import { AlertTriangle, Loader2 } from "lucide-react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -97,6 +99,7 @@ import {
 } from "./segmentEditorDirtyRegistry";
 import { translateTextSelection } from "../translation/entryTranslation";
 import { TranslationTaskDialog } from "../translation/TranslationTaskDialog";
+import { PaperExportDialog } from "../export/PaperExportDialog";
 import { UnsavedSegmentChangesDialog } from "./pdf-reader/UnsavedSegmentChangesDialog";
 
 type MineruPdfReaderProps = {
@@ -222,7 +225,7 @@ export function MineruPdfReader({
   editorScopeKey,
   workspaceRoot,
   markdownNoteRefreshById,
-  jumpRequest,
+  jumpRequest: externalJumpRequest,
   recordReloadKey,
   reloadKey,
   pairedMarkdownNoteTarget,
@@ -275,10 +278,13 @@ export function MineruPdfReader({
     recordReloadKey,
     reloadKey,
   });
+  const readingSession = useReadingSession();
+  const jumpRequest = readingSession?.jump ?? externalJumpRequest;
   const [hoveredSegmentUid, setHoveredSegmentUid] = useState<string | null>(
     null,
   );
   const [notePaneOpen, setNotePaneOpen] = useState(false);
+  const [paperExportOpen, setPaperExportOpen] = useState(false);
   const [segmentOverlayOpen, setSegmentOverlayOpen] = useState(false);
   const [confirmSegmentCloseOpen, setConfirmSegmentCloseOpen] = useState(false);
   const [segmentCloseBusy, setSegmentCloseBusy] = useState(false);
@@ -339,20 +345,7 @@ export function MineruPdfReader({
     segments,
     workspaceRoot,
   });
-  const notesBySegmentUid = useMemo(() => {
-    const next = new Map<string, SegmentBlockNote>();
-    for (const note of segmentNotes) {
-      if (!hasNoteText(note.text)) {
-        continue;
-      }
-      next.set(note.segment_uid, note);
-      const segment = segments.find((candidate) => candidate.uid === note.segment_uid);
-      if (segment) {
-        next.set(logicalSegmentUid(segment), note);
-      }
-    }
-    return next;
-  }, [segmentNotes, segments]);
+  const notesBySegmentUid = useMemo(() => buildSegmentNoteLookup(segmentNotes, segments), [segmentNotes, segments]);
   const annotationsBySegmentUid = useMemo(() => {
     const next = new Map<string, Annotation[]>();
     for (const annotation of annotations) {
@@ -413,7 +406,7 @@ export function MineruPdfReader({
   // A workspace-paired note is the visible citation target. Keeping the older
   // embedded note pane open at the same time creates a third pane and makes the
   // insertion target ambiguous.
-  const globalNotePaneOpen = notePaneOpen && Boolean(globalNote) && !pairedMarkdownNoteTarget;
+  const globalNotePaneOpen = notePaneOpen && Boolean(globalNote) && !pairedMarkdownNoteTarget && !readingSession;
   const pendingSourceLinkForGlobalNote =
     globalNote &&
     sidePaneNoteTarget &&
@@ -914,8 +907,9 @@ export function MineruPdfReader({
   );
 
   const sourceLinkHint =
-    activeMarkdownNoteTarget
+    activeMarkdownNoteTarget || readingSession?.note
       ? undefined
+      : readingSession ? '点击顶部“笔记”，打开可编辑的文档笔记后添加来源。'
       : globalNote
         ? "要添加到笔记，请在左侧用分屏按钮打开笔记。"
         : "要添加到笔记，请先在左侧新建笔记，并用分屏按钮打开。";
@@ -1106,6 +1100,7 @@ export function MineruPdfReader({
         searchStatus={pdfTextSearch.status}
         onCurrentPageChange={goToPageNumber}
         onExportTranslation={() => void exportTranslation()}
+        onExportPaper={() => setPaperExportOpen(true)}
         onApplyRecommendedTags={() => void applyRecommendedTags()}
         onDismissRecommendedTags={dismissTagSuggestions}
         onRecommendedTagToggle={toggleRecommendedTag}
@@ -1130,7 +1125,16 @@ export function MineruPdfReader({
         }
       />
 
+      <PaperExportDialog
+        entryId={entry.id}
+        entryTitle={entry.title}
+        workspaceRoot={workspaceRoot}
+        open={paperExportOpen}
+        onOpenChange={setPaperExportOpen}
+        onCreateTranslationNote={!translationBusy && translation ? exportTranslation : undefined}
+      />
       <TranslationTaskDialog
+        exportContext={{ entryId: entry.id, entryTitle: entry.title, workspaceRoot }}
         busy={translationBusy || translatingSegmentUid !== null}
         detail={translationDetail}
         message={translationMessage}
@@ -1298,7 +1302,7 @@ export function MineruPdfReader({
             searchQuery={pdfTextSearch.query}
             pageWidth={pageWidth}
             leftInset={PDF_RAIL_WIDTH}
-            hoverPreviewEnabled={readerPreferences.hoverPreviewEnabled}
+            hoverPreviewEnabled={readerPreferences.hoverPreviewEnabled && !readingSession?.resizing}
             hoverPreviewFontSize={readerPreferences.pdfHoverPreviewFontSize}
             hoverPreviewSize={readerPreferences.pdfHoverPreviewSize}
             hoverPreviewShowRegion={readerPreferences.hoverPreviewShowRegion}
@@ -1314,7 +1318,7 @@ export function MineruPdfReader({
             showRegions={readerPreferences.showRegions}
             sourceLinkHint={sourceLinkHint}
             sourceBacklinksBySegmentUid={sourceBacklinksBySegmentUid}
-            suppressRegions={zoomSuppressRegions}
+            suppressRegions={zoomSuppressRegions || Boolean(readingSession?.resizing)}
             translationBySegmentUid={translationBySegmentUid}
             translationStatus={translation?.status ?? null}
             translationMode={translationMode}
@@ -1332,10 +1336,10 @@ export function MineruPdfReader({
             onCopyContent={copyContent}
             onCopySourceLink={copySourceLink}
             onInsertSegmentImage={
-              activeMarkdownNoteTarget ? insertSegmentImageIntoMarkdownNote : undefined
+              !readingSession && activeMarkdownNoteTarget ? insertSegmentImageIntoMarkdownNote : undefined
             }
             onTranslateSegment={!translationBusy ? translateSingleSegment : undefined}
-            onAddSourceLink={activeMarkdownNoteTarget ? createSourceLinkForMarkdownNote : undefined}
+            onAddSourceLink={readingSession ? (readingSession.note ? createSourceLinkForMarkdownNote : undefined) : activeMarkdownNoteTarget ? createSourceLinkForMarkdownNote : undefined}
             onAddAssistantContext={addSegmentToAssistantContext}
             onCloseSegmentOverlay={() => {
               if (readerPreferences.closeSegmentOverlayOnBlankClick) {

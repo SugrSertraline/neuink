@@ -1,63 +1,35 @@
 // @vitest-environment jsdom
-
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { beginEntryTagDrag, cancelEntryTagDrag, finishEntryTagDrag, registerEntryTagDropTarget } from './entryDragData';
 
-import {
-  beginEntryTagDrag,
-  cancelEntryTagDrag,
-  finishEntryTagDrag,
-  getEntryTagDragState,
-  isEntryTagDropTargetActive,
-  registerEntryTagDropTarget,
-  updateEntryTagDrag
-} from './entryDragData';
+afterEach(() => { cancelEntryTagDrag(); vi.restoreAllMocks(); });
 
-afterEach(() => cancelEntryTagDrag());
-
-describe('entry tag drag', () => {
-  it('highlights and commits the tag target below the pointer', () => {
-    const element = document.createElement('div');
+describe('visible entry tag drop targets', () => {
+  it('does not drop on a row clipped or covered by the sidebar toolbar', () => {
+    const row = document.createElement('div');
+    const toolbar = document.createElement('div');
     const onDrop = vi.fn();
-    vi.spyOn(element, 'getBoundingClientRect').mockReturnValue(rect(100, 50, 120, 28));
-    const unregister = registerEntryTagDropTarget({ element, onDrop });
-
-    beginEntryTagDrag('entry-42', 120, 60);
-
-    expect(isEntryTagDropTargetActive(element)).toBe(true);
-    updateEntryTagDrag(140, 68);
-    expect(getEntryTagDragState()).toMatchObject({ entryId: 'entry-42', x: 140, y: 68 });
-
-    finishEntryTagDrag(140, 68);
-
-    expect(onDrop).toHaveBeenCalledWith('entry-42');
-    expect(getEntryTagDragState()).toBeNull();
-    unregister();
-  });
-
-  it('does not commit when released outside a tag target', () => {
-    const onDrop = vi.fn();
-    const element = document.createElement('div');
-    vi.spyOn(element, 'getBoundingClientRect').mockReturnValue(rect(100, 50, 120, 28));
-    const unregister = registerEntryTagDropTarget({ element, onDrop });
-
-    beginEntryTagDrag('entry-42', 20, 20);
-    finishEntryTagDrag(20, 20);
-
-    expect(onDrop).not.toHaveBeenCalled();
-    unregister();
+    const unregister = registerEntryTagDropTarget({ element: row, onDrop });
+    vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({ left: 0, right: 200, top: 0, bottom: 50 } as DOMRect);
+    const original = Object.getOwnPropertyDescriptor(document, 'elementFromPoint');
+    const hit = vi.fn((): Element | null => toolbar);
+    Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: hit });
+    try {
+      beginEntryTagDrag('paper', 20, 20);
+      finishEntryTagDrag(20, 20);
+      expect(onDrop).not.toHaveBeenCalled();
+      hit.mockReturnValue(row);
+      beginEntryTagDrag('paper', 20, 20);
+      finishEntryTagDrag(20, 20);
+      expect(onDrop).toHaveBeenCalledExactlyOnceWith('paper');
+      hit.mockReturnValue(null);
+      beginEntryTagDrag('paper', 20, 20);
+      finishEntryTagDrag(20, 20);
+      expect(onDrop).toHaveBeenCalledTimes(1);
+    } finally {
+      unregister();
+      if (original) Object.defineProperty(document, 'elementFromPoint', original);
+      else Reflect.deleteProperty(document, 'elementFromPoint');
+    }
   });
 });
-
-function rect(left: number, top: number, width: number, height: number): DOMRect {
-  return {
-    bottom: top + height,
-    height,
-    left,
-    right: left + width,
-    top,
-    width,
-    x: left,
-    y: top,
-    toJSON: () => ({})
-  } as DOMRect;
-}

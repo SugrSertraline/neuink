@@ -45,6 +45,10 @@ export function useSegmentNoteDraft({
   const lastSharedDraftRef = useRef<{ segmentUid: string; text: string | undefined } | null>(null);
 
   const noteDirty = selectedSegment !== null && noteText !== savedNoteText;
+  const savingRef = useRef(false);
+  const liveDraft = useRef({ entryId, segmentUid: selectedSegment ? logicalSegmentUid(selectedSegment) : null, text: noteText, baseline: savedNoteText });
+  liveDraft.current = { entryId, segmentUid: selectedSegment ? logicalSegmentUid(selectedSegment) : null, text: noteText, baseline: savedNoteText };
+  const isDirty = () => savingRef.current || (liveDraft.current.segmentUid !== null && liveDraft.current.text !== liveDraft.current.baseline);
 
   const resetDraft = () => {
     setSelectedSegment(null);
@@ -61,7 +65,7 @@ export function useSegmentNoteDraft({
 
   const saveNote = useCallback(
     async () => {
-      if (!selectedSegment || !noteDirty || noteBusy) {
+      if (!selectedSegment || !noteDirty || savingRef.current) {
         return null;
       }
 
@@ -71,6 +75,7 @@ export function useSegmentNoteDraft({
         return null;
       }
 
+      savingRef.current = true;
       setNoteBusy(true);
 
       try {
@@ -80,15 +85,19 @@ export function useSegmentNoteDraft({
           segmentUid,
           noteText,
         );
+        if (liveDraft.current.entryId !== entryId || liveDraft.current.segmentUid !== segmentUid) return null;
+        const unchanged = liveDraft.current.text === noteText;
+        liveDraft.current.baseline = noteText;
         onSegmentNotesSaved?.(nextNotes);
         setSavedNoteText(noteText);
-        onSharedDraftChange?.(segmentUid, null);
+        // Only clear the saved snapshot, never text entered while the request was pending.
+        if (unchanged) onSharedDraftChange?.(segmentUid, null);
         notify({
           tone: "success",
           title: "已保存",
           description: "片段笔记已更新",
         });
-        return nextNotes;
+        return unchanged ? nextNotes : null;
       } catch (caught) {
         notify({
           tone: "danger",
@@ -97,6 +106,7 @@ export function useSegmentNoteDraft({
         });
         return null;
       } finally {
+        savingRef.current = false;
         setNoteBusy(false);
       }
     },
@@ -122,7 +132,7 @@ export function useSegmentNoteDraft({
     }
     if (
       selectedSegment &&
-      noteDirty &&
+      (noteDirty || noteBusy) &&
       logicalSegmentUid(selectedSegment) !== logicalSegmentUid(segment)
     ) {
       notify({
@@ -145,6 +155,7 @@ export function useSegmentNoteDraft({
   };
 
   const updateNoteText = (value: string) => {
+    liveDraft.current.text = value;
     setNoteText(value);
     if (selectedSegment) {
       onSharedDraftChange?.(logicalSegmentUid(selectedSegment), value);
@@ -173,7 +184,7 @@ export function useSegmentNoteDraft({
   }, [noteBusy, noteDirty, noteText, notesBySegmentUid, selectedSegment, sharedDrafts]);
 
   useEffect(() => {
-    if (!selectedSegment || noteBusy) {
+    if (!selectedSegment) {
       return;
     }
     const sharedDraft = sharedDrafts?.[logicalSegmentUid(selectedSegment)];
@@ -192,18 +203,19 @@ export function useSegmentNoteDraft({
 
   useEffect(() => {
     if (!draftScopeKey) return;
-    setSegmentEditorDirty(draftScopeKey, ownerId, noteDirty);
+    setSegmentEditorDirty(draftScopeKey, ownerId, noteDirty || noteBusy);
     return () => setSegmentEditorDirty(draftScopeKey, ownerId, false);
-  }, [draftScopeKey, noteDirty, ownerId]);
+  }, [draftScopeKey, noteDirty, noteBusy, ownerId]);
 
   useEffect(() => {
     if (!draftScopeKey) return;
     return registerSegmentEditorCloseHandler(draftScopeKey, ownerId, {
       discard: discardNote,
       save: async () => {
-        if (!noteDirty) return true;
+        if (!isDirty()) return true;
         return Boolean(await saveNote());
       },
+      isDirty,
     });
   }, [discardNote, draftScopeKey, noteDirty, ownerId, saveNote]);
 

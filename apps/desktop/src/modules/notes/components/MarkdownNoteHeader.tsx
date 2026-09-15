@@ -50,6 +50,7 @@ export function MarkdownNoteHeader({
   onRevealFile,
   onSave,
   onSaveAs,
+  onExport,
   onStartTitleEdit,
   onTakeOver,
   onUndo
@@ -79,6 +80,7 @@ export function MarkdownNoteHeader({
   onRevealFile: () => void;
   onSave: () => void;
   onSaveAs: () => void;
+  onExport?: () => void;
   onStartTitleEdit: () => void;
   onTakeOver: () => void;
   onUndo: () => void;
@@ -157,7 +159,7 @@ export function MarkdownNoteHeader({
                 {fileAction ? <Loader2 className="animate-spin" aria-hidden="true" /> : <MoreHorizontal aria-hidden="true" />}
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuContent viewportAligned align="end" className="w-48">
               {!canEdit && !loadFailed ? (
                 <DropdownMenuItem onSelect={onTakeOver}>在此处继续编辑</DropdownMenuItem>
               ) : null}
@@ -184,6 +186,9 @@ export function MarkdownNoteHeader({
               <DropdownMenuItem disabled={loadFailed} onSelect={onSaveAs}>
                 <FileDown aria-hidden="true" />另存为
               </DropdownMenuItem>
+              {onExport ? <DropdownMenuItem disabled={!workspaceAvailable || loadFailed} onSelect={onExport}>
+                <FileDown aria-hidden="true" />导出 Word / TXT
+              </DropdownMenuItem> : null}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -220,7 +225,7 @@ export function MarkdownNoteHeader({
               {fileAction ? <Loader2 className="animate-spin" aria-hidden="true" /> : <MoreHorizontal aria-hidden="true" />}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuContent viewportAligned align="end" className="w-44">
             <DropdownMenuItem disabled={!workspaceAvailable} onSelect={onOpenFile}>
               <ExternalLink aria-hidden="true" />打开 Markdown
             </DropdownMenuItem>
@@ -230,6 +235,9 @@ export function MarkdownNoteHeader({
             <DropdownMenuItem onSelect={onSaveAs}>
               <FileDown aria-hidden="true" />另存为
             </DropdownMenuItem>
+            {onExport ? <DropdownMenuItem disabled={!workspaceAvailable} onSelect={onExport}>
+              <FileDown aria-hidden="true" />导出 Word / TXT
+            </DropdownMenuItem> : null}
           </DropdownMenuContent>
         </DropdownMenu>
         <Button

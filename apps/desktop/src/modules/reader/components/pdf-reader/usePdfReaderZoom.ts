@@ -41,10 +41,6 @@ export function usePdfReaderZoom({
     setZoom(readStoredPdfZoom(entryId));
   }, [entryId]);
 
-  useEffect(() => {
-    writeStoredPdfZoom(entryIdRef.current, zoom);
-  }, [zoom]);
-
   useEffect(
     () => () => {
       if (suppressTimerRef.current !== null) {
@@ -79,6 +75,7 @@ export function usePdfReaderZoom({
         }
 
         beginZoomInteraction();
+        writeStoredPdfZoom(entryIdRef.current, nextZoom);
         if (anchor) {
           keepZoomAnchor(anchor, nextZoom / currentZoom);
         }
@@ -164,17 +161,23 @@ function readStoredPdfZoom(entryId: string) {
   if (typeof window === "undefined") {
     return 1;
   }
-  const saved = Number(window.localStorage.getItem(pdfZoomStorageKey(entryId)));
-  if (Number.isFinite(saved)) {
-    return clampZoom(saved);
-  }
-  const legacySaved = Number(window.localStorage.getItem(PDF_ZOOM_STORAGE_KEY));
-  return Number.isFinite(legacySaved) ? clampZoom(legacySaved) : 1;
+  try {
+    for (const key of [pdfZoomStorageKey(entryId), PDF_ZOOM_STORAGE_KEY]) {
+      const raw = window.localStorage.getItem(key);
+      // Number(null) is zero: missing preferences must mean fit-to-width, not 30%.
+      if (!raw?.trim()) continue;
+      const saved = Number(raw);
+      if (Number.isFinite(saved) && saved > 0) return clampZoom(saved);
+    }
+  } catch { /* Storage may be unavailable; fit-to-width remains usable. */ }
+  return 1;
 }
 
 function writeStoredPdfZoom(entryId: string, zoom: number) {
   if (typeof window === "undefined") {
     return;
   }
-  window.localStorage.setItem(pdfZoomStorageKey(entryId), String(clampZoom(zoom)));
+  try {
+    window.localStorage.setItem(pdfZoomStorageKey(entryId), String(clampZoom(zoom)));
+  } catch { /* Keep the in-memory preference when storage is unavailable. */ }
 }

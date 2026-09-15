@@ -95,11 +95,15 @@ export function TagEditorNode({
           />
         ) : (
           <button
+            aria-label={`打开标签 ${node.path}`}
             className="min-w-0 rounded-md px-2 py-1.5 text-left hover:bg-accent"
             style={{ marginLeft: node.depth * 14 }}
-            title={node.path}
+            title={`双击打开：${node.path}`}
             type="button"
-            onClick={() => onSelectTag(node.id)}
+            onClick={(event) => {
+              if (event.detail === 0) onSelectTag(node.id);
+            }}
+            onDoubleClick={() => onSelectTag(node.id)}
           >
             <span className="block truncate text-sm font-medium">{node.name}</span>
             <span className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">

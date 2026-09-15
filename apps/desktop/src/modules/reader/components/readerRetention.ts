@@ -4,7 +4,7 @@ export const HEAVY_READER_IDLE_UNMOUNT_MS = 5 * 60 * 1000;
 export const HEAVY_READER_SWEEP_INTERVAL_MS = 5 * 1000;
 
 export function isHeavyReaderSurface(surface: WorkspaceSurface) {
-  return surface.kind === 'pdf' || surface.kind === 'reflow';
+  return surface.kind === 'pdf' || surface.kind === 'reflow' || surface.kind === 'tag-reading';
 }
 
 export function hasHeavyReaderIdleExpired(inactiveSince: number, now: number) {

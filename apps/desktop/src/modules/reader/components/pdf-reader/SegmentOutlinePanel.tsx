@@ -181,14 +181,17 @@ function OutlineItems({
           style={{ paddingLeft: 6 + depth * 14 }}
         >
           {hasChildren ? (
-            <button
+            <Button
+              aria-expanded={!collapsed}
               aria-label={collapsed ? `展开 ${node.title}` : `收起 ${node.title}`}
-              className="grid size-6 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-muted"
+              className="text-muted-foreground"
+              size="icon-xs"
               type="button"
+              variant="ghost"
               onClick={() => onToggle(node.segment.uid)}
             >
               {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
-            </button>
+            </Button>
           ) : (
             <span className="w-6 shrink-0" />
           )}

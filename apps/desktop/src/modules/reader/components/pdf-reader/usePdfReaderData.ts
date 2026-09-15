@@ -32,13 +32,6 @@ export function usePdfReaderData({
   const previousRecordReloadKeyRef = useRef(recordReloadKey);
 
   useEffect(() => {
-    if (!entry.pdfFileName) {
-      setLoadState({ status: 'idle', data: null, error: null });
-      setSegmentNotes([]);
-      setAnnotations([]);
-      return undefined;
-    }
-
     let cancelled = false;
     setLoadState({ status: 'loading', data: null, error: null });
 
@@ -72,10 +65,6 @@ export function usePdfReaderData({
       return undefined;
     }
     previousRecordReloadKeyRef.current = recordReloadKey;
-
-    if (!entry.pdfFileName) {
-      return undefined;
-    }
 
     let cancelled = false;
     void onReadPdfReader(entry.id)

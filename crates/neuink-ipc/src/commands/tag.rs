@@ -63,6 +63,21 @@ pub fn rename_tag(request: RenameTagRequest) -> Result<TagMeta, String> {
         .map_err(|error| error.to_string())
 }
 
+#[derive(Debug, Deserialize)]
+pub struct UpdateTagDescriptionRequest {
+    pub root: PathBuf,
+    pub tag_id: TagId,
+    pub description: String,
+    pub expected_description: String,
+}
+
+#[tauri::command]
+pub fn update_tag_description(request: UpdateTagDescriptionRequest) -> Result<TagMeta, String> {
+    neuink_workspace::Workspace::open_existing(request.root)
+        .and_then(|workspace| workspace.update_tag_description(&request.tag_id, request.description, &request.expected_description))
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 pub fn delete_tag(request: DeleteTagRequest) -> Result<DeleteTagResponse, String> {
     let workspace =

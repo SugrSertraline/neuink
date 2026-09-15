@@ -6,6 +6,7 @@ import { Check, Copy, EyeOff, Link2, MessageCircle, StickyNote } from "lucide-re
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { Badge } from "@/components/ui/badge";
+import { hoverInteractionBlocked } from '@/components/ui/hover-interactions';
 import { cn } from "@/lib/utils";
 import {
   resolveMineruAssetUrl,
@@ -49,6 +50,7 @@ import {
 } from './ReflowSourcePreview';
 import {
   reflowGroupTextScale,
+  reflowGroupVisualSize,
   useReflowComponentPreferences
 } from './ReflowComponentPreferencesContext';
 
@@ -143,7 +145,7 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
     event: ReactMouseEvent<HTMLElement>,
     segment = segmentGroup.body,
   ) => {
-    if (!hoverPreviewEnabled) {
+    if (!hoverPreviewEnabled || event.buttons !== 0 || hoverInteractionBlocked()) {
       onPreviewChange(null);
       return;
     }
@@ -224,7 +226,7 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
       <div
         aria-hidden="true"
         className="absolute bottom-0 left-0 top-0 z-[1] w-12 -translate-x-12"
-        onMouseMove={(event) => event.stopPropagation()}
+        onMouseMove={(event) => { event.stopPropagation(); onPreviewChange(null); }}
       />
       <button
         className="pointer-events-none absolute left-0 top-4 z-[2] grid size-6 -translate-x-[calc(100%+0.75rem)] place-items-center rounded-sm border bg-background/95 text-muted-foreground opacity-0 shadow-sm ring-1 ring-foreground/5 transition-[opacity,background-color,color] duration-150 hover:bg-muted hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
@@ -234,7 +236,7 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
           event.stopPropagation();
           hideWithAnimation();
         }}
-        onMouseMove={(event) => event.stopPropagation()}
+        onMouseMove={(event) => { event.stopPropagation(); onPreviewChange(null); }}
       >
         <EyeOff size={13} aria-hidden="true" />
       </button>
@@ -347,9 +349,6 @@ function VisualReflowContent({
   onRequirePdfDocument: () => void;
 }) {
   const componentPreferences = useReflowComponentPreferences();
-  const visualPreference = segmentGroup.body.raw_type === 'chart'
-    ? componentPreferences.chart
-    : componentPreferences.figure;
   const bodyText = segmentGroup.body.markdown ?? segmentGroup.body.text;
 
   return (
@@ -357,7 +356,7 @@ function VisualReflowContent({
       <SegmentText
         entryId={entryId}
         imageDetailEnabled={componentPreferences.imageClickToOpen}
-        imageSize={visualPreference.size}
+        imageSize={reflowGroupVisualSize(segmentGroup, componentPreferences)}
         originalText={bodyText || segmentGroup.body.text}
         reflowTranslationMode={reflowTranslationMode}
         relatedImagePath={relatedImagePath}
@@ -691,7 +690,7 @@ function RoleText({
       style={{ fontSize: `${reflowTextSizeScale(componentPreferences.supportingText.size)}em` }}
       onMouseMove={(event) => {
         event.stopPropagation();
-        if (!hoverPreviewEnabled) {
+        if (!hoverPreviewEnabled || event.buttons !== 0 || hoverInteractionBlocked()) {
           onPreviewChange(null);
           return;
         }
@@ -891,7 +890,7 @@ function InteractiveListItems({
             data-reflow-list-item
             onMouseMove={(event) => {
               event.stopPropagation();
-              if (!hoverPreviewEnabled) {
+              if (!hoverPreviewEnabled || event.buttons !== 0 || hoverInteractionBlocked()) {
                 onPreviewChange(null);
                 return;
               }

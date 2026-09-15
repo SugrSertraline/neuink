@@ -493,6 +493,8 @@
 }
 
 .app-sidebar {
+  /* Radix scrollbars overlay by default; reserve their full width in every sidebar. */
+  --scroll-area-gutter: 0.625rem;
   position: relative;
   z-index: 60;
   grid-column: 2;
@@ -574,6 +576,12 @@
   background: var(--card);
   font-size: 12px;
   font-weight: 800;
+}
+
+.app-sidebar .overflow-auto,
+.app-sidebar .overflow-y-auto,
+.app-sidebar .overflow-y-scroll {
+  scrollbar-gutter: stable;
 }
 
 .side-body {

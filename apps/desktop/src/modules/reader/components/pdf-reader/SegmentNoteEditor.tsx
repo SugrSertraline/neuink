@@ -35,6 +35,8 @@ import {
   getSegmentNoteVisibleText
 } from './segmentNoteLimits';
 import { useStoredCollapseState } from './useStoredCollapseState';
+import { ReadingExportButton } from '../../export/ReadingExportButton';
+import { logicalSegmentUid } from './readerUtils';
 
 const SegmentMarkdownShortcuts = Extension.create({
   name: 'segmentMarkdownShortcuts',
@@ -182,6 +184,10 @@ export function SegmentNoteEditor({
           </div>
 
           <div className="flex shrink-0 items-center gap-1">
+            <ReadingExportButton entryId={sourceEntryId} workspaceRoot={workspaceRoot} compact
+              scope={{ kinds: ['segment_note'], segment_uids: segment ? [segment.uid, logicalSegmentUid(segment)] : [] }}
+              scopeLabel="导出当前片段笔记" disabled={!segment || busy || dirty || !hasNoteText(noteText)}
+              disabledReason={dirty ? '请先保存片段笔记再导出' : busy ? '请等待保存完成' : '当前片段没有已保存笔记'} preselectScope />
             {busy ? <Badge variant="outline">保存中</Badge> : null}
             {!busy && dirty ? <Badge variant="secondary">未保存</Badge> : null}
             {!busy && segment && !hasNoteText(noteText) ? (
@@ -296,6 +302,10 @@ export function SegmentNoteEditor({
 
               {translationPreviewText && !translationCollapsed ? (
                 <div className="mt-2 max-h-40 min-w-0 overflow-y-auto overscroll-contain rounded-md border bg-white px-2.5 py-2 text-xs leading-5 text-muted-foreground">
+                  <div className="mb-1 flex items-center justify-between gap-2"><span>已保存译文</span>
+                    <ReadingExportButton entryId={sourceEntryId} workspaceRoot={workspaceRoot} label="导出译文" scopeLabel="导出当前片段译文"
+                      scope={{ kinds: ['translation'], segment_uids: [segment.uid, logicalSegmentUid(segment)] }} preselectScope />
+                  </div>
                   <SourceSnapshotPreview
                     allowScroll={false}
                     compact

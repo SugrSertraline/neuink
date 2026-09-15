@@ -49,7 +49,7 @@ describe('TranslationTaskDialog', () => {
         '[data-slot="hover-card-content"]'
       );
       expect(preview).not.toBeNull();
-      expect(preview?.className).toContain('z-[var(--z-dialog-popover)]');
+      expect(preview?.closest('[data-slot="overlay-viewport"]')?.className).toContain('z-[var(--z-dialog-popover)]');
       expect(preview?.textContent).toContain('Preview source text');
     });
   });

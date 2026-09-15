@@ -20,7 +20,8 @@ import { createPortal } from 'react-dom';
 
 import { cn } from '@/lib/utils';
 import { useToast } from '@/shared/hooks/useToast';
-import type { NoteDocument, SourceLink } from '@/shared/types/domain';
+import { ReadingExportDialog } from '@/modules/reader/export/ReadingExportDialog';
+import type { NoteDocument, NoteOwner, SourceLink } from '@/shared/types/domain';
 
 import { CalloutBlock } from '../editor/CalloutBlock';
 import { DataTableNode } from '../editor/DataTableNode';
@@ -41,6 +42,7 @@ import { MarkdownNoteConflictPanel } from './MarkdownNoteConflictPanel';
 import { MarkdownNoteHeader } from './MarkdownNoteHeader';
 import { MarkdownNoteToolbar } from './MarkdownNoteToolbar';
 import { SourceLinksPanel } from './SourceLinksPanel';
+import { NoteSourcesProvider } from '../NoteSourcesContext';
 import { useMarkdownBlockDrag } from './useMarkdownBlockDrag';
 import {
   firstImageFromClipboard,
@@ -65,6 +67,9 @@ type InsertMenuState = {
 
 type MarkdownNoteEditorProps = {
   entryId: string;
+  noteOwner?: NoteOwner;
+  editorScopeKey?: string;
+  onWritableChange?: (writable: boolean) => void;
   entryTitle?: string;
   fallbackTitle: string;
   noteId: string;
@@ -94,6 +99,9 @@ type MarkdownNoteEditorProps = {
 
 export function MarkdownNoteEditor({
   entryId,
+  noteOwner,
+  editorScopeKey,
+  onWritableChange,
   entryTitle,
   fallbackTitle,
   noteId,
@@ -111,6 +119,7 @@ export function MarkdownNoteEditor({
   onOpenSourceLink
 }: MarkdownNoteEditorProps) {
   const { notify } = useToast();
+  const [exportOpen, setExportOpen] = useState(false);
   const [noteLinks, setNoteLinks] = useState<SourceLink[]>([]);
   const [insertMenu, setInsertMenu] = useState<InsertMenuState | null>(null);
   const suppressEditorUpdateRef = useRef(false);
@@ -133,7 +142,7 @@ export function MarkdownNoteEditor({
     pasteImageBusyRef,
     savePastedImage,
     selectAndInsertImage
-  } = useMarkdownNoteImages({ entryId, noteId, notify, workspaceRoot });
+  } = useMarkdownNoteImages({ entryId, noteOwner, noteId, notify, workspaceRoot });
 
   useEffect(() => {
     onOpenSourceLinkRef.current = onOpenSourceLink;
@@ -194,6 +203,7 @@ export function MarkdownNoteEditor({
       DataTableNode,
       NoteImage.configure({
         entryId,
+        noteOwner,
         noteId,
         workspaceRoot
       }),
@@ -217,11 +227,13 @@ export function MarkdownNoteEditor({
       Highlight.configure({ multicolor: true }),
       SourceLinkNode.configure({
         getPdfDocument: () => pdfDocumentRef.current,
-        onOpenSourceLink: (target: SourceLinkOpenTarget) => {
+        onOpenSourceLink: onOpenSourceLink ? (target: SourceLinkOpenTarget) => {
           onOpenSourceLinkRef.current?.(target);
-        },
+        } : null,
         snapshotAssetContext: {
           entryId,
+          entryTitle,
+          noteOwner,
           noteId,
           workspaceRoot
         }
@@ -286,7 +298,7 @@ export function MarkdownNoteEditor({
       transformPastedHTML: sanitizePastedNoteHtml
     },
     onUpdate: () => markEditorDirtyRef.current()
-  }, [entryId, noteId, savePastedImage, workspaceRoot]);
+  }, [entryId, noteId, noteOwner, savePastedImage, workspaceRoot]);
 
   const {
     acceptRemoteConflict,
@@ -312,6 +324,7 @@ export function MarkdownNoteEditor({
     updateDraftTitle
   } = useMarkdownNoteSession({
     editor,
+    editorScopeKey,
     editorRef,
     entryId,
     fallbackTitle,
@@ -325,6 +338,10 @@ export function MarkdownNoteEditor({
     workspaceRoot
   });
   markEditorDirtyRef.current = markEditorDirty;
+  useEffect(() => {
+    onWritableChange?.(canEdit && !loading && !loadFailed);
+    return () => onWritableChange?.(false);
+  }, [canEdit, loading, loadFailed, onWritableChange]);
 
   const {
     dragHandle,
@@ -527,6 +544,7 @@ export function MarkdownNoteEditor({
 
   const { fileAction, openMarkdownFile, revealMarkdownFile, saveMarkdownAs } =
     useMarkdownNoteFileActions({
+      noteOwner,
       dirty,
       editor,
       entryId,
@@ -539,17 +557,20 @@ export function MarkdownNoteEditor({
       workspaceRoot
     });
 
+  // A zero-minimum column is needed on every nested grid. min-w-0 on the
+  // container alone still lets long headers push the scroll owner offscreen.
   return (
+    <NoteSourcesProvider root={workspaceRoot} links={noteLinks}>
     <div
       className={cn(
-        'markdown-note-editor grid h-full w-full min-h-[560px] min-w-0 max-w-none',
-        compact && 'min-h-0'
+        'markdown-note-editor grid h-full w-full min-h-0 min-w-0 max-w-full grid-cols-1 grid-rows-[minmax(0,1fr)]',
+        editorScopeKey && 'markdown-note-editor-embedded'
       )}
       onKeyDownCapture={saveFromFocusedEditor}
     >
       <section
         className={cn(
-          'grid min-h-0 min-w-0 gap-3',
+          'grid min-h-0 min-w-0 grid-cols-1 gap-3',
           conflict
             ? 'grid-rows-[auto_auto_minmax(0,1fr)]'
             : 'grid-rows-[auto_minmax(0,1fr)]'
@@ -581,10 +602,12 @@ export function MarkdownNoteEditor({
           onRevealFile={() => void revealMarkdownFile()}
           onSave={() => void save()}
           onSaveAs={() => void saveMarkdownAs()}
+          onExport={() => setExportOpen(true)}
           onStartTitleEdit={startTitleEditing}
           onTakeOver={takeOverEditing}
           onUndo={() => editor?.chain().focus().undo().run()}
         />
+        <ReadingExportDialog entryId={entryId} tagId={noteOwner?.kind === 'tag_reading' ? noteOwner.tag_id : undefined} entryTitle={entryTitle ?? fallbackTitle} workspaceRoot={workspaceRoot} noteId={noteId} open={exportOpen} onOpenChange={setExportOpen} />
         {conflict ? (
           <MarkdownNoteConflictPanel
             conflict={conflict}
@@ -596,7 +619,7 @@ export function MarkdownNoteEditor({
         ) : null}
         <div
           className={cn(
-            'grid min-h-0 min-w-0',
+            'grid min-h-0 min-w-0 grid-cols-1',
             sourcePanelOpen && activeSourceLinks.length > 0
               ? 'grid-rows-[auto_auto_minmax(0,1fr)]'
               : 'grid-rows-[auto_minmax(0,1fr)]'
@@ -631,7 +654,7 @@ export function MarkdownNoteEditor({
           ) : null}
           <div
             ref={editorScrollRef}
-            className="relative min-h-0 min-w-0 overflow-x-hidden overflow-y-auto"
+            className="markdown-note-scroll relative w-full min-h-0 min-w-0 max-w-full overflow-x-hidden overflow-y-auto overscroll-contain [scrollbar-gutter:stable]"
             onContextMenu={handleEditorContextMenu}
             onMouseDownCapture={handleEditorMouseDownCapture}
             onMouseLeave={handleEditorMouseLeave}
@@ -703,7 +726,7 @@ export function MarkdownNoteEditor({
                 ) : null}
                 <EditorContent
                   className={cn(
-                    'min-w-0 max-w-full',
+                    'w-full min-w-0 max-w-full',
                     compact &&
                       '[&_.tiptap]:min-h-[360px] [&_.tiptap]:py-3 [&_.tiptap]:pr-3 [&_.tiptap]:pl-8'
                   )}
@@ -724,5 +747,6 @@ export function MarkdownNoteEditor({
         </div>
       </section>
     </div>
+    </NoteSourcesProvider>
   );
 }

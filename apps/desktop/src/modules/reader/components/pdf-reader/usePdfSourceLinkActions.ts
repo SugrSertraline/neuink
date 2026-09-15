@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useReadingSession } from '../../parallel-reading/ReadingSessionContext';
 
 import { useToast } from "@/shared/hooks/useToast";
 import { formatSourceLinkClipboardMarker } from "@/shared/lib/sourceLinkClipboard";
@@ -33,16 +34,19 @@ export function usePdfSourceLinkActions({
   onQueuePendingSourceLinkInsertion,
 }: UsePdfSourceLinkActionsOptions) {
   const { notify } = useToast();
+  const session = useReadingSession();
   const [clipboard, setClipboard] = useState<SourceClipboardItem | null>(null);
   const [busySegmentUid, setBusySegmentUid] = useState<string | null>(null);
 
   const createAndQueue = async (sourceEntryId: string, segmentUid: string) => {
-    if (!activeTarget || busySegmentUid) {
+    if ((!activeTarget && !session?.note) || busySegmentUid) {
       return;
     }
     setBusySegmentUid(segmentUid);
-    onEnsureNotePaneOpen();
     try {
+      if (session?.note) { await session.note.onAddSource(sourceEntryId, segmentUid); return; }
+      if (!activeTarget) return;
+      onEnsureNotePaneOpen();
       const link = await onCreateMarkdownSourceLink(
         activeTarget.entryId,
         activeTarget.noteId,

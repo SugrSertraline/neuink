@@ -183,7 +183,7 @@ describe('PDF segment preview layout', () => {
 
     expect(document.querySelector('[title="片段笔记"]')?.className).toContain('-translate-x-full');
     expect(document.querySelector('[title="批注"]')?.className).toContain('translate-x-full');
-    expect(document.querySelector('[title="1 个来源链接"]')?.className).toContain('-translate-x-full');
+    expect(document.querySelector('[title="1 个笔记引用"]')?.className).toContain('-translate-x-full');
   });
 
   it('uses a single click only to select the segment', () => {

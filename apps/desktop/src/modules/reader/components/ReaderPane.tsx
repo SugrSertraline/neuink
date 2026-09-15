@@ -6,7 +6,13 @@ import {
   type PointerEvent as ReactPointerEvent
 } from 'react';
 import type { WorkspacePaneId, WorkspaceSurface, WorkspaceSurfaceLayout } from '@/app/workspaceSurface';
-import { entryContentId, entryContentSurface, surfaceKey } from '@/app/workspaceSurface';
+import { entryContentId, entryContentSurface, surfaceKey, noteSurface } from '@/app/workspaceSurface';
+import { useWorkspaceNotes } from '@/modules/notes/WorkspaceNotesContext';
+import { OwnedNoteSurfaceView } from '@/modules/notes/components/OwnedNoteSurfaceView';
+import { TagDetailsView } from '@/modules/library/components/TagDetailsView';
+import { ReadingSessionContext, type ReadingNoteBinding } from '../parallel-reading/ReadingSessionContext';
+import { noteTargetKey } from '@/shared/lib/noteOwner';
+import { TagReadingWorkspaceView } from '../parallel-reading/TagReadingWorkspaceView';
 import {
   readerKind,
   resolveWorkspaceSurfacePair,
@@ -39,6 +45,7 @@ import type {
   MarkdownNoteTarget,
   PdfJumpRequest,
   SidePaneState,
+  SourceBacklink,
 } from '../types';
 import type { AppThemePreset, AppThemePresetId } from '@/shared/lib/themePresets';
 import type { UiScale } from '@/shared/lib/uiScale';
@@ -52,14 +59,19 @@ import { MineruClientImportGuide } from './MineruClientImportGuide';
 import { EntryLibraryView } from './EntryLibraryView';
 import { EntryWorkspaceView } from './EntryWorkspaceView';
 import { SourceLinksSurface } from './SourceLinksSurface';
-import {
-  hasHeavyReaderIdleExpired,
-  HEAVY_READER_SWEEP_INTERVAL_MS,
-  isHeavyReaderSurface
-} from './readerRetention';
+import { isHeavyReaderSurface } from './readerRetention';
+import { useHeavyReaderRetention } from './useHeavyReaderRetention';
+import { hasUnsavedSegmentEditors } from './segmentEditorDirtyRegistry';
 import { useSourceBacklinks } from './useSourceBacklinks';
 
 type ReaderPaneProps = {
+  librarySection: 'papers' | 'notes';
+  onLibrarySectionChange: (section: 'papers' | 'notes') => void;
+  onOpenTagLibrary: (tagId: string, section?: 'papers' | 'notes') => void;
+  onOpenTagReading: (tagId: string) => void;
+  onUpdateTagDescription: (id: string, value: string, expected: string) => Promise<TagMeta>;
+  onOpenTrash: () => void;
+  onRestoreTagArchive: (archiveId: string) => Promise<number>;
   surfaceLayout: WorkspaceSurfaceLayout;
   onOpenSurface: (surface: WorkspaceSurface, pane?: WorkspacePaneId) => void;
   onFocusSurface: (pane: WorkspacePaneId) => void;
@@ -179,6 +191,9 @@ type LinkedReaderSegment = {
 };
 
 export function ReaderPane({
+  onUpdateTagDescription,
+  onOpenTrash,
+  onRestoreTagArchive,
   surfaceLayout,
   onOpenSurface,
   onFocusSurface,
@@ -192,6 +207,7 @@ export function ReaderPane({
   trashedEntries,
   trashItems,
   isRefreshingParseStatus,
+  librarySection, onLibrarySectionChange, onOpenTagLibrary, onOpenTagReading,
   libraryView,
   libraryFilterResetKey,
   recentReadingEntryIds,
@@ -288,15 +304,14 @@ export function ReaderPane({
   >({});
   const linkedRequestKeyRef = useRef(0);
   const previousPdfJumpByEntryIdRef = useRef(pdfJumpByEntryId);
-  const sourceBacklinksByEntryId = useSourceBacklinks(entries, markdownNoteRefreshById, onReadMarkdownNote);
+  const noteCatalog = useWorkspaceNotes();
+  const sourceBacklinksByEntryId = useSourceBacklinks(entries, markdownNoteRefreshById, onReadMarkdownNote, noteCatalog?.catalog.notes);
+  const [noteBindings, setNoteBindings] = useState<Record<string, ReadingNoteBinding | null>>({});
   const [isWorkspaceSplitResizing, setIsWorkspaceSplitResizing] = useState(false);
   const [workspaceSplitPreviewLeft, setWorkspaceSplitPreviewLeft] = useState<number | null>(null);
   const workspaceSplitPreviewRef = useRef<HTMLDivElement | null>(null);
   const workspaceSplitResizeCleanupRef = useRef<(() => void) | null>(null);
-  const heavyInactiveSinceRef = useRef(new Map<string, number>());
-  const [expiredHeavySurfaceKeys, setExpiredHeavySurfaceKeys] = useState<Set<string>>(
-    () => new Set()
-  );
+  const expiredHeavySurfaceKeys = useHeavyReaderRetention(surfaceLayout);
 
   const nextLinkedRequestKey = () => {
     linkedRequestKeyRef.current += 1;
@@ -390,45 +405,6 @@ export function ReaderPane({
     });
   }, [pdfJumpByEntryId]);
 
-  useEffect(() => {
-    const sweep = () => {
-      const now = Date.now();
-      const activeKeys = new Set([
-        surfaceKey(surfaceLayout.left),
-        surfaceLayout.right ? surfaceKey(surfaceLayout.right) : ''
-      ]);
-      const heavyKeys = new Set(
-        [...surfaceLayout.leftTabs, ...surfaceLayout.rightTabs]
-          .filter(isHeavyReaderSurface)
-          .map(surfaceKey)
-      );
-
-      for (const key of Array.from(heavyInactiveSinceRef.current.keys())) {
-        if (!heavyKeys.has(key) || activeKeys.has(key)) {
-          heavyInactiveSinceRef.current.delete(key);
-        }
-      }
-      for (const key of heavyKeys) {
-        if (!activeKeys.has(key) && !heavyInactiveSinceRef.current.has(key)) {
-          heavyInactiveSinceRef.current.set(key, now);
-        }
-      }
-
-      setExpiredHeavySurfaceKeys((current) => {
-        const next = new Set<string>();
-        for (const [key, inactiveSince] of heavyInactiveSinceRef.current) {
-          if (hasHeavyReaderIdleExpired(inactiveSince, now)) {
-            next.add(key);
-          }
-        }
-        return sameStringSet(current, next) ? current : next;
-      });
-    };
-
-    sweep();
-    const timer = window.setInterval(sweep, HEAVY_READER_SWEEP_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [surfaceLayout]);
 
   useEffect(() => () => {
     workspaceSplitResizeCleanupRef.current?.();
@@ -576,6 +552,11 @@ export function ReaderPane({
   const renderLibraryView = (standalone = false) =>
     <EntryLibraryView
         activeTag={activeTag}
+        section={librarySection} onSectionChange={onLibrarySectionChange}
+        onUpdateTagDescription={onUpdateTagDescription}
+        onOpenTagNote={(target, label) => onOpenSurface(noteSurface(target, label))}
+        onManageTags={() => onOpenSurface({ kind: 'tag-editor' })}
+        onOpenTrash={onOpenTrash}
         entries={entries}
         standalone={standalone}
         trashedEntries={trashedEntries}
@@ -592,6 +573,8 @@ export function ReaderPane({
         onOpenCreateEntryTab={onOpenCreateEntryTab}
         onOpenEntryExplorer={onOpenEntryExplorer}
         onOpenEntryInSidePane={onOpenEntryInSidePane}
+        onOpenTagReading={onOpenTagReading}
+        onRestoreTagArchive={onRestoreTagArchive}
         onPurgeEntry={onPurgeEntry}
         onPurgeTrashItem={onPurgeTrashItem}
         onRefreshParseStatus={onRefreshParseStatus}
@@ -659,7 +642,8 @@ export function ReaderPane({
     standalone = false,
     pane: WorkspacePaneId = 'left',
     focusedSegmentUid?: string,
-    initialRecordMode: 'note' | 'annotation' = 'note'
+    initialRecordMode: 'note' | 'annotation' = 'note',
+    editorScopeOverride?: string
   ) => {
     if (!tabId) {
       return standalone ? <EmptyPane /> : null;
@@ -709,6 +693,7 @@ export function ReaderPane({
         standalone={standalone}
         workspaceRoot={workspaceRoot}
         tabValue={tabId}
+        editorScopeKey={editorScopeOverride ?? surfaceKey(currentSurface)}
         markdownNoteRefreshById={markdownNoteRefreshById}
         pdfJumpRequest={linkedPdfJump ?? externalPdfJump}
         pdfReaderReloadKey={pdfReaderReloadByEntryId[parsed.entryId] ?? 0}
@@ -732,6 +717,12 @@ export function ReaderPane({
           (item) => item.entry_id === openEntry.id && item.kind !== 'entry' && !item.parent_entry_trashed
         )}
         onReaderPreferencesChange={onReaderPreferencesChange}
+        onOpenContent={(contentId) =>
+          onOpenSurface(entryContentSurface(openEntry.id, contentId, (() => {
+            const origin = (pane === 'left' ? surfaceLayout.leftTabs : surfaceLayout.rightTabs).find((item) => surfaceKey(item) === surfaceKey(currentSurface));
+            return origin && 'contextTagId' in origin ? origin.contextTagId : undefined;
+          })()), pane)
+        }
         onApplyEntryTagPaths={onApplyEntryTagPaths}
         onUpdateEntry={onUpdateEntry}
         onCreateMarkdownSourceLink={onCreateMarkdownSourceLink}
@@ -742,7 +733,7 @@ export function ReaderPane({
         onStartPdfParse={onStartPdfParse}
         onCloseSidePane={onCloseSidePane}
 	        onOpenSourceLink={onOpenSourceLink}
-	        onOpenSourceBacklink={(backlink) => onOpenEntryNote(backlink.noteEntryId, backlink.noteId)}
+	        onOpenSourceBacklink={(backlink) => backlink.noteTarget ? onOpenSurface(noteSurface(backlink.noteTarget, backlink.noteTitle), pane === 'left' ? 'right' : 'left') : backlink.noteEntryId && onOpenEntryNote(backlink.noteEntryId, backlink.noteId)}
 	        onOpenSegmentNotesSurface={(segmentUid, mode = 'note') => {
           focusLinkedSegment(
             openEntry.id,
@@ -880,6 +871,8 @@ export function ReaderPane({
   );
   const renderTagEditorPage = () => (
     <TagEditorPage
+      workspaceRoot={workspaceRoot}
+      onRestoreTagArchive={onRestoreTagArchive}
       activeTag={activeTag}
       entries={entries}
       tags={tags}
@@ -910,40 +903,67 @@ export function ReaderPane({
     />
   );
   const renderSurface = (surface: WorkspaceSurface, sibling: WorkspaceSurface | null, pane: WorkspacePaneId) => {
+    if (surface.kind === 'tag-details') return <TagDetailsView key={`${workspaceRoot}:${surface.tagId}`} root={workspaceRoot} tagId={surface.tagId} tags={tags} entries={entries} initialView={surface.view}
+      onDescription={onUpdateTagDescription} onOpenNote={(target, label) => onOpenSurface(noteSurface(target, label), pane)}
+      onOpenEntry={(entry) => onOpenSurface({ kind: 'entry-overview', entryId: entry.id, contextTagId: surface.tagId }, pane)}
+      onReading={() => onOpenTagReading(surface.tagId)}
+      onManage={() => { onSelectTag(surface.tagId); onOpenSurface({ kind: 'tag-editor' }, pane); }} onTrash={onOpenTrash} />;
+    if (surface.kind === 'owned-note') return <OwnedNoteSurfaceView key={`${workspaceRoot}:${noteTargetKey(surface.target)}`} root={workspaceRoot} target={surface.target} tags={tags} label={surface.label}
+      onSource={onOpenSourceLink} onSaveEntryNote={onSaveMarkdownNote} onBinding={(key, binding) => setNoteBindings((current) => ({ ...current, [key]: binding }))}
+      onOwner={() => { if (surface.target.owner.kind === 'tag_reading') onOpenTagLibrary(surface.target.owner.tag_id, 'notes'); }} />;
+    if (surface.kind === 'tag-reading') {
+      return <TagReadingWorkspaceView key={`${workspaceRoot}:${surface.tagId}`}
+        root={workspaceRoot} tagId={surface.tagId} tags={tags} pane={pane}
+        onOpenNote={(target) => onOpenSurface(noteSurface(target), pane === 'left' ? 'right' : 'left')}
+        entries={entries} onSaveEntryNote={onSaveMarkdownNote} onRefreshEntries={onRefreshParseStatus} onOpenSourceLink={onOpenSourceLink}
+        active={surfaceLayout.focusedPane === pane && surfaceKey(surfaceLayout[pane] ?? { kind: 'library' }) === surfaceKey(surface)}
+        availableEntryIds={new Set(entries.map((entry) => entry.id))}
+        refreshKey={JSON.stringify([tags.map((tag) => [tag.id, tag.parent_id, tag.updated_at]), entries.map((entry) => [entry.id, entry.tagIds, entry.status, entry.updatedAt])])}
+        renderReader={(entryId, mode, scopeKey) => renderEntryWorkspaceView(`entry-content:${entryId}|${mode}`, null, true, pane, undefined, 'note', scopeKey)}
+        onOpenLibrary={() => onOpenSurface({ kind: 'library' }, pane)} />;
+    }
     if (surface.kind === 'source-links') {
       const backlinks = Object.values(sourceBacklinksByEntryId[surface.entryId] ?? {}).flat();
       const entry = entries.find((item) => item.id === surface.entryId);
       const pairing = sibling ? resolveWorkspaceSurfacePair(surface, sibling) : null;
       const siblingReaderKind = pairing?.relation === 'source-navigation' ? readerKind(sibling) : null;
-      const locateBacklinkSource = (segmentUid: string) => {
-        if (!siblingReaderKind) return;
-        focusLinkedSegment(surface.entryId, segmentUid, 'segment-notes');
-        if (siblingReaderKind === 'reflow') {
+      const openBacklinkEvidence = (backlink: SourceBacklink) => {
+        if (backlink.sourceStatus && !backlink.sourceStatus.can_locate) return;
+        const sourceEntry = entries.find((item) => item.id === backlink.sourceEntryId);
+        const targetReaderKind = siblingReaderKind ?? (sourceEntry?.pdfFileName ? 'pdf' : 'reflow');
+        focusLinkedSegment(backlink.sourceEntryId, backlink.segmentUid, 'segment-notes');
+        if (targetReaderKind === 'reflow') {
           setLinkedReflowSegmentByEntryId((current) => ({
             ...current,
-            [surface.entryId]: { requestKey: nextLinkedRequestKey(), segmentUid }
+            [backlink.sourceEntryId]: { requestKey: nextLinkedRequestKey(), segmentUid: backlink.segmentUid }
           }));
-          return;
+        } else {
+          setLinkedPdfJumpByEntryId((current) => ({
+            ...current,
+            [backlink.sourceEntryId]: {
+              kind: 'segment',
+              pageIdx: Math.max(0, backlink.page - 1),
+              requestKey: nextLinkedRequestKey(),
+              segmentUid: backlink.segmentUid
+            }
+          }));
         }
-        setLinkedPdfJumpByEntryId((current) => ({
-          ...current,
-          [surface.entryId]: {
-            kind: 'segment',
-            pageIdx: 0,
-            requestKey: nextLinkedRequestKey(),
-            segmentUid
-          }
-        }));
+        if (!siblingReaderKind) {
+          onOpenSurface(
+            { kind: targetReaderKind, entryId: backlink.sourceEntryId },
+            pane === 'left' ? 'right' : 'left'
+          );
+        }
       };
       return (
         <SourceLinksSurface
           backlinks={backlinks}
           entryTitle={entry?.title ?? '条目'}
           linkedReaderKind={siblingReaderKind}
-          onLocateSource={locateBacklinkSource}
+          onOpenEvidence={openBacklinkEvidence}
           onOpenNote={(backlink) =>
             onOpenSurface(
-              { kind: 'note', entryId: backlink.noteEntryId, noteId: backlink.noteId },
+              backlink.noteTarget ? noteSurface(backlink.noteTarget, backlink.noteTitle) : backlink.noteEntryId ? { kind: 'note', entryId: backlink.noteEntryId, noteId: backlink.noteId } : { kind: 'library' },
               pane === 'left' ? 'right' : 'left'
             )
           }
@@ -956,7 +976,7 @@ export function ReaderPane({
       const siblingTabId = sibling && siblingContentId && 'entryId' in sibling
         ? `entry-content:${sibling.entryId}|${siblingContentId}`
         : null;
-      return renderEntryWorkspaceView(
+      const reader = renderEntryWorkspaceView(
         `entry-content:${surface.entryId}|${contentId}`,
         siblingTabId,
         true,
@@ -966,6 +986,10 @@ export function ReaderPane({
             ? surface.mode ?? 'note'
             : 'note'
       );
+      const entry = entries.find((entry) => entry.id === surface.entryId);
+      if (!entry || !['pdf', 'reflow', 'entry-overview'].includes(surface.kind)) return reader;
+      const note = sibling?.kind === 'owned-note' ? noteBindings[noteTargetKey(sibling.target)] ?? undefined : undefined;
+      return note ? <ReadingSessionContext.Provider value={{ active: surfaceLayout.focusedPane === pane, onReady: () => undefined, note }}>{reader}</ReadingSessionContext.Provider> : reader;
     }
     switch (surface.kind) {
       case 'library':
@@ -977,7 +1001,7 @@ export function ReaderPane({
       case 'mineru-client-guide':
         return <div className="h-full min-h-0 overflow-y-auto"><MineruClientImportGuide /></div>;
       case 'tag-editor':
-        return <TagEditorPage standalone activeTag={activeTag} entries={entries} tags={tags} onCreateTagPath={onCreateTagPath} onDeleteTag={onDeleteTag} onRenameTag={onRenameTag} onSelectTag={onSelectTag} />;
+        return <TagEditorPage standalone workspaceRoot={workspaceRoot} onOpenTrash={onOpenTrash} onRestoreTagArchive={onRestoreTagArchive} activeTag={activeTag} entries={entries} tags={tags} onCreateTagPath={onCreateTagPath} onDeleteTag={onDeleteTag} onRenameTag={onRenameTag} onSelectTag={(id) => { if (id) onOpenTagLibrary(id); else onSelectTag(null); }} />;
       default:
         return <EmptyPane />;
     }
@@ -991,13 +1015,13 @@ export function ReaderPane({
     const key = surfaceKey(surface);
     const activeSurface = key === surfaceKey(active);
     const shouldMount =
-      activeSurface || !isHeavyReaderSurface(surface) || !expiredHeavySurfaceKeys.has(key);
+      activeSurface || hasUnsavedSegmentEditors(key) || !isHeavyReaderSurface(surface) || !expiredHeavySurfaceKeys.has(key);
     return (
       <div
         className={activeSurface ? 'workspace-pane-surface is-active' : 'workspace-pane-surface'}
         key={key}
       >
-        {shouldMount ? renderSurface(surface, sibling, pane) : null}
+        {shouldMount ? renderSurface(activeSurface ? active : surface, sibling, pane) : null}
       </div>
     );
   });
@@ -1062,14 +1086,6 @@ export function ReaderPane({
         </div>
     </section>
   );
-}
-
-function sameStringSet(left: Set<string>, right: Set<string>) {
-  if (left.size !== right.size) return false;
-  for (const value of left) {
-    if (!right.has(value)) return false;
-  }
-  return true;
 }
 
 function EmptyPane() {

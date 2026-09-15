@@ -14,6 +14,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/h
 import { Progress } from '@/components/ui/progress';
 import type { EntryTranslation, JobProgress, TranslatedSegmentStatus } from '@/shared/ipc/workspaceApi';
 import type { SegmentType, SourceSegment } from '@/shared/types/domain';
+import { ReadingExportButton } from '../export/ReadingExportButton';
 
 type Filter = 'all' | 'pending' | 'translated' | 'failed';
 type RunMode = 'pending' | 'retry' | 'force';
@@ -41,7 +42,8 @@ export function TranslationTaskDialog({
   message,
   progress,
   onOpenChange,
-  onTranslate
+  onTranslate,
+  exportContext
 }: {
   open: boolean;
   segments: SourceSegment[];
@@ -52,6 +54,7 @@ export function TranslationTaskDialog({
   progress?: JobProgress | null;
   onOpenChange: (open: boolean) => void;
   onTranslate: (segments: SourceSegment[], mode: RunMode) => Promise<void>;
+  exportContext?: { entryId: string; entryTitle: string; workspaceRoot: string | null };
 }) {
   const [filter, setFilter] = useState<Filter>('all');
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -270,6 +273,8 @@ export function TranslationTaskDialog({
         </div>
 
         <DialogFooter>
+          {exportContext ? <ReadingExportButton {...exportContext} disabled={busy || completedCount === 0}
+            scope={{ kinds: ['translation'] }} label="导出已保存译文" scopeLabel="导出已保存译文" /> : null}
           <Button disabled={busy || selected.size === 0} size="sm" type="button" variant="outline" onClick={() => run('force')}>
             重新翻译选中
           </Button>
@@ -286,15 +291,14 @@ function SourcePreview({ segment }: { segment: SourceSegment }) {
   const text = (segment.markdown ?? segment.text).trim();
 
   return (
-    <HoverCard closeDelay={100} openDelay={150}>
-      <HoverCardTrigger asChild>
+    <HoverCard>
+      <HoverCardTrigger asChild openOnClick>
         <Button
           aria-label="查看原文"
           size="icon-xs"
           type="button"
           variant="ghost"
           onClick={(event) => {
-            event.preventDefault();
             event.stopPropagation();
           }}
         >
@@ -303,11 +307,11 @@ function SourcePreview({ segment }: { segment: SourceSegment }) {
       </HoverCardTrigger>
       <HoverCardContent
         align="end"
-        className="z-[var(--z-dialog-popover)] w-[min(32rem,calc(100vw-2rem))] p-3"
+        className="w-[32rem]"
         side="left"
       >
         <div className="mb-2 text-xs font-medium text-muted-foreground">原文 · 第 {segment.page_idx + 1} 页</div>
-        <div className="max-h-[min(50vh,28rem)] overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 p-2 text-sm leading-relaxed">
+        <div className="whitespace-pre-wrap break-words rounded-md bg-muted/50 p-2 text-sm leading-relaxed">
           {text || '该 Block 没有可显示的原文。'}
         </div>
       </HoverCardContent>

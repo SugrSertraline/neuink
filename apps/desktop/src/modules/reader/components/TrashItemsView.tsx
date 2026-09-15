@@ -291,9 +291,9 @@ function TrashTextHoverCard({
   title: string;
 }) {
   return (
-    <HoverCard closeDelay={120} openDelay={220}>
+    <HoverCard>
       <HoverCardTrigger asChild>
-        <div className="min-w-0 cursor-default">{children}</div>
+        <div className="min-w-0 cursor-default rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" tabIndex={0}>{children}</div>
       </HoverCardTrigger>
       <HoverCardContent align="start" className="w-80 break-words" side="top">
         <div className="text-sm font-medium">{title}</div>

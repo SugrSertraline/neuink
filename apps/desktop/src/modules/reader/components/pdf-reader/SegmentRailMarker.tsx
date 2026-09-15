@@ -1,4 +1,5 @@
 import { HoverCard, HoverCardTrigger } from '@/components/ui/hover-card';
+import { HOVER_TIMING } from '@/components/ui/hover-interactions';
 import { cn } from '@/lib/utils';
 
 import type { RailLayoutItem } from './types';
@@ -63,8 +64,7 @@ export function SegmentRailMarker({
   });
   return (
     <HoverCard
-      closeDelay={100}
-      openDelay={100}
+      openDelay={HOVER_TIMING.reader}
       onOpenChange={onHoverOpenChange}
     >
       <HoverCardTrigger asChild>

@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{EntryId, NoteId, SegmentType, SegmentUid, SourceLinkId};
+use crate::{EntryId, NoteId, SegmentType, SegmentUid, SourceLinkId, TagId};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SourceLink {
@@ -36,6 +36,7 @@ impl SourceLink {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum LinkOwner {
     Note { entry_id: EntryId, note_id: NoteId },
+    TagNote { tag_id: TagId, note_id: NoteId },
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

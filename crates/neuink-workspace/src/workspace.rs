@@ -34,6 +34,7 @@ impl Workspace {
         };
         workspace.ensure_layout()?;
         workspace.ensure_workspace_file()?;
+        drop(workspace.begin_tag_safe_mutation()?);
         Ok(workspace)
     }
 
@@ -48,6 +49,7 @@ impl Workspace {
         }
         workspace.ensure_layout()?;
         workspace.ensure_workspace_file()?;
+        drop(workspace.begin_tag_safe_mutation()?);
         Ok(workspace)
     }
 
@@ -77,6 +79,7 @@ impl Workspace {
             ));
         }
         workspace.ensure_layout()?;
+        drop(workspace.begin_tag_safe_mutation()?);
         Ok(workspace)
     }
 
@@ -95,6 +98,7 @@ impl Workspace {
         tags: Vec<TagId>,
     ) -> Result<EntryMeta, WorkspaceError> {
         let mut entry = EntryMeta::new(title)?;
+        let _guard = self.begin_tag_safe_mutation()?;
         entry.fields = fields;
         entry.tags = self.normalize_entry_tags(tags)?;
         entry.validate()?;
@@ -114,6 +118,7 @@ impl Workspace {
         fields: BTreeMap<String, String>,
         tags: Vec<TagId>,
     ) -> Result<EntryMeta, WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         let mut entry = self.read_entry_meta(entry_id)?;
         entry.title = title.into();
         entry.fields = fields;
@@ -125,6 +130,7 @@ impl Workspace {
     }
 
     pub fn delete_entry(&self, entry_id: &EntryId) -> Result<(), WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         let entry_dir = self.layout.entry_dir(entry_id);
         if !entry_dir.exists() {
             return Err(WorkspaceError::EntryMissing(entry_id.to_string()));
@@ -140,6 +146,7 @@ impl Workspace {
     }
 
     pub fn restore_entry(&self, entry_id: &EntryId) -> Result<EntryMeta, WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         let entry_dir = self.layout.entry_dir(entry_id);
         if entry_dir.exists() {
             return Err(WorkspaceError::EntryAlreadyExists(entry_id.to_string()));
@@ -157,6 +164,7 @@ impl Workspace {
     }
 
     pub fn purge_entry(&self, entry_id: &EntryId) -> Result<(), WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         let trashed_entry_dir = self.layout.trashed_entry_dir(entry_id);
         if !trashed_entry_dir.exists() {
             return Err(WorkspaceError::EntryMissing(entry_id.to_string()));
@@ -170,6 +178,7 @@ impl Workspace {
         entry_id: &EntryId,
         title: impl Into<String>,
     ) -> Result<EntryMeta, WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         let mut entry = self.read_entry_meta(entry_id)?;
         let note_id = NoteId::new();
         let title = normalize_note_title(title.into());
@@ -202,6 +211,7 @@ impl Workspace {
         name: impl Into<String>,
         parent_id: Option<TagId>,
     ) -> Result<TagMeta, WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         let mut workspace_file = self.read_workspace_file()?;
         let name = name.into().trim().to_string();
 
@@ -228,6 +238,7 @@ impl Workspace {
         tag_id: &TagId,
         new_name: impl Into<String>,
     ) -> Result<TagMeta, WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         let mut workspace_file = self.read_workspace_file()?;
         let new_name = new_name.into().trim().to_string();
         let tag_index = workspace_file
@@ -253,32 +264,12 @@ impl Workspace {
         Ok(tag)
     }
 
-    pub fn delete_tag(&self, tag_id: &TagId) -> Result<(), WorkspaceError> {
-        let mut workspace_file = self.read_workspace_file()?;
-        self.ensure_tag_exists(&workspace_file, tag_id)?;
-        let deleted_ids = collect_descendant_tag_ids(&workspace_file.tags, tag_id);
-        workspace_file
-            .tags
-            .retain(|tag| !deleted_ids.contains(&tag.id));
-        self.write_workspace_file(&workspace_file)?;
-
-        for mut entry in self.list_entries()? {
-            let original_count = entry.tags.len();
-            entry.tags.retain(|tag| !deleted_ids.contains(tag));
-            if entry.tags.len() != original_count {
-                entry.updated_at = Utc::now();
-                atomic_write_json(self.layout.entry_meta_file(&entry.id), &entry)?;
-            }
-        }
-
-        Ok(())
-    }
-
     pub fn import_pdf(
         &self,
         entry_id: &EntryId,
         src_path: impl Into<PathBuf>,
     ) -> Result<EntryMeta, WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         let src_path = src_path.into();
         let mut entry = self.read_entry_meta(entry_id)?;
         if entry.pdf.is_some() {
@@ -307,6 +298,7 @@ impl Workspace {
         entry_id: &EntryId,
         file_name: impl Into<String>,
     ) -> Result<EntryMeta, WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         let file_name = file_name.into().trim().to_string();
         if file_name.is_empty() || file_name.contains(['/', '\\']) {
             return Err(WorkspaceError::InvalidPdfDisplayName(file_name));
@@ -340,6 +332,7 @@ impl Workspace {
         task_id: Option<String>,
         endpoint: Option<String>,
     ) -> Result<EntryMeta, WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         let mut entry = self.read_entry_meta(entry_id)?;
         let pdf = entry
             .pdf
@@ -994,7 +987,7 @@ impl Workspace {
         Err(WorkspaceError::TagMissing(tag_id.to_string()))
     }
 
-    fn read_workspace_file(&self) -> Result<WorkspaceFile, WorkspaceError> {
+    pub(crate) fn read_workspace_file(&self) -> Result<WorkspaceFile, WorkspaceError> {
         let path = self.layout.workspace_file();
         if !path.exists() {
             return Ok(WorkspaceFile::default());
@@ -1003,7 +996,7 @@ impl Workspace {
         Ok(serde_json::from_slice(&bytes)?)
     }
 
-    fn write_workspace_file(&self, workspace_file: &WorkspaceFile) -> Result<(), WorkspaceError> {
+    pub(crate) fn write_workspace_file(&self, workspace_file: &WorkspaceFile) -> Result<(), WorkspaceError> {
         atomic_write_json(self.layout.workspace_file(), workspace_file)
     }
 
@@ -1131,7 +1124,7 @@ fn normalize_note_title(title: String) -> String {
     }
 }
 
-fn collect_descendant_tag_ids(tags: &[TagMeta], tag_id: &TagId) -> BTreeSet<TagId> {
+pub(crate) fn collect_descendant_tag_ids(tags: &[TagMeta], tag_id: &TagId) -> BTreeSet<TagId> {
     let mut collected = BTreeSet::from([tag_id.clone()]);
     let mut changed = true;
 
@@ -1772,11 +1765,13 @@ fn non_empty(value: String) -> Option<String> {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct WorkspaceFile {
+pub(crate) struct WorkspaceFile {
     #[serde(default)]
     schema_version: u16,
     #[serde(default)]
-    tags: Vec<TagMeta>,
+    pub(crate) tags: Vec<TagMeta>,
+    #[serde(default)]
+    pub(crate) tag_archives: Vec<crate::tag_archive::TagArchive>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1854,6 +1849,7 @@ impl Default for WorkspaceFile {
         Self {
             schema_version: 1,
             tags: Vec::new(),
+            tag_archives: Vec::new(),
         }
     }
 }

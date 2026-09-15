@@ -2,6 +2,14 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
+// Pinned cells inherit their row's opaque background, including hover/selection.
+const pinnedCellClasses = {
+  left: "sticky left-0 z-10 bg-inherit shadow-[4px_0_12px_-6px_color-mix(in_oklab,var(--foreground)_12%,transparent)] after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-border",
+  right: "sticky right-0 z-10 bg-inherit shadow-[-4px_0_12px_-6px_color-mix(in_oklab,var(--foreground)_12%,transparent)] after:pointer-events-none after:absolute after:inset-y-0 after:left-0 after:w-px after:bg-border",
+}
+
+type TableCellPin = keyof typeof pinnedCellClasses
+
 function Table({ className, ...props }: React.ComponentProps<"table">) {
   return (
     <div
@@ -63,12 +71,14 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
   )
 }
 
-function TableHead({ className, ...props }: React.ComponentProps<"th">) {
+function TableHead({ className, pin, ...props }: React.ComponentProps<"th"> & { pin?: TableCellPin }) {
   return (
     <th
       data-slot="table-head"
+      data-pinned={pin}
       className={cn(
         "h-10 px-2 text-left align-middle font-medium whitespace-nowrap text-foreground [&:has([role=checkbox])]:pr-0",
+        pin && pinnedCellClasses[pin],
         className
       )}
       {...props}
@@ -76,12 +86,14 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
   )
 }
 
-function TableCell({ className, ...props }: React.ComponentProps<"td">) {
+function TableCell({ className, pin, ...props }: React.ComponentProps<"td"> & { pin?: TableCellPin }) {
   return (
     <td
       data-slot="table-cell"
+      data-pinned={pin}
       className={cn(
         "p-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0",
+        pin && pinnedCellClasses[pin],
         className
       )}
       {...props}

@@ -27,10 +27,9 @@ export function ListHoverPreview({
   }
 
   return (
-    <div className="max-h-[min(55vh,30rem)] min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain pr-1">
+    <div className="min-w-0">
       <ol className="grid gap-2">
         {items.map((item, index) => {
-          const isLong = item.text.length > 420;
           return (
             <li
               className="rounded-md border bg-background/70 px-2 py-1.5 text-[inherit] leading-[inherit] transition-colors hover:border-primary/40 hover:bg-primary/5"
@@ -38,11 +37,10 @@ export function ListHoverPreview({
               onPointerEnter={() => onItemHover(regions[index]?.bbox ?? null)}
               onPointerLeave={() => onItemHover(null)}
             >
-              <div className={isLong ? 'max-h-40 overflow-y-auto overscroll-contain pr-1' : undefined}>
+              <div>
                 <span className="mr-1 font-medium text-foreground">{item.marker ?? `•`}</span>
                 <span className="whitespace-pre-wrap break-words">{item.text}</span>
               </div>
-              {isLong ? <div className="mt-1 text-[11px] text-muted-foreground">此长列表项可单独滚动查看</div> : null}
             </li>
           );
         })}

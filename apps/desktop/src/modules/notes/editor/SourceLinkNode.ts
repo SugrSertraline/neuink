@@ -9,12 +9,13 @@ import type { SegmentType, SourceLink } from '@/shared/types/domain';
 import { SourceLinkNodeView } from './SourceLinkNodeView';
 
 export type SourceLinkOpenTarget = {
+  originPane?: 'left' | 'right';
   page: number | null;
   segmentUid: string | null;
   sourceEntryId: string | null;
 };
 
-type SourceLinkAttrs = {
+export type SourceLinkAttrs = {
   anchorId: string;
   displayText?: string | null;
   expanded?: boolean | null;
@@ -45,6 +46,8 @@ type HydratedSourceLink = SourceLinkAttrs & {
 };
 
 export type SourceLinkSnapshotAssetContext = {
+  entryTitle?: string;
+  noteOwner?: import('@/shared/types/domain').NoteOwner;
   entryId: string;
   noteId: string;
   workspaceRoot: string | null;

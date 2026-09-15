@@ -4,6 +4,7 @@ import { Dialog as DialogPrimitive } from "radix-ui"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { XIcon } from "lucide-react"
+import { OverlayLayerProvider } from './overlay-layer'
 
 function Dialog({
   ...props
@@ -51,23 +52,29 @@ function DialogContent({
   children,
   overlayClassName,
   showCloseButton = true,
+  layout = "default",
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   overlayClassName?: string
   showCloseButton?: boolean
+  /** Stable viewport-bounded frame with DialogBody as its only scroll owner. */
+  layout?: "default" | "bounded"
 }) {
   return (
     <DialogPortal>
       <DialogOverlay className={overlayClassName} />
       <DialogPrimitive.Content
         data-slot="dialog-content"
+        data-layout={layout}
         className={cn(
           "fixed top-1/2 left-1/2 z-[var(--z-dialog)] grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border bg-popover p-4 text-sm text-popover-foreground shadow-lg duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          // Percentages use the fixed containing block; vh overflows under CSS UI zoom.
+          layout === "bounded" && "@container/dialog flex h-[min(42rem,calc(100%-2rem))] min-h-0 w-[calc(100%-2rem)] min-w-0 max-w-[38rem] flex-col overflow-hidden sm:max-w-[38rem] [&>[data-slot=dialog-header]]:shrink-0 [&>[data-slot=dialog-footer]]:shrink-0",
           className
         )}
         {...props}
       >
-        {children}
+        <OverlayLayerProvider value="dialog-popover">{children}</OverlayLayerProvider>
         {showCloseButton && (
           <DialogPrimitive.Close data-slot="dialog-close" asChild>
             <Button
@@ -84,6 +91,12 @@ function DialogContent({
       </DialogPrimitive.Content>
     </DialogPortal>
   )
+}
+
+function DialogBody({ className, ...props }: React.ComponentProps<"div">) {
+  return <div data-slot="dialog-body"
+    className={cn("min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain [overflow-anchor:none] [scrollbar-gutter:stable]", className)}
+    {...props} />
 }
 
 function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
@@ -159,6 +172,7 @@ export {
   Dialog,
   DialogClose,
   DialogContent,
+  DialogBody,
   DialogDescription,
   DialogFooter,
   DialogHeader,

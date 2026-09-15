@@ -3,7 +3,8 @@ import { createContext, useContext, type ReactNode } from 'react';
 import {
   DEFAULT_REFLOW_COMPONENT_PREFERENCES,
   reflowTextSizeScale,
-  type ReflowComponentPreferences
+  type ReflowComponentPreferences,
+  type ReflowVisualSize
 } from '@/shared/lib/readerPreferences';
 
 import type { ReflowSegmentGroup } from './buildReflowBlocks';
@@ -68,12 +69,28 @@ export function reflowGroupEstimateScale(
   preferences: ReflowComponentPreferences
 ) {
   const key = reflowComponentKeyForGroup(group);
-  if (key !== 'figure' && key !== 'chart') {
+  if (group.kind !== 'visual') {
+    if (key === 'figure' || key === 'chart') return 1;
     return reflowTextSizeScale(preferences[key].size);
   }
 
-  const size = preferences[key].size;
+  const size = reflowGroupVisualSize(group, preferences);
   return size === 'compact' ? 0.75 : size === 'large' ? 1.5 : size === 'full' ? 1.8 : 1;
+}
+
+export function reflowGroupVisualSize(
+  group: ReflowSegmentGroup,
+  preferences: ReflowComponentPreferences
+): ReflowVisualSize {
+  const key = reflowComponentKeyForGroup(group);
+  if (key === 'figure' || key === 'chart') {
+    return preferences[key].size;
+  }
+  if (key === 'table') {
+    const size = preferences.table.size;
+    return size === 'small' ? 'compact' : size === 'large' ? 'large' : 'standard';
+  }
+  return 'standard';
 }
 
 export function reflowComponentKeyForGroup(group: ReflowSegmentGroup): ReflowComponentKey {

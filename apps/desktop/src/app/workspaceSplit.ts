@@ -3,6 +3,7 @@ import type { WorkspaceSurface } from './workspaceSurface';
 export const WORKSPACE_SPLIT_DIVIDER_WIDTH = 10;
 export const WORKSPACE_SPLIT_STANDARD_MIN_WIDTH = 320;
 export const WORKSPACE_SPLIT_NOTE_MIN_WIDTH = 224;
+export const WORKSPACE_SPLIT_MIN_RESIZE_RANGE = 96;
 
 export type WorkspaceSplitMinimums = {
   left: number;
@@ -32,19 +33,30 @@ export function getWorkspaceSplitWidthBounds(
   const requestedTotal = requestedLeft + requestedRight;
 
   if (requestedTotal <= availableWidth) {
-    return {
-      minLeftWidth: requestedLeft,
-      maxLeftWidth: availableWidth - requestedRight
-    };
+    const availableResizeRange = availableWidth - requestedTotal;
+    if (availableResizeRange >= WORKSPACE_SPLIT_MIN_RESIZE_RANGE) {
+      return {
+        minLeftWidth: requestedLeft,
+        maxLeftWidth: availableWidth - requestedRight
+      };
+    }
   }
 
   if (requestedTotal === 0) {
     return { minLeftWidth: 0, maxLeftWidth: availableWidth };
   }
 
-  // Preserve the requested proportion when even the two minimums cannot fit.
-  const minLeftWidth = Math.floor(availableWidth * (requestedLeft / requestedTotal));
-  return { minLeftWidth, maxLeftWidth: minLeftWidth };
+  // Target minimums are soft in a compact workspace. Contract both sides in
+  // their requested proportion while reserving enough travel for the divider;
+  // otherwise min and max collapse to one value and horizontal resizing stops.
+  const resizeRange = Math.min(availableWidth, WORKSPACE_SPLIT_MIN_RESIZE_RANGE);
+  const compactMinimumTotal = availableWidth - resizeRange;
+  const minLeftWidth = Math.floor(compactMinimumTotal * (requestedLeft / requestedTotal));
+  const minRightWidth = compactMinimumTotal - minLeftWidth;
+  return {
+    minLeftWidth,
+    maxLeftWidth: availableWidth - minRightWidth
+  };
 }
 
 export function clampWorkspaceSplitLeftWidth(

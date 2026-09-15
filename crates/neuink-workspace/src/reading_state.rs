@@ -42,6 +42,7 @@ impl Workspace {
         entry_id: &EntryId,
         update: ReadingStateUpdate,
     ) -> Result<EntryReadingState, WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         let entry = self.read_entry(entry_id)?;
         let path = self.layout().entry_reading_state_file(entry_id);
         let mut state = if path.exists() {

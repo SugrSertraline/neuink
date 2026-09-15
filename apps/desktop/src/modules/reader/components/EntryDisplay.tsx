@@ -1,10 +1,15 @@
 import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
 
 import type { LibraryEntry, LibraryEntryStatus } from '../../library/components/LibrarySidebar';
 import { EntryTagBadges } from './EntryTagBadges';
 
-export function AssetSummary({ entry }: { entry: LibraryEntry }) {
+export function AssetSummary({ entry, compact = false }: { entry: LibraryEntry; compact?: boolean }) {
   const notes = entry.contents.filter((content) => content.kind === 'note').length;
+  if (compact) return <div className="truncate text-xs text-muted-foreground" title={`${entry.pdfFileName || '无 PDF'} · ${notes} 篇笔记`}>
+    <span className={cn(entry.pdfFileName && 'text-foreground')}>{entry.pdfFileName ? 'PDF' : '无 PDF'}</span>
+    {notes > 0 ? <span> · {notes} 篇笔记</span> : null}
+  </div>;
   return (
     <div className="flex flex-wrap gap-1">
       {entry.pdfFileName ? <Badge variant="secondary">PDF</Badge> : <Badge variant="outline">无 PDF</Badge>}
@@ -30,8 +35,8 @@ export function FieldBadges({ fields }: { fields: Record<string, string> }) {
   );
 }
 
-export function TagBadges({ tags }: { tags: string[] }) {
-  return <EntryTagBadges tags={tags} />;
+export function TagBadges({ tags, compact = false }: { tags: string[]; compact?: boolean }) {
+  return <EntryTagBadges tags={tags} compact={compact} />;
 }
 
 export function StatusBadge({ status }: { status: LibraryEntryStatus }) {

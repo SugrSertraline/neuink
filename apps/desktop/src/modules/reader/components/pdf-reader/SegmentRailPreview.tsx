@@ -37,7 +37,7 @@ export function SegmentRailPreview({
   return (
     <HoverCardContent
       align="center"
-      className="z-[var(--z-reader-preview)] w-64 p-2.5"
+      layer="reader-preview"
       side="right"
       sideOffset={10}
     >

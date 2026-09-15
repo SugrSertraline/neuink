@@ -249,7 +249,6 @@ export function SettingsPanelLayout(props: SettingsPanelLayoutProps) {
                                 : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                             )}
                             size="sm"
-                            title={section.title}
                             type="button"
                             variant="ghost"
                             onClick={() => onSetActiveSettingsTab(section.value)}

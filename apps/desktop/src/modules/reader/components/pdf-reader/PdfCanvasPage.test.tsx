@@ -40,6 +40,30 @@ afterEach(() => {
 });
 
 describe('PdfCanvasPage', () => {
+  it('resizes offscreen placeholders without loading or rasterizing PDF pages', () => {
+    const fixture = createPdfFixture(Promise.resolve());
+    const page = (pageWidth: number) => (
+      <PdfCanvasPage
+        pageIdx={5}
+        pageWidth={pageWidth}
+        pdfDocument={fixture.document}
+        renderEnabled={false}
+        renderPriority="preload"
+      />
+    );
+    const view = render(page(800));
+    const placeholder = view.container.querySelector('canvas')!.parentElement!;
+    const aspectRatio = parseFloat(placeholder.style.height) / 800;
+
+    for (const width of [440, 300, 560, 800]) {
+      view.rerender(page(width));
+      expect(placeholder.style.width).toBe(`${width}px`);
+      expect(parseFloat(placeholder.style.height)).toBeCloseTo(width * aspectRatio);
+    }
+    expect(fixture.document.getPage).not.toHaveBeenCalled();
+    expect(fixture.render).not.toHaveBeenCalled();
+  });
+
   it('keeps the loading state until the PDF canvas has been copied', async () => {
     const pendingRender = deferred<void>();
     const fixture = createPdfFixture(pendingRender.promise);

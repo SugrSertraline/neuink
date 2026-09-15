@@ -11,6 +11,7 @@ import {
 
 import { useToast } from '@/shared/hooks/useToast';
 import type { NoteDocument, SourceLink } from '@/shared/types/domain';
+import { registerSegmentEditorCloseHandler, setSegmentEditorDirty } from '@/modules/reader/components/segmentEditorDirtyRegistry';
 
 import {
   clearMarkdownNoteDirty,
@@ -55,6 +56,7 @@ type SaveOptions = {
 };
 
 type SessionOptions = {
+  editorScopeKey?: string;
   editor: Editor | null;
   editorRef: MutableRefObject<Editor | null>;
   entryId: string;
@@ -88,6 +90,7 @@ function isNoteRevisionConflict(caught: unknown) {
 }
 
 export function useMarkdownNoteSession({
+  editorScopeKey,
   editor,
   editorRef,
   entryId,
@@ -140,6 +143,7 @@ export function useMarkdownNoteSession({
     title: string;
   } | null>(null);
   const lastPersistedRevisionRef = useRef<string | null>(null);
+  const persistedNoteRef = useRef<NoteDocument | null>(null);
   const onLoadNoteRef = useRef(onLoadNote);
   const onSaveNoteRef = useRef(onSaveNote);
   const saveCurrentNoteRef = useRef<
@@ -287,6 +291,7 @@ export function useMarkdownNoteSession({
           title: note.title
         };
         lastPersistedRevisionRef.current = note.revision;
+        persistedNoteRef.current = note;
         setConflict(null);
         dirtyRef.current = false;
         if (ownsNoteEditLease(entryId, noteId, editLeaseOwnerId.current)) {
@@ -353,17 +358,20 @@ export function useMarkdownNoteSession({
           setTitle(saved.title);
           setDraftTitle(saved.title);
         }
-        setNoteLinks(saved.links);
-        noteLinksRef.current = saved.links;
+        const liveLinks = changeVersionRef.current === versionWhenSaveStarted ? saved.links :
+          [...new Map([...saved.links, ...noteLinksRef.current].map((link) => [link.link_id, link])).values()];
+        setNoteLinks(liveLinks);
+        noteLinksRef.current = liveLinks;
         lastPersistedMarkdownRef.current = {
           identity: `${workspaceRoot ?? ''}:${entryId}:${noteId}`,
           markdown: persistedMarkdown,
           title: saved.title
         };
         lastPersistedRevisionRef.current = saved.revision;
+        persistedNoteRef.current = saved;
         setConflict(null);
         setError(null);
-        const currentPersistedMarkdown = persistedMarkdownFromEditor(editor, saved.links);
+        const currentPersistedMarkdown = persistedMarkdownFromEditor(editor, liveLinks);
         const currentTitle = draftTitleRef.current.trim() || '未命名笔记';
         if (
           changeVersionRef.current === versionWhenSaveStarted &&
@@ -426,6 +434,40 @@ export function useMarkdownNoteSession({
   };
   saveCurrentNoteRef.current = save;
 
+  // An embedded document shares the parent surface's close/save boundary, while
+  // retaining the same note edit lease as standalone and split-pane editors.
+  const discardRef = useRef<() => void>(() => undefined);
+  discardRef.current = () => {
+    const note = persistedNoteRef.current;
+    if (!canEdit || !editor || !note) return;
+    suppressEditorUpdateRef.current = true;
+    try {
+      editor.commands.setContent(dematerializeMarkdownSourceLinks(note.markdown, note.links), { contentType: 'markdown', emitUpdate: false });
+      hydrateSourceLinkNodes(editor, note.links, workspaceRoot);
+    } finally { suppressEditorUpdateRef.current = false; }
+    titleRef.current = note.title;
+    draftTitleRef.current = note.title;
+    setTitle(note.title); setDraftTitle(note.title); setTitleEditing(false);
+    noteLinksRef.current = note.links; setNoteLinks(note.links);
+    dirtyRef.current = false;
+    clearMarkdownNoteDirty(entryId, noteId); clearNoteEditDraft(entryId, noteId);
+    setDirty(false); setConflict(null); setError(null);
+    changeVersionRef.current += 1; setChangeVersion(changeVersionRef.current);
+  };
+  useEffect(() => {
+    if (!editorScopeKey || !canEdit) return;
+    const owner = dirtyRegistryOwnerId.current;
+    const unregister = registerSegmentEditorCloseHandler(editorScopeKey, owner, {
+      save: () => saveCurrentNoteRef.current({ quiet: true }),
+      discard: () => discardRef.current(),
+      isDirty: () => dirtyRef.current || savingRef.current
+    });
+    return () => { unregister(); setSegmentEditorDirty(editorScopeKey, owner, false); };
+  }, [editorScopeKey, canEdit]);
+  useEffect(() => {
+    if (editorScopeKey) setSegmentEditorDirty(editorScopeKey, dirtyRegistryOwnerId.current, canEdit && (dirty || saving));
+  }, [editorScopeKey, canEdit, dirty, saving]);
+
   useEffect(() => {
     if (!canEdit) return undefined;
     return registerMarkdownNoteSaveHandler(
@@ -437,12 +479,12 @@ export function useMarkdownNoteSession({
   }, [canEdit, entryId, noteId]);
 
   useEffect(() => {
-    if (!canEdit || !dirty || conflict || loading || loadFailed || savingRef.current) return undefined;
+    if (!canEdit || !dirty || conflict || error || loading || loadFailed || savingRef.current) return undefined;
     const timeoutId = window.setTimeout(() => {
       void saveCurrentNoteRef.current({ quiet: true });
     }, 1000);
     return () => window.clearTimeout(timeoutId);
-  }, [canEdit, changeVersion, conflict, dirty, loadFailed, loading]);
+  }, [canEdit, changeVersion, conflict, error, dirty, loadFailed, loading, saving]);
 
   useEffect(() => {
     if (!canEdit) setTitleEditing(false);
@@ -551,6 +593,7 @@ export function useMarkdownNoteSession({
       title: remote.title
     };
     lastPersistedRevisionRef.current = remote.revision;
+    persistedNoteRef.current = remote;
     dirtyRef.current = false;
     clearMarkdownNoteDirty(entryId, noteId);
     clearNoteEditDraft(entryId, noteId);

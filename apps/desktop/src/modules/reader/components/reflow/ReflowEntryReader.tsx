@@ -1,3 +1,5 @@
+import { buildSegmentNoteLookup } from '../pdf-reader/segmentNoteLookup';
+import { useReadingSession } from '../../parallel-reading/ReadingSessionContext';
 import { ListRestart, Loader2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
@@ -38,7 +40,7 @@ import { hasNoteText, logicalSegmentUid } from '../pdf-reader/readerUtils';
 import { SegmentNoteEditor } from '../pdf-reader/SegmentNoteEditor';
 import { FloatingSegmentPanel } from '../pdf-reader/FloatingSegmentPanel';
 import { HoverPreviewControls } from '../pdf-reader/ReaderToolbar';
-import { EntryContentHeader } from '../EntryContentHeader';
+import { ReflowToolbar } from './ReflowToolbar';
 import { usePdfBytes } from '../pdf-reader/usePdfBytes';
 import { usePdfDocument } from '../pdf-reader/usePdfDocument';
 import { usePdfReaderData } from '../pdf-reader/usePdfReaderData';
@@ -48,6 +50,7 @@ import { ReflowAppearanceControls } from './ReflowAppearanceControls';
 import { ReflowComponentControls } from './ReflowComponentControls';
 import { useGuardedSegmentAction } from '../useGuardedSegmentAction';
 import { TranslationTaskDialog } from '../../translation/TranslationTaskDialog';
+import { PaperExportDialog } from '../../export/PaperExportDialog';
 import { UnsavedSegmentChangesDialog } from '../pdf-reader/UnsavedSegmentChangesDialog';
 import {
   discardSegmentEditorsBeforeClose,
@@ -77,8 +80,8 @@ export function ReflowEntryReader({
   onSaveSegmentNote,
   onOpenSegmentNotesSurface,
   onOpenAnnotationsSurface,
-  syncSegmentUid,
-  syncRequestKey,
+  syncSegmentUid: externalSyncSegmentUid,
+  syncRequestKey: externalSyncRequestKey,
   onSegmentClick
   , suppressClickOverlay = false
 }: {
@@ -113,6 +116,9 @@ export function ReflowEntryReader({
   suppressClickOverlay?: boolean;
 }) {
   const { notify } = useToast();
+  const readingSession = useReadingSession();
+  const syncRequestKey = readingSession?.jump?.requestKey ?? externalSyncRequestKey;
+  const [paperExportOpen, setPaperExportOpen] = useState(false);
   const { annotations, loadState, segmentNotes, setAnnotations, setSegmentNotes } = usePdfReaderData({
     entry,
     onReadPdfReader
@@ -134,6 +140,9 @@ export function ReflowEntryReader({
   const handledTranslationJobKeyRef = useRef<string | null>(null);
 
   const segments = loadState.status === 'ready' ? loadState.data.segments : [];
+  const syncSegmentUid = readingSession?.jump ? (readingSession.jump.kind === 'page'
+    ? segments.find((segment) => segment.page_idx === readingSession.jump?.pageIdx)?.uid
+    : readingSession.jump.segmentUid) : externalSyncSegmentUid;
   const {
     activeJob: translationJob,
     currentJobKey: translationJobKey,
@@ -151,20 +160,7 @@ export function ReflowEntryReader({
   const pdfPath = loadState.status === 'ready' ? loadState.data.pdf_path : null;
   const pdfBytesState = usePdfBytes(pdfDocumentRequested ? pdfPath : null);
   const pdfState = usePdfDocument(pdfBytesState.status === 'ready' ? pdfBytesState.bytes : null);
-  const notesBySegmentUid = useMemo(() => {
-    const next = new Map<string, SegmentBlockNote>();
-    for (const note of segmentNotes) {
-      if (!hasNoteText(note.text)) {
-        continue;
-      }
-      next.set(note.segment_uid, note);
-      const segment = segments.find((candidate) => candidate.uid === note.segment_uid);
-      if (segment) {
-        next.set(logicalSegmentUid(segment), note);
-      }
-    }
-    return next;
-  }, [segmentNotes, segments]);
+  const notesBySegmentUid = useMemo(() => buildSegmentNoteLookup(segmentNotes, segments), [segmentNotes, segments]);
   const annotationCountBySegmentUid = useMemo(() => {
     const counts = new Map<string, number>();
     for (const annotation of annotations) {
@@ -423,9 +419,11 @@ export function ReflowEntryReader({
   }, [segments, syncRequestKey, syncSegmentUid]);
 
   const addSourceLink = async (segment: SourceSegment) => {
-    if (!pairedMarkdownNoteTarget || sourceLinkBusySegmentUid) return;
+    if ((!pairedMarkdownNoteTarget && !readingSession?.note) || sourceLinkBusySegmentUid) return;
     setSourceLinkBusySegmentUid(segment.uid);
     try {
+      if (readingSession?.note) { await readingSession.note.onAddSource(entry.id, segment.uid); return; }
+      if (!pairedMarkdownNoteTarget) return;
       const link = await onCreateMarkdownSourceLink(
         pairedMarkdownNoteTarget.entryId,
         pairedMarkdownNoteTarget.noteId,
@@ -545,14 +543,18 @@ export function ReflowEntryReader({
 
   return (
     <div className="relative grid size-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-muted/30">
-      <EntryContentHeader className="gap-2" contentTitle="重排视图" entryTitle={entry.title}>
-        <span className="min-w-0 flex-1" />
-
-        <ReflowAppearanceControls
+      <ReflowToolbar compact={Boolean(readingSession)} busy={translationBusy} entryTitle={entry.title}
+        appearance={<ReflowAppearanceControls
+          compact={Boolean(readingSession)}
           preferences={readerPreferences}
           onChange={onReaderPreferencesChange}
-        />
-
+        />}
+        translationMode={hasTranslation ? <Select value={readerPreferences.reflowTranslationMode}
+          onValueChange={(value) => updateReflowTranslationMode(value as ReaderPreferences['reflowTranslationMode'])}>
+          <SelectTrigger className="w-[116px]" size="sm" aria-label="原文与译文显示"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectItem value="source">原文</SelectItem><SelectItem value="translation">译文</SelectItem><SelectItem value="bilingual">双语对照</SelectItem></SelectContent>
+        </Select> : null}
+      >
         <ReflowComponentControls
           preferences={readerPreferences}
           onChange={onReaderPreferencesChange}
@@ -570,8 +572,8 @@ export function ReflowEntryReader({
           </Button>
         ) : null}
 
-        {!translationBusy && hasExportableTranslation ? (
-          <Button size="sm" type="button" variant="outline" onClick={() => void exportTranslation()}>
+        {segments.length > 0 ? (
+          <Button aria-label="导出论文内容" size="sm" type="button" variant="outline" onClick={() => setPaperExportOpen(true)}>
             导出
           </Button>
         ) : null}
@@ -587,28 +589,12 @@ export function ReflowEntryReader({
           </Button>
         ) : null}
 
-        {hasTranslation ? (
-          <Select
-            value={readerPreferences.reflowTranslationMode}
-            onValueChange={(value) => updateReflowTranslationMode(value as ReaderPreferences['reflowTranslationMode'])}
-          >
-            <SelectTrigger className="h-8 w-[116px]" size="sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="source">原文</SelectItem>
-              <SelectItem value="translation">译文</SelectItem>
-              <SelectItem value="bilingual">双语对照</SelectItem>
-            </SelectContent>
-          </Select>
-        ) : null}
-
         <HiddenReflowSegmentsMenu
           hiddenSegments={hiddenSegments}
           onRestoreAll={restoreAllSegments}
           onRestoreSegment={restoreSegment}
         />
-      </EntryContentHeader>
+      </ReflowToolbar>
 
       <div className="relative size-full min-h-0 min-w-0 overflow-hidden">
         <ReflowReader
@@ -616,7 +602,7 @@ export function ReflowEntryReader({
           annotationsBySegmentUid={annotationsBySegmentUid}
           entryId={entry.id}
           flashSegmentUid={flashSegmentUid}
-          hoverPreviewEnabled={readerPreferences.reflowHoverSourceEnabled}
+          hoverPreviewEnabled={readerPreferences.reflowHoverSourceEnabled && !readingSession?.resizing}
           hoverPreviewShowOriginal={readerPreferences.hoverPreviewShowOriginal}
           hoverPreviewShowTranslation={readerPreferences.hoverPreviewShowTranslation}
           hoverPreviewShowNote={readerPreferences.hoverPreviewShowNote}
@@ -655,7 +641,7 @@ export function ReflowEntryReader({
           }}
           onRequirePdfDocument={() => setPdfDocumentRequested(true)}
           onHideSegment={hideSegment}
-          onAddSourceLink={pairedMarkdownNoteTarget ? addSourceLink : undefined}
+          onAddSourceLink={readingSession ? (readingSession.note ? addSourceLink : undefined) : pairedMarkdownNoteTarget ? addSourceLink : undefined}
           onCopyContent={copyContent}
           onCopySourceLink={copySourceLink}
           onOpenSourceBacklink={onOpenSourceBacklink}
@@ -733,7 +719,16 @@ export function ReflowEntryReader({
         onDiscard={discardAndCloseSegmentOverlay}
         onSave={() => void saveAndCloseSegmentOverlay()}
       />
+      <PaperExportDialog
+        entryId={entry.id}
+        entryTitle={entry.title}
+        workspaceRoot={workspaceRoot}
+        open={paperExportOpen}
+        onOpenChange={setPaperExportOpen}
+        onCreateTranslationNote={!translationBusy && hasExportableTranslation ? exportTranslation : undefined}
+      />
       <TranslationTaskDialog
+        exportContext={{ entryId: entry.id, entryTitle: entry.title, workspaceRoot }}
         busy={translationBusy || translatingSegmentUid !== null}
         detail={translationDetail}
         message={translationMessage}

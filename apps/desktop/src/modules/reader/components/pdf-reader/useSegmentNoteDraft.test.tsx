@@ -1,11 +1,12 @@
 /** @vitest-environment jsdom */
 
-import { act, renderHook } from '@testing-library/react';
-import { createElement, type PropsWithChildren } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, cleanup, renderHook } from '@testing-library/react';
+import { createElement, useState, type PropsWithChildren } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { hasUnsavedEntrySegmentEditors, hasUnsavedSegmentEditors, saveSegmentEditorsBeforeClose } from '../segmentEditorDirtyRegistry';
 
 import { ToastContext } from '@/shared/hooks/useToast';
-import type { SourceSegment } from '@/shared/types/domain';
+import type { SegmentBlockNote, SourceSegment } from '@/shared/types/domain';
 
 import { useSegmentNoteDraft } from './useSegmentNoteDraft';
 import { MAX_SEGMENT_NOTE_CHARACTERS } from './segmentNoteLimits';
@@ -29,6 +30,44 @@ function wrapper({ children }: PropsWithChildren) {
 }
 
 describe('useSegmentNoteDraft', () => {
+  afterEach(cleanup);
+  it('does not erase a shared draft edited in the other pane during a save', async () => {
+    let finish!: (notes: []) => void;
+    const onSaveSegmentNote = vi.fn(() => new Promise<[]>((resolve) => { finish = resolve; }));
+    const onSharedDraftChange = vi.fn();
+    const { result, rerender } = renderHook(({ sharedDrafts }) => useSegmentNoteDraft({ entryId: 'split-race', draftScopeKey: 'pdf:split-race', notesBySegmentUid: new Map(), onSaveSegmentNote, onSharedDraftChange, sharedDrafts }), { wrapper, initialProps: { sharedDrafts: { 'logical-segment': 'snapshot' } } });
+    act(() => result.current.selectSegment(segment));
+    let closing!: Promise<boolean>;
+    act(() => { closing = saveSegmentEditorsBeforeClose('pdf:split-race'); });
+    rerender({ sharedDrafts: { 'logical-segment': 'new text from the other pane' } });
+    await act(async () => finish([]));
+    expect(await closing).toBe(false);
+    expect(result.current.noteText).toBe('new text from the other pane');
+    expect(onSharedDraftChange).not.toHaveBeenCalledWith('logical-segment', null);
+  });
+  it.each(['newer text', ''])('protects real legacy-scoped drafts and retains pending edits (%j)', async (newText) => {
+    let finish!: (notes: SegmentBlockNote[]) => void;
+    const onSaveSegmentNote = vi.fn(() => new Promise<SegmentBlockNote[]>((resolve) => { finish = resolve; }));
+    const onSharedDraftChange = vi.fn();
+    const { result } = renderHook(() => {
+      const [notes, setNotes] = useState<SegmentBlockNote[]>([]);
+      return useSegmentNoteDraft({ entryId: 'race', draftScopeKey: 'entry-content:race|pdf', notesBySegmentUid: new Map(notes.map((note) => [note.segment_uid, note])), onSegmentNotesSaved: setNotes, onSaveSegmentNote, onSharedDraftChange });
+    }, { wrapper });
+    act(() => result.current.selectSegment(segment));
+    act(() => result.current.updateNoteText('snapshot'));
+    expect(hasUnsavedEntrySegmentEditors('race')).toBe(true);
+    let closing!: Promise<boolean>;
+    act(() => { closing = saveSegmentEditorsBeforeClose('pdf:race'); });
+    act(() => result.current.updateNoteText(newText));
+    expect(hasUnsavedSegmentEditors('pdf:race')).toBe(true);
+    await act(async () => finish([{ segment_uid: 'logical-segment', text: 'snapshot', created_at: '', updated_at: '' }]));
+    expect(await closing).toBe(false);
+    expect(result.current.noteText).toBe(newText);
+    expect(result.current.noteDirty).toBe(true);
+    expect(hasUnsavedSegmentEditors('pdf:race')).toBe(true);
+    expect(onSharedDraftChange).not.toHaveBeenCalledWith('logical-segment', null);
+    expect(onSaveSegmentNote).toHaveBeenCalledWith('race', 'logical-segment', 'snapshot');
+  });
   it('shares live drafts and persists continuation notes with their logical uid', async () => {
     const onSaveSegmentNote = vi.fn().mockResolvedValue([]);
     const onSharedDraftChange = vi.fn();

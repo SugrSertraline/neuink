@@ -2,9 +2,7 @@ import { Loader2 } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 
 import { cn } from '@/lib/utils';
-
-let mermaidInitialized = false;
-let mermaidApi: (typeof import('mermaid'))['default'] | null = null;
+import { renderMermaidSvg } from '@/shared/lib/mermaidRenderer';
 
 export function MermaidDiagramPreview({
   code,
@@ -25,7 +23,7 @@ export function MermaidDiagramPreview({
   useEffect(() => {
     let cancelled = false;
     setRenderState({ status: 'loading' });
-    void renderMermaidDiagram(`${id}-${Date.now()}`, code).then(
+    void renderMermaidSvg(`${id}-${Date.now()}`, code).then(
       (svg) => {
         if (!cancelled) {
           setRenderState({ status: 'ready', svg });
@@ -72,20 +70,4 @@ export function MermaidDiagramPreview({
       dangerouslySetInnerHTML={{ __html: renderState.svg }}
     />
   );
-}
-
-async function renderMermaidDiagram(id: string, code: string) {
-  if (!mermaidApi) {
-    mermaidApi = (await import('mermaid')).default;
-  }
-  if (!mermaidInitialized) {
-    mermaidApi.initialize({
-      securityLevel: 'strict',
-      startOnLoad: false,
-      theme: 'neutral',
-    });
-    mermaidInitialized = true;
-  }
-  const { svg } = await mermaidApi.render(`neuink-mermaid-${id}`, code);
-  return svg;
 }

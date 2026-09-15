@@ -83,6 +83,44 @@ describe('usePdfViewportMetrics', () => {
 
     expect(screen.getByTestId('viewport-width').textContent).toBe('460');
   });
+
+  it('remeasures a retained PDF when moving the active note tab into a new split', () => {
+    render(<ViewportHarness segments={[]} />);
+    const originalViewport = document.querySelector('[data-pdf-viewport="true"]');
+    expect(screen.getByTestId('viewport-width').textContent).toBe('800');
+
+    // Opening the note hides, but does not unmount, the PDF. A pending normal
+    // resize must not restore the full-pane width after the tab drop.
+    viewportWidth = 760;
+    act(() => resizeObserver?.notify());
+    viewportWidth = 0;
+    act(() => {
+      resizeObserver?.notify();
+      window.dispatchEvent(new Event('neuink:reader-surface-change'));
+      flushAnimationFrames();
+    });
+
+    // Tab dragging does not use the divider's is-workspace-split-resizing flag.
+    // Reveal the same PDF in the narrower left pane and notify the layout owner.
+    viewportWidth = 420;
+    act(() => {
+      window.dispatchEvent(new Event('neuink:reader-surface-change'));
+      flushAnimationFrames();
+    });
+
+    expect(document.querySelector('[data-pdf-viewport="true"]')).toBe(originalViewport);
+    expect(screen.getByTestId('viewport-width').textContent).toBe('420');
+    act(() => vi.advanceTimersByTime(300));
+    expect(screen.getByTestId('viewport-width').textContent).toBe('420');
+
+    // Closing the split restores the full width without recreating the reader.
+    viewportWidth = 800;
+    act(() => {
+      window.dispatchEvent(new Event('neuink:reader-surface-change'));
+      flushAnimationFrames();
+    });
+    expect(screen.getByTestId('viewport-width').textContent).toBe('800');
+  });
 });
 
 function ViewportHarness({ segments }: { segments: SourceSegment[] }) {

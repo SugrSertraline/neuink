@@ -26,6 +26,9 @@ import {
 } from '../utils/tagTree';
 
 type TagEditorPageProps = {
+  onOpenTrash?: () => void;
+  workspaceRoot?: string | null;
+  onRestoreTagArchive?: (archiveId: string) => Promise<number>;
   activeTag: string | null;
   entries: TagCountEntry[];
   tags: TagMeta[];
@@ -36,6 +39,9 @@ type TagEditorPageProps = {
 };
 
 export function TagEditorPage({
+  onOpenTrash,
+  workspaceRoot,
+  onRestoreTagArchive,
   activeTag,
   entries,
   tags,
@@ -194,6 +200,7 @@ export function TagEditorPage({
           </div>
         ) : null}
 
+        {onOpenTrash ? <Button variant="ghost" size="sm" onClick={onOpenTrash}>从回收站恢复标签</Button> : null}
         <DeleteTagDialog
           busy={busy}
           target={deleteTarget}
