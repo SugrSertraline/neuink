@@ -36,15 +36,20 @@ export type SourceClipboardItem = {
 };
 
 export type SourceBacklink = {
+  noteTarget?: import('@/shared/types/domain').NoteTarget;
   anchorId: string;
   displayText: string;
   linkId: string;
-  noteEntryId: string;
+  noteEntryId: string | null;
+  sourceStatus?: import('@/shared/ipc/noteCatalogApi').SourceAvailability;
   noteEntryTitle: string;
   noteId: string;
   noteTitle: string;
+  page: number;
+  segmentType: import('@/shared/types/domain').SegmentType | null;
   sourceEntryId: string;
   segmentUid: string;
+  snapshotText: string;
 };
 
 export type SourceBacklinksBySegmentUid = Record<string, SourceBacklink[]>;

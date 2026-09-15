@@ -1,6 +1,7 @@
 import { Check, ChevronDown, ChevronRight, Hash } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
+import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import type { TagMeta } from '@/shared/types/domain';
@@ -81,15 +82,19 @@ function QuickTagNode({
     >
       <div className="grid min-h-8 grid-cols-[auto_minmax(0,1fr)] items-center gap-1">
         {hasChildren ? (
-          <button
-            className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+          <Button
+            aria-expanded={open}
+            aria-label={open ? `收起 ${node.name}` : `展开 ${node.name}`}
+            className="text-muted-foreground"
             disabled={disabled}
+            size="icon-sm"
             title={open ? '收起' : '展开'}
             type="button"
+            variant="ghost"
             onClick={() => setOpen((current) => !current)}
           >
             {open ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronRight size={13} aria-hidden="true" />}
-          </button>
+          </Button>
         ) : (
           <span className="grid size-7 place-items-center text-muted-foreground">
             <Hash size={12} aria-hidden="true" />

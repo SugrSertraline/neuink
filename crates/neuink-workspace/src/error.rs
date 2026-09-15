@@ -4,6 +4,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum WorkspaceError {
+    #[error("{0}")]
+    TagReading(String),
     #[error(transparent)]
     Domain(#[from] neuink_domain::DomainError),
     #[error("entry already exists: {0}")]

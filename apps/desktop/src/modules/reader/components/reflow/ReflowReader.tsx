@@ -6,6 +6,7 @@ import { Check, Copy, EyeOff, Link2, MessageCircle, StickyNote } from "lucide-re
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { Badge } from "@/components/ui/badge";
+import { hoverInteractionBlocked, useHoverDismiss } from '@/components/ui/hover-interactions';
 import { cn } from "@/lib/utils";
 import {
   resolveMineruAssetUrl,
@@ -231,7 +232,7 @@ export function ReflowReader({
   }, [groupIndexBySegmentUid, rowVirtualizer, scrollRequestKey, scrollToSegmentUid]);
   const updatePreview = useCallback(
     (next: ReflowPreviewPointerState | null) => {
-      if (!hoverPreviewEnabled || !next) {
+      if (!hoverPreviewEnabled || !next || hoverInteractionBlocked()) {
         setPreview(null);
         return;
       }
@@ -241,6 +242,8 @@ export function ReflowReader({
     },
     [hoverPreviewEnabled],
   );
+
+  useHoverDismiss(() => setPreview(null), hoverPreviewEnabled);
 
   useEffect(() => {
     if (!hoverPreviewEnabled) {

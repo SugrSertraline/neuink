@@ -132,6 +132,7 @@ impl Workspace {
         entry_id: &EntryId,
         trash_id: &str,
     ) -> Result<(), WorkspaceError> {
+        let _metadata_guard = self.begin_tag_safe_mutation()?;
         let mut records = self.read_trash_records(&self.layout().entry_dir(entry_id))?;
         let index = records
             .iter()

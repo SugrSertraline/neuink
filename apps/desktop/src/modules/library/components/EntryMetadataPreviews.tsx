@@ -1,6 +1,9 @@
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { Badge } from '@/components/ui/badge';
 import { useState } from 'react';
+import { useTagPreferences } from '@/shared/components/TagPreferencesProvider';
+import { getEntryTagLabel, getVisibleEntryTags } from '@/shared/lib/tagPreferences';
+import { TagDisplaySettingsMenu } from './TagDisplaySettingsMenu';
 
 const DESCRIPTION_PREVIEW_LENGTH = 240;
 const VISIBLE_TAG_LIMIT = 10;
@@ -15,13 +18,13 @@ export function CompactEntryDescription({ description }: { description: string }
     <div className="grid h-[5.75rem] min-w-0 grid-rows-[minmax(0,1fr)_auto] text-xs leading-5">
       <p className="line-clamp-3 whitespace-pre-wrap break-words">{preview}</p>
       {truncated ? (
-        <HoverCard openDelay={120} closeDelay={100}>
-          <HoverCardTrigger asChild>
+        <HoverCard>
+          <HoverCardTrigger asChild openOnClick>
             <button className="text-left text-[11px] text-primary hover:underline" type="button">
               还有 {normalized.length - DESCRIPTION_PREVIEW_LENGTH} 字未显示
             </button>
           </HoverCardTrigger>
-          <HoverCardContent align="start" className="max-h-[min(24rem,60vh)] w-[min(34rem,calc(100vw-2rem))] overflow-y-auto whitespace-pre-wrap break-words text-xs leading-5">
+          <HoverCardContent align="start" className="w-[34rem] whitespace-pre-wrap text-xs">
             {normalized}
           </HoverCardContent>
         </HoverCard>
@@ -32,35 +35,37 @@ export function CompactEntryDescription({ description }: { description: string }
 
 export function CompactEntryTags({ tags }: { tags: string[] }) {
   const [expanded, setExpanded] = useState(false);
-  const visible = expanded ? tags : tags.slice(0, VISIBLE_TAG_LIMIT);
-  const hiddenCount = Math.max(0, tags.length - VISIBLE_TAG_LIMIT);
+  const { preferences } = useTagPreferences();
+  const displayTags = getVisibleEntryTags(tags, preferences.onlyMostSpecificTags);
+  const hiddenAncestors = new Set(tags).size - displayTags.length;
+  const visible = expanded ? displayTags : displayTags.slice(0, VISIBLE_TAG_LIMIT);
+  const hiddenCount = Math.max(0, displayTags.length - VISIBLE_TAG_LIMIT);
 
   return (
     <div className="grid min-h-12 min-w-0 grid-rows-[minmax(0,1fr)_auto]">
       <div className="flex min-w-0 flex-wrap content-start items-center gap-1 overflow-hidden">
         {visible.map((tag) => (
-          <Badge className="min-w-0 max-w-full shrink truncate" key={tag} title={tag} variant="secondary">
-            {tagLeaf(tag)}
+          <Badge className="min-w-0 max-w-full shrink justify-start" key={tag} title={tag} variant="secondary">
+            <span className="min-w-0 truncate">{getEntryTagLabel(tag, displayTags)}</span>
           </Badge>
         ))}
       </div>
-      {hiddenCount > 0 ? (
+      <div className="flex min-w-0 items-center justify-end gap-1 pt-1">
+        {hiddenAncestors > 0 ? <span className="mr-auto text-[11px] text-muted-foreground">已隐藏 {hiddenAncestors} 个上级标签</span> : null}
+        <TagDisplaySettingsMenu />
+        {hiddenCount > 0 ? (
         <button
-          aria-label={expanded ? '收起标签' : `展开全部 ${tags.length} 个标签`}
+          aria-label={expanded ? '收起标签' : `展开全部 ${displayTags.length} 个标签`}
           className="justify-self-end rounded px-1.5 py-0.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
           type="button"
           onClick={() => setExpanded((current) => !current)}
         >
           {expanded ? '收起' : '…'}
         </button>
-      ) : <span />}
+        ) : null}
+      </div>
     </div>
   );
-}
-
-function tagLeaf(tag: string) {
-  const parts = tag.split('/').map((part) => part.trim()).filter(Boolean);
-  return parts[parts.length - 1] ?? tag;
 }
 
 export function CompactEntryFields({ fields }: { fields: Array<[string, string]> }) {
@@ -78,13 +83,13 @@ export function CompactEntryFields({ fields }: { fields: Array<[string, string]>
         ))}
       </div>
       {hidden.length > 0 ? (
-        <HoverCard openDelay={120} closeDelay={100}>
-          <HoverCardTrigger asChild>
+        <HoverCard>
+          <HoverCardTrigger asChild openOnClick>
             <button className="w-fit text-left text-[11px] text-primary hover:underline" type="button">
               还有 {hidden.length} 项未显示
             </button>
           </HoverCardTrigger>
-          <HoverCardContent align="start" className="max-h-[min(24rem,60vh)] w-[min(34rem,calc(100vw-2rem))] overflow-y-auto">
+          <HoverCardContent align="start" className="w-[34rem]">
             <dl className="grid gap-3 text-xs">
               {fields.map(([key, value]) => (
                 <div className="min-w-0" key={key}>

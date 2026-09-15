@@ -39,6 +39,7 @@ import {
   getAnnotationTypeDefinition,
 } from "../annotationRegistry";
 import { segmentTypeLabel } from "../../reader/components/pdf-reader/readerUtils";
+import { ReadingExportButton } from '../../reader/export/ReadingExportButton';
 import { SegmentSourceContextPreview } from "../../reader/components/pdf-reader/SegmentSourceContextPreview";
 import {
   registerSegmentEditorCloseHandler,
@@ -60,7 +61,7 @@ type AnnotationDraft = {
 
 export function SegmentAnnotationEditor({
   annotations,
-  busy,
+  busy: externalBusy,
   className,
   draftScopeKey,
   onClose,
@@ -109,10 +110,18 @@ export function SegmentAnnotationEditor({
     useState<AnnotationId | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Annotation | null>(null);
   const [draft, setDraft] = useState<AnnotationDraft>(emptyDraft());
+  const [savingDraft, setSavingDraft] = useState(false);
+  const savingRef = useRef(false);
+  const dirtyRef = useRef(false);
+  const liveDraft = useRef({ segmentUid: segment?.uid, draft });
+  liveDraft.current = { segmentUid: segment?.uid, draft };
+  const busy = externalBusy || savingDraft;
   const appliedFocusedAnnotationIdRef = useRef<AnnotationId | null>(null);
   const pendingSaveRef = useRef<{
     annotationId: AnnotationId | null;
     content: string;
+    kind: string;
+    importance: AnnotationImportance;
     existingIds: AnnotationId[];
     segmentUid: string;
   } | null>(null);
@@ -156,7 +165,7 @@ export function SegmentAnnotationEditor({
   }, [currentSegmentUid]);
 
   useEffect(() => {
-    if (!segment) {
+    if (!segment || dirtyRef.current || savingRef.current) {
       return;
     }
 
@@ -177,7 +186,7 @@ export function SegmentAnnotationEditor({
   }, [currentSegmentAnnotations, focusedAnnotationId, segment]);
 
   useEffect(() => {
-    if (!selectedAnnotationId || currentSegmentAnnotations.length === 0) {
+    if (dirtyRef.current || savingRef.current || !selectedAnnotationId || currentSegmentAnnotations.length === 0) {
       return;
     }
 
@@ -206,25 +215,16 @@ export function SegmentAnnotationEditor({
       return;
     }
 
-    const savedAnnotation = pendingSave.annotationId
-      ? currentSegmentAnnotations.find(
-          (annotation) => annotation.annotation_id === pendingSave.annotationId,
-        )
-      : (currentSegmentAnnotations.find(
-          (annotation) =>
-            !pendingSave.existingIds.includes(annotation.annotation_id),
-        ) ??
-        currentSegmentAnnotations.find(
-          (annotation) => annotation.content === pendingSave.content,
-        ) ??
-        currentSegmentAnnotations[0] ??
-        null);
+    // This is selection synchronization only, and only after a confirmed save.
+    const savedAnnotation = currentSegmentAnnotations.find((annotation) =>
+      annotation.content.trim() === pendingSave.content &&
+      annotation.kind === pendingSave.kind && annotation.importance === pendingSave.importance &&
+      (pendingSave.annotationId ? annotation.annotation_id === pendingSave.annotationId : !pendingSave.existingIds.includes(annotation.annotation_id))
+    );
 
     if (savedAnnotation) {
       pendingSaveRef.current = null;
       setSelectedAnnotationId(savedAnnotation.annotation_id);
-      setEditorMode("idle");
-      setDraft(emptyDraft());
     }
   }, [busy, currentSegmentAnnotations, currentSegmentUid, segment]);
 
@@ -237,6 +237,7 @@ export function SegmentAnnotationEditor({
       : emptyDraft();
     return JSON.stringify(baseline) !== JSON.stringify(draft);
   }, [draft, editingAnnotation, editorMode]);
+  dirtyRef.current = dirty || savingDraft;
 
   const canSave = Boolean(
     segment && draft.kind.trim() && draft.content.trim() && dirty,
@@ -245,35 +246,43 @@ export function SegmentAnnotationEditor({
     ? (segmentByUid.get(selectedAnnotation.segment_uid) ?? segment)
     : segment;
   const startNewAnnotation = () => {
+    pendingSaveRef.current = null;
     setEditorMode("create");
     setSelectedAnnotationId(null);
     setDraft(emptyDraft());
   };
 
   const startEditAnnotation = (annotation: Annotation) => {
+    pendingSaveRef.current = null;
     setSelectedAnnotationId(annotation.annotation_id);
     setEditorMode("edit");
     setDraft(draftFromAnnotation(annotation));
   };
 
   const cancelEditing = () => {
+    pendingSaveRef.current = null;
     setEditorMode("idle");
     setDraft(emptyDraft());
   };
 
   const saveDraft = async () => {
+    if (busy || savingRef.current) return false;
     if (!segment || !canSave) {
       return !dirty;
     }
 
-    pendingSaveRef.current = {
+    const savedSnapshot = {
       annotationId: draft.annotationId,
       content: draft.content.trim(),
+      kind: draft.kind,
+      importance: draft.importance,
       existingIds: currentSegmentAnnotations.map(
         (annotation) => annotation.annotation_id,
       ),
       segmentUid: segment.uid,
     };
+    savingRef.current = true;
+    setSavingDraft(true);
     try {
       const result = await onSave({
         annotationId: draft.annotationId,
@@ -283,25 +292,34 @@ export function SegmentAnnotationEditor({
         segmentUid: segment.uid,
       });
       const saved = result !== false && result !== null;
-      if (!saved) pendingSaveRef.current = null;
-      return saved;
+      if (!saved || liveDraft.current.segmentUid !== segment.uid || liveDraft.current.draft !== draft) return false;
+      pendingSaveRef.current = savedSnapshot;
+      dirtyRef.current = false;
+      if (draftScopeKey) setSegmentEditorDirty(draftScopeKey, ownerId, false);
+      setEditorMode("idle");
+      setDraft(emptyDraft());
+      return true;
     } catch {
       pendingSaveRef.current = null;
       return false;
+    } finally {
+      savingRef.current = false;
+      setSavingDraft(false);
     }
   };
 
   useEffect(() => {
     if (!draftScopeKey) return;
-    setSegmentEditorDirty(draftScopeKey, ownerId, dirty);
+    setSegmentEditorDirty(draftScopeKey, ownerId, dirty || savingDraft);
     return () => setSegmentEditorDirty(draftScopeKey, ownerId, false);
-  }, [dirty, draftScopeKey, ownerId]);
+  }, [dirty, savingDraft, draftScopeKey, ownerId]);
 
   useEffect(() => {
     if (!draftScopeKey) return;
     return registerSegmentEditorCloseHandler(draftScopeKey, ownerId, {
       discard: cancelEditing,
       save: saveDraft,
+      isDirty: () => dirtyRef.current || savingRef.current,
     });
   }, [draftScopeKey, ownerId, saveDraft]);
 
@@ -338,6 +356,10 @@ export function SegmentAnnotationEditor({
           </div>
 
           <div className="flex shrink-0 items-center gap-1">
+            <ReadingExportButton entryId={sourceEntryId} workspaceRoot={workspaceRoot} compact
+              scope={{ kinds: ['annotation'], item_ids: currentSegmentAnnotations.map((item) => `annotation:${item.annotation_id}`) }}
+              scopeLabel="导出当前片段批注" disabled={busy || dirty || !segment || currentSegmentAnnotations.length === 0}
+              disabledReason={dirty ? '请先保存批注再导出' : busy ? '请等待保存完成' : '当前片段没有已保存批注'} preselectScope />
             {busy ? <Badge variant="outline">保存中</Badge> : null}
             {!busy && dirty ? <Badge variant="secondary">未保存</Badge> : null}
             {!busy && !dirty ? (

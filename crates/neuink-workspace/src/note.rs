@@ -7,7 +7,7 @@ use std::{
 
 use chrono::Utc;
 use neuink_domain::{
-    ContentItem, EntryId, EntryMeta, LinkOwner, NoteId, PdfParseStatus, SegmentRef, SegmentUid,
+    ContentItem, EntryId, EntryMeta, LinkOwner, NoteId, SegmentRef, SegmentUid,
     SourceLink, SourceSegment,
 };
 use serde::{Deserialize, Serialize};
@@ -31,7 +31,7 @@ struct NoteAssetTransaction {
     previous_manifest: Option<Vec<u8>>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct NoteDocument {
     pub note_id: NoteId,
     pub title: String,
@@ -157,6 +157,7 @@ impl Workspace {
             None => prune_note_links(&markdown, &previous_links),
         };
         let previous_links_file = fs::read(&links_path).ok();
+        let _metadata_guard = self.begin_tag_safe_mutation()?;
         let mut entry = self.read_entry(entry_id)?;
         let mut note_found = false;
 
@@ -184,7 +185,8 @@ impl Workspace {
             Utc::now().to_rfc3339(),
             markdown.trim_start()
         );
-        let asset_transaction = self.prepare_note_asset_maintenance(entry_id, note_id, &markdown)?;
+        let asset_transaction =
+            self.prepare_note_asset_maintenance(entry_id, note_id, &markdown)?;
         if let Err(error) = atomic_write(&note_path, body.as_bytes()) {
             rollback_note_asset_transaction(asset_transaction);
             return Err(error);
@@ -212,6 +214,7 @@ impl Workspace {
         entry_id: &EntryId,
         note_id: &NoteId,
     ) -> Result<EntryMeta, WorkspaceError> {
+        let _metadata_guard = self.begin_tag_safe_mutation()?;
         let mut entry = self.read_entry(entry_id)?;
         let (original_index, title) = entry
             .contents
@@ -273,12 +276,25 @@ impl Workspace {
         segment_uid: SegmentUid,
     ) -> Result<SourceLink, WorkspaceError> {
         self.read_note(owner_entry_id, note_id)?;
-        let source_entry = self.read_entry(source_entry_id)?;
-        let parse_status = source_entry.pdf.as_ref().map(|pdf| pdf.parse.status);
-        if parse_status != Some(PdfParseStatus::Succeeded) {
-            return Err(WorkspaceError::PdfNotParsed(source_entry_id.to_string()));
-        }
+        self.build_owned_source_link(
+            LinkOwner::Note {
+                entry_id: owner_entry_id.clone(),
+                note_id: note_id.clone(),
+            },
+            source_entry_id,
+            segment_uid,
+        )
+    }
 
+    pub(crate) fn build_owned_source_link(
+        &self,
+        owner: LinkOwner,
+        source_entry_id: &EntryId,
+        segment_uid: SegmentUid,
+    ) -> Result<SourceLink, WorkspaceError> {
+        crate::tag_reading::validate_id(source_entry_id.as_str())?;
+        let source_entry = self.read_entry(source_entry_id)?;
+        // Existing parsed segments remain valid while a reparse is queued or has failed.
         let segment = self.resolve_source_segment(source_entry_id, &segment_uid)?;
         let source_segment_uid = segment.uid.clone();
         let snapshot_text = segment
@@ -298,13 +314,14 @@ impl Workspace {
             snapshot_asset_path: segment.asset_path.clone(),
             snapshot_text,
         };
-        Ok(SourceLink::note(
-            owner_entry_id.clone(),
-            note_id.clone(),
+        Ok(SourceLink {
+            link_id: neuink_domain::SourceLinkId::new(),
             anchor_id,
-            source,
-            format!("p.{}", segment.page_idx + 1),
-        ))
+            owner,
+            sources: vec![source],
+            display_text: format!("{} · p.{}", source_entry.title, segment.page_idx + 1),
+            created_at: Utc::now(),
+        })
     }
 
     pub fn read_note_source_links(
@@ -390,9 +407,7 @@ impl Workspace {
                 let quarantined_path = quarantine_dir.join(file_name);
                 if !active_path.exists() && quarantined_path.is_file() {
                     fs::rename(&quarantined_path, &active_path)?;
-                    transaction
-                        .moves
-                        .push((quarantined_path, active_path));
+                    transaction.moves.push((quarantined_path, active_path));
                 }
                 manifest.unreferenced_since.remove(file_name);
             }
@@ -515,6 +530,21 @@ fn validate_and_prune_note_links(
     markdown: &str,
     links: &[SourceLink],
 ) -> Result<Vec<SourceLink>, WorkspaceError> {
+    validate_owned_note_links(
+        &LinkOwner::Note {
+            entry_id: entry_id.clone(),
+            note_id: note_id.clone(),
+        },
+        markdown,
+        links,
+    )
+}
+
+pub(crate) fn validate_owned_note_links(
+    owner: &LinkOwner,
+    markdown: &str,
+    links: &[SourceLink],
+) -> Result<Vec<SourceLink>, WorkspaceError> {
     let mut anchor_ids = BTreeSet::new();
     for link in links {
         if link.anchor_id.trim().is_empty() {
@@ -528,13 +558,7 @@ fn validate_and_prune_note_links(
                 link.anchor_id
             )));
         }
-        if !matches!(
-            &link.owner,
-            LinkOwner::Note {
-                entry_id: owner_entry_id,
-                note_id: owner_note_id,
-            } if owner_entry_id == entry_id && owner_note_id == note_id
-        ) {
+        if &link.owner != owner {
             return Err(WorkspaceError::InvalidNoteDocument(format!(
                 "source link {} belongs to another note",
                 link.anchor_id
@@ -568,8 +592,7 @@ fn referenced_note_asset_names(markdown: &str, note_id: &NoteId) -> BTreeSet<Str
         let candidate = &remaining[prefix_index + prefix.len()..];
         let end = candidate
             .find(|character: char| {
-                character.is_whitespace()
-                    || matches!(character, '\'' | '"' | '(' | ')' | '<' | '>')
+                character.is_whitespace() || matches!(character, '\'' | '"' | '(' | ')' | '<' | '>')
             })
             .unwrap_or(candidate.len());
         let file_name = &candidate[..end];
@@ -605,7 +628,10 @@ fn is_managed_note_asset_name(file_name: &str) -> bool {
     let Some((_, hash_suffix)) = stem.rsplit_once('-') else {
         return false;
     };
-    hash_suffix.len() == 12 && hash_suffix.chars().all(|character| character.is_ascii_hexdigit())
+    hash_suffix.len() == 12
+        && hash_suffix
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
 }
 
 fn rollback_note_asset_transaction(transaction: Option<NoteAssetTransaction>) {

@@ -96,13 +96,11 @@ pub fn read_pdf_reader(request: ReadPdfReaderRequest) -> Result<PdfReaderRespons
     let entry = workspace
         .read_entry(&request.entry_id)
         .map_err(|error| error.to_string())?;
-    if entry.pdf.is_none() {
-        return Err("selected entry has no PDF".to_string());
+    // Parsed-only imports are readable in Reflow even without an original PDF.
+    let pdf_path = workspace.layout().entry_pdf_file(&request.entry_id);
+    if entry.pdf.is_none() && !pdf_path.is_file() && !workspace.layout().entry_segments_file(&request.entry_id).is_file() {
+        return Err("该条目没有可读的 PDF 或解析内容".to_string());
     }
-
-    let pdf_path = workspace
-        .entry_pdf_path(&request.entry_id)
-        .map_err(|error| error.to_string())?;
 
     let mut document = NeuinkDocument::new(
         workspace
@@ -245,6 +243,22 @@ mod tests {
     fn validates_pdf_paths_case_insensitively() {
         assert!(validate_pdf_path(std::path::Path::new("paper.PDF")).is_ok());
         assert!(validate_pdf_path(std::path::Path::new("paper.txt")).is_err());
+    }
+
+    #[test]
+    fn reads_parsed_only_content_without_pdf_metadata_or_file() {
+        let root = test_workspace_root();
+        let workspace = neuink_workspace::Workspace::create(&root).unwrap();
+        let entry = workspace.create_entry("Parsed-only import").unwrap();
+        assert!(entry.pdf.is_none());
+        workspace.write_segments(&entry.id, &[SourceSegment::new(
+            neuink_domain::SegmentType::Paragraph, 0, None, "Parsed content".into(),
+        )]).unwrap();
+        let response = read_pdf_reader(ReadPdfReaderRequest { root: root.clone(), entry_id: entry.id }).unwrap();
+        assert!(!response.pdf_path.exists());
+        assert_eq!(response.segments.len(), 1);
+        assert_eq!(response.segments[0].text, "Parsed content");
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

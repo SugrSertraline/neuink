@@ -1,10 +1,20 @@
 pub mod annotation_index;
 pub mod atomic_write;
 pub mod entry_meta;
+pub mod export;
 pub mod error;
 pub mod layout;
 pub mod note;
+pub mod tag_note;
+pub mod note_catalog;
+#[cfg(test)]
+mod note_catalog_tests;
+pub mod source_availability;
+pub mod tag_details;
 pub mod reading_state;
+pub mod tag_reading;
+pub mod tag_archive;
+mod tag_transaction;
 pub mod search;
 pub mod trash;
 pub mod workspace;

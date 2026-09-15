@@ -15,6 +15,7 @@ export type EntryMeta = {
 };
 
 export type TagMeta = {
+  description?: string;
   id: TagId;
   name: string;
   parent_id: TagId | null;
@@ -79,6 +80,9 @@ export type ContentItem = {
   title: string;
 };
 
+export type NoteOwner = { kind: 'entry'; entry_id: string } | { kind: 'tag_reading'; tag_id: string };
+export type NoteTarget = { owner: NoteOwner; note_id: string };
+
 export type NoteDocument = {
   note_id: NoteId;
   title: string;
@@ -94,7 +98,7 @@ export type SourceLink = {
     kind: 'note';
     entry_id: EntryId;
     note_id: NoteId;
-  };
+  } | { kind: 'tag_note'; tag_id: string; note_id: NoteId };
   sources: SegmentRef[];
   display_text: string;
   created_at: string;

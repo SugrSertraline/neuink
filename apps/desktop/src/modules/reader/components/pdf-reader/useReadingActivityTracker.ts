@@ -3,10 +3,13 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { readReadingState, updateReadingState } from '@/shared/ipc/workspaceApi';
 import { emitReadingStateUpdated } from '@/shared/lib/readingStateEvents';
 import type { EntryReadingState, ReadingMode } from '@/shared/types/domain';
+import { useReadingSession } from '../../parallel-reading/ReadingSessionContext';
 
 const IDLE_AFTER_MS = 60_000;
 const FLUSH_EVERY_MS = 15_000;
 const PAGE_VISIT_AFTER_MS = 2_000;
+let activeReaderElement: HTMLElement | null = null;
+const readerIsVisible = (element: HTMLElement | null) => Boolean(element?.isConnected && element.getClientRects().length);
 
 export function useReadingActivityTracker({
   enabled,
@@ -25,6 +28,12 @@ export function useReadingActivityTracker({
   visiblePageIndexes: number[];
   workspaceRoot: string | null;
 }) {
+  const session = useReadingSession();
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+  useEffect(() => {
+    if (enabled && pageCount > 0 && session?.active) session.onReady();
+  }, [enabled, pageCount, session?.active, session?.onReady]);
   const [savedState, setSavedState] = useState<EntryReadingState | null>(null);
   const activeContextRef = useRef(`${workspaceRoot ?? ''}:${entryId}`);
   const activeMsRef = useRef(0);
@@ -40,7 +49,7 @@ export function useReadingActivityTracker({
 
   useEffect(() => {
     visiblePagesRef.current = visiblePageIndexes;
-    if (visiblePageIndexes.length > 0) {
+    if (visiblePageIndexes.length > 0 && sessionRef.current?.active !== false) {
       dirtyLocationRef.current = true;
     }
   }, [visiblePageIndexes]);
@@ -122,10 +131,14 @@ export function useReadingActivityTracker({
     if (!enabled) {
       return;
     }
-    const markInteraction = () => {
+    const container = scrollRef.current;
+    const interactionRoot = container?.closest('[data-reading-frame]') ?? container?.closest('.workspace-pane-surface') ?? container;
+    const markInteraction = (event?: Event) => {
+      if (sessionRef.current?.active === false || !readerIsVisible(container)) return;
+      if (event && event.target instanceof Node && !interactionRoot?.contains(event.target)) return;
+      activeReaderElement = container;
       lastInteractionAtRef.current = Date.now();
     };
-    const container = scrollRef.current;
     container?.addEventListener('scroll', markInteraction, { passive: true });
     window.addEventListener('keydown', markInteraction);
     window.addEventListener('pointerdown', markInteraction);
@@ -136,12 +149,16 @@ export function useReadingActivityTracker({
       const elapsed = Math.min(now - lastTickAtRef.current, 2_000);
       lastTickAtRef.current = now;
       const active =
+        sessionRef.current?.active !== false &&
+        readerIsVisible(container) &&
         document.visibilityState === 'visible' &&
         document.hasFocus() &&
         now - lastInteractionAtRef.current <= IDLE_AFTER_MS;
       if (!active || visiblePagesRef.current.length === 0) {
         return;
       }
+      if (!readerIsVisible(activeReaderElement)) activeReaderElement = container;
+      if (activeReaderElement !== container) return;
       activeMsRef.current += elapsed;
       for (const pageIdx of visiblePagesRef.current) {
         const dwell = (pageDwellMsRef.current.get(pageIdx) ?? 0) + elapsed;
@@ -174,6 +191,7 @@ export function useReadingActivityTracker({
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('blur', handleBlur);
       flush();
+      if (activeReaderElement === container) activeReaderElement = null;
     };
   }, [enabled, flush, scrollRef]);
 

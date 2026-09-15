@@ -70,8 +70,12 @@ export async function saveMarkdownNoteBeforeClose(entryId: string, noteId: strin
   if (handlers.length === 0) {
     return false;
   }
-  const results = await Promise.all(handlers.map((save) => save()));
-  return results.every(Boolean);
+  try {
+    const results = await Promise.all(handlers.map((save) => save()));
+    return results.every(Boolean) && !hasUnsavedMarkdownNote(entryId, noteId);
+  } catch {
+    return false;
+  }
 }
 
 export async function saveAllMarkdownNotesBeforeWorkspaceChange() {
@@ -81,10 +85,19 @@ export async function saveAllMarkdownNotesBeforeWorkspaceChange() {
     if (handlers.length === 0) {
       return false;
     }
-    const results = await Promise.all(handlers.map((save) => save()));
-    if (!results.every(Boolean)) {
+    let results: boolean[];
+    try { results = await Promise.all(handlers.map((save) => save())); }
+    catch { return false; }
+    if (!results.every(Boolean) || dirtyNoteOwners.has(key)) {
       return false;
     }
   }
-  return true;
+  return !hasAnyUnsavedMarkdownNotes();
+}
+
+export async function saveMarkdownNotesForOwner(ownerKey: string) {
+  for (const key of Array.from(dirtyNoteOwners.keys()).filter((key) => key.startsWith(`${ownerKey}:`))) {
+    if (!await saveMarkdownNoteBeforeClose(ownerKey, key.slice(ownerKey.length + 1))) return false;
+  }
+  return ![...dirtyNoteOwners.keys()].some((key) => key.startsWith(`${ownerKey}:`));
 }

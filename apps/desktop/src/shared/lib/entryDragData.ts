@@ -66,7 +66,11 @@ export function isEntryTagDropTargetActive(element: HTMLElement, drag = activeDr
 }
 
 function findDropTarget(x: number, y: number) {
+  // Bounding boxes alone can hit rows clipped by a scroller or covered by its
+  // sticky toolbar. Only the visible row under the pointer may receive a drop.
+  const hit = typeof document.elementFromPoint === 'function' ? document.elementFromPoint(x, y) : undefined;
   return [...dropTargets].reverse().find(({ element }) => {
+    if (hit !== undefined && (!hit || !element.contains(hit))) return false;
     const bounds = element.getBoundingClientRect();
     return x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom;
   }) ?? null;

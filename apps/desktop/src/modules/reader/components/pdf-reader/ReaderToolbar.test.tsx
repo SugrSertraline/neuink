@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@/components/ui/tooltip';
 
 import { ReaderToolbar } from './ReaderToolbar';
+import { ReadingSessionContext } from '../../parallel-reading/ReadingSessionContext';
 
 describe('ReaderToolbar', () => {
   afterEach(() => cleanup());
@@ -66,8 +67,66 @@ describe('ReaderToolbar', () => {
     };
   }
 
+  it('uses a single compact row in parallel reading and keeps navigation, search, zoom and export operable', () => {
+    const onCurrentPageChange = vi.fn();
+    const onSearchQueryChange = vi.fn();
+    const onSearchNext = vi.fn();
+    const onZoomIn = vi.fn();
+    const onReaderPreferencesChange = vi.fn();
+    const onExportPaper = vi.fn();
+    const onPauseTranslation = vi.fn();
+    const onOpenTranslationTask = vi.fn();
+    const { container } = renderWithTooltipProvider(
+      <ReadingSessionContext.Provider value={{ active: true, onReady: vi.fn() }}>
+        <ReaderToolbar entry={buildEntry()} pageCount={12} currentPage={1} segmentCount={86}
+          readerPreferences={buildPreferences()} zoom={1} recommendedTags={[]} selectedRecommendedTagPaths={[]}
+          tagSuggestionBusy={false} tagSuggestionsOpen={false} translation={null} translationBusy translationMessage="已完成 8 个片段"
+          searchQuery="alpha" searchStatus="ready" searchMatchCount={3} searchActiveMatchNumber={1}
+          onApplyRecommendedTags={vi.fn()} onDismissRecommendedTags={vi.fn()} onRecommendedTagToggle={vi.fn()}
+          onTagSuggestionsOpenChange={vi.fn()} onExportTranslation={vi.fn()} onExportPaper={onExportPaper}
+          onPauseTranslation={onPauseTranslation} onOpenTranslationTask={onOpenTranslationTask}
+          onZoomIn={onZoomIn} onZoomOut={vi.fn()} onCurrentPageChange={onCurrentPageChange}
+          onReaderPreferencesChange={onReaderPreferencesChange} onSearchQueryChange={onSearchQueryChange} onSearchNext={onSearchNext} />
+      </ReadingSessionContext.Provider>
+    );
+    expect(container.querySelector('.entry-content-header')).toBeNull();
+    expect(screen.queryByText('PDF 内容')).toBeNull();
+    expect(container.querySelector('[data-reader-compact-toolbar]')?.className).toContain('h-9');
+    expect(screen.getByRole('status').textContent).toBe('已完成 8 个片段');
+    for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+    expect(onCurrentPageChange.mock.calls.map(([page]) => page)).toEqual([2, 3, 4]);
+    const input = screen.getByRole('textbox', { name: '当前页码' });
+    expect(input.getAttribute('type')).toBe('text');
+    fireEvent.change(input, { target: { value: '8' } });
+    fireEvent.submit(input.closest('form') as HTMLFormElement);
+    expect(onCurrentPageChange).toHaveBeenLastCalledWith(8);
+    fireEvent.click(screen.getByRole('button', { name: '查找 PDF 文字' }));
+    fireEvent.change(screen.getByRole('searchbox', { name: '在当前 PDF 中查找' }), { target: { value: 'beta' } });
+    expect(onSearchQueryChange).toHaveBeenCalledWith('beta');
+    fireEvent.click(screen.getByRole('button', { name: '下一个匹配' }));
+    expect(onSearchNext).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: '查找 PDF 文字' }));
+    fireEvent.click(screen.getByRole('button', { name: '缩放与阅读显示' }));
+    fireEvent.click(screen.getByRole('button', { name: '放大' }));
+    expect(onZoomIn).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: '切换为双页' }));
+    expect(onReaderPreferencesChange).toHaveBeenCalledWith(expect.objectContaining({ pageDisplayMode: 'dual' }));
+    fireEvent.click(screen.getByRole('button', { name: '缩放与阅读显示' }));
+    const openTools = () => fireEvent.keyDown(screen.getByRole('button', { name: '更多 PDF 操作' }), { key: 'Enter' });
+    openTools();
+    fireEvent.click(screen.getByRole('menuitem', { name: '导出论文内容' }));
+    expect(onExportPaper).toHaveBeenCalledOnce();
+    openTools();
+    fireEvent.click(screen.getByRole('menuitem', { name: '暂停翻译' }));
+    expect(onPauseTranslation).toHaveBeenCalledOnce();
+    openTools();
+    fireEvent.click(screen.getByRole('menuitem', { name: '查看翻译任务' }));
+    expect(onOpenTranslationTask).toHaveBeenCalledOnce();
+  });
+
   it('keeps the content title with compact reader metadata', () => {
     const onOpenTranslationTask = vi.fn();
+    const onExportPaper = vi.fn();
     const onZoomIn = vi.fn();
     const onZoomOut = vi.fn();
     renderWithTooltipProvider(
@@ -87,6 +146,7 @@ describe('ReaderToolbar', () => {
         onDismissRecommendedTags={() => {}}
         onExportTranslation={() => {}}
         onOpenTranslationTask={onOpenTranslationTask}
+        onExportPaper={onExportPaper}
         onPauseTranslation={() => {}}
         onReaderPreferencesChange={() => {}}
         onRecommendedTagToggle={() => {}}
@@ -108,6 +168,8 @@ describe('ReaderToolbar', () => {
     fireEvent.click(screen.getByTitle('放大'));
     expect(onOpenTranslationTask).toHaveBeenCalledOnce();
     expect(onZoomOut).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: '导出论文内容' }));
+    expect(onExportPaper).toHaveBeenCalledOnce();
     expect(onZoomIn).toHaveBeenCalledOnce();
   });
 
@@ -326,6 +388,46 @@ describe('ReaderToolbar', () => {
     expect(pageInput.className).toContain('w-9');
     fireEvent.change(pageInput, { target: { value: '8abc' } });
     expect((pageInput as HTMLInputElement).value).toBe('8');
+  });
+
+  it('keeps advancing when page visibility updates lag behind repeated clicks', () => {
+    const onCurrentPageChange = vi.fn();
+    renderWithTooltipProvider(
+      <ReaderToolbar
+        currentPage={1}
+        entry={buildEntry()}
+        pageCount={30}
+        readerPreferences={buildPreferences()}
+        recommendedTags={[]}
+        segmentCount={86}
+        selectedRecommendedTagPaths={[]}
+        tagSuggestionBusy={false}
+        tagSuggestionsOpen={false}
+        translation={null}
+        translationBusy={false}
+        zoom={1}
+        onApplyRecommendedTags={() => {}}
+        onCurrentPageChange={onCurrentPageChange}
+        onDismissRecommendedTags={() => {}}
+        onExportTranslation={() => {}}
+        onOpenTranslationTask={() => {}}
+        onPauseTranslation={() => {}}
+        onReaderPreferencesChange={() => {}}
+        onRecommendedTagToggle={() => {}}
+        onTagSuggestionsOpenChange={() => {}}
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+      />
+    );
+
+    const nextPage = screen.getByRole('button', { name: '下一页' });
+    for (let index = 0; index < 10; index += 1) {
+      fireEvent.click(nextPage);
+    }
+
+    expect(onCurrentPageChange.mock.calls.map(([page]) => page)).toEqual([
+      2, 3, 4, 5, 6, 7, 8, 9, 10, 11
+    ]);
   });
 
   it('keeps the original PDF controls available after parsing fails', () => {

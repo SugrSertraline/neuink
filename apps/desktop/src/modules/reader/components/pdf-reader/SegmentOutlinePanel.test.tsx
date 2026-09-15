@@ -28,9 +28,14 @@ describe('SegmentOutlinePanel', () => {
     expect(
       screen.getByRole('button', { name: 'Section' }).getAttribute('aria-current')
     ).toBe('location');
-    fireEvent.click(screen.getByRole('button', { name: '收起 Chapter' }));
+    const collapseButton = screen.getByRole('button', { name: '收起 Chapter' });
+    expect(collapseButton.getAttribute('data-slot')).toBe('button');
+    expect(collapseButton.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(collapseButton);
     expect(screen.queryByRole('button', { name: 'Section' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: '展开 Chapter' }));
+    const expandButton = screen.getByRole('button', { name: '展开 Chapter' });
+    expect(expandButton.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(expandButton);
     fireEvent.click(screen.getByRole('button', { name: 'Section' }));
     expect(onJumpToSegment).toHaveBeenCalledWith('section');
   });

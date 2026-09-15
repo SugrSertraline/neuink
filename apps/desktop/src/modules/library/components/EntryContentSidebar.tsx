@@ -27,12 +27,17 @@ import {
   CompactEntryTags
 } from './EntryMetadataPreviews';
 import type { LibraryEntry } from './LibrarySidebar';
+import { SidebarSectionHeader } from './SidebarSectionHeader';
+import { SidebarContentRow as ContentRow } from './SidebarContentRow';
+import { EntryTagNotesSidebar, type EntryTagNotesContext } from '@/modules/notes/components/EntryTagNotesSidebar';
 
 type EntryContentSidebarProps = {
   activeContentId: string | null;
   entry: LibraryEntry;
   tags: TagMeta[];
+  tagNotes?: EntryTagNotesContext;
   onBack: () => void;
+  onOpenTrash: () => void;
   onCreateMarkdownNote: () => Promise<void> | void;
   onDeleteMarkdownNote: (entryId: string, noteId: string) => Promise<void> | void;
   onAttachPdf: (entryId: string, pdfPath: string) => Promise<void> | void;
@@ -57,7 +62,9 @@ export function EntryContentSidebar({
   activeContentId,
   entry,
   tags,
+  tagNotes,
   onBack,
+  onOpenTrash,
   onCreateMarkdownNote,
   onDeleteMarkdownNote,
   onAttachPdf,
@@ -71,6 +78,7 @@ export function EntryContentSidebar({
   onUpdateEntry
 }: EntryContentSidebarProps) {
   const [creating, setCreating] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(true);
   const [pdfAction, setPdfAction] = useState<'attach' | 'version' | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [notePendingDelete, setNotePendingDelete] = useState<{
@@ -220,16 +228,18 @@ export function EntryContentSidebar({
 
   return (
     <>
-      <ScrollArea className="side-body">
+      <ScrollArea className="side-body [&_[data-slot=scroll-area-viewport]>div]:!block">
         <div className="min-w-0 space-y-3 p-2">
-          <button
-            className="flex min-h-7 w-full items-center gap-2 rounded-md px-2 text-left text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+          <Button
+            className="w-full justify-start text-muted-foreground"
+            size="sm"
             type="button"
+            variant="ghost"
             onClick={onBack}
           >
             <ArrowLeft size={14} aria-hidden="true" />
             返回条目库
-          </button>
+          </Button>
 
           <section className="min-w-0 space-y-3 rounded-md border bg-muted/25 p-2">
             <div className="flex items-start justify-between gap-2">
@@ -277,19 +287,7 @@ export function EntryContentSidebar({
           </section>
 
           <section className="min-w-0 space-y-1">
-            <div className="flex h-7 items-center gap-1.5 px-1.5 text-[10px] font-extrabold uppercase tracking-wide text-muted-foreground">
-              <span className="min-w-0 flex-1 truncate">内容</span>
-              <Button
-                disabled={creating}
-                size="icon-xs"
-                title="新建笔记"
-                type="button"
-                variant="ghost"
-                onClick={() => void createNote()}
-              >
-                <Plus size={13} aria-hidden="true" />
-              </Button>
-            </div>
+            <SidebarSectionHeader label="阅读内容" />
 
             <ContentRow
               active={activeContentId === 'overview'}
@@ -369,8 +367,8 @@ export function EntryContentSidebar({
                 <ContentRow
                   active={activeContentId === 'source-links'}
                   icon={<Link2 size={14} />}
-                  label="来源链接"
-                  meta="引用关系"
+                  label="引用此文"
+                  meta="证据与笔记"
                   action={<OpenInRightButton onClick={() => onOpenContentInRight('source-links')} />}
                   onClick={() => onSelectContent('source-links')}
                 />
@@ -385,6 +383,15 @@ export function EntryContentSidebar({
               </div>
             )}
 
+          </section>
+
+          <section className="min-w-0 space-y-1">
+            <SidebarSectionHeader label={`文档笔记 · ${notes.length}`} open={notesOpen} onToggle={() => setNotesOpen(value => !value)} action={
+              <Button aria-label="新建文档笔记" disabled={creating} size="icon-xs" title="新建文档笔记" type="button" variant="ghost" onClick={() => { setNotesOpen(true); void createNote(); }}>
+                <Plus size={13} aria-hidden="true" />
+              </Button>
+            } />
+            <div hidden={!notesOpen}>
             {notes.map((note) => (
               <ContentRow
                 active={activeContentId === `note:${note.note_id}`}
@@ -462,18 +469,22 @@ export function EntryContentSidebar({
 
             {notes.length === 0 ? (
               <div className="rounded-md px-2 py-1.5 text-xs text-muted-foreground">
-                暂无笔记
+                暂无文档笔记
               </div>
             ) : null}
+            </div>
 
-            <div className="my-1 h-px bg-border" />
+          </section>
+
+          {tagNotes ? <EntryTagNotesSidebar key={`${entry.id}:${tagNotes.contextTagId ?? ''}`} entry={entry} tags={tags} {...tagNotes} /> : null}
+
+          <section className="min-w-0 border-t pt-2">
             <ContentRow
               active={activeContentId === 'entry-trash'}
               icon={<Trash2 size={14} />}
               label="回收站"
-              meta="已删除内容"
-              action={<OpenInRightButton onClick={() => onOpenContentInRight('entry-trash')} />}
-              onClick={() => onSelectContent('entry-trash')}
+              meta="条目、笔记与标签"
+              onClick={onOpenTrash}
             />
           </section>
         </div>
@@ -588,62 +599,6 @@ function InfoBlock({
     <div className="grid gap-1.5 text-xs">
       <div className="font-semibold text-muted-foreground">{label}</div>
       <div className="min-w-0 leading-5">{children}</div>
-    </div>
-  );
-}
-
-function ContentRow({
-  active,
-  icon,
-  label,
-  labelContent,
-  meta,
-  action,
-  onContextMenu,
-  onClick
-}: {
-  active: boolean;
-  icon: ReactNode;
-  label: string;
-  labelContent?: ReactNode;
-  meta: string;
-  action?: ReactNode;
-  onContextMenu?: (event: ReactMouseEvent<HTMLDivElement>) => void;
-  onClick: () => void;
-}) {
-  return (
-    <div
-      className={cn(
-        'flex min-h-7 w-full min-w-0 items-center gap-1 overflow-hidden rounded-md border border-transparent text-xs transition-colors',
-        active
-          ? 'border-primary/20 bg-accent font-bold text-primary'
-          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-      )}
-      onContextMenu={onContextMenu}
-    >
-      {labelContent ? (
-        <div className="flex w-full min-w-0 max-w-full flex-1 items-center gap-2 overflow-hidden px-2 py-1 text-left">
-          <span className="grid size-4 shrink-0 place-items-center">{icon}</span>
-          <span className="w-0 min-w-0 flex-1 overflow-hidden">
-            {labelContent}
-            <span className="block text-[10px] font-medium text-muted-foreground">{meta}</span>
-          </span>
-        </div>
-      ) : (
-        <button
-          className="flex w-full min-w-0 max-w-full flex-1 items-center gap-2 overflow-hidden px-2 py-1 text-left"
-          title={label}
-          type="button"
-          onClick={onClick}
-        >
-          <span className="grid size-4 shrink-0 place-items-center">{icon}</span>
-          <span className="w-0 min-w-0 flex-1 overflow-hidden">
-            <span className="block truncate">{label}</span>
-            <span className="block text-[10px] font-medium text-muted-foreground">{meta}</span>
-          </span>
-        </button>
-      )}
-      {action ? <span className="shrink-0 pr-1">{action}</span> : null}
     </div>
   );
 }

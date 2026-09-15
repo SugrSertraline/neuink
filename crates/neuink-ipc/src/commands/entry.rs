@@ -794,7 +794,7 @@ pub(crate) fn reveal_path_in_file_manager(path: &std::path::Path) -> Result<(), 
     }
 }
 
-fn note_asset_extension(path: &Path) -> Result<String, String> {
+pub(super) fn note_asset_extension(path: &Path) -> Result<String, String> {
     let extension = path
         .extension()
         .and_then(|extension| extension.to_str())
@@ -806,7 +806,7 @@ fn note_asset_extension(path: &Path) -> Result<String, String> {
     }
 }
 
-fn note_asset_extension_from_mime(mime_type: &str) -> Result<String, String> {
+pub(super) fn note_asset_extension_from_mime(mime_type: &str) -> Result<String, String> {
     match mime_type
         .split(';')
         .next()

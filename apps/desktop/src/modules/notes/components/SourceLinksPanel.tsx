@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import type { SourceLink } from '@/shared/types/domain';
 
 import type { SourceLinkOpenTarget } from '../editor/SourceLinkNode';
+import { useNoteSourceStatus } from '../NoteSourcesContext';
 
 type SourceLinksPanelProps = {
   filters: string[];
@@ -71,6 +72,7 @@ function SourceLinkRow({
   onOpenSourceLink?: (target: SourceLinkOpenTarget) => void;
 }) {
   const source = link.sources[0];
+  const status = useNoteSourceStatus(link.anchor_id);
   return (
     <div className="flex min-w-0 items-center gap-2 rounded-sm border bg-background px-2 py-1.5 text-xs">
       <button className="min-w-0 flex-1 text-left" type="button" onClick={() => onLocate(link.anchor_id)}>
@@ -78,6 +80,7 @@ function SourceLinkRow({
           {link.display_text || `p.${source?.page ?? '?'}`}
         </div>
         <div className="truncate text-[11px] text-muted-foreground">
+          {status && status.status !== 'available' ? `${status.message} · ` : ''}
           {source
             ? `p.${source.page} · ${sourceFilterLabel(source.segment_type ?? 'unknown')}`
             : link.anchor_id}
@@ -88,6 +91,7 @@ function SourceLinkRow({
           size="xs"
           type="button"
           variant="outline"
+          disabled={Boolean(status && !status.can_locate)}
           onClick={() =>
             onOpenSourceLink({
               page: source.page,

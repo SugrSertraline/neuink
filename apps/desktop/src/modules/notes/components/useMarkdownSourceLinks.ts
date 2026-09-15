@@ -99,6 +99,7 @@ export function useMarkdownSourceLinks({
 
   const insertSourceLink = useCallback(
     (targetEditor: Editor, link: SourceLink) => {
+      if (targetEditor.isDestroyed || !targetEditor.isEditable) return;
       const linkToInsert =
         findExistingSourceLinkForSameSource(noteLinksRef.current, link) ?? link;
       insertSourceLinkNode(targetEditor, linkToInsert, workspaceRoot);
@@ -205,8 +206,15 @@ export function useMarkdownSourceLinks({
       return;
     }
 
-    insertSourceLink(editor, sourceLinkToInsert);
-    handledSourceLinkIdRef.current = sourceLinkToInsert.link_id;
+    // Tiptap React node views may flush synchronously. Insert outside React's
+    // effect commit, and cancel when ownership/target changes before this runs.
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled || editor.isDestroyed || !editor.isEditable) return;
+      handledSourceLinkIdRef.current = sourceLinkToInsert.link_id;
+      insertSourceLink(editor, sourceLinkToInsert);
+    });
+    return () => { cancelled = true; };
   }, [canEdit, editor, insertSourceLink, loadFailed, loading, sourceLinkToInsert]);
 
   const locateSourceLink = useCallback(

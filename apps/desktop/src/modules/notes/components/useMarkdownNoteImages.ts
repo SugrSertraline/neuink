@@ -3,7 +3,8 @@ import type { Editor } from '@tiptap/core';
 import { useCallback, useRef, useState } from 'react';
 
 import type { ToastContextValue } from '@/shared/hooks/useToast';
-import { importNoteAsset, saveNoteAssetBytes } from '@/shared/ipc/workspaceApi';
+import { importOwnedNoteAsset, saveOwnedNoteAssetBytes } from '@/shared/ipc/noteOwnerApi';
+import type { NoteOwner } from '@/shared/types/domain';
 
 export function firstImageFromClipboard(clipboardData: DataTransfer | null): File | null {
   if (!clipboardData) {
@@ -57,11 +58,13 @@ export function imageAltFromPath(path: string) {
 
 export function useMarkdownNoteImages({
   entryId,
+  noteOwner,
   noteId,
   notify,
   workspaceRoot
 }: {
   entryId: string;
+  noteOwner?: NoteOwner;
   noteId: string;
   notify: ToastContextValue['notify'];
   workspaceRoot?: string | null;
@@ -78,9 +81,9 @@ export function useMarkdownNoteImages({
       pasteImageBusyRef.current = true;
       setImageImporting(true);
       try {
-        const imported = await saveNoteAssetBytes(
+        const imported = await saveOwnedNoteAssetBytes(
           workspaceRoot,
-          entryId,
+          noteOwner ?? { kind: 'entry', entry_id: entryId },
           noteId,
           image.type,
           await fileToBase64(image),
@@ -97,7 +100,7 @@ export function useMarkdownNoteImages({
         setImageImporting(false);
       }
     },
-    [entryId, noteId, notify, workspaceRoot]
+    [entryId, noteOwner, noteId, notify, workspaceRoot]
   );
 
   const selectAndInsertImage = useCallback(
@@ -121,7 +124,7 @@ export function useMarkdownNoteImages({
           return;
         }
 
-        const imported = await importNoteAsset(workspaceRoot, entryId, noteId, selected);
+        const imported = await importOwnedNoteAsset(workspaceRoot, noteOwner ?? { kind: 'entry', entry_id: entryId }, noteId, selected);
         insertNoteImageIntoEditor(editor, imported.markdown_path, imageAltFromPath(selected));
         notify({
           tone: 'success',
@@ -138,7 +141,7 @@ export function useMarkdownNoteImages({
         setImageImporting(false);
       }
     },
-    [entryId, imageImporting, noteId, notify, workspaceRoot]
+    [entryId, noteOwner, imageImporting, noteId, notify, workspaceRoot]
   );
 
   return {

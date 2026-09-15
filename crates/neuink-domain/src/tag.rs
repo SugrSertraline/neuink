@@ -7,6 +7,8 @@ use crate::{DomainError, TagId};
 pub struct TagMeta {
     pub id: TagId,
     pub name: String,
+    #[serde(default)]
+    pub description: String,
     pub parent_id: Option<TagId>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -18,6 +20,7 @@ impl TagMeta {
         let tag = Self {
             id: TagId::new(),
             name: name.into(),
+            description: String::new(),
             parent_id,
             created_at: now,
             updated_at: now,

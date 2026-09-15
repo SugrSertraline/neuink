@@ -2,6 +2,11 @@ pub mod commands;
 
 pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder.invoke_handler(tauri::generate_handler![
+        commands::export::inspect_paper_export,
+        commands::export::preview_paper_export,
+        commands::export::inspect_reading_export,
+        commands::export::export_reading,
+        commands::export::export_paper,
         commands::workspace::create_workspace,
         commands::workspace::create_and_set_workspace_root,
         commands::workspace::forget_recent_workspace,
@@ -116,6 +121,14 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
         commands::tag::apply_tag_proposal,
         commands::tag::delete_tag,
         commands::tag::rename_tag,
+        commands::tag::update_tag_description,
+        commands::note_catalog::read_note_catalog,
+        commands::note_catalog::inspect_note_sources,
+        commands::tag_reading::read_tag_reading,
+        commands::tag_note::tag_note,
+        commands::tag_reading::save_tag_reading,
+        commands::tag_reading::list_tag_archives,
+        commands::tag_reading::restore_tag_archive,
         commands::translation::begin_entry_translation,
         commands::translation::finish_entry_translation,
         commands::translation::pause_entry_translation,

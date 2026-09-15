@@ -3,14 +3,16 @@ import type { Editor } from '@tiptap/core';
 import { useCallback, useState } from 'react';
 
 import type { ToastContextValue } from '@/shared/hooks/useToast';
-import { openNoteFile, revealNoteFile, saveNoteMarkdownAs } from '@/shared/ipc/workspaceApi';
-import type { SourceLink } from '@/shared/types/domain';
+import { saveNoteMarkdownAs } from '@/shared/ipc/workspaceApi';
+import { openOwnedNoteFile } from '@/shared/ipc/noteOwnerApi';
+import type { NoteOwner, SourceLink } from '@/shared/types/domain';
 
 import { getMarkdownWithSourceLinks, materializeMarkdownSourceLinks, pruneUnusedSourceLinks } from '../editor/SourceLinkNode';
 import type { MarkdownNoteFileAction } from './MarkdownNoteHeader';
 import { sanitizeExportFileName } from './markdownNoteEditorSupport';
 
 export function useMarkdownNoteFileActions({
+  noteOwner,
   dirty,
   editor,
   entryId,
@@ -25,6 +27,7 @@ export function useMarkdownNoteFileActions({
   dirty: boolean;
   editor: Editor | null;
   entryId: string;
+  noteOwner?: NoteOwner;
   fallbackTitle: string;
   noteId: string;
   noteLinks: SourceLink[];
@@ -52,7 +55,7 @@ export function useMarkdownNoteFileActions({
       if (!(await saveDirtyNote())) {
         return;
       }
-      await openNoteFile(workspaceRoot, entryId, noteId);
+      await openOwnedNoteFile(workspaceRoot, noteOwner ?? { kind: 'entry', entry_id: entryId }, noteId, false);
     } catch (caught) {
       notify({
         tone: 'danger',
@@ -62,7 +65,7 @@ export function useMarkdownNoteFileActions({
     } finally {
       setFileAction(null);
     }
-  }, [entryId, fileAction, noteId, notify, saveDirtyNote, workspaceRoot]);
+  }, [entryId, noteOwner, fileAction, noteId, notify, saveDirtyNote, workspaceRoot]);
 
   const revealMarkdownFile = useCallback(async () => {
     if (!workspaceRoot || fileAction) {
@@ -74,7 +77,7 @@ export function useMarkdownNoteFileActions({
       if (!(await saveDirtyNote())) {
         return;
       }
-      await revealNoteFile(workspaceRoot, entryId, noteId);
+      await openOwnedNoteFile(workspaceRoot, noteOwner ?? { kind: 'entry', entry_id: entryId }, noteId, true);
     } catch (caught) {
       notify({
         tone: 'danger',
@@ -84,7 +87,7 @@ export function useMarkdownNoteFileActions({
     } finally {
       setFileAction(null);
     }
-  }, [entryId, fileAction, noteId, notify, saveDirtyNote, workspaceRoot]);
+  }, [entryId, noteOwner, fileAction, noteId, notify, saveDirtyNote, workspaceRoot]);
 
   const saveMarkdownAs = useCallback(async () => {
     if (!editor || fileAction) {

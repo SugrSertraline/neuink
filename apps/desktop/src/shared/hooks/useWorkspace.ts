@@ -54,6 +54,7 @@ import type {
 } from '../types/domain';
 import type { AssistantEntryMetaProposal, AssistantTagProposal } from '../types/assistant';
 import { useWorkspaceResourceActions } from './useWorkspaceResourceActions';
+import { listTagArchives } from '../ipc/tagReadingApi';
 
 type WorkspaceStatus = 'loading' | 'ready' | 'error';
 
@@ -85,6 +86,13 @@ export function useWorkspace() {
   const [trashedEntries, setTrashedEntries] = useState<EntryMeta[]>([]);
   const [trashItems, setTrashItems] = useState<TrashItem[]>([]);
   const [tags, setTags] = useState<TagMeta[]>([]);
+  const [tagArchiveCount, setTagArchiveCount] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    setTagArchiveCount(0);
+    if (root) void listTagArchives(root).then((items) => { if (!cancelled) setTagArchiveCount(items.length); }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [root, tags]);
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
   const [status, setStatus] = useState<WorkspaceStatus>('loading');
   const [error, setError] = useState<string | null>(null);
@@ -259,6 +267,8 @@ export function useWorkspace() {
     applyWorkspaceTagProposal,
     applyWorkspaceEntryMetaProposal,
     renameWorkspaceTag,
+    updateWorkspaceTagDescription,
+    restoreWorkspaceTagArchive,
     deleteWorkspaceTag,
     deleteWorkspaceEntry,
     restoreWorkspaceEntry,
@@ -412,6 +422,7 @@ export function useWorkspace() {
   );
 
   return {
+    tagArchiveCount,
     root,
     entries,
     trashedEntries,
@@ -445,6 +456,8 @@ export function useWorkspace() {
     readMarkdownNote,
     readEntryPdfReader,
     renameWorkspaceTag,
+    updateWorkspaceTagDescription,
+    restoreWorkspaceTagArchive,
     refreshEntries,
     refreshTrashItems,
     refreshAnnotationCatalog,

@@ -819,6 +819,18 @@ fn load_search_build_status(root: &PathBuf) -> Result<SearchIndexBuildStatus, St
         .ok()
         .and_then(|bytes| serde_json::from_slice::<SearchIndexBuildStatus>(&bytes).ok())
         .unwrap_or_else(|| idle_search_build_status(root));
+    if matches!(
+        &status.state,
+        SearchIndexBuildState::Queued | SearchIndexBuildState::Running
+    ) {
+        // Builds run inside the current application process and cannot survive
+        // a restart. If an in-progress state exists only on disk, the previous
+        // process stopped before it could record a terminal state. Recover to
+        // idle instead of presenting or resuming a phantom background build.
+        let recovered = interrupted_search_build_status(root);
+        store_search_build_status(root, recovered.clone());
+        return Ok(recovered);
+    }
     cache
         .lock()
         .map_err(|_| "search build status lock is poisoned".to_string())?
@@ -840,6 +852,12 @@ fn idle_search_build_status(root: &PathBuf) -> SearchIndexBuildStatus {
         started_at_ms: now,
         updated_at_ms: now,
     }
+}
+
+fn interrupted_search_build_status(root: &PathBuf) -> SearchIndexBuildStatus {
+    let mut status = idle_search_build_status(root);
+    status.message = "上次向量索引构建已中断；等待用户手动构建".to_string();
+    status
 }
 
 fn begin_search_build(root: &PathBuf, message: &str) {
@@ -1313,7 +1331,7 @@ mod tests {
     use super::{
         begin_search_build, load_search_build_status, records_fingerprint,
         search_build_status_path, update_search_build_progress, SearchIndexBuildState,
-        WorkspaceSearchRecord, WorkspaceSearchRecordKind,
+        SearchIndexBuildStatus, WorkspaceSearchRecord, WorkspaceSearchRecordKind,
     };
     use neuink_domain::EntryId;
 
@@ -1359,6 +1377,58 @@ mod tests {
         assert_eq!(status.total, 10);
         assert!(search_build_status_path(&root).is_file());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn persisted_in_progress_build_is_recovered_as_manual_idle_state() {
+        for (suffix, state) in [
+            ("queued", SearchIndexBuildState::Queued),
+            ("running", SearchIndexBuildState::Running),
+        ] {
+            let root = std::env::temp_dir().join(format!(
+                "neuink-search-interrupted-status-{suffix}-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .expect("clock")
+                    .as_nanos()
+            ));
+            let path = search_build_status_path(&root);
+            fs::create_dir_all(path.parent().expect("status parent")).expect("status directory");
+            let persisted = SearchIndexBuildStatus {
+                root: root.display().to_string(),
+                state,
+                scope: "global".to_string(),
+                phase: "embedding".to_string(),
+                completed: 4,
+                total: 10,
+                message: "building".to_string(),
+                error: None,
+                started_at_ms: 1,
+                updated_at_ms: 2,
+            };
+            fs::write(
+                &path,
+                serde_json::to_vec_pretty(&persisted).expect("serialize persisted status"),
+            )
+            .expect("write persisted status");
+
+            let recovered = load_search_build_status(&root).expect("recover interrupted status");
+            assert!(matches!(recovered.state, SearchIndexBuildState::Idle));
+            assert_eq!(recovered.completed, 0);
+            assert_eq!(recovered.total, 0);
+            assert_eq!(
+                recovered.message,
+                "上次向量索引构建已中断；等待用户手动构建"
+            );
+
+            let stored = serde_json::from_slice::<SearchIndexBuildStatus>(
+                &fs::read(&path).expect("read recovered status"),
+            )
+            .expect("deserialize recovered status");
+            assert!(matches!(stored.state, SearchIndexBuildState::Idle));
+            let _ = fs::remove_dir_all(root);
+        }
     }
 
     fn record(entry_id: &str, text: &str) -> WorkspaceSearchRecord {

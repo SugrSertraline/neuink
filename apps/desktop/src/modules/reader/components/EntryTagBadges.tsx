@@ -1,84 +1,53 @@
 import { ChevronRight, Tags } from 'lucide-react';
+import { useId } from 'react';
 
 import { Badge } from '@/components/ui/badge';
-import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger
-} from '@/components/ui/hover-card';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { cn } from '@/lib/utils';
+import { useTagPreferences } from '@/shared/components/TagPreferencesProvider';
+import { getEntryTagLabel, getVisibleEntryTags } from '@/shared/lib/tagPreferences';
 
-const TAG_ACCENTS = [
-  'bg-sky-500',
-  'bg-violet-500',
-  'bg-emerald-500',
-  'bg-amber-500',
-  'bg-rose-500',
-  'bg-cyan-500'
-] as const;
-
-export function EntryTagBadges({ tags }: { tags: string[] }) {
-  if (tags.length === 0) {
-    return <Badge variant="outline">无标签</Badge>;
-  }
+export function EntryTagBadges({ tags, compact = false }: { tags: string[]; compact?: boolean }) {
+  const previewId = useId();
+  const { preferences } = useTagPreferences();
+  const visible = getVisibleEntryTags(tags, preferences.onlyMostSpecificTags);
+  const hiddenAncestors = new Set(tags).size - visible.length;
+  if (!visible.length) return compact ? <span className="text-xs text-muted-foreground">未分类</span> : <Badge variant="outline">无标签</Badge>;
 
   return (
     <div className="entry-tag-badges min-w-0 max-w-full">
-      <HoverCard closeDelay={120} openDelay={180}>
-        <HoverCardTrigger asChild>
+      <HoverCard>
+        <HoverCardTrigger asChild openOnClick>
           <button
-            aria-label={`查看全部 ${tags.length} 个标签`}
-            className="entry-tag-trigger flex h-6 w-full min-w-0 items-center justify-center gap-1 overflow-hidden rounded-full outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            aria-label={`查看全部 ${visible.length} 个标签`}
+            aria-description={visible.join('；')}
+            aria-describedby={previewId}
+            data-multiple={visible.length > 1}
+            className={cn('entry-tag-trigger flex h-6 w-full min-w-0 items-center justify-center gap-1 overflow-hidden rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/50', compact && 'justify-start text-left')}
             type="button"
-            onClick={(event) => event.stopPropagation()}
+            onClick={event => event.stopPropagation()}
+            onDoubleClick={event => event.stopPropagation()}
           >
-            <Badge
-              className="entry-tag-primary min-w-0 gap-1.5 bg-secondary/80 transition-colors hover:bg-secondary"
-              variant="secondary"
-            >
-              <span className={cn('size-1.5 shrink-0 rounded-full', tagAccent(tags[0]))} />
-              <span className="truncate">{leafTag(tags[0])}</span>
+            <Badge className="entry-tag-primary min-w-0 gap-1.5" variant="secondary">
+              <span className="truncate">{getEntryTagLabel(visible[0], visible)}</span>
             </Badge>
-            {tags.length > 1 ? (
-              <Badge
-                className="entry-tag-secondary min-w-0 gap-1.5 bg-secondary/80 transition-colors hover:bg-secondary"
-                variant="secondary"
-              >
-                <span className={cn('size-1.5 shrink-0 rounded-full', tagAccent(tags[1]))} />
-                <span className="truncate">{leafTag(tags[1])}</span>
-              </Badge>
-            ) : null}
-            {tags.length > 2 ? (
-              <Badge className="entry-tag-default-count shrink-0" variant="outline">
-                +{tags.length - 2}
-              </Badge>
-            ) : null}
-            {tags.length > 1 ? (
-              <Badge className="entry-tag-narrow-count hidden shrink-0" variant="outline">
-                +{tags.length - 1}
-              </Badge>
-            ) : null}
-            <Badge className="entry-tag-compact-count hidden shrink-0 gap-1" variant="secondary">
-              <Tags size={11} aria-hidden="true" />
-              {tags.length}
-            </Badge>
+            {visible.length > 1 ? <Badge className="entry-tag-secondary min-w-0 gap-1.5" variant="secondary">
+              <span className="truncate">{getEntryTagLabel(visible[1], visible)}</span>
+            </Badge> : null}
+            {visible.length > 2 ? <Badge className="entry-tag-default-count shrink-0" variant="outline">+{visible.length - 2}</Badge> : null}
+            {visible.length > 1 ? <Badge className="entry-tag-narrow-count hidden shrink-0" variant="outline">+{visible.length - 1}</Badge> : null}
+            {visible.length > 1 ? <Badge className="entry-tag-compact-count hidden shrink-0 gap-1" variant="secondary"><Tags size={11} aria-hidden="true" />{visible.length}</Badge> : null}
           </button>
         </HoverCardTrigger>
-        <HoverCardContent align="center" className="w-80 p-0" side="top">
-          <div className="flex items-center gap-2 border-b px-3 py-2.5">
-            <span className="grid size-7 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
-              <Tags size={14} aria-hidden="true" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-xs font-semibold">条目标签</p>
-              <p className="text-[11px] text-muted-foreground">共 {tags.length} 个标签</p>
-            </div>
+        <HoverCardContent id={previewId} role="tooltip" aria-label="条目标签" align="start" className="w-80 p-3" side="top"
+          onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}>
+          <div className="mb-2 border-b pb-2">
+            <p className="text-xs font-semibold">条目标签</p>
+            <p className="text-[11px] text-muted-foreground">{hiddenAncestors ? `显示 ${visible.length} 个 · 已隐藏 ${hiddenAncestors} 个重复上级标签` : `共 ${visible.length} 个标签`}</p>
           </div>
-          <div className="grid max-h-64 gap-1 overflow-y-auto p-2">
-            {tags.map((tag) => (
-              <TagPath key={tag} path={tag} />
-            ))}
-          </div>
+          <ul className="space-y-2">
+            {visible.map(tag => <TagPath key={tag} path={tag} />)}
+          </ul>
         </HoverCardContent>
       </HoverCard>
     </div>
@@ -86,38 +55,15 @@ export function EntryTagBadges({ tags }: { tags: string[] }) {
 }
 
 function TagPath({ path }: { path: string }) {
-  const segments = path.split('/').map((part) => part.trim()).filter(Boolean);
+  const segments = path.split('/').map(part => part.trim()).filter(Boolean);
   return (
-    <div className="flex min-w-0 items-center gap-1 rounded-md border bg-muted/20 px-2 py-1.5">
-      <span className={cn('size-2 shrink-0 rounded-full', tagAccent(path))} />
-      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-0.5 gap-y-1 text-[11px]">
-        {segments.map((segment, index) => (
-          <span className="contents" key={`${segment}:${index}`}>
-            {index > 0 ? (
-              <ChevronRight className="shrink-0 text-muted-foreground/60" size={11} aria-hidden="true" />
-            ) : null}
-            <span className={cn(
-              'max-w-full break-words',
-              index === segments.length - 1 ? 'font-semibold text-foreground' : 'text-muted-foreground'
-            )}>
-              {segment}
-            </span>
-          </span>
-        ))}
-      </div>
-    </div>
+    <li className="flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1 text-xs" aria-label={path}>
+      {segments.map((segment, index) => <span className="contents" key={`${segment}:${index}`}>
+        {index > 0 ? <ChevronRight className="shrink-0 text-muted-foreground" size={11} aria-hidden="true" /> : null}
+        {index === segments.length - 1
+          ? <Badge variant="secondary" className="h-auto min-h-5 max-w-full justify-start whitespace-normal [overflow-wrap:anywhere]">{segment}</Badge>
+          : <span className="max-w-full text-muted-foreground [overflow-wrap:anywhere]">{segment}</span>}
+      </span>)}
+    </li>
   );
-}
-
-function leafTag(path: string) {
-  const segments = path.split('/').filter(Boolean);
-  return segments[segments.length - 1] ?? path;
-}
-
-function tagAccent(path: string) {
-  let hash = 0;
-  for (const character of path.split('/')[0] ?? path) {
-    hash = (hash * 31 + character.charCodeAt(0)) | 0;
-  }
-  return TAG_ACCENTS[Math.abs(hash) % TAG_ACCENTS.length];
 }

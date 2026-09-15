@@ -1,28 +1,29 @@
 import {
   AlertTriangle,
-  ChevronDown,
-  ChevronRight,
   FileText,
   FolderTree,
   FilterX,
   History,
-  Pencil,
   Plus,
   RefreshCw,
-  Tags,
   Trash2
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/shared/hooks/useToast';
 import type { ContentItem, TagMeta } from '@/shared/types/domain';
 
 import { EntryContentSidebar } from './EntryContentSidebar';
-import { SidebarTagTreeItem } from './SidebarTagTreeItem';
+import { useWorkspaceNotes } from '@/modules/notes/WorkspaceNotesContext';
+import type { EntryTagNotesContext } from '@/modules/notes/components/EntryTagNotesSidebar';
+import { SidebarSectionHeader } from './SidebarSectionHeader';
+import { TagNavigation } from './TagNavigation';
 import { buildTagTree } from '../utils/tagTree';
+import { LIBRARY_VIEW_LABELS, type LibraryView } from '../utils/libraryView';
 
 export type LibraryEntryStatus =
   | 'No PDF'
@@ -33,7 +34,7 @@ export type LibraryEntryStatus =
   | 'Failed'
   | 'Canceled';
 
-export type LibraryView = 'all' | 'recent' | 'parsed' | 'parsing' | 'failed' | 'no_pdf' | 'trash';
+export type { LibraryView } from '../utils/libraryView';
 
 export type LibraryEntry = {
   id: string;
@@ -60,6 +61,7 @@ type LibrarySidebarProps = {
   entryExplorerOpen: boolean;
   status: 'loading' | 'ready' | 'error';
   tags: TagMeta[];
+  tagNotes?: EntryTagNotesContext;
   activeContentId: string | null;
   selectedEntry: LibraryEntry | null;
   recentReadingEntryIds: string[];
@@ -76,7 +78,7 @@ type LibrarySidebarProps = {
   onOpenCreateEntryTab: () => void;
   onOpenTagEditorTab: () => void;
   onSelectContent: (contentId: string) => void;
-  onSelectTag: (tag: string | null) => void;
+  onOpenTagDetails: (tagId: string) => void;
   onSelectView: (view: LibraryView) => void;
   onClearFilters: () => void;
   onUpdateEntry: (
@@ -113,12 +115,13 @@ export function LibrarySidebar({
   activeContentId,
   entries,
   trashItemCount,
-  error: _error,
+  error,
   entryExplorerOpen,
   selectedEntry,
   recentReadingEntryIds,
   status,
   tags,
+  tagNotes,
   onBackToLibraryExplorer,
   onCreateMarkdownNote,
   onDeleteMarkdownNote,
@@ -132,11 +135,14 @@ export function LibrarySidebar({
   onOpenCreateEntryTab,
   onOpenTagEditorTab,
   onSelectContent,
-  onSelectTag,
+  onOpenTagDetails,
   onSelectView,
   onClearFilters,
   onUpdateEntry
 }: LibrarySidebarProps) {
+  const { notify } = useToast();
+  const noteCatalog = useWorkspaceNotes();
+  const deletedTagNoteCount = noteCatalog?.catalog.notes.filter(note => note.target.owner.kind === 'tag_reading' && note.deleted_at).length ?? 0;
   const [openSections, setOpenSections] = useState<Record<SectionKey, boolean>>(readStoredSectionState);
   const tagTree = useMemo(() => buildTagTree(tags, entries), [entries, tags]);
   const parsedCount = entries.filter((entry) => entry.status === 'Parsed').length;
@@ -152,23 +158,36 @@ export function LibrarySidebar({
     });
   };
 
-  const assignEntryToTag = (entryId: string, tagPath: string) => {
+  const assignEntryToTag = useCallback(async (entryId: string, tagPath: string) => {
     const entry = entries.find((item) => item.id === entryId);
-    if (!entry || entry.tags.includes(tagPath)) {
+    if (status !== 'ready' || !entry || entry.tags.includes(tagPath)) {
       return;
     }
 
-    return onUpdateEntry(entry.id, {
-      fields: entry.fields,
-      tagPaths: [...entry.tags, tagPath],
-      title: entry.title
-    });
-  };
+    try {
+      await onUpdateEntry(entry.id, {
+        fields: entry.fields,
+        tagPaths: [...entry.tags, tagPath],
+        title: entry.title
+      });
+      notify({
+        tone: 'success',
+        title: '标签已添加',
+        description: `已将“${entry.title}”添加到“${tagPath}”。`
+      });
+    } catch (error) {
+      notify({
+        tone: 'danger',
+        title: '添加标签失败',
+        description: error instanceof Error ? error.message : `无法将“${entry.title}”添加到“${tagPath}”。`
+      });
+    }
+  }, [entries, notify, onUpdateEntry, status]);
 
   return (
     <aside className="app-sidebar">
       <div className="side-head">
-        <span>{entryExplorerOpen ? '条目内容' : '条目库'}</span>
+        <span>{entryExplorerOpen ? '条目详情' : '条目库'}</span>
         {!entryExplorerOpen ? (
           <Button
             disabled={status !== 'ready'}
@@ -188,7 +207,9 @@ export function LibrarySidebar({
           activeContentId={activeContentId}
           entry={selectedEntry}
           tags={tags}
+          tagNotes={tagNotes}
           onBack={onBackToLibraryExplorer}
+          onOpenTrash={() => onSelectView('trash')}
           onCreateMarkdownNote={onCreateMarkdownNote}
           onDeleteMarkdownNote={onDeleteMarkdownNote}
           onAttachPdf={onAttachPdf}
@@ -202,7 +223,7 @@ export function LibrarySidebar({
           onUpdateEntry={onUpdateEntry}
         />
       ) : (
-        <ScrollArea className="side-body">
+        <ScrollArea className="side-body [&_[data-slot=scroll-area-viewport]>div]:!block">
           <div className="space-y-3 p-2">
             <SidebarSection
               action={
@@ -225,74 +246,34 @@ export function LibrarySidebar({
               title="快速视图"
               onToggle={() => toggleSection('quick')}
             >
-              <SidebarRow active={activeView === 'all'} icon={<FolderTree size={14} />} label="全部" value={entries.length} onClick={() => onSelectView('all')} />
-              <SidebarRow active={activeView === 'recent'} icon={<History size={14} />} label="最近阅读" value={recentReadingEntryIds.filter((id) => entries.some((entry) => entry.id === id)).length} onClick={() => onSelectView('recent')} />
-              <SidebarRow active={activeView === 'trash'} icon={<Trash2 size={14} />} label="回收站" value={trashItemCount} onClick={() => onSelectView('trash')} />
+              <SidebarRow active={activeView === 'all'} icon={<FolderTree size={14} />} label={LIBRARY_VIEW_LABELS.all} value={entries.length} onClick={() => onSelectView('all')} />
+              <SidebarRow active={activeView === 'recent'} icon={<History size={14} />} label={LIBRARY_VIEW_LABELS.recent} value={recentReadingEntryIds.filter((id) => entries.some((entry) => entry.id === id)).length} onClick={() => onSelectView('recent')} />
+              <SidebarRow active={activeView === 'trash'} icon={<Trash2 size={14} />} label={LIBRARY_VIEW_LABELS.trash} value={trashItemCount + deletedTagNoteCount} onClick={() => onSelectView('trash')} />
             </SidebarSection>
             <SidebarSection open={openSections.parsing} title="解析" onToggle={() => toggleSection('parsing')}>
-              <SidebarRow active={activeView === 'parsed'} icon={<FileText size={14} />} label="已解析 PDF" value={parsedCount} onClick={() => onSelectView('parsed')} />
+              <SidebarRow active={activeView === 'parsed'} icon={<FileText size={14} />} label={LIBRARY_VIEW_LABELS.parsed} value={parsedCount} onClick={() => onSelectView('parsed')} />
               <SidebarRow
                 active={activeView === 'parsing'}
                 icon={<RefreshCw className={parsingCount > 0 ? 'animate-spin' : undefined} size={14} />}
-                label="解析中"
+                label={LIBRARY_VIEW_LABELS.parsing}
                 value={parsingCount}
                 onClick={() => onSelectView('parsing')}
               />
-              <SidebarRow active={activeView === 'failed'} danger={failedCount > 0} icon={<AlertTriangle size={14} />} label="解析失败" value={failedCount} onClick={() => onSelectView('failed')} />
-              <SidebarRow active={activeView === 'no_pdf'} icon={<FileText size={14} />} label="无 PDF" value={noPdfCount} onClick={() => onSelectView('no_pdf')} />
+              <SidebarRow active={activeView === 'failed'} danger={failedCount > 0} icon={<AlertTriangle size={14} />} label={LIBRARY_VIEW_LABELS.failed} value={failedCount} onClick={() => onSelectView('failed')} />
+              <SidebarRow active={activeView === 'no_pdf'} icon={<FileText size={14} />} label={LIBRARY_VIEW_LABELS.no_pdf} value={noPdfCount} onClick={() => onSelectView('no_pdf')} />
             </SidebarSection>
 
-            <SidebarSection
-              action={
-                <div className="flex items-center gap-1">
-                  <Button
-                    className="size-5"
-                    size="icon-xs"
-                    title="编辑标签"
-                    type="button"
-                    variant="ghost"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onOpenTagEditorTab();
-                    }}
-                  >
-                    <Pencil size={12} aria-hidden="true" />
-                  </Button>
-                  <Button
-                    className="h-6 px-1.5 text-[10px]"
-                    size="xs"
-                    type="button"
-                    variant="ghost"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onSelectTag(null);
-                    }}
-                  >
-                    清除
-                  </Button>
-                </div>
-              }
+            <TagNavigation
+              activeTag={activeTag}
+              nodes={tagTree}
+              status={status}
+              error={error}
               open={openSections.tags}
-              title="标签"
-              onToggle={() => toggleSection('tags')}
-            >
-              <SidebarRow active={activeTag === null} icon={<Tags size={14} />} label="全部标签" value={entries.length} onClick={() => onSelectTag(null)} />
-              {tagTree.length > 0 ? (
-                <div className="space-y-0.5">
-                  {tagTree.map((node) => (
-                    <SidebarTagTreeItem
-                      activeTag={activeTag}
-                      key={node.id}
-                      node={node}
-                      onAssignEntryToTag={assignEntryToTag}
-                      onSelectTag={onSelectTag}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="px-2 py-1.5 text-xs text-muted-foreground">暂无标签</div>
-              )}
-            </SidebarSection>
+              onAssignEntryToTag={assignEntryToTag}
+              onOpenTagDetails={onOpenTagDetails}
+              onToggleOpen={() => toggleSection('tags')}
+              onEditTags={onOpenTagEditorTab}
+            />
           </div>
         </ScrollArea>
       )}
@@ -315,15 +296,7 @@ function SidebarSection({
 }) {
   return (
     <section>
-      <button
-        className="flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 text-left text-[10px] font-extrabold uppercase tracking-wide text-muted-foreground hover:bg-muted"
-        type="button"
-        onClick={onToggle}
-      >
-        {open ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronRight size={13} aria-hidden="true" />}
-        <span className="min-w-0 flex-1 truncate">{title}</span>
-        {action}
-      </button>
+      <SidebarSectionHeader action={action} label={title} open={open} onToggle={onToggle} />
       {open ? <div className="space-y-0.5">{children}</div> : null}
     </section>
   );

@@ -1,4 +1,4 @@
-import { MessageSquare, PanelRight, Search, Settings } from 'lucide-react';
+import { ListFilter, MessageSquare, PanelRight, Search, Settings } from 'lucide-react';
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import {
   type CSSProperties,
@@ -28,14 +28,26 @@ import {
   TooltipTrigger
 } from '@/components/ui/tooltip';
 import {
+  findSurfacePane,
   entryContentSurface,
   entryContentId,
   initialWorkspaceSurfaceLayout,
+  noteSurface,
+  sourceLinkSurfaceActions,
   surfaceKey,
+  surfaceNoteTarget,
+  workspaceSurfaceOpenActions,
   workspaceSurfaceReducer,
+  type WorkspaceSurfaceLayout,
   type WorkspacePaneId,
   type WorkspaceSurface
 } from './workspaceSurface';
+import { resolveEntrySidebarContext, resolveTagNoteSidebarContext } from './entrySidebarContext';
+import { TagNoteDetailsSidebar } from '../modules/notes/components/TagNoteDetailsSidebar';
+import { sameTagEntries, startTagReadingActions, tagNoteOpenPane, tagReadingMoveTargets, tagReadingSurface } from './tagReadingNavigation';
+import { SameTagSidebar } from '../modules/library/components/SameTagSidebar';
+import { useSameTagContext } from './useSameTagContext';
+import { WorkspaceNotesProvider } from '../modules/notes/WorkspaceNotesContext';
 import {
   resolveActiveActivityPanel,
   type SidePanel
@@ -49,19 +61,17 @@ import { AssistantPanel } from '../modules/assistant/components/AssistantPanel';
 import type { AssistantComposerDraft } from '../modules/assistant/components/AssistantComposerEditor';
 import type { SourceLinkOpenTarget } from '../modules/notes/editor/SourceLinkNode';
 import {
-  hasAnyUnsavedMarkdownNotes,
   hasUnsavedMarkdownNote,
-  saveAllMarkdownNotesBeforeWorkspaceChange,
+  saveMarkdownNotesForOwner,
   saveMarkdownNoteBeforeClose
 } from '../modules/notes/editor/noteDirtyRegistry';
 import { LibrarySidebar, type LibraryEntry, type LibraryView } from '../modules/library/components/LibrarySidebar';
-import { buildTagPathById } from '../modules/library/utils/tagTree';
+import { buildTagPathById, collectDescendantTagIds } from '../modules/library/utils/tagTree';
+import { hasUnsavedEntrySegmentEditors, saveSegmentEditorsBeforeClose } from '../modules/reader/components/segmentEditorDirtyRegistry';
 import { ReaderPane } from '../modules/reader/components/ReaderPane';
-import {
-  discardSegmentEditorsBeforeClose,
-  hasUnsavedSegmentEditors,
-  saveSegmentEditorsBeforeClose
-} from '../modules/reader/components/segmentEditorDirtyRegistry';
+import { hasUnsavedSurface, saveEditsBeforeWorkspaceChange } from './editSafety';
+import { useSurfaceCloseGuard } from './useSurfaceCloseGuard';
+import { useUnsavedWindowCloseGuard } from './useUnsavedWindowCloseGuard';
 import type { PdfJumpRequest, SidePaneState, SidePaneTarget } from '../modules/reader/types';
 import { SearchDialog } from '../modules/search/components/SearchDialog';
 import { SearchPanel } from '../modules/search/components/SearchPanel';
@@ -120,16 +130,6 @@ import type {
 } from '../shared/ipc/workspaceApi';
 import type { SourceLink } from '../shared/types/domain';
 import { saveNoteAssetBytes, updateNote } from '../shared/ipc/workspaceApi';
-
-type PendingNoteTabClose = {
-  pane: WorkspacePaneId;
-  surface: Extract<WorkspaceSurface, { kind: 'note' }>;
-};
-
-type PendingSegmentTabClose = {
-  pane: WorkspacePaneId;
-  surface: WorkspaceSurface;
-};
 
 type PendingMarkdownNoteDelete = {
   entryId: string;
@@ -431,6 +431,7 @@ export function App() {
   const [libraryView, setLibraryView] = useState<LibraryView>(readStoredLibraryView);
   const [libraryFilterResetKey, setLibraryFilterResetKey] = useState(0);
   const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [librarySection, setLibrarySection] = useState<'papers' | 'notes'>('papers');
   const [assistantContext, setAssistantContext] = useState<AssistantContext>({ items: [] });
   const [assistantComposerDraft, setAssistantComposerDraft] =
     useState<AssistantComposerDraft | null>(null);
@@ -440,7 +441,7 @@ export function App() {
   const [sidePanel, setSidePanel] = useState<SidePanel>(readStoredSidePanel);
   const [sidebarOpen, setSidebarOpen] = useState(() => readStoredBoolean(SIDEBAR_OPEN_STORAGE_KEY, true));
   const [recentReadingEntryIds, setRecentReadingEntryIds] = useState<string[]>(readStoredRecentReading);
-  const [sidebarWidth, setSidebarWidth] = useState(readStoredSidebarWidth);
+  const [sidebarWidth, setSidebarWidth] = useState(() => readStoredSidebarWidth());
   const [sidebarResizePreviewWidth, setSidebarResizePreviewWidth] = useState<number | null>(null);
   const [themePreset, setThemePreset] = useState<AppThemePresetId>(readStoredThemePreset);
   const [uiScale, setUiScale] = useState<UiScale>(readStoredUiScale);
@@ -448,12 +449,8 @@ export function App() {
     readStoredReaderPreferences
   );
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
-  const [pendingNoteTabClose, setPendingNoteTabClose] = useState<PendingNoteTabClose | null>(null);
-  const [pendingSegmentTabClose, setPendingSegmentTabClose] = useState<PendingSegmentTabClose | null>(null);
   const [pendingMarkdownNoteDelete, setPendingMarkdownNoteDelete] =
     useState<PendingMarkdownNoteDelete | null>(null);
-  const [savingNoteBeforeClose, setSavingNoteBeforeClose] = useState(false);
-  const [savingSegmentBeforeClose, setSavingSegmentBeforeClose] = useState(false);
   const parseRefreshDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const parserErrorToastRef = useRef<{ message: string; id: string } | null>(null);
   const pendingMarkdownDeleteRef = useRef(new Set<string>());
@@ -505,12 +502,7 @@ export function App() {
     if (activeBackgroundJobCount > 0) {
       throw new Error('当前仍有解析、索引或翻译任务运行。请等待任务完成后再切换工作区。');
     }
-    if (hasAnyUnsavedMarkdownNotes()) {
-      const saved = await saveAllMarkdownNotesBeforeWorkspaceChange();
-      if (!saved) {
-        throw new Error('有笔记未能保存，已取消切换工作区。');
-      }
-    }
+    await saveEditsBeforeWorkspaceChange();
   }, [activeBackgroundJobCount]);
   const resetWorkspaceUi = useCallback(() => {
     dispatchSurface({ type: 'reset' });
@@ -520,6 +512,7 @@ export function App() {
     setPdfJumpByEntryId({});
     setPdfReaderReloadByEntryId({});
     setActiveTag(null);
+    setLibrarySection('papers');
     setAssistantContext({ items: [] });
     setAssistantComposerDraft(null);
     setActiveAssistantSegment(null);
@@ -570,6 +563,32 @@ export function App() {
     workspaceSplitPreviewWidthRef.current = nextWidth;
     setWorkspaceSplitLeftWidth(nextWidth);
   }, [surfaceLayout.left, surfaceLayout.right, workspaceSplitLeftWidth]);
+
+  const openWorkspaceSurface = useCallback(
+    (surface: WorkspaceSurface, pane?: WorkspacePaneId) => {
+      const actions = workspaceSurfaceOpenActions(surfaceLayout, surface, pane);
+      const movesBetweenPanes = actions.some((action) => action.type === 'move');
+
+      // An explicit pane request is a placement command. Move an already-open
+      // surface just like tab dragging does instead of silently focusing it in
+      // the old pane and making the split entry appear unresponsive.
+      if (movesBetweenPanes && hasUnsavedSurface(surface)) {
+        notify({
+          tone: 'default',
+          title: '请先保存当前修改',
+          description: '跨分屏移动会重新打开编辑器，请先保存或放弃当前修改。'
+        });
+        return false;
+      }
+
+      if (pane === 'right' && !surfaceLayout.right) {
+        prepareWorkspaceSplit(surface);
+      }
+      actions.forEach(dispatchSurface);
+      return true;
+    },
+    [notify, prepareWorkspaceSplit, surfaceLayout]
+  );
 
   useEffect(() => {
     const split = document.querySelector('.workspace-split');
@@ -688,6 +707,11 @@ export function App() {
       surfaceKey: surfaceKey(focusedSurface)
     };
   }, [activeAssistantSegment, focusedSurface, surfaceLayout.focusedPane]);
+  const sidebarContext = resolveEntrySidebarContext(surfaceLayout);
+  const sidebarNote = resolveTagNoteSidebarContext(surfaceLayout);
+  const sidebarEntry = sidebarContext ? entries.find((entry) => entry.id === sidebarContext.entryId) ?? null : null;
+  const readingContext = useSameTagContext(workspace.root, surfaceLayout, entries, workspace.tags, activeTag, sidebarOpen && sidePanel === 'same-tag' && workspace.status === 'ready');
+  const sameTagId = readingContext.tagId;
   const activeContentId = entryContentId(focusedSurface);
   const activeAssistantNote = useMemo<AssistantActiveNote | null>(() => {
     const sidePaneNoteTarget = sidePane.target?.kind === 'markdown-note' ? sidePane.target : null;
@@ -907,17 +931,13 @@ export function App() {
   const openEntryContentTab = (
     entryId: string,
     contentId: string,
-    pane?: WorkspacePaneId
+    pane?: WorkspacePaneId,
+    origin?: { contextTagId?: string }
   ) => {
-    const surface = entryContentSurface(entryId, contentId);
-    if (pane === 'right' && !surfaceLayout.right) {
-      prepareWorkspaceSplit(surface);
+    const surface = entryContentSurface(entryId, contentId, origin?.contextTagId);
+    if (!openWorkspaceSurface(surface, pane)) {
+      return;
     }
-    dispatchSurface({
-      type: 'open',
-      pane,
-      surface
-    });
     if (workspace.selectedEntryId !== entryId) {
       workspace.setSelectedEntryId(entryId);
     }
@@ -939,7 +959,7 @@ export function App() {
 
     setSidePanel('library');
     setSidebarOpen(true);
-    openEntryContentTab(entryId, 'overview');
+    openEntryContentTab(entryId, 'overview', undefined, { contextTagId: activeTag ?? undefined });
   };
 
   const openEntryTabToRight = (entryId: string) => {
@@ -952,11 +972,11 @@ export function App() {
       return;
     }
 
-    openEntryContentTab(entryId, contentId, 'right');
+    openEntryContentTab(entryId, contentId, 'right', { contextTagId: activeTag ?? undefined });
   };
 
   const openEntryContentTabToRight = (entryId: string, contentId: string) => {
-    openEntryContentTab(entryId, contentId, 'right');
+    openEntryContentTab(entryId, contentId, 'right', sidebarContext?.entryId === entryId ? sidebarContext : undefined);
   };
 
   const clearEntryUiState = (entryId: string) => {
@@ -995,11 +1015,11 @@ export function App() {
   };
 
   const selectEntryContent = (contentId: string) => {
-    if (!activeEntryId) {
+    if (!sidebarContext) {
       return;
     }
 
-    openEntryContentTab(activeEntryId, contentId);
+    openEntryContentTab(sidebarContext.entryId, contentId, sidebarContext.pane, sidebarContext);
   };
 
   const openSidePaneMarkdownNote = (target: SidePaneTarget) => {
@@ -1024,17 +1044,17 @@ export function App() {
     }));
   };
 
-  const openMarkdownInPdfPane = (entryId: string, noteId: string) => {
+  const openMarkdownInPdfPane = (entryId: string, noteId: string, origin?: { contextTagId?: string }) => {
     const target = entries.find((entry) => entry.id === entryId);
     if (!target?.pdfFileName) {
       return;
     }
-    openEntryContentTab(entryId, 'pdf', 'left');
-    openEntryContentTabToRight(entryId, 'note:' + noteId);
+    openEntryContentTab(entryId, 'pdf', 'left', origin);
+    openEntryContentTab(entryId, 'note:' + noteId, 'right', origin);
   };
 
   const createMarkdownNote = async () => {
-    const targetEntryId = activeEntryId ?? workspace.selectedEntryId;
+    const targetEntryId = sidebarContext?.entryId ?? workspace.selectedEntryId;
     if (!targetEntryId) {
       return;
     }
@@ -1044,7 +1064,7 @@ export function App() {
     }
     const note = updated.contents[updated.contents.length - 1];
     if (note?.kind === 'note') {
-      openEntryContentTab(updated.id, 'note:' + note.note_id);
+      openEntryContentTab(updated.id, 'note:' + note.note_id, sidebarContext?.pane, sidebarContext ?? undefined);
     }
   };
 
@@ -1153,7 +1173,9 @@ export function App() {
     [mineruEndpoint, parserApiKey, reloadPdfReaders, workspace.refreshParsingEntries]
   );
 
-  const selectLibraryView = (view: LibraryView) => {
+  const selectLibraryView = (view: LibraryView) => changeLibraryContext(() => {
+    setActiveTag(null);
+    setLibrarySection('papers');
     setLibraryView(view);
     dispatchSurface({ type: 'open', surface: { kind: 'library' } });
     if (parseRefreshDebounce.current) {
@@ -1164,20 +1186,25 @@ export function App() {
         void refreshParseStatus(false);
       }, 300);
     }
-  };
+  });
 
   const deleteEntry = async (entryId: string) => {
+    const entry = entries.find((item) => item.id === entryId);
+    if (hasUnsavedEntrySegmentEditors(entryId) || entry?.contents.some((content) => content.kind === 'note' && hasUnsavedMarkdownNote(entryId, content.note_id))) {
+      throw new Error('该条目仍有未保存的笔记或批注，请先保存或明确放弃修改，再移入回收站。');
+    }
     await workspace.deleteWorkspaceEntry(entryId);
     clearEntryUiState(entryId);
     dispatchSurface({ type: 'removeEntry', entryId });
   };
 
-  const clearLibraryFilters = () => {
+  const clearLibraryFilters = () => changeLibraryContext(() => {
     setActiveTag(null);
     setLibraryView('all');
+    setLibrarySection('papers');
     setLibraryFilterResetKey((current) => current + 1);
     dispatchSurface({ type: 'open', surface: { kind: 'library' } });
-  };
+  });
 
   const attachPdfToEntry = async (entryId: string, pdfPath: string) => {
     await workspace.importPdfForEntry(
@@ -1212,9 +1239,7 @@ export function App() {
 
   const restoreEntry = async (entryId: string) => {
     await workspace.restoreWorkspaceEntry(entryId);
-    setActiveTag(null);
-    setLibraryView('all');
-    dispatchSurface({ type: 'open', surface: { kind: 'library' } });
+    clearLibraryFilters();
   };
 
   const purgeEntry = async (entryId: string) => {
@@ -1466,7 +1491,8 @@ export function App() {
   };
 
   const openMarkdownSourceLink = (target: SourceLinkOpenTarget) => {
-    if (!target.sourceEntryId || !target.segmentUid) {
+    if (!target.sourceEntryId || !entries.some((entry) => entry.id === target.sourceEntryId)) {
+      notify({ tone: 'default', title: '来源条目不可用', description: '请确认来源条目仍在资料库中；已保存的摘录仍可在引用预览中查看。' });
       return;
     }
 
@@ -1474,7 +1500,13 @@ export function App() {
       typeof target.page === 'number' && Number.isFinite(target.page)
         ? Math.max(0, target.page - 1)
         : 0;
-    openPdfSegment(target.sourceEntryId, target.segmentUid, pageIdx);
+    const entryId = target.sourceEntryId;
+    const requestKey = ++pdfJumpCounter.current;
+    setPdfJumpByEntryId((current) => ({ ...current, [entryId]: target.segmentUid
+      ? { kind: 'segment', segmentUid: target.segmentUid, pageIdx, requestKey }
+      : { kind: 'page', pageIdx, requestKey } }));
+    if (!surfaceLayout.right) prepareWorkspaceSplit({ kind: 'pdf', entryId });
+    sourceLinkSurfaceActions(surfaceLayout, entryId, target.originPane).forEach(dispatchSurface);
   };
 
   const openPdfSegment = (entryId: string, segmentUid: string, pageIdx: number) => {
@@ -1831,21 +1863,81 @@ export function App() {
     return () => window.clearInterval(interval);
   }, [hasActiveParseTasks, refreshParseStatus]);
 
-  const closeSurfaceTab = (pane: WorkspacePaneId, surface: WorkspaceSurface) => {
-    dispatchSurface({ type: 'close', pane, key: surfaceKey(surface) });
+  useUnsavedWindowCloseGuard();
+  const closeGuard = useSurfaceCloseGuard({
+    root: workspace.root,
+    onClose: (targets) => targets.forEach(({ pane, surface }) => dispatchSurface({ type: 'close', pane, key: surfaceKey(surface) }))
+  });
+  const changeLibraryContext = (transition: () => void) => closeGuard.requestClose([
+    { pane: findSurfacePane(surfaceLayout, 'library') ?? surfaceLayout.focusedPane, surface: { kind: 'library' } }
+  ], transition);
+  const openTagReading = (tagId: string, layout: WorkspaceSurfaceLayout = surfaceLayout) => {
+    if (workspace.status !== 'ready' || !workspace.tags.some(tag => tag.id === tagId)) return;
+    const actions = startTagReadingActions(layout, sameTagEntries(entries, workspace.tags, tagId, true), tagId);
+    const moved = tagReadingMoveTargets(layout, actions);
+    // Only moved editors remount; other tabs retain their drafts under the normal split.
+    const transition = () => {
+      readingContext.startReading(tagId);
+      setSidePanel('same-tag'); setSidebarOpen(true);
+      actions.forEach(dispatchSurface);
+    };
+    if (moved.length) closeGuard.requestClose(moved, transition); else transition();
   };
+  const selectLibraryTag = (tagId: string | null, section: 'papers' | 'notes' = 'papers', resetView = false) => {
+    const transition = () => {
+      setActiveTag(tagId); setLibrarySection(section);
+      if (resetView || libraryView === 'trash') setLibraryView('all');
+      openWorkspaceSurface({ kind: 'library' });
+    };
+    if (tagId === activeTag && libraryView !== 'trash') transition(); else changeLibraryContext(transition);
+  };
+  // Existing detail tabs from a running session move into the shared library through its edit guard.
+  const migratedTagDetails = useRef<string | null>(null);
+  useEffect(() => {
+    const legacy = [...surfaceLayout.leftTabs, ...surfaceLayout.rightTabs].filter(surface => surface.kind === 'tag-details');
+    if (!legacy.length) return;
+    const signature = `${workspace.root}:${legacy.map(surfaceKey).join('|')}`;
+    if (migratedTagDetails.current === signature) return;
+    migratedTagDetails.current = signature;
+    const selected = focusedSurface.kind === 'tag-details' ? focusedSurface : legacy[0];
+    closeGuard.requestClose([
+      ...legacy.map(surface => ({ pane: findSurfacePane(surfaceLayout, surfaceKey(surface)) ?? 'left' as const, surface })),
+      { pane: findSurfacePane(surfaceLayout, 'library') ?? 'left', surface: { kind: 'library' } }
+    ], () => {
+      for (const surface of legacy) dispatchSurface({ type: 'close', pane: findSurfacePane(surfaceLayout, surfaceKey(surface)) ?? 'left', key: surfaceKey(surface) });
+      if (selected.kind === 'tag-details') { setActiveTag(selected.tagId); setLibrarySection(selected.view === 'notes' ? 'notes' : 'papers'); setLibraryView('all'); }
+      dispatchSurface({ type: 'open', surface: { kind: 'library' } });
+    });
+  }, [surfaceLayout, workspace.root]);
+  const requestCloseSurfaceTab = (pane: WorkspacePaneId, surface: WorkspaceSurface) => closeGuard.requestClose([{ pane, surface }]);
 
-  const requestCloseSurfaceTab = (pane: WorkspacePaneId, surface: WorkspaceSurface) => {
-    if (surface.kind === 'note' && hasUnsavedMarkdownNote(surface.entryId, surface.noteId)) {
-      setPendingNoteTabClose({ pane, surface });
-      return;
-    }
-    if (hasUnsavedSegmentEditors(surfaceKey(surface))) {
-      setPendingSegmentTabClose({ pane, surface });
-      return;
-    }
-    closeSurfaceTab(pane, surface);
-  };
+  // Keep the legacy renderer alive until its nested editor has passed the save guard.
+  const migratedTagReading = useRef<string | null>(null);
+  useEffect(() => {
+    if (workspace.status !== 'ready') return;
+    const legacy = [...surfaceLayout.leftTabs, ...surfaceLayout.rightTabs].filter(surface => surface.kind === 'tag-reading');
+    if (!legacy.length) return;
+    const signature = `${workspace.root}:${legacy.map(surfaceKey).join('|')}`;
+    if (migratedTagReading.current === signature) return;
+    migratedTagReading.current = signature;
+    const selected = focusedSurface.kind === 'tag-reading' ? focusedSurface : legacy[0];
+    let layout = surfaceLayout;
+    const closing = legacy.map(surface => {
+      const action = { type: 'close' as const, pane: findSurfacePane(layout, surfaceKey(surface)) ?? 'left', key: surfaceKey(surface) };
+      layout = workspaceSurfaceReducer(layout, action);
+      return action;
+    });
+    if (selected.kind !== 'tag-reading') return;
+    const actions = startTagReadingActions(layout, sameTagEntries(entries, workspace.tags, selected.tagId, true), selected.tagId);
+    closeGuard.requestClose([
+      ...legacy.map(surface => ({ pane: findSurfacePane(surfaceLayout, surfaceKey(surface)) ?? 'left' as const, surface })),
+      ...tagReadingMoveTargets(layout, actions)
+    ], () => {
+      readingContext.startReading(selected.tagId);
+      setSidePanel('same-tag'); setSidebarOpen(true);
+      [...closing, ...actions].forEach(dispatchSurface);
+    });
+  }, [surfaceLayout, workspace.root, workspace.status]);
 
   useEffect(() => {
     const handleCloseTabShortcut = (event: KeyboardEvent) => {
@@ -1863,65 +1955,6 @@ export function App() {
     return () => window.removeEventListener('keydown', handleCloseTabShortcut);
   }, [requestCloseSurfaceTab, surfaceLayout]);
 
-  const discardAndClosePendingNoteTab = () => {
-    if (!pendingNoteTabClose) {
-      return;
-    }
-    closeSurfaceTab(pendingNoteTabClose.pane, pendingNoteTabClose.surface);
-    setPendingNoteTabClose(null);
-  };
-
-  const saveAndClosePendingNoteTab = async () => {
-    if (!pendingNoteTabClose || savingNoteBeforeClose) {
-      return;
-    }
-    setSavingNoteBeforeClose(true);
-    try {
-      const { pane, surface } = pendingNoteTabClose;
-      const saved = await saveMarkdownNoteBeforeClose(surface.entryId, surface.noteId);
-      if (!saved) {
-        notify({
-          tone: 'danger',
-          title: '保存失败',
-          description: '笔记未保存，标签页仍保持打开。'
-        });
-        return;
-      }
-      closeSurfaceTab(pane, surface);
-      setPendingNoteTabClose(null);
-    } finally {
-      setSavingNoteBeforeClose(false);
-    }
-  };
-
-  const discardAndClosePendingSegmentTab = () => {
-    if (!pendingSegmentTabClose) return;
-    const { pane, surface } = pendingSegmentTabClose;
-    discardSegmentEditorsBeforeClose(surfaceKey(surface));
-    closeSurfaceTab(pane, surface);
-    setPendingSegmentTabClose(null);
-  };
-
-  const saveAndClosePendingSegmentTab = async () => {
-    if (!pendingSegmentTabClose || savingSegmentBeforeClose) return;
-    setSavingSegmentBeforeClose(true);
-    try {
-      const { pane, surface } = pendingSegmentTabClose;
-      if (!(await saveSegmentEditorsBeforeClose(surfaceKey(surface)))) {
-        notify({
-          tone: 'danger',
-          title: '保存失败',
-          description: '片段笔记或批注未保存，标签页仍保持打开。'
-        });
-        return;
-      }
-      closeSurfaceTab(pane, surface);
-      setPendingSegmentTabClose(null);
-    } finally {
-      setSavingSegmentBeforeClose(false);
-    }
-  };
-
   return (
     <div className="app gap-0">
       <TitleBar onOpenSearch={() => setSearchDialogOpen(true)} />
@@ -1932,48 +1965,7 @@ export function App() {
         onOpenChange={setSearchDialogOpen}
         onOpenResult={openSearchResult}
       />
-      <Dialog
-        open={Boolean(pendingNoteTabClose)}
-        onOpenChange={(open) => {
-          if (!open && !savingNoteBeforeClose) {
-            setPendingNoteTabClose(null);
-          }
-        }}
-      >
-        <DialogContent showCloseButton={!savingNoteBeforeClose}>
-          <DialogHeader>
-            <DialogTitle>保存笔记后再关闭？</DialogTitle>
-            <DialogDescription>
-              “{pendingNoteTabClose?.surface.kind === 'note'
-                ? entries.find((entry) => entry.id === pendingNoteTabClose.surface.entryId)?.contents.find(
-                    (content) => content.kind === 'note' && content.note_id === pendingNoteTabClose.surface.noteId
-                  )?.title ?? '当前笔记'
-                : '当前笔记'}”有未保存的修改。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="flex-wrap">
-            <Button
-              disabled={savingNoteBeforeClose}
-              type="button"
-              variant="outline"
-              onClick={() => setPendingNoteTabClose(null)}
-            >
-              取消
-            </Button>
-            <Button
-              disabled={savingNoteBeforeClose}
-              type="button"
-              variant="destructive"
-              onClick={discardAndClosePendingNoteTab}
-            >
-              不保存并关闭
-            </Button>
-            <Button disabled={savingNoteBeforeClose} type="button" onClick={() => void saveAndClosePendingNoteTab()}>
-              {savingNoteBeforeClose ? '保存中…' : '保存并关闭'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {closeGuard.dialog}
       <Dialog
         open={Boolean(pendingMarkdownNoteDelete)}
         onOpenChange={(open) => {
@@ -2002,46 +1994,10 @@ export function App() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <Dialog
-        open={Boolean(pendingSegmentTabClose)}
-        onOpenChange={(open) => {
-          if (!open && !savingSegmentBeforeClose) setPendingSegmentTabClose(null);
-        }}
-      >
-        <DialogContent showCloseButton={!savingSegmentBeforeClose}>
-          <DialogHeader>
-            <DialogTitle>保存修改后再关闭？</DialogTitle>
-            <DialogDescription>
-              当前标签页内的片段笔记或批注包含未保存修改。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="flex-wrap">
-            <Button
-              disabled={savingSegmentBeforeClose}
-              type="button"
-              variant="outline"
-              onClick={() => setPendingSegmentTabClose(null)}
-            >
-              继续编辑
-            </Button>
-            <Button
-              disabled={savingSegmentBeforeClose}
-              type="button"
-              variant="destructive"
-              onClick={discardAndClosePendingSegmentTab}
-            >
-              不保存并关闭
-            </Button>
-            <Button
-              disabled={savingSegmentBeforeClose}
-              type="button"
-              onClick={() => void saveAndClosePendingSegmentTab()}
-            >
-              {savingSegmentBeforeClose ? '保存中…' : '保存并关闭'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <WorkspaceNotesProvider root={workspace.root} refreshKey={JSON.stringify([
+        workspace.tags, entries.map((entry) => [entry.id, entry.updatedAt, entry.tagIds]),
+        trashedEntries.map((entry) => entry.id), markdownNoteRefreshById
+      ])}>
       <main
         ref={appShellRef}
         className={'app-shell ' + (sidebarResizePreviewWidth !== null ? 'is-sidebar-resizing' : '') + ' ' + (sidebarOpen ? '' : 'is-sidebar-collapsed')}
@@ -2052,23 +2008,35 @@ export function App() {
           layout={surfaceLayout}
           onAddToAssistantContext={addWorkspaceSurfaceToAssistantContext}
           onClose={requestCloseSurfaceTab}
-          onCloseOthers={(pane, surface) => dispatchSurface({ type: 'closeOthers', pane, key: surfaceKey(surface) })}
-          onClosePane={(pane) => dispatchSurface({ type: 'closePane', pane })}
+          onCloseOthers={(pane, surface) => closeGuard.requestClose((pane === 'left' ? surfaceLayout.leftTabs : surfaceLayout.rightTabs)
+            .filter((tab) => surfaceKey(tab) !== surfaceKey(surface)).map((tab) => ({ pane, surface: tab })))}
+          onClosePane={(pane) => closeGuard.requestClose((pane === 'left' ? surfaceLayout.leftTabs : surfaceLayout.rightTabs).map((surface) => ({ pane, surface })))}
           onMove={(surface, pane, targetIndex) => {
+            const sourcePane = surfaceLayout.leftTabs.some((tab) => surfaceKey(tab) === surfaceKey(surface)) ? 'left' : 'right';
+            if (sourcePane !== pane && hasUnsavedSurface(surface)) {
+              notify({ tone: 'default', title: '请先保存当前修改', description: '跨分屏移动会重新打开编辑器，请先保存或放弃片段笔记、批注和文档笔记的修改。' });
+              return;
+            }
             if (pane === 'right' && !surfaceLayout.right) {
               prepareWorkspaceSplit(surface);
             }
             dispatchSurface({ type: 'move', key: surfaceKey(surface), pane, targetIndex });
           }}
-          onSwap={() => dispatchSurface({ type: 'swap' })}
+          onSwap={() => {
+            if ([...surfaceLayout.leftTabs, ...surfaceLayout.rightTabs].some(hasUnsavedSurface)) {
+              notify({ tone: 'default', title: '请先保存当前修改', description: '保存或放弃未保存内容后再交换左右分屏。' });
+              return;
+            }
+            dispatchSurface({ type: 'swap' });
+          }}
           onSelect={(pane, surface) => dispatchSurface({ type: 'open', pane, surface })}
         />
         <nav className="activitybar" aria-label="主导航">
           <ActivityButton
             active={activeActivityPanel === 'library'}
-            label="条目库"
+            label={sidebarNote ? '笔记详情' : sidebarEntry ? '条目详情' : '条目库'}
             onClick={() => toggleSidePanel('library')}
-            onContextMenu={() => dispatchSurface({ type: 'open', pane: 'right', surface: { kind: 'library' } })}
+            onContextMenu={() => openWorkspaceSurface({ kind: 'library' }, 'right')}
           >
             <PanelRight size={18} aria-hidden="true" />
           </ActivityButton>
@@ -2086,29 +2054,45 @@ export function App() {
           >
             <MessageSquare size={18} aria-hidden="true" />
           </ActivityButton>
+          <ActivityButton active={activeActivityPanel === 'same-tag'} label="标签阅读" onClick={() => toggleSidePanel('same-tag')}>
+            <ListFilter size={18} aria-hidden="true" />
+          </ActivityButton>
           <div className="spacer" />
           <ActivityButton
             active={focusedSurface.kind === 'settings'}
             label="设置"
             onClick={openSettingsTab}
-            onContextMenu={() => dispatchSurface({ type: 'open', pane: 'right', surface: { kind: 'settings' } })}
+            onContextMenu={() => openWorkspaceSurface({ kind: 'settings' }, 'right')}
           >
             <Settings size={18} aria-hidden="true" />
           </ActivityButton>
         </nav>
-        {sidebarOpen && sidePanel === 'library' ? (
+        {sidebarOpen && sidePanel === 'library' && sidebarNote ? (
+          <TagNoteDetailsSidebar key={workspace.root} target={sidebarNote.target} title={sidebarNote.label}
+            entries={entries} tags={workspace.tags} status={workspace.status} error={workspace.error} layout={surfaceLayout}
+            onLocateTag={id => { readingContext.locateTag(id); setSidePanel('same-tag'); }}
+            onRead={(entry, split) => openWorkspaceSurface(tagReadingSurface(entry), split ? surfaceLayout.focusedPane === 'right' ? 'left' : 'right' : undefined)}
+            onOpenNote={(target, title, split) => openWorkspaceSurface(noteSurface(target, title), tagNoteOpenPane(surfaceLayout, target, split))} />
+        ) : sidebarOpen && sidePanel === 'library' ? (
           <LibrarySidebar
+            key={workspace.root}
             activeTag={activeTag}
             activeView={libraryView}
-            activeContentId={activeContentId}
+            activeContentId={sidebarContext?.contentId ?? null}
             entries={entries}
-            trashItemCount={workspace.trashItems.length}
+            trashItemCount={workspace.trashItems.length + workspace.tagArchiveCount}
             error={workspace.error}
-            entryExplorerOpen={Boolean(activeEntry)}
+            entryExplorerOpen={Boolean(sidebarEntry)}
             recentReadingEntryIds={recentReadingEntryIds}
-            selectedEntry={activeEntry}
+            selectedEntry={sidebarEntry}
             status={workspace.status}
             tags={workspace.tags}
+            tagNotes={sidebarContext ? {
+              contextTagId: sidebarContext.contextTagId,
+              scope: surfaceKey(sidebarContext.surface),
+              activeTarget: surfaceNoteTarget(focusedSurface),
+              onOpen: (target, title, split) => openWorkspaceSurface(noteSurface(target, title), tagNoteOpenPane(surfaceLayout, target, split))
+            } : undefined}
             onBackToLibraryExplorer={() => {
               dispatchSurface({ type: 'open', surface: { kind: 'library' } });
             }}
@@ -2118,19 +2102,19 @@ export function App() {
             onCreatePdfVersion={createPdfVersion}
             onImportMineruClientResult={workspace.importMineruClientResultForEntry}
             onOpenMarkdownInPdfPane={(noteId) => {
-              if (activeEntryId) {
-                openMarkdownInPdfPane(activeEntryId, noteId);
+              if (sidebarContext) {
+                openMarkdownInPdfPane(sidebarContext.entryId, noteId, sidebarContext);
               }
             }}
             onOpenContentInRight={(contentId) => {
-              if (activeEntryId) openEntryContentTabToRight(activeEntryId, contentId);
+              if (sidebarContext) openEntryContentTab(sidebarContext.entryId, contentId, 'right', sidebarContext);
             }}
             onRenameMarkdownNote={renameMarkdownNote}
             onRenamePdfDisplayName={workspace.renameWorkspacePdfDisplayName}
             onOpenCreateEntryTab={openCreateEntryTab}
             onOpenTagEditorTab={openTagEditorTab}
             onSelectContent={selectEntryContent}
-            onSelectTag={setActiveTag}
+            onOpenTagDetails={(tagId) => selectLibraryTag(tagId, 'papers', true)}
             onSelectView={selectLibraryView}
             onClearFilters={clearLibraryFilters}
             onUpdateEntry={workspace.updateWorkspaceEntry}
@@ -2143,6 +2127,21 @@ export function App() {
             onOpenResult={openSearchResult}
           />
         ) : null}
+        <div className={sidebarOpen && sidePanel === 'same-tag' ? 'contents' : 'hidden'}>
+          <SameTagSidebar key={workspace.root} entries={entries} tags={workspace.tags} tagId={sameTagId} descendants={readingContext.descendants}
+            onEditTags={openTagEditorTab}
+            workspaceRoot={workspace.root} contextKey={readingContext.contextKey} contextReason={readingContext.reason} currentEntryId={readingContext.entryId}
+            status={workspace.status} error={workspace.error} layout={surfaceLayout}
+            onTagChange={readingContext.selectTag} onDescendantsChange={readingContext.setDescendants}
+            onLocateEntry={readingContext.locateEntry}
+            onOpenTagNote={(target, title, split) => openWorkspaceSurface(noteSurface(target, title), tagNoteOpenPane(surfaceLayout, target, split))}
+            onRead={(entry, pane) => openWorkspaceSurface(tagReadingSurface(entry, sameTagId ?? undefined), pane)}
+            onDetails={entry => {
+              if (openWorkspaceSurface({ kind: 'entry-overview', entryId: entry.id, contextTagId: sameTagId ?? undefined }, 'left')) {
+                setSidePanel('library'); setSidebarOpen(true);
+              }
+            }} />
+        </div>
         <div className={sidebarOpen && sidePanel === 'assistant' ? 'contents' : 'hidden'}>
           <AssistantPanel
             activeEntry={activeEntry}
@@ -2203,10 +2202,12 @@ export function App() {
           />
         ) : null}
         <ReaderPane
+          onUpdateTagDescription={workspace.updateWorkspaceTagDescription}
+          onOpenTrash={() => selectLibraryView('trash')}
+          key={workspace.root ?? 'no-workspace'}
           surfaceLayout={surfaceLayout}
-          onOpenSurface={(surface: WorkspaceSurface, pane?: WorkspacePaneId) =>
-            dispatchSurface({ type: 'open', pane, surface })
-          }
+          onOpenSurface={openWorkspaceSurface}
+          onOpenTagReading={openTagReading}
           onFocusSurface={(pane) => dispatchSurface({ type: 'focus', pane })}
           activeTag={activeTag}
           annotationRecords={workspace.annotationRecords}
@@ -2219,6 +2220,8 @@ export function App() {
           trashItems={workspace.trashItems}
           isRefreshingParseStatus={workspace.isRefreshingParseStatus}
           libraryView={libraryView}
+          librarySection={librarySection} onLibrarySectionChange={setLibrarySection}
+          onOpenTagLibrary={(tagId, section) => selectLibraryTag(tagId, section, true)}
           libraryFilterResetKey={libraryFilterResetKey}
           recentReadingEntryIds={recentReadingEntryIds}
           tags={workspace.tags}
@@ -2235,6 +2238,7 @@ export function App() {
               return;
             }
 
+            changeLibraryContext(() => {
             // A successful creation is complete in the library. Close the creation tab
             // regardless of which pane it occupies, then return to the entry list.
             dispatchSurface({ type: 'close', pane: 'left', key: 'create-entry' });
@@ -2242,6 +2246,8 @@ export function App() {
             dispatchSurface({ type: 'open', pane: 'left', surface: { kind: 'library' } });
             setLibraryView(result.importedMineruClientResult ? 'parsed' : result.createdWithPdf ? 'parsing' : 'all');
             setActiveTag(null);
+              setLibrarySection('papers');
+            });
           }}
           onOpenMineruClientGuide={openMineruClientGuideTab}
           onCreateMarkdownSourceLink={workspace.createMarkdownSourceLink}
@@ -2250,8 +2256,15 @@ export function App() {
           onDeleteEntry={deleteEntry}
           onDeleteMarkdownNote={deleteMarkdownNote}
           onDeleteTag={async (tagId) => {
+            const affected = collectDescendantTagIds(workspace.tags, tagId);
+            for (const affectedId of affected) {
+              if (!await saveSegmentEditorsBeforeClose(`tag-reading:${affectedId}`) ||
+                  !await saveSegmentEditorsBeforeClose(`tag-details:${affectedId}`) ||
+                  !await saveSegmentEditorsBeforeClose(`library/tag:${affectedId}`) ||
+                  !await saveMarkdownNotesForOwner(`tag-reading:${affectedId}`)) throw new Error('标签描述或笔记仍有未保存内容，请先保存后再移入回收站。');
+            }
             await workspace.deleteWorkspaceTag(tagId);
-            setActiveTag(null);
+            if (activeTag && affected.has(activeTag)) { setActiveTag(null); setLibrarySection('papers'); }
           }}
           onOpenCreateEntryTab={openCreateEntryTab}
           onOpenEntryExplorer={openEntryTab}
@@ -2264,6 +2277,7 @@ export function App() {
           onEmptyEntryTrash={workspace.emptyWorkspaceEntryTrash}
           onPurgeTrashItem={workspace.purgeWorkspaceTrashItem}
           onRenameTag={workspace.renameWorkspaceTag}
+          onRestoreTagArchive={workspace.restoreWorkspaceTagArchive}
           onRefreshParseStatus={() => refreshParseStatus(true)}
           onRetryPdfParse={(entryId) =>
             workspace.retryPdfParseForEntry(entryId, mineruEndpoint, parserApiKey)
@@ -2303,7 +2317,7 @@ export function App() {
           }
           onSaveMarkdownNote={saveMarkdownNote}
           onSelectEntry={workspace.setSelectedEntryId}
-          onSelectTag={setActiveTag}
+          onSelectTag={selectLibraryTag}
           onSwitchWorkspaceRoot={switchWorkspace}
           onWorkspaceSplitLeftWidthChange={resizeWorkspaceSplitLeft}
           onWorkspaceSplitLeftWidthPreview={previewWorkspaceSplitLeft}
@@ -2312,6 +2326,7 @@ export function App() {
           status={workspace.status}
         />
       </main>
+      </WorkspaceNotesProvider>
       <footer className="statusbar">
         <button type="button">侧栏</button>
         <span>严格来源：已开启</span>

@@ -404,7 +404,10 @@ export type AssistantActiveSurfaceSnapshot = {
     | 'segment-notes'
     | 'settings'
     | 'source-links'
-    | 'tag-editor';
+    | 'tag-editor'
+    | 'tag-details'
+    | 'owned-note'
+    | 'tag-reading';
   noteId: NoteId | null;
   pane: 'left' | 'right';
   segmentUid: string | null;

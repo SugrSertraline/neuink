@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   surfaceKey,
+  sourceLinkSurfaceActions,
+  workspaceSurfaceOpenActions,
   workspaceSurfaceReducer,
   type WorkspaceSurface,
   type WorkspaceSurfaceLayout
@@ -25,6 +27,72 @@ function layout(overrides: Partial<WorkspaceSurfaceLayout> = {}): WorkspaceSurfa
 }
 
 describe('workspaceSurfaceReducer', () => {
+  it('opens a tag detail tab without splitting and reuses its stable id after renaming', () => {
+    const initial = layout({ right: null, rightTabs: [] });
+    const detail: WorkspaceSurface = { kind: 'tag-details', tagId: 'research', label: '研究' };
+    const opened = workspaceSurfaceOpenActions(initial, detail).reduce(workspaceSurfaceReducer, initial);
+    expect(opened.right).toBeNull();
+    expect(opened.leftTabs).toEqual([...initial.leftTabs, detail]);
+    const renamed = { ...detail, label: '新研究主题' };
+    const reopened = workspaceSurfaceOpenActions(opened, renamed).reduce(workspaceSurfaceReducer, opened);
+    expect(reopened.leftTabs).toEqual([...initial.leftTabs, renamed]);
+    expect(reopened.left).toEqual(renamed);
+  });
+
+  it('focuses an existing tag detail tab in the other pane without moving its editor', () => {
+    const detail: WorkspaceSurface = { kind: 'tag-details', tagId: 'research' };
+    const initial = layout({ right: detail, rightTabs: [noteA, detail] });
+    const actions = workspaceSurfaceOpenActions(initial, detail);
+    expect(actions.some(action => action.type === 'move')).toBe(false);
+    const next = actions.reduce(workspaceSurfaceReducer, initial);
+    expect(next.focusedPane).toBe('right');
+    expect(next.leftTabs).toEqual(initial.leftTabs);
+    expect(next.rightTabs).toEqual(initial.rightTabs);
+  });
+
+  it('uses the citation origin instead of stale focus when locating through the keyboard', () => {
+    const state = layout({ focusedPane: 'left' });
+    const next = sourceLinkSurfaceActions(state, 'b', 'right').reduce(workspaceSurfaceReducer, state);
+    expect(next.right).toBe(noteA);
+    expect(next.left).toEqual(pdfB);
+    expect(next.focusedPane).toBe('right');
+  });
+  it('locates a citation in the left PDF without replacing the right note or its focus', () => {
+    const state = layout({ focusedPane: 'right' });
+    const next = sourceLinkSurfaceActions(state, 'a').reduce(workspaceSurfaceReducer, state);
+    expect(next.right).toBe(noteA);
+    expect(next.rightTabs).toBe(state.rightTabs);
+    expect(next.left).toEqual(pdfA);
+    expect(next.focusedPane).toBe('right');
+  });
+
+  it('moves an inactive source PDF to the opposite pane, not the edited note', () => {
+    const state = layout({ focusedPane: 'right' });
+    const next = sourceLinkSurfaceActions(state, 'b').reduce(workspaceSurfaceReducer, state);
+    expect(next.right).toBe(noteA);
+    expect(next.left).toEqual(pdfB);
+    expect(next.leftTabs).toContainEqual(pdfA);
+    expect(next.rightTabs).not.toContainEqual(pdfB);
+    expect(next.focusedPane).toBe('right');
+  });
+
+  it('opens a cited PDF beside a single-pane note and retains the note', () => {
+    const state = layout({ left: noteA, leftTabs: [noteA], right: null, rightTabs: [] });
+    const next = sourceLinkSurfaceActions(state, 'b').reduce(workspaceSurfaceReducer, state);
+    expect(next.left).toBe(noteA);
+    expect(next.leftTabs).toBe(state.leftTabs);
+    expect(next.right).toEqual(pdfB);
+    expect(next.focusedPane).toBe('left');
+  });
+  it.each(['left', 'right'] as const)('refreshes existing record payloads in the %s pane without duplicating tabs', (pane) => {
+    const old: WorkspaceSurface = { kind: 'segment-notes', entryId: 'a', segmentUid: 'old', mode: 'note' };
+    const updated: WorkspaceSurface = { ...old, segmentUid: 'new', mode: 'annotation' };
+    const initial = layout({ [pane]: old, [`${pane}Tabs`]: [old] });
+    const next = workspaceSurfaceReducer(initial, { type: 'open', pane: 'left', surface: updated });
+    expect(next[pane]).toEqual(updated);
+    expect(next[`${pane}Tabs`]).toEqual([updated]);
+    expect(next.focusedPane).toBe(pane);
+  });
   it('keeps an entry trash surface distinct per entry', () => {
     expect(surfaceKey({ kind: 'entry-trash', entryId: 'a' })).toBe('entry-trash:a');
   });
@@ -94,6 +162,17 @@ describe('workspaceSurfaceReducer', () => {
     expect(next.right).toEqual(noteA);
     expect(next.focusedPane).toBe('right');
     expect(next.leftTabs).not.toContainEqual(noteA);
+  });
+
+  it('moves an existing surface when a click explicitly requests the other pane', () => {
+    const initial = layout({ right: null, rightTabs: [] });
+    const next = workspaceSurfaceOpenActions(initial, pdfA, 'right')
+      .reduce(workspaceSurfaceReducer, initial);
+
+    expect(next.leftTabs).toEqual([library, reflowA]);
+    expect(next.right).toEqual(pdfA);
+    expect(next.rightTabs).toEqual([pdfA]);
+    expect(next.focusedPane).toBe('right');
   });
 
   it('removes only surfaces belonging to a deleted entry', () => {

@@ -1,15 +1,46 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ToastContext } from '@/shared/hooks/useToast';
 
 import { MarkdownNoteEditor } from './MarkdownNoteEditor';
+import { discardSegmentEditorsBeforeClose, hasUnsavedSegmentEditors, saveSegmentEditorsBeforeClose } from '@/modules/reader/components/segmentEditorDirtyRegistry';
 
 afterEach(cleanup);
 
 describe('MarkdownNoteEditor dirty state', () => {
+  it('includes embedded note drafts in parent close protection and truly discards a failed draft', async () => {
+    const save = vi.fn().mockRejectedValue(new Error('disk unavailable'));
+    const result = render(<ToastContext.Provider value={{ dismiss: vi.fn(), notify: vi.fn(() => 'toast') }}><MarkdownNoteEditor
+      entryId="tag-reading:scope-test" noteOwner={{ kind: 'tag_reading', tag_id: 'scope-test' }} noteId="embedded"
+      editorScopeKey="tag-reading:scope-test/note:embedded" fallbackTitle="Saved title"
+      onLoadNote={async () => ({ note_id: 'embedded', title: 'Saved title', markdown: 'Saved body', links: [], revision: 'base' })}
+      onSaveNote={save} /></ToastContext.Provider>);
+    await waitFor(() => expect(result.getByText(/自动保存/)).toBeTruthy());
+    fireEvent.click(result.getByRole('button', { name: 'Saved title' }));
+    fireEvent.change(result.getByRole('textbox', { name: '文档笔记标题' }), { target: { value: 'Unsaved title' } });
+    expect(hasUnsavedSegmentEditors('tag-reading:scope-test')).toBe(true);
+    await act(async () => { expect(await saveSegmentEditorsBeforeClose('tag-reading:scope-test')).toBe(false); });
+    expect(hasUnsavedSegmentEditors('tag-reading:scope-test')).toBe(true);
+    act(() => discardSegmentEditorsBeforeClose('tag-reading:scope-test'));
+    expect(hasUnsavedSegmentEditors('tag-reading:scope-test')).toBe(false);
+    expect(result.getByRole('button', { name: 'Saved title' })).toBeTruthy();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1100)); });
+    expect(save).toHaveBeenCalledOnce();
+  });
+
+  it('reports a second view as read-only and never grants it an insertion target', async () => {
+    const writableA = vi.fn(), writableB = vi.fn();
+    const props = { entryId: 'shared-parallel', noteId: 'shared', fallbackTitle: 'Shared',
+      onLoadNote: async () => ({ note_id: 'shared', title: 'Shared', markdown: 'Body', links: [], revision: '1' }), onSaveNote: vi.fn() };
+    const result = render(<ToastContext.Provider value={{ dismiss: vi.fn(), notify: vi.fn(() => 'toast') }}><MarkdownNoteEditor {...props} onWritableChange={writableA} /><MarkdownNoteEditor {...props} editorScopeKey="tag-reading:other/note:shared" onWritableChange={writableB} /></ToastContext.Provider>);
+    await waitFor(() => expect(writableA).toHaveBeenLastCalledWith(true));
+    expect(writableB).not.toHaveBeenCalledWith(true);
+    expect(result.container.querySelectorAll('.tiptap[contenteditable="true"]')).toHaveLength(1);
+    expect(hasUnsavedSegmentEditors('tag-reading:other')).toBe(false);
+  });
   it('does not mark a freshly loaded normalized Markdown document as unsaved', async () => {
     const result = render(
       <ToastContext.Provider value={{ dismiss: vi.fn(), notify: vi.fn(() => 'toast-1') }}>

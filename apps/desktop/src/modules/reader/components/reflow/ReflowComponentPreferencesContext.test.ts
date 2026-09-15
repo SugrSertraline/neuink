@@ -8,7 +8,8 @@ import {
   isReflowGroupVisible,
   reflowComponentKeyForGroup,
   reflowGroupEstimateScale,
-  reflowGroupTextScale
+  reflowGroupTextScale,
+  reflowGroupVisualSize
 } from './ReflowComponentPreferencesContext';
 
 describe('reflow component preferences', () => {
@@ -42,6 +43,19 @@ describe('reflow component preferences', () => {
     expect(reflowGroupTextScale(heading, preferences)).toBeGreaterThan(1);
     expect(reflowGroupEstimateScale(chart, preferences)).toBe(0.75);
   });
+
+  it('applies the table component size to image-based table rendering', () => {
+    const table = group(segment('table', { raw_type: 'table' }));
+    const preferences = {
+      ...DEFAULT_REFLOW_COMPONENT_PREFERENCES,
+      table: { visible: true, size: 'large' as const },
+      figure: { visible: true, size: 'compact' as const }
+    };
+
+    expect(reflowComponentKeyForGroup(table)).toBe('table');
+    expect(reflowGroupVisualSize(table, preferences)).toBe('large');
+    expect(reflowGroupEstimateScale(table, preferences)).toBe(1.5);
+  });
 });
 
 function segment(
@@ -60,13 +74,18 @@ function segment(
 }
 
 function group(body: SourceSegment): ReflowSegmentGroup {
+  const visual =
+    body.segment_type === 'figure' ||
+    body.raw_type === 'image' ||
+    body.raw_type === 'chart' ||
+    body.raw_type === 'table';
   return {
     assetPath: body.asset_path,
     body,
     captions: [],
     footnotes: [],
     id: body.uid,
-    kind: body.segment_type === 'figure' ? 'visual' : 'text',
+    kind: visual ? 'visual' : 'text',
     segments: [body]
   };
 }

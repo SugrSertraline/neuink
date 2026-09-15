@@ -1,4 +1,5 @@
-import { FilterX, LocateFixed, MessageSquareText, RefreshCw, Search, Star } from 'lucide-react';
+import { FilterX, MessageSquareText, RefreshCw, Search, Star } from 'lucide-react';
+import { LocateSourceButton } from '../../reader/components/LocateSourceButton';
 import { useEffect, useMemo, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
@@ -295,16 +296,11 @@ export function AnnotationLibraryView({
                   </div>
 
                   {selectedRecord ? (
-                    <Button
+                    <LocateSourceButton
                       disabled={!selectedRecord.segment}
-                      size="sm"
-                      type="button"
-                      variant="outline"
+                      label="跳到原文"
                       onClick={() => onOpenAnnotation(selectedRecord)}
-                    >
-                      <LocateFixed size={14} aria-hidden="true" />
-                      跳到原文
-                    </Button>
+                    />
                   ) : null}
                 </div>
               </div>

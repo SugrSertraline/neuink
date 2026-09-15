@@ -4,6 +4,7 @@ pub mod conversation;
 pub mod embedding;
 pub mod embedding_resources;
 pub mod entry;
+pub mod export;
 pub mod job;
 mod llm_http;
 pub mod pdf_reader;
@@ -11,6 +12,9 @@ pub mod sciverse;
 pub mod search;
 pub mod settings;
 pub mod tag;
+pub mod tag_reading;
+pub mod tag_note;
+pub mod note_catalog;
 #[cfg(test)]
 mod tag_tests;
 pub mod translation;

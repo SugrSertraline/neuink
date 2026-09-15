@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { Profiler, type ProfilerOnRenderCallback } from 'react';
+import { cloneElement, Profiler, type ProfilerOnRenderCallback } from 'react';
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
@@ -8,7 +8,9 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { SourceSegment } from '@/shared/types/domain';
 
 vi.mock('./PdfCanvasPage', () => ({
-  PdfCanvasPage: () => <div data-testid="mock-pdf-canvas" />,
+  PdfCanvasPage: ({ pageWidth }: { pageWidth: number }) => (
+    <div data-testid="mock-pdf-canvas" style={{ width: pageWidth }} />
+  ),
   PdfTextSelectionHighlightLayer: ({ highlights }: { highlights: Array<{ active?: boolean }> }) => (
     <div
       data-active-highlights={highlights.filter((highlight) => highlight.active).length}
@@ -29,6 +31,18 @@ afterEach(() => {
 });
 
 describe('PdfSourcePage performance boundaries', () => {
+  it('updates offscreen page widths when a split is opened, resized, and closed', () => {
+    const page = pdfSourcePage(createPage(0));
+    const result = render(page);
+
+    // Keep every other prop stable to exercise the memo boundary, not incidental
+    // updates from freshly created maps or page objects.
+    for (const pageWidth of [440, 300, 560, 800]) {
+      result.rerender(cloneElement(page, { pageWidth }));
+      expect(result.getByTestId('mock-pdf-canvas').style.width).toBe(`${pageWidth}px`);
+    }
+  });
+
   it('does not attach per-region ResizeObservers in hover translation mode', () => {
     const observe = vi.fn();
     globalThis.ResizeObserver = class ResizeObserverMock {

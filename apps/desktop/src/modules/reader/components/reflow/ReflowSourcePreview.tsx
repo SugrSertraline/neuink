@@ -1,44 +1,22 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { MouseEvent as ReactMouseEvent } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { createPortal } from "react-dom";
-import { Check, Copy, EyeOff, Link2, MessageCircle, StickyNote } from "lucide-react";
-import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
+import { PointerPreview, type PreviewAnchor } from '@/components/ui/pointer-preview';
+import { useReaderPreviewVisible } from '@/components/ui/hover-interactions';
 import {
   resolveMineruAssetUrl,
   SourceSnapshotPreview,
 } from "@/shared/components/SourceSnapshotPreview";
-import { useToast } from "@/shared/hooks/useToast";
-import type { TranslatedSegment } from "@/shared/ipc/workspaceApi";
-import type { Annotation, SegmentBlockNote, SourceSegment } from "@/shared/types/domain";
+import type { Annotation, SourceSegment } from "@/shared/types/domain";
 
 import {
-  logicalSegmentUid,
-  groupSegmentsByPage,
-  inferPageCount,
   segmentDisplayLabel,
 } from "../pdf-reader/readerUtils";
-import { SegmentActionMenu } from "../pdf-reader/SegmentActionMenu";
-import { SegmentRail } from "../pdf-reader/SegmentRail";
-import { SegmentRailLayout } from "../pdf-reader/SegmentRailLayout";
-import { PDF_RAIL_WIDTH } from "../pdf-reader/readerConstants";
-import type { SourceBacklinksBySegmentUid } from "../../types";
-import type { SourceBacklink } from "../../types";
-import {
-  buildReflowSegmentGroups,
-  type ReflowSegmentGroup,
-} from "./buildReflowBlocks";
 import {
   readCachedPdfSegmentSnapshot,
   warmCachedPdfSegmentSnapshot,
 } from "./pdfSourceSnapshot";
-import {
-  buildReflowGroupIndex,
-  estimateReflowGroupSize,
-} from "./reflowVirtualization";
 
 export type ReflowTranslationMode = "source" | "translation" | "bilingual";
 
@@ -74,36 +52,20 @@ export function ReflowSourcePreview({
   translatedText: string | null;
   workspaceRoot: string | null;
 }) {
-  const previewRef = useRef<HTMLDivElement | null>(null);
-  const frameRef = useRef<number | null>(null);
-  const latestPositionRef = useRef(initialPosition);
-
+  const visible = useReaderPreviewVisible(segment.uid);
+  const positionRef = useRef(initialPosition);
+  const moveRef = useRef<(anchor: PreviewAnchor) => void>(() => {});
+  useEffect(() => { positionRef.current = initialPosition; }, [initialPosition]);
   useEffect(() => {
-    latestPositionRef.current = initialPosition;
-    movePreviewElement(previewRef.current, initialPosition);
-  }, [initialPosition]);
-
-  useEffect(() => {
-    const move = (position: ReflowPreviewPosition) => {
-      latestPositionRef.current = position;
-      if (frameRef.current !== null) {
-        return;
-      }
-      frameRef.current = window.requestAnimationFrame(() => {
-        frameRef.current = null;
-        movePreviewElement(previewRef.current, latestPositionRef.current);
-      });
-    };
-    onMoveReady(move);
-    return () => {
-      onMoveReady(() => undefined);
-      if (frameRef.current !== null) {
-        window.cancelAnimationFrame(frameRef.current);
-      }
-    };
+    onMoveReady((position) => {
+      positionRef.current = position;
+      moveRef.current({ x: position.x, top: position.y, bottom: position.y });
+    });
+    return () => onMoveReady(() => {});
   }, [onMoveReady]);
+  const registerMove = useCallback((move: (anchor: PreviewAnchor) => void) => { moveRef.current = move; }, []);
 
-  if (typeof document === "undefined") {
+  if (!visible || typeof document === "undefined") {
     return null;
   }
 
@@ -114,23 +76,18 @@ export function ReflowSourcePreview({
     return null;
   }
 
-  const layout = previewLayout(initialPosition);
-  return createPortal(
-    <div
-      ref={previewRef}
-      className="pointer-events-none fixed z-[var(--z-reader-preview)] max-h-[80vh] overflow-auto rounded-md border bg-popover text-popover-foreground shadow-xl ring-1 ring-foreground/10"
-      style={{
-        left: layout.left,
-        top: layout.top,
-        width: layout.width,
-      }}
+  return (
+    <PointerPreview
+      anchor={{ x: positionRef.current.x, top: positionRef.current.y, bottom: positionRef.current.y }}
+      width={720}
+      onMoveReady={registerMove}
     >
       <div className="sticky top-0 z-[1] flex items-center gap-2 border-b bg-popover px-2 py-1.5 text-xs">
         <Badge variant="secondary">{segmentDisplayLabel(segment)}</Badge>
         <span className="font-semibold">第 {segment.page_idx + 1} 页</span>
         <span className="text-muted-foreground">片段</span>
       </div>
-      <div className="grid min-w-0 gap-3 bg-white p-2 text-muted-foreground">
+      <div className="grid min-w-0 gap-3 p-3 text-muted-foreground">
         {showOriginal ? (
           <PreviewSection label="解析后原文">
             <ReflowSourcePreviewContent
@@ -182,8 +139,7 @@ export function ReflowSourcePreview({
           </PreviewSection>
         ) : null}
       </div>
-    </div>,
-    document.body,
+    </PointerPreview>
   );
 }
 
@@ -267,38 +223,6 @@ const ReflowSourcePreviewContent = memo(function ReflowSourcePreviewContent({
     />
   );
 });
-
-function movePreviewElement(
-  element: HTMLDivElement | null,
-  position: ReflowPreviewPosition,
-) {
-  if (!element) {
-    return;
-  }
-  const layout = previewLayout(position);
-  element.style.left = `${layout.left}px`;
-  element.style.top = `${layout.top}px`;
-  element.style.width = `${layout.width}px`;
-}
-
-function previewLayout(position: { x: number; y: number }) {
-  const viewportWidth =
-    typeof window === "undefined" ? 1024 : window.innerWidth;
-  const viewportHeight =
-    typeof window === "undefined" ? 768 : window.innerHeight;
-  const margin = 12;
-  const width = Math.max(160, Math.min(720, viewportWidth - margin * 2));
-  const left =
-    position.x + margin + width > viewportWidth
-      ? Math.max(margin, position.x - width - margin)
-      : position.x + margin;
-  const top =
-    position.y + margin + 420 > viewportHeight
-      ? Math.max(margin, viewportHeight - 420 - margin)
-      : position.y + margin;
-
-  return { left, top, width };
-}
 
 const warmedPreviewAssetUrls = new Set<string>();
 const warmedPreviewSegmentKeys = new Set<string>();

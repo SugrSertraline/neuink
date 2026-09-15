@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { hasUnsavedSegmentEditors, saveSegmentEditorsBeforeClose } from '@/modules/reader/components/segmentEditorDirtyRegistry';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Annotation, SourceSegment } from '@/shared/types/domain';
@@ -10,6 +11,27 @@ import { SegmentAnnotationEditor } from './SegmentAnnotationEditor';
 afterEach(cleanup);
 
 describe('SegmentAnnotationEditor', () => {
+  it.each([false, true])('keeps annotation drafts until the actual save settles (success=%s)', async (success) => {
+    let finish!: (value: boolean) => void;
+    const save = vi.fn(() => new Promise<boolean>((resolve) => { finish = resolve; }));
+    const props = { annotations: [annotation], busy: false, segment, segments: [segment], sourceEntryId: 'entry-1', workspaceRoot: null, draftScopeKey: 'entry-content:entry-1|pdf', onClose: vi.fn(), onDelete: vi.fn(), onModeChange: vi.fn(), onSave: save };
+    const view = render(<SegmentAnnotationEditor {...props} />);
+    fireEvent.click(screen.getByTitle('编辑批注'));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Unsaved new annotation' } });
+    let closing!: Promise<boolean>;
+    act(() => { closing = saveSegmentEditorsBeforeClose('pdf:entry-1'); });
+    // A refreshed annotation list used to be mistaken for save completion.
+    view.rerender(<SegmentAnnotationEditor {...props} annotations={[{ ...annotation }]} selectedAnnotationId={annotation.annotation_id} />);
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('Unsaved new annotation');
+    expect(hasUnsavedSegmentEditors('pdf:entry-1')).toBe(true);
+    await act(async () => finish(success));
+    expect(await closing).toBe(success);
+    if (success) await waitFor(() => expect(screen.queryByRole('textbox')).toBeNull());
+    else {
+      expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('Unsaved new annotation');
+      expect(hasUnsavedSegmentEditors('pdf:entry-1')).toBe(true);
+    }
+  });
   it('reports the exact selected annotation so a linked PDF can locate its text range', () => {
     const onSelectAnnotation = vi.fn();
     render(

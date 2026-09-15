@@ -21,10 +21,12 @@ const BACKGROUND_PRESETS = [
 
 export function ReflowAppearanceControls({
   preferences,
-  onChange
+  onChange,
+  compact = false
 }: {
   preferences: ReaderPreferences;
   onChange: (preferences: ReaderPreferences) => void;
+  compact?: boolean;
 }) {
   const updateFontSize = (value: number) => {
     onChange({ ...preferences, reflowFontSize: normalizeReflowFontSize(value) });
@@ -43,13 +45,13 @@ export function ReflowAppearanceControls({
       <PopoverTrigger asChild>
         <Button
           aria-label="重排阅读外观"
-          className="h-8 gap-1.5 px-2"
+          className={cn('gap-1.5 px-2', !compact && 'h-8')}
           size="sm"
           title="调整重排视图的文字大小和背景颜色"
           type="button"
           variant="outline"
         >
-          <Type size={14} aria-hidden="true" />
+          {compact ? <span>字号</span> : <Type size={14} aria-hidden="true" />}
           <span className="tabular-nums">{preferences.reflowFontSize}</span>
           <span
             aria-hidden="true"

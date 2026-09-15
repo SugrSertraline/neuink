@@ -3,9 +3,11 @@ import Image from '@tiptap/extension-image';
 import { ReactNodeViewRenderer } from '@tiptap/react';
 
 import { NoteImageView } from './NoteImageView';
+import type { NoteOwner } from '@/shared/types/domain';
 
 export type NoteImageOptions = {
   entryId: string;
+  noteOwner?: NoteOwner;
   noteId: string;
   workspaceRoot?: string | null;
 };
@@ -87,8 +89,7 @@ export function resolveNoteImageSrc(src: string | null | undefined, options: Not
   const normalized = src.replace(/\\/g, '/').replace(/^\.\//, '');
   const absolutePath = [
     options.workspaceRoot,
-    'entries',
-    options.entryId,
+    ...(options.noteOwner?.kind === 'tag_reading' ? ['tag-reading', options.noteOwner.tag_id] : ['entries', options.entryId]),
     'notes',
     ...normalized.split('/').filter(Boolean)
   ].join('\\');

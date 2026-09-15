@@ -1,9 +1,10 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import type { CSSProperties, KeyboardEvent, MouseEvent } from 'react';
 import { Link2, MessageCircle, StickyNote } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
+import { PointerPreview, placePointerPreview } from '@/components/ui/pointer-preview';
+import { useReaderPreviewVisible } from '@/components/ui/hover-interactions';
 import { cn } from '@/lib/utils';
 import { SourceSnapshotPreview } from '@/shared/components/SourceSnapshotPreview';
 import type { TranslatedSegment, TranslationStatus } from '@/shared/ipc/workspaceApi';
@@ -278,7 +279,7 @@ function SegmentRegionImpl({
             segmentIndicatorClassName('bottom-left', indicatorsExpanded),
             'bg-success text-white ring-success/20'
           )}
-          title={`${sourceBacklinkCount} 个来源链接`}
+          title={`${sourceBacklinkCount} 个笔记引用`}
         >
           <Link2 size={11} aria-hidden="true" />
           {indicatorsExpanded ? <span className="pr-0.5">{sourceBacklinkCount}</span> : null}
@@ -521,7 +522,8 @@ function SegmentPreview({
   onPointerEnter?: () => void;
   onPointerLeave?: () => void;
 }) {
-  if (typeof document === 'undefined') {
+  const visible = useReaderPreviewVisible(segment.uid);
+  if (!visible || typeof document === 'undefined') {
     return null;
   }
 
@@ -567,17 +569,12 @@ function SegmentPreview({
     text: layoutText
   });
 
-  return createPortal(
-    <div
-      className={cn(
-        'fixed z-[var(--z-reader-preview)] block overflow-visible rounded-md border bg-popover text-popover-foreground shadow-xl ring-1 ring-foreground/10',
-        isScrollableList ? 'pointer-events-auto' : 'pointer-events-none',
-      )}
-      style={{
-        left: previewLayout.left,
-        top: previewLayout.top,
-        width: previewLayout.width
-      }}
+  return (
+    <PointerPreview
+      anchor={{ x: position.x, top: position.segmentTop, bottom: position.segmentBottom }}
+      width={previewLayout.width}
+      maxHeight={previewLayout.maxHeight}
+      interactive={isScrollableList}
       onPointerEnter={isScrollableList ? onPointerEnter : undefined}
       onPointerLeave={isScrollableList ? onPointerLeave : undefined}
     >
@@ -690,8 +687,7 @@ function SegmentPreview({
           {sourceLinkHint}
         </div>
       ) : null}
-    </div>,
-    document.body
+    </PointerPreview>
   );
 }
 
@@ -734,6 +730,7 @@ type PreviewLayoutInput = {
 
 type PreviewLayout = {
   contentStyle: CSSProperties;
+  maxHeight: number;
   left: number;
   top: number;
   width: number;
@@ -749,12 +746,9 @@ export function buildPreviewLayout({
 }: PreviewLayoutInput): PreviewLayout {
   const viewportWidth = typeof window === 'undefined' ? 1024 : window.innerWidth;
   const viewportHeight = typeof window === 'undefined' ? 768 : window.innerHeight;
-  const maxWidth = Math.max(320, viewportWidth - PREVIEW_MARGIN * 2);
-  const availableHeight = Math.max(260, viewportHeight - PREVIEW_MARGIN * 2);
-  const maxHeight = Math.max(
-    260,
-    Math.min(availableHeight, availableHeight * previewCardHeightScale(size))
-  );
+  const maxWidth = Math.max(0, viewportWidth - PREVIEW_MARGIN * 2);
+  const availableHeight = Math.max(0, viewportHeight - PREVIEW_MARGIN * 2);
+  const maxHeight = availableHeight * previewCardHeightScale(size);
   const hasTable = hasTableLikeContent(text);
   const cardScale = previewCardWidthScale(size);
   const fontScale = previewFontScale(fontSize);
@@ -815,29 +809,10 @@ export function buildPreviewLayout({
     measuredCandidates[measuredCandidates.length - 1];
 
   const safeHeight = Math.min(selected.estimatedHeight, maxHeight);
-  const pointerGap = 8;
-  const rightSpace = viewportWidth - PREVIEW_MARGIN - position.x - pointerGap;
-  const leftSpace = position.x - pointerGap - PREVIEW_MARGIN;
-  const placeRight = rightSpace >= selected.width || rightSpace >= leftSpace;
-  const preferredLeft = placeRight
-    ? position.x + pointerGap
-    : position.x - pointerGap - selected.width;
-  const left = clamp(
-    preferredLeft,
-    PREVIEW_MARGIN,
-    viewportWidth - selected.width - PREVIEW_MARGIN,
-  );
-
-  const belowSpace = viewportHeight - PREVIEW_MARGIN - position.segmentBottom - pointerGap;
-  const aboveSpace = position.segmentTop - pointerGap - PREVIEW_MARGIN;
-  const placeBelow = belowSpace >= safeHeight || belowSpace >= aboveSpace;
-  const preferredTop = placeBelow
-    ? position.segmentBottom + pointerGap
-    : position.segmentTop - pointerGap - safeHeight;
-  const top = clamp(
-    preferredTop,
-    PREVIEW_MARGIN,
-    viewportHeight - safeHeight - PREVIEW_MARGIN,
+  const { left, top } = placePointerPreview(
+    { x: position.x, top: position.segmentTop, bottom: position.segmentBottom },
+    { width: selected.width, height: safeHeight },
+    { width: viewportWidth, height: viewportHeight },
   );
 
   return {
@@ -847,11 +822,8 @@ export function buildPreviewLayout({
       columnGap: preferScrollable ? undefined : PREVIEW_COLUMN_GAP,
       fontSize: selected.fontSize,
       lineHeight: `${selected.lineHeight}px`,
-      maxHeight: preferScrollable ? Math.min(420 * cardScale, maxHeight - 64) : undefined,
-      overflowX: preferScrollable ? 'hidden' : undefined,
-      overflowY: preferScrollable ? 'auto' : undefined,
-      overscrollBehavior: preferScrollable ? 'contain' : undefined,
     },
+    maxHeight,
     left,
     top,
     width: selected.width
@@ -912,11 +884,4 @@ function hasTableLikeContent(text: string) {
 
 function maxColumnsForWidth(width: number) {
   return Math.max(1, Math.floor((width + PREVIEW_COLUMN_GAP) / (210 + PREVIEW_COLUMN_GAP)));
-}
-
-function clamp(value: number, min: number, max: number) {
-  if (max < min) {
-    return min;
-  }
-  return Math.min(max, Math.max(min, value));
 }

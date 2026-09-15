@@ -42,6 +42,7 @@ import type { TagRecommendation } from '@/shared/ipc/assistantApi';
 import type { LibraryEntry } from '../../../library/components/LibrarySidebar';
 import { StatusBadge } from '../EntryDisplay';
 import { EntryContentHeader } from '../EntryContentHeader';
+import { useReadingSession } from '../../parallel-reading/ReadingSessionContext';
 
 export function ReaderToolbar({
   entry,
@@ -66,6 +67,7 @@ export function ReaderToolbar({
   onRecommendedTagToggle,
   onTagSuggestionsOpenChange,
   onExportTranslation,
+  onExportPaper,
   onPauseTranslation,
   onOpenTranslationTask,
   onReaderPreferencesChange,
@@ -104,6 +106,7 @@ export function ReaderToolbar({
   onRecommendedTagToggle: (tag: TagRecommendation) => void;
   onTagSuggestionsOpenChange: (open: boolean) => void;
   onExportTranslation: () => void;
+  onExportPaper?: () => void;
   onPauseTranslation: () => void;
   onOpenTranslationTask: () => void;
   onReaderPreferencesChange: (preferences: ReaderPreferences) => void;
@@ -120,9 +123,50 @@ export function ReaderToolbar({
   onZoomIn: () => void;
   onZoomOut: () => void;
 }) {
+  const readingSession = useReadingSession();
   const hasTranslation = Boolean(
     translation?.segments.some((segment) => segment.status === 'translated')
   );
+  const pageNavigation = <PageNavigationControls currentPage={currentPage} pageCount={pageCount}
+    pageStep={readerPreferences.pageDisplayMode === 'dual' ? 2 : 1} onCurrentPageChange={onCurrentPageChange} />;
+  const searchControls = <PdfSearchControls activeMatchNumber={searchActiveMatchNumber} matchCount={searchMatchCount}
+    query={searchQuery} status={searchStatus} onNext={onSearchNext} onPrevious={onSearchPrevious} onQueryChange={onSearchQueryChange} />;
+  const overflowMenu = (compact = false) => <ReaderToolbarOverflowMenu compact={compact} hasTranslation={hasTranslation}
+    parseStatus={entry.status} parsed={entry.status === 'Parsed'} reparseBusy={reparseBusy} translationBusy={translationBusy}
+    onExportTranslation={onExportTranslation} onExportPaper={segmentCount > 0 ? onExportPaper : undefined}
+    onOpenPdf={onOpenPdf} onOpenTranslationTask={onOpenTranslationTask} onPauseTranslation={onPauseTranslation}
+    onReparsePdf={onReparsePdf} onRetryPdfParse={onRetryPdfParse} onRevealPdf={onRevealPdf} onStartPdfParse={onStartPdfParse} />;
+
+  // The parallel-reading frame already owns the title and PDF/reflow switch.
+  if (readingSession) return <div aria-label="PDF 阅读工具" data-reader-compact-toolbar className="flex h-9 min-w-0 shrink-0 items-center gap-1 border-b bg-background px-2 py-0.5 text-xs">
+    {pageNavigation}
+    <div className="min-w-0 flex-1" />
+    <Popover>
+      <PopoverTrigger asChild><Button size="sm" variant="outline" className="px-2 text-xs" aria-label="缩放与阅读显示" title="调整缩放、单页/双页与悬停预览">{Math.round(zoom * 100)}%</Button></PopoverTrigger>
+      <PopoverContent viewportAligned align="end" className="w-72 max-w-[calc(100vw-2rem)] space-y-3 text-xs">
+        <div className="flex items-center justify-between gap-2"><span>PDF 缩放</span><div className="flex items-center gap-2">
+          <Button size="icon-sm" variant="outline" aria-label="缩小" title="缩小" onClick={onZoomOut}><ZoomOut size={14} aria-hidden="true" /></Button>
+          <span>{Math.round(zoom * 100)}%</span>
+          <Button size="icon-sm" variant="outline" aria-label="放大" title="放大" onClick={onZoomIn}><ZoomIn size={14} aria-hidden="true" /></Button>
+        </div></div>
+        <Button size="sm" variant="outline" onClick={() => onReaderPreferencesChange({ ...readerPreferences, pageDisplayMode: readerPreferences.pageDisplayMode === 'dual' ? 'single' : 'dual' })}>
+          {readerPreferences.pageDisplayMode === 'dual' ? '切换为单页' : '切换为双页'}
+        </Button>
+        <HoverPreviewControls preferences={readerPreferences} onChange={onReaderPreferencesChange} />
+        {entry.status === 'Parsed' && recommendedTags.length > 0 ? <RecommendedTagControls busy={tagSuggestionBusy} open={tagSuggestionsOpen}
+          recommendedTags={recommendedTags} selectedRecommendedTagPaths={selectedRecommendedTagPaths} onApply={onApplyRecommendedTags}
+          onDismiss={onDismissRecommendedTags} onOpenChange={onTagSuggestionsOpenChange} onToggleTag={onRecommendedTagToggle} /> : null}
+        <p className="break-words text-muted-foreground">{entry.pdfFileName} · {segmentCount} 个区域</p>
+        <StatusBadge status={entry.status} />
+      </PopoverContent>
+    </Popover>
+    <Popover>
+      <PopoverTrigger asChild><Button size="sm" variant={searchQuery ? 'secondary' : 'outline'} className="px-2 text-xs" aria-label="查找 PDF 文字" title="查找当前 PDF 中的文字">查找</Button></PopoverTrigger>
+      <PopoverContent viewportAligned align="end" className="w-80 max-w-[calc(100vw-2rem)] space-y-2 p-3"><p className="text-xs font-medium">查找当前 PDF</p>{searchControls}</PopoverContent>
+    </Popover>
+    {overflowMenu(true)}
+    {translationBusy ? <span className="sr-only" role="status">{translationMessage || '正在翻译'}</span> : null}
+  </div>;
   return (
     <div className="pdf-reader-toolbar border-b bg-background">
       <EntryContentHeader
@@ -139,7 +183,14 @@ export function ReaderToolbar({
           </ToolbarTooltip>
         ) : null}
 
-        {!translationBusy && hasTranslation ? (
+        {onExportPaper && segmentCount > 0 ? (
+          <ToolbarTooltip content="导出解析全文、中文译稿或中英对照，支持 Word、TXT 和图片资料包">
+            <Button aria-label="导出论文内容" className="pdf-reader-toolbar-overflow-action shrink-0" size="sm" type="button" variant="outline" onClick={onExportPaper}>
+              <Download size={14} aria-hidden="true" /><span className="pdf-reader-toolbar-label">导出</span>
+            </Button>
+          </ToolbarTooltip>
+        ) : null}
+        {!onExportPaper && !translationBusy && hasTranslation ? (
           <ToolbarTooltip content="导出当前条目的译文笔记">
           <Button aria-label="导出译文笔记" className="pdf-reader-toolbar-overflow-action shrink-0" size="sm" type="button" variant="outline" onClick={onExportTranslation}>
             <Download size={14} aria-hidden="true" />
@@ -249,21 +300,7 @@ export function ReaderToolbar({
           onChange={onReaderPreferencesChange}
         />
 
-        <ReaderToolbarOverflowMenu
-          hasTranslation={hasTranslation}
-          parseStatus={entry.status}
-          parsed={entry.status === 'Parsed'}
-          reparseBusy={reparseBusy}
-          translationBusy={translationBusy}
-          onExportTranslation={onExportTranslation}
-          onOpenPdf={onOpenPdf}
-          onOpenTranslationTask={onOpenTranslationTask}
-          onPauseTranslation={onPauseTranslation}
-          onReparsePdf={onReparsePdf}
-          onRetryPdfParse={onRetryPdfParse}
-          onRevealPdf={onRevealPdf}
-          onStartPdfParse={onStartPdfParse}
-        />
+        {overflowMenu()}
 
         <Button
           className="shrink-0"
@@ -307,22 +344,8 @@ export function ReaderToolbar({
           <StatusBadge status={entry.status} />
         </div>
 
-        <PageNavigationControls
-          currentPage={currentPage}
-          pageCount={pageCount}
-          pageStep={readerPreferences.pageDisplayMode === 'dual' ? 2 : 1}
-          onCurrentPageChange={onCurrentPageChange}
-        />
-
-        <PdfSearchControls
-          activeMatchNumber={searchActiveMatchNumber}
-          matchCount={searchMatchCount}
-          query={searchQuery}
-          status={searchStatus}
-          onNext={onSearchNext}
-          onPrevious={onSearchPrevious}
-          onQueryChange={onSearchQueryChange}
-        />
+        {pageNavigation}
+        {searchControls}
       </div>
     </div>
   );
@@ -338,12 +361,14 @@ function ToolbarTooltip({ content, children }: { content: string; children: Reac
 }
 
 function ReaderToolbarOverflowMenu({
+  compact = false,
   hasTranslation,
   parseStatus,
   parsed,
   reparseBusy,
   translationBusy,
   onExportTranslation,
+  onExportPaper,
   onOpenPdf,
   onOpenTranslationTask,
   onPauseTranslation,
@@ -352,12 +377,14 @@ function ReaderToolbarOverflowMenu({
   onRevealPdf,
   onStartPdfParse
 }: {
+  compact?: boolean;
   hasTranslation: boolean;
   parseStatus: LibraryEntry['status'];
   parsed: boolean;
   reparseBusy: boolean;
   translationBusy: boolean;
   onExportTranslation: () => void;
+  onExportPaper?: () => void;
   onOpenPdf?: () => void;
   onOpenTranslationTask: () => void;
   onPauseTranslation: () => void;
@@ -371,26 +398,29 @@ function ReaderToolbarOverflowMenu({
       <DropdownMenuTrigger asChild>
         <Button
           aria-label="更多 PDF 操作"
-          className="pdf-reader-toolbar-overflow shrink-0"
-          size="icon-sm"
+          className={compact ? 'shrink-0 px-2 text-xs' : 'pdf-reader-toolbar-overflow shrink-0'}
+          size={compact ? 'sm' : 'icon-sm'}
           title="更多 PDF 操作"
           type="button"
-          variant="outline"
+          variant={compact && translationBusy ? 'secondary' : 'outline'}
         >
-          <MoreHorizontal size={14} aria-hidden="true" />
+          {compact ? translationBusy ? '翻译中' : '工具' : <MoreHorizontal size={14} aria-hidden="true" />}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent viewportAligned={compact} align="end">
         {translationBusy ? (
           <DropdownMenuItem onSelect={onPauseTranslation}>
             <Pause size={14} aria-hidden="true" />
             暂停翻译
           </DropdownMenuItem>
         ) : null}
+        {onExportPaper ? <DropdownMenuItem onSelect={onExportPaper}>
+          <Download size={14} aria-hidden="true" />导出论文内容
+        </DropdownMenuItem> : null}
         {!translationBusy && hasTranslation ? (
           <DropdownMenuItem onSelect={onExportTranslation}>
             <Download size={14} aria-hidden="true" />
-            导出译文笔记
+            {onExportPaper ? '生成内部译文笔记（已译片段）' : '导出译文笔记'}
           </DropdownMenuItem>
         ) : null}
         {parsed ? (

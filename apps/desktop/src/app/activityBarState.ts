@@ -1,6 +1,6 @@
 import type { WorkspaceSurface } from './workspaceSurface';
 
-export type SidePanel = 'assistant' | 'library' | 'search';
+export type SidePanel = 'assistant' | 'library' | 'search' | 'same-tag';
 
 export function resolveActiveActivityPanel({
   focusedSurfaceKind,

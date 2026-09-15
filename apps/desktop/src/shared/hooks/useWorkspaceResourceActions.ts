@@ -1,4 +1,6 @@
-import { useCallback, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useRef, type Dispatch, type SetStateAction } from 'react';
+import { listTagArchives, restoreTagArchive } from '@/shared/ipc/tagReadingApi';
+import { updateTagDescription } from '@/shared/ipc/noteCatalogApi';
 
 import {
   applyTagProposal,
@@ -92,6 +94,25 @@ export function useWorkspaceResourceActions({
   setTrashedEntries,
   tags
 }: UseWorkspaceResourceActionsOptions) {
+  const currentRoot = useRef(root);
+  currentRoot.current = root;
+  const updateWorkspaceTagDescription = useCallback(async (id: string, value: string, expected: string) => {
+    if (!root) throw new Error('请先打开资料库');
+    const saved = await updateTagDescription(root, id, value, expected);
+    if (currentRoot.current === root) setTags((tags) => tags.map((tag) => tag.id === id ? saved : tag));
+    return saved;
+  }, [root, setTags]);
+  const restoreWorkspaceTagArchive = useCallback(async (archiveId: string) => {
+    if (!root) throw new Error('请先打开资料库');
+    const response = await restoreTagArchive(root, archiveId);
+    const trashed = await listTrashedEntries(root);
+    if (currentRoot.current === root) {
+      setTags(response.tags);
+      setEntries(response.entries);
+      setTrashedEntries(trashed);
+    }
+    return response.missing_entries;
+  }, [root, setEntries, setTags, setTrashedEntries]);
   const ensureTagPath = useCallback(
     async (path: string, catalog: TagMeta[]): Promise<{ tagId: TagId | null; tags: TagMeta[] }> => {
       if (!root) {
@@ -567,6 +588,8 @@ export function useWorkspaceResourceActions({
         return;
       }
       try {
+        // A hot-reloaded frontend must not promise recovery on an old desktop backend.
+        await listTagArchives(root);
         const response = await deleteTag(root, tagId);
         setTags(response.tags);
         setEntries(response.entries);
@@ -874,6 +897,8 @@ export function useWorkspaceResourceActions({
     applyWorkspaceTagProposal,
     applyWorkspaceEntryMetaProposal,
     renameWorkspaceTag,
+    updateWorkspaceTagDescription,
+    restoreWorkspaceTagArchive,
     deleteWorkspaceTag,
     deleteWorkspaceEntry,
     restoreWorkspaceEntry,

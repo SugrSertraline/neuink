@@ -2,39 +2,73 @@ import * as React from "react"
 import { HoverCard as HoverCardPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
+import { HOVER_SURFACE_CLASS, HOVER_TIMING, useHoverOpenState } from './hover-interactions'
+import { useOverlayLayer } from './overlay-layer'
+import { ViewportOverlay } from './viewport-overlay'
+
+const HoverGateContext = React.createContext({ rearm: () => {}, show: () => {} })
 
 function HoverCard({
+  open: controlledOpen,
+  defaultOpen = false,
+  onOpenChange,
+  openDelay = HOVER_TIMING.open,
+  closeDelay = HOVER_TIMING.close,
   ...props
 }: React.ComponentProps<typeof HoverCardPrimitive.Root>) {
-  return <HoverCardPrimitive.Root data-slot="hover-card" {...props} />
+  const state = useHoverOpenState({ open: controlledOpen, defaultOpen, onOpenChange })
+  return <HoverGateContext.Provider value={state}>
+    <HoverCardPrimitive.Root data-slot="hover-card" {...props} open={state.open}
+      openDelay={openDelay} closeDelay={closeDelay}
+      onOpenChange={state.onOpenChange} />
+  </HoverGateContext.Provider>
 }
 
 function HoverCardTrigger({
+  onPointerEnter,
+  onFocus,
+  onClick,
+  openOnClick = false,
   ...props
-}: React.ComponentProps<typeof HoverCardPrimitive.Trigger>) {
+}: React.ComponentProps<typeof HoverCardPrimitive.Trigger> & { openOnClick?: boolean }) {
+  const { rearm, show } = React.useContext(HoverGateContext)
   return (
-    <HoverCardPrimitive.Trigger data-slot="hover-card-trigger" {...props} />
+    <HoverCardPrimitive.Trigger data-slot="hover-card-trigger" {...props}
+      onPointerEnter={(event) => { rearm(); onPointerEnter?.(event) }}
+      onFocus={(event) => { rearm(); onFocus?.(event) }}
+      onClick={(event) => { onClick?.(event); if (openOnClick && !event.defaultPrevented) show() }} />
   )
 }
 
 function HoverCardContent({
   className,
   align = "center",
-  sideOffset = 4,
+  sideOffset = 8,
+  collisionPadding = 12,
+  layer,
   ...props
-}: React.ComponentProps<typeof HoverCardPrimitive.Content>) {
+}: React.ComponentProps<typeof HoverCardPrimitive.Content> & {
+  layer?: 'reader-preview' | 'popover' | 'dialog-popover'
+}) {
+  const inheritedLayer = useOverlayLayer()
   return (
     <HoverCardPrimitive.Portal data-slot="hover-card-portal">
+      <ViewportOverlay enabled layer={inheritedLayer === 'dialog-popover' ? inheritedLayer : layer ?? inheritedLayer}>
       <HoverCardPrimitive.Content
         data-slot="hover-card-content"
+        data-hover-surface="true"
         align={align}
         sideOffset={sideOffset}
+        collisionPadding={collisionPadding}
+        hideWhenDetached
         className={cn(
-          "z-50 w-64 origin-(--radix-hover-card-content-transform-origin) rounded-lg bg-popover p-2.5 text-sm text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-hidden duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          HOVER_SURFACE_CLASS,
+          "w-64 min-w-0 max-w-[var(--radix-hover-card-content-available-width)] max-h-[min(28rem,var(--radix-hover-card-content-available-height))] overflow-y-auto overscroll-contain break-words p-3 text-sm leading-5 outline-hidden data-[state=open]:animate-in data-[state=open]:fade-in-0 duration-100 motion-reduce:animate-none",
           className
         )}
         {...props}
       />
+      </ViewportOverlay>
     </HoverCardPrimitive.Portal>
   )
 }

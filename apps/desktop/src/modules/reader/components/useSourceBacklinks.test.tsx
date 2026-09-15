@@ -23,7 +23,7 @@ const note: NoteDocument = {
   links: [{
     link_id: 'link-1', anchor_id: 'anchor-1', display_text: 'Source', created_at: '',
     owner: { kind: 'note', entry_id: 'notes', note_id: 'note-1' },
-    sources: [{ entry_id: 'source', segment_uid: 'segment-1', page: 0, snapshot_text: '', quote_hash: '' }]
+    sources: [{ entry_id: 'source', segment_uid: 'segment-1', page: 2, segment_type: 'paragraph', snapshot_text: 'Grounded evidence', quote_hash: '' }]
   }]
 };
 
@@ -36,6 +36,11 @@ describe('useSourceBacklinks', () => {
     );
 
     await waitFor(() => expect(result.current.source?.['segment-1']).toHaveLength(1));
+    expect(result.current.source?.['segment-1']?.[0]).toMatchObject({
+      page: 2,
+      segmentType: 'paragraph',
+      snapshotText: 'Grounded evidence'
+    });
     expect(readMarkdownNote).toHaveBeenCalledTimes(1);
 
     rerender({ revisions: {} });

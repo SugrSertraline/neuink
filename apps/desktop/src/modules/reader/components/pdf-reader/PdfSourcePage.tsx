@@ -6,6 +6,7 @@ import type {
 } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { HOVER_TIMING, hoverInteractionBlocked, useHoverDismiss } from '@/components/ui/hover-interactions';
 import { isMineruImagePath } from "@/shared/components/SourceSnapshotPreview";
 import type { TranslatedSegment } from "@/shared/ipc/workspaceApi";
 import type { TranslationStatus } from "@/shared/ipc/workspaceApi";
@@ -272,7 +273,7 @@ function PdfSourcePageImpl({
         setPreviewRegionId(null);
         setLocalHoveredGroupUid(null);
       }
-    }, 180);
+    }, HOVER_TIMING.close);
   };
 
   const cancelListPreviewClear = () => {
@@ -343,6 +344,18 @@ function PdfSourcePageImpl({
     setPreviewPosition((current) => current === null ? current : null);
   };
 
+  useHoverDismiss(() => {
+    cancelListPreviewClear();
+    previewPointerInsideRef.current = false;
+    if (hoverAnimationFrameRef.current !== null) {
+      window.cancelAnimationFrame(hoverAnimationFrameRef.current);
+      hoverAnimationFrameRef.current = null;
+    }
+    pendingHoverSampleRef.current = null;
+    previewSuppressUntilRef.current = Date.now() + PREVIEW_SUPPRESS_MS;
+    clearHoveredRegion();
+  }, hoverPreviewEnabled);
+
   const updateHoveredSegmentAtPoint = (
     element: HTMLDivElement,
     clientX: number,
@@ -350,7 +363,7 @@ function PdfSourcePageImpl({
     buttons: number,
   ) => {
     notifyPdfInteraction();
-    if (suppressRegions || !hoverPreviewEnabled) {
+    if (suppressRegions || !hoverPreviewEnabled || hoverInteractionBlocked()) {
       clearHoveredRegion();
       return;
     }
@@ -958,9 +971,9 @@ export const PdfSourcePage = memo(
   PdfSourcePageImpl,
   (previous, next) => {
     for (const key of Object.keys(previous) as Array<keyof typeof previous>) {
-      if (key === "pageWidth" && !previous.renderEnabled && !next.renderEnabled) {
-        continue;
-      }
+      // Offscreen placeholders still own document geometry. Skipping pageWidth
+      // leaves old wide rows in scrollWidth after a split and miscenters the PDF.
+      // PdfCanvasPage gates expensive raster/text work with renderEnabled.
       const previousValue = previous[key];
       const nextValue = next[key];
       if (typeof previousValue === "function" || typeof nextValue === "function") {

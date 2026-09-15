@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ToastContext } from '@/shared/hooks/useToast';
@@ -12,7 +12,8 @@ afterEach(cleanup);
 describe('EntryOverview', () => {
   it('shows the complete title, description, custom fields and hierarchical tag paths', () => {
     const longTitle = '一个需要完整显示而不能被省略的长论文标题：面向复杂科研工作流的统一知识组织方法';
-    const { container, getAllByText, getByText } = render(
+    const onOpenContent = vi.fn();
+    const { container, getAllByText, getByRole, getByText } = render(
       <ToastContext.Provider value={{ dismiss: vi.fn(), notify: vi.fn(() => 'toast-1') }}>
         <EntryOverview
           entry={{
@@ -35,6 +36,7 @@ describe('EntryOverview', () => {
             progress: 100
           }}
           onUpdateEntry={async () => undefined}
+          onOpenContent={onOpenContent}
           sourceBacklinksBySegmentUid={{}}
           tags={[
             { id: 'tag-root', name: '研究', parent_id: null, created_at: '', updated_at: '' },
@@ -56,6 +58,16 @@ describe('EntryOverview', () => {
     expect(getByText('研究/人工智能/智能体')).toBeTruthy();
     expect(getByText('10.1000/example')).toBeTruthy();
     expect(getByText('张三、李四')).toBeTruthy();
+    fireEvent.click(getByRole('button', { name: '打开 PDF' }));
+    fireEvent.click(getByRole('button', { name: '打开重排视图' }));
+    fireEvent.click(getByRole('button', { name: '查看片段记录' }));
+    fireEvent.click(getByRole('button', { name: '查看引用笔记' }));
+    expect(onOpenContent.mock.calls).toEqual([
+      ['pdf'],
+      ['reflow'],
+      ['segment-notes'],
+      ['source-links']
+    ]);
     expect(container.querySelector('.entry-overview')).toBeTruthy();
     expect(container.querySelector('.entry-overview-body')?.className).toContain('overflow-x-hidden');
     expect(container.querySelector('.entry-overview-stats')?.children).toHaveLength(4);

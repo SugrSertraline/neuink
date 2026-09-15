@@ -83,7 +83,7 @@ export function SearchResultPreview({
   return (
     <div className="text-xs leading-5">
       <PreviewHeader hit={hit} />
-      <div className="mt-2 max-h-[min(28rem,calc(100vh-5rem))] min-w-0 overflow-auto overscroll-contain">
+      <div className="mt-2 min-w-0">
         {state.status === 'loading' ? (
           <div className="flex items-center gap-2 rounded-sm bg-muted/50 px-2 py-3 text-muted-foreground">
             <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />

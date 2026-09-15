@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import type { NoteDocument } from '@/shared/types/domain';
+import type { CatalogNote } from '@/shared/ipc/noteCatalogApi';
 
 import type { LibraryEntry } from '../../library/components/LibrarySidebar';
 import type { SourceBacklink, SourceBacklinksBySegmentUid } from '../types';
@@ -23,12 +24,14 @@ type CachedNote = {
 export function useSourceBacklinks(
   entries: LibraryEntry[],
   markdownNoteRefreshById: Record<string, number>,
-  readMarkdownNote: (entryId: string, noteId: string) => Promise<NoteDocument>
+  readMarkdownNote: (entryId: string, noteId: string) => Promise<NoteDocument>,
+  catalog?: CatalogNote[]
 ) {
   const cacheRef = useRef(new Map<string, CachedNote>());
   const [backlinks, setBacklinks] = useState<Record<string, SourceBacklinksBySegmentUid>>({});
 
   useEffect(() => {
+    if (catalog) { setBacklinks(catalogBacklinks(catalog)); return; }
     let cancelled = false;
     const notes = collectNotes(entries, markdownNoteRefreshById);
     const noteKeys = new Set(notes.map(noteKey));
@@ -48,9 +51,24 @@ export function useSourceBacklinks(
     });
 
     return () => { cancelled = true; };
-  }, [entries, markdownNoteRefreshById, readMarkdownNote]);
+  }, [entries, markdownNoteRefreshById, readMarkdownNote, catalog]);
 
   return backlinks;
+}
+
+export function catalogBacklinks(notes: CatalogNote[]) {
+  const result: Record<string, SourceBacklinksBySegmentUid> = {};
+  for (const note of notes) {
+    if (note.deleted_at || note.error) continue;
+    for (const link of note.links) for (const source of link.sources) addBacklink(result, {
+      noteTarget: note.target, noteEntryId: note.target.owner.kind === 'entry' ? note.target.owner.entry_id : null,
+      noteEntryTitle: note.owner_title,
+      sourceStatus: note.source_statuses?.find((status) => status.entry_id === source.entry_id && status.segment_uid === source.segment_uid && status.quote_hash === source.quote_hash),
+      noteId: note.target.note_id, noteTitle: note.title, anchorId: link.anchor_id, linkId: link.link_id, displayText: link.display_text,
+      sourceEntryId: source.entry_id, segmentUid: source.segment_uid, page: source.page, snapshotText: source.snapshot_text, segmentType: source.segment_type ?? null,
+    });
+  }
+  return result;
 }
 
 function collectNotes(entries: LibraryEntry[], refreshById: Record<string, number>): NoteDescriptor[] {
@@ -96,8 +114,11 @@ function buildBacklinks(notes: NoteDescriptor[], cache: Map<string, CachedNote>)
           noteEntryTitle: note.entryTitle,
           noteId: note.noteId,
           noteTitle: document.title || note.fallbackTitle,
+          page: source.page,
+          segmentType: source.segment_type ?? null,
           sourceEntryId: source.entry_id,
-          segmentUid: source.segment_uid
+          segmentUid: source.segment_uid,
+          snapshotText: source.snapshot_text
         });
       }
     }
