@@ -121,6 +121,25 @@ fn invalid_entry_leaves_no_created_tag_or_partial_attachment() {
     fs::remove_dir_all(root).expect("cleanup");
 }
 
+#[test]
+fn refuses_ambiguous_names_and_missing_ids_without_falling_back() {
+    let root = test_root("exact-target");
+    let workspace = Workspace::create(&root).expect("workspace");
+    let entry = workspace.create_entry("Paper").expect("entry");
+    let parent = workspace.create_tag("Group", None).expect("parent");
+    let first = workspace.create_tag("Same", None).expect("first");
+    let second = workspace.create_tag("Same", Some(parent.id)).expect("second");
+    assert!(apply_tag_proposal_impl(request(&root, "attach", vec![entry.id.clone()], Some("Same"), None)).is_err());
+    assert!(apply_tag_proposal_impl(request(&root, "attach", vec![entry.id.clone()], Some("Same"), Some(TagId::from_string("missing")))).is_err());
+    assert!(workspace.read_entry(&entry.id).expect("entry").tags.is_empty());
+    apply_tag_proposal_impl(request(&root, "attach", vec![entry.id.clone()], Some("Group/Same"), Some(second.id.clone()))).expect("exact path and id");
+    assert_eq!(workspace.read_entry(&entry.id).expect("entry").tags, vec![second.id.clone()]);
+    assert!(!workspace.read_entry(&entry.id).expect("entry").tags.contains(&first.id));
+    apply_tag_proposal_impl(request(&root, "detach", vec![entry.id.clone()], Some("Group/Same"), None)).expect("detach exact path");
+    assert!(workspace.read_entry(&entry.id).expect("entry").tags.is_empty());
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
 fn request(
     root: &Path,
     action: &str,

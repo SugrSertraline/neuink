@@ -10,7 +10,7 @@ export function ReadingOverviewPopover({ overview }: { overview: ReturnType<type
       <PopoverTrigger asChild>
         <Button
           aria-label="阅读统计"
-          className="text-xs @max-[700px]/library-heading:w-8 @max-[700px]/library-heading:px-0"
+          className="@max-[700px]/library-heading:w-8 @max-[700px]/library-heading:px-0"
           size="default"
           title={`查看当前范围的阅读统计；今日 ${formatReadingDuration(overview.todayMs)}`}
           type="button"

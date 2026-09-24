@@ -1,12 +1,13 @@
-use std::{collections::BTreeSet, fs, path::PathBuf};
+use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use neuink_domain::segment_note::validate_segment_note_text;
-use neuink_domain::{ContentItem, EntryId, NoteId, SegmentUid};
-use neuink_workspace::Workspace;
+use neuink_domain::{EntryId, NoteId, SegmentUid};
+use neuink_workspace::{Workspace, WorkspaceError};
 use serde::{Deserialize, Serialize};
 
 use super::note_apply_content::{
     apply_markdown_action, proposal_digest, segment_note_html, stable_hash,
+    validate_source_placements,
 };
 use super::note_apply_store::{
     journal_path, load_verified_proposal, read_json, receipt_path, write_json, ApplyJournal,
@@ -32,6 +33,7 @@ pub(super) fn apply_note_proposal_impl(
     request: ApplyNoteProposalRequest,
 ) -> Result<ApplyNoteProposalResponse, String> {
     let workspace = Workspace::open(&request.root).map_err(|error| error.to_string())?;
+    let _decision_lock = crate::commands::assistant_proposal::decision_lock(&request.root)?;
     let proposal = load_verified_proposal(&request.root, &request.task_id, &request.proposal_id)?;
     validate_proposal(&proposal, &request)?;
     let receipt_file = receipt_path(&request.root, &proposal.idempotency_key);
@@ -40,9 +42,13 @@ pub(super) fn apply_note_proposal_impl(
             receipt: read_json(&receipt_file)?,
         });
     }
+    if proposal.target_kind == "markdown_note" {
+        // Reject unplaced evidence before creating a note or a recovery journal.
+        validate_source_placements(&proposal)?;
+    }
     let journal_file = journal_path(&request.root, &proposal.idempotency_key);
     if journal_file.exists() {
-        recover_journal(&workspace, &journal_file)?;
+        return recover_journal(&journal_file, &receipt_file);
     }
 
     if proposal.target_kind == "segment_note" {
@@ -59,43 +65,19 @@ fn apply_markdown_proposal(
 ) -> Result<ApplyNoteProposalResponse, String> {
     let entry_id = EntryId::from_string(&proposal.entry_id);
     if proposal.action == "create" {
+        let note_id = NoteId::new();
         let journal = ApplyJournal::MarkdownCreate {
-            created_note_id: None,
+            created_note_id: Some(note_id.to_string()),
             entry_id: proposal.entry_id.clone(),
         };
         write_json(journal_file, &journal)?;
-        let before_ids = note_ids(workspace, &entry_id)?;
-        let entry = workspace
-            .create_note(&entry_id, &proposal.title)
+        workspace
+            .create_note_with_id(&entry_id, note_id.clone(), &proposal.title)
             .map_err(|error| error.to_string())?;
-        let note_id = entry
-            .contents
-            .iter()
-            .find_map(|content| match content {
-                ContentItem::Note { note_id, .. } if !before_ids.contains(note_id.as_str()) => {
-                    Some(note_id.clone())
-                }
-                _ => None,
-            })
-            .ok_or_else(|| "created note id could not be resolved".to_string())?;
-        write_json(
-            journal_file,
-            &ApplyJournal::MarkdownCreate {
-                created_note_id: Some(note_id.to_string()),
-                entry_id: proposal.entry_id.clone(),
-            },
-        )?;
         let current = workspace
             .read_note(&entry_id, &note_id)
             .map_err(|error| error.to_string())?;
-        let (markdown, _, links) =
-            match materialize_sources(workspace, proposal, &entry_id, &note_id) {
-                Ok(materialized) => materialized,
-                Err(error) => {
-                    recover_journal(workspace, journal_file)?;
-                    return Err(error);
-                }
-            };
+        let (markdown, _, links) = materialize_sources(workspace, proposal, &entry_id, &note_id)?;
         let result = workspace.update_note_document_if_revision(
             &entry_id,
             &note_id,
@@ -105,7 +87,6 @@ fn apply_markdown_proposal(
             Some(&current.revision),
         );
         if let Err(error) = result {
-            recover_journal(workspace, journal_file)?;
             return Err(error.to_string());
         }
         return commit_receipt(
@@ -133,38 +114,24 @@ fn apply_markdown_proposal(
     let previous_links = workspace
         .read_note_source_links(&entry_id, &note_id)
         .map_err(|error| error.to_string())?;
-    write_json(
-        journal_file,
-        &ApplyJournal::MarkdownUpdate {
-            entry_id: proposal.entry_id.clone(),
-            links: previous_links.clone(),
-            markdown: current.markdown.clone(),
-            note_id: note_id.to_string(),
-            title: current.title.clone(),
-        },
-    )?;
+    let journal = ApplyJournal::MarkdownUpdate {
+        entry_id: proposal.entry_id.clone(),
+        links: previous_links.clone(),
+        markdown: current.markdown.clone(),
+        note_id: note_id.to_string(),
+        title: current.title.clone(),
+    };
     let (materialized, patch_operations, new_links) =
-        match materialize_sources(workspace, proposal, &entry_id, &note_id) {
-            Ok(materialized) => materialized,
-            Err(error) => {
-                let _ = fs::remove_file(journal_file);
-                return Err(error);
-            }
-        };
-    let markdown = match apply_markdown_action(
+        materialize_sources(workspace, proposal, &entry_id, &note_id)?;
+    let markdown = apply_markdown_action(
         &proposal.action,
         &current.markdown,
         &materialized,
         &patch_operations,
-    ) {
-        Ok(markdown) => markdown,
-        Err(error) => {
-            let _ = fs::remove_file(journal_file);
-            return Err(error);
-        }
-    };
+    )?;
     let mut links = previous_links;
     links.extend(new_links);
+    write_json(journal_file, &journal)?;
     if let Err(error) = workspace.update_note_document_if_revision(
         &entry_id,
         &note_id,
@@ -173,7 +140,11 @@ fn apply_markdown_proposal(
         &links,
         Some(&current.revision),
     ) {
-        let _ = fs::remove_file(journal_file);
+        // An I/O error can leave a partial multi-file write. Retain the journal
+        // and fail closed on retry; never roll back a possibly newer edit.
+        if matches!(error, WorkspaceError::NoteRevisionConflict(_)) {
+            fs::remove_file(journal_file).map_err(|error| error.to_string())?;
+        }
         return Err(error.to_string());
     }
     commit_receipt(
@@ -209,14 +180,6 @@ fn apply_segment_proposal(
             current_content_hash: stable_hash(&current),
         });
     }
-    write_json(
-        journal_file,
-        &ApplyJournal::SegmentUpdate {
-            entry_id: proposal.entry_id.clone(),
-            segment_uid: segment_uid.to_string(),
-            text: current.clone(),
-        },
-    )?;
     let proposed = segment_note_html(&proposal.markdown, &proposal.sources);
     let text = match proposal.action.as_str() {
         "prepend" if !current.trim().is_empty() => {
@@ -233,9 +196,29 @@ fn apply_segment_proposal(
         }
     };
     validate_segment_note_text(&text).map_err(|error| error.to_string())?;
-    workspace
-        .upsert_segment_note(&entry_id, segment_uid, text.clone())
-        .map_err(|error| error.to_string())?;
+    write_json(
+        journal_file,
+        &ApplyJournal::SegmentUpdate {
+            entry_id: proposal.entry_id.clone(),
+            segment_uid: segment_uid.to_string(),
+            text: current.clone(),
+        },
+    )?;
+    match workspace.upsert_segment_note_if_text(
+        &entry_id,
+        segment_uid,
+        text.clone(),
+        Some(&current),
+    ) {
+        Ok(_) => {}
+        Err(WorkspaceError::SegmentNoteConflict(latest)) => {
+            fs::remove_file(journal_file).map_err(|error| error.to_string())?;
+            return Ok(ApplyNoteProposalResponse::Conflict {
+                current_content_hash: stable_hash(&latest),
+            });
+        }
+        Err(error) => return Err(error.to_string()),
+    }
     commit_receipt(proposal, None, &text, receipt_file, journal_file)
 }
 
@@ -255,33 +238,32 @@ fn materialize_sources(
     let mut markdown = proposal.markdown.clone();
     let mut patch_operations = proposal.patch_operations.clone();
     let mut links = Vec::new();
-    let mut seen = BTreeSet::new();
+    let mut anchors = BTreeMap::new();
     for (index, source) in proposal.sources.iter().enumerate() {
-        let key = format!("{}:{}", source.entry_id, source.segment_uid);
-        if !seen.insert(key) {
-            continue;
-        }
-        let link = workspace
-            .build_note_source_link(
-                entry_id,
-                note_id,
-                &EntryId::from_string(&source.entry_id),
-                SegmentUid::from_string(&source.segment_uid),
-            )
-            .map_err(|error| error.to_string())?;
+        let key = (source.entry_id.clone(), source.segment_uid.clone());
+        let anchor = if let Some(anchor) = anchors.get(&key) {
+            String::clone(anchor)
+        } else {
+            let link = workspace
+                .build_note_source_link(
+                    entry_id,
+                    note_id,
+                    &EntryId::from_string(&source.entry_id),
+                    SegmentUid::from_string(&source.segment_uid),
+                )
+                .map_err(|error| error.to_string())?;
+            let anchor = format!("[^{}]", link.anchor_id);
+            anchors.insert(key, anchor.clone());
+            links.push(link);
+            anchor
+        };
         let marker = source
             .marker
             .clone()
             .unwrap_or_else(|| format!("S{}", index + 1));
         let needle = format!("[{marker}]");
-        let anchor = format!("[^{}]", link.anchor_id);
-        let used = markdown.contains(&needle);
         markdown = markdown.replace(&needle, &anchor);
         materialize_patch_markers(&mut patch_operations, &needle, &anchor);
-        if !used && !markdown.contains(&anchor) {
-            markdown = format!("{}\n\n{}", markdown.trim_end(), anchor);
-        }
-        links.push(link);
     }
     Ok((markdown, patch_operations, links))
 }
@@ -336,50 +318,17 @@ fn validate_proposal(
     Ok(())
 }
 
-fn recover_journal(workspace: &Workspace, path: &std::path::Path) -> Result<(), String> {
+pub(super) fn recover_journal(
+    path: &std::path::Path,
+    receipt_file: &std::path::Path,
+) -> Result<ApplyNoteProposalResponse, String> {
     let journal: ApplyJournal = read_json(path)?;
-    match journal {
-        ApplyJournal::MarkdownCreate {
-            created_note_id,
-            entry_id,
-        } => {
-            if let Some(note_id) = created_note_id {
-                let _ = workspace.delete_note(
-                    &EntryId::from_string(entry_id),
-                    &NoteId::from_string(note_id),
-                );
-            }
-        }
-        ApplyJournal::MarkdownUpdate {
-            entry_id,
-            links,
-            markdown,
-            note_id,
-            title,
-        } => {
-            let entry_id = EntryId::from_string(entry_id);
-            let note_id = NoteId::from_string(note_id);
-            workspace
-                .update_note_document_if_revision(
-                    &entry_id, &note_id, title, markdown, &links, None,
-                )
-                .map_err(|error| error.to_string())?;
-        }
-        ApplyJournal::SegmentUpdate {
-            entry_id,
-            segment_uid,
-            text,
-        } => {
-            workspace
-                .upsert_segment_note(
-                    &EntryId::from_string(entry_id),
-                    SegmentUid::from_string(segment_uid),
-                    text,
-                )
-                .map_err(|error| error.to_string())?;
-        }
-    }
-    fs::remove_file(path).map_err(|error| error.to_string())
+    let ApplyJournal::Completed { receipt } = journal else {
+        return Err("上次笔记写入中断，无法确定是否完整保存。为保护后续编辑，已停止重试，未回滚或删除任何笔记。请先查看目标条目的笔记，再基于当前内容生成新提案。".into());
+    };
+    write_json(receipt_file, &receipt)?;
+    fs::remove_file(path).map_err(|error| error.to_string())?;
+    Ok(ApplyNoteProposalResponse::Applied { receipt })
 }
 
 fn commit_receipt(
@@ -398,21 +347,15 @@ fn commit_receipt(
         segment_uid: proposal.segment_uid.clone(),
         task_id: proposal.task_id.clone(),
     };
+    write_json(
+        journal_file,
+        &ApplyJournal::Completed {
+            receipt: receipt.clone(),
+        },
+    )?;
     write_json(receipt_file, &receipt)?;
     fs::remove_file(journal_file).map_err(|error| error.to_string())?;
     Ok(ApplyNoteProposalResponse::Applied { receipt })
-}
-
-fn note_ids(workspace: &Workspace, entry_id: &EntryId) -> Result<BTreeSet<String>, String> {
-    Ok(workspace
-        .read_entry(entry_id)
-        .map_err(|error| error.to_string())?
-        .contents
-        .iter()
-        .map(|content| match content {
-            ContentItem::Note { note_id, .. } => note_id.to_string(),
-        })
-        .collect())
 }
 
 fn base_matches(proposal: &VerifiedNoteProposal, current: &str) -> bool {

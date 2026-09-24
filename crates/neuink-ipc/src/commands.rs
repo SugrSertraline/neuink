@@ -1,5 +1,7 @@
 pub mod annotation;
 pub mod assistant;
+pub mod assistant_routing;
+pub mod assistant_proposal;
 pub mod conversation;
 pub mod embedding;
 pub mod embedding_resources;

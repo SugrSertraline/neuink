@@ -184,6 +184,7 @@ function PdfCanvasPageImpl({
         applyPdfLayerSize(canvas, nextSize);
         visibleContext.clearRect(0, 0, canvas.width, canvas.height);
         visibleContext.drawImage(renderCanvas, 0, 0);
+        canvas.dataset.pdfRendered = 'true';
         releaseRenderCanvas();
         pageAspectRatioRef.current = baseViewport.height / baseViewport.width;
         hasRenderedPageRef.current = true;
@@ -412,6 +413,7 @@ function releasePdfPageLayers(
 ) {
   if (canvas) {
     canvas.width = 0;
+    delete canvas.dataset.pdfRendered;
     canvas.height = 0;
   }
   textLayer?.replaceChildren();

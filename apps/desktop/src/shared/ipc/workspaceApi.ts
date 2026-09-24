@@ -18,7 +18,8 @@ import type {
   TagId,
   TagMeta
 } from '../types/domain';
-import type { AssistantEntryMetaProposal } from '../types/assistant';
+import type { AssistantEntryMetaProposal, AssistantTagProposal } from '../types/assistant';
+import { decideAssistantProposal, type AssistantProposalConfirmation } from './assistantProposalApi';
 
 export type SearchMode = 'keyword' | 'semantic' | 'hybrid';
 
@@ -428,17 +429,13 @@ export async function updateNote(
 
 export async function applyEntryMetaProposal(
   root: string,
-  proposal: AssistantEntryMetaProposal
+  proposal: AssistantEntryMetaProposal,
+  confirmation: AssistantProposalConfirmation
 ): Promise<EntryMeta> {
-  return invoke<EntryMeta>('apply_entry_meta_proposal', {
-    request: {
-      base_updated_at: proposal.baseUpdatedAt,
-      description: proposal.afterDescription,
-      entry_id: proposal.entryId,
-      root,
-      title: proposal.afterTitle
-    }
-  });
+  const result = await decideAssistantProposal(root, proposal, confirmation, 'apply');
+  const entry = result.entries.find(value => value.id === proposal.entryId);
+  if (!entry) throw new Error('条目已提交，但无法刷新显示，请重新打开资料库核对。');
+  return entry;
 }
 
 export type ApplyTagProposalResponse = {
@@ -448,24 +445,10 @@ export type ApplyTagProposalResponse = {
 
 export async function applyTagProposal(
   root: string,
-  proposal: {
-    action: 'attach' | 'create' | 'detach' | 'rename';
-    entryIds: EntryId[];
-    name?: string;
-    newName?: string;
-    tagId?: TagId;
-  }
+  proposal: AssistantTagProposal,
+  confirmation: AssistantProposalConfirmation
 ): Promise<ApplyTagProposalResponse> {
-  return invoke<ApplyTagProposalResponse>('apply_tag_proposal', {
-    request: {
-      root,
-      action: proposal.action,
-      entry_ids: proposal.entryIds,
-      name: proposal.name ?? null,
-      new_name: proposal.newName ?? null,
-      tag_id: proposal.tagId ?? null
-    }
-  });
+  return decideAssistantProposal(root, proposal, confirmation, 'apply');
 }
 
 export async function getNoteFilePath(root: string, entryId: EntryId, noteId: NoteId): Promise<string> {
@@ -662,6 +645,12 @@ export type RefreshParseStatusResponse = {
   segment_count: number | null;
 };
 
+export async function setSegmentNoteBookmark(root: string, entryId: string, segmentUid: string, bookmarked: boolean) {
+  return invoke<SegmentBlockNote[]>('set_segment_note_bookmark', {
+    request: { root, entry_id: entryId, segment_uid: segmentUid, bookmarked }
+  });
+}
+
 export type PdfReaderResponse = {
   pdf_path: string;
   segments: SourceSegment[];
@@ -743,6 +732,7 @@ export type EntryTranslationResponse = {
 };
 
 export type JobKind =
+  | 'paragraph_translation'
   | 'pdf_import'
   | 'parser'
   | 'index_build'

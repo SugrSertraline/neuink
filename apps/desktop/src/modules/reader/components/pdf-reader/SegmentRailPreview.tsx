@@ -1,14 +1,16 @@
-import { MessageSquareText, StickyNote } from 'lucide-react';
+import { Bookmark, MessageSquareText, StickyNote } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { HoverCardContent } from '@/components/ui/hover-card';
 import type { SourceSegment } from '@/shared/types/domain';
 
-import { matchesSegmentUid } from './railLayout';
+import { cn } from '@/lib/utils';
+import { summarizeSegmentRailMarks, type SegmentRailMarks, type SegmentRailMarkSummary } from './segmentRailMarks';
 import { segmentTypeLabel } from './readerUtils';
 
 export function SegmentRailPreview({
   annotationSegmentUids,
+  bookmarkSegmentUids,
   noteSegmentUids,
   segment,
   segments,
@@ -16,23 +18,15 @@ export function SegmentRailPreview({
   onOpenOutline
 }: {
   annotationSegmentUids: ReadonlySet<string>;
+  bookmarkSegmentUids: ReadonlySet<string>;
   noteSegmentUids: ReadonlySet<string>;
   segment: SourceSegment;
   segments: SourceSegment[];
   onJumpToSegment: (segmentUid: string) => void;
   onOpenOutline?: () => void;
 }) {
-  const markedSegments = segments.filter(
-    (candidate) =>
-      matchesSegmentUid(candidate, noteSegmentUids) ||
-      matchesSegmentUid(candidate, annotationSegmentUids)
-  );
-  const hasNote = markedSegments.some((candidate) =>
-    matchesSegmentUid(candidate, noteSegmentUids)
-  );
-  const hasAnnotation = markedSegments.some((candidate) =>
-    matchesSegmentUid(candidate, annotationSegmentUids)
-  );
+  const marks = { bookmarkSegmentUids, noteSegmentUids, annotationSegmentUids };
+  const summary = summarizeSegmentRailMarks(segments, marks);
 
   return (
     <HoverCardContent
@@ -48,36 +42,21 @@ export function SegmentRailPreview({
         <span className="text-muted-foreground">
           第 {segment.page_idx + 1} 页
         </span>
-        {hasNote ? (
-          <StickyNote
-            aria-label="已有笔记"
-            className="ml-auto text-violet-600"
-            size={13}
-          />
-        ) : null}
-        {hasAnnotation ? (
-          <MessageSquareText
-            aria-label="已有批注"
-            className={hasNote ? undefined : 'ml-auto'}
-            color="#c2410c"
-            size={13}
-          />
-        ) : null}
       </div>
+      <MarkLabels summary={summary} />
       <p className="line-clamp-3 text-xs leading-5 text-muted-foreground">
         {segmentExcerpt(segment) || '该片段没有可预览的文本。'}
       </p>
       {segments.length > 1 ? (
         <SegmentList
-          annotationSegmentUids={annotationSegmentUids}
-          noteSegmentUids={noteSegmentUids}
+          marks={marks}
           segments={segments}
           onJumpToSegment={onJumpToSegment}
         />
       ) : null}
       {segments.length === 1 ? (
         <div className="mt-2 flex items-center justify-between gap-2 border-t pt-2 text-[11px] text-muted-foreground">
-          <span>点击左侧横条可定位到此处</span>
+          <span>点击左侧标记可定位到此处</span>
           {segment.segment_type === 'heading' && onOpenOutline ? (
             <button
               className="shrink-0 font-medium text-primary hover:underline"
@@ -94,31 +73,26 @@ export function SegmentRailPreview({
 }
 
 function SegmentList({
-  annotationSegmentUids,
-  noteSegmentUids,
+  marks,
   segments,
   onJumpToSegment
 }: {
-  annotationSegmentUids: ReadonlySet<string>;
-  noteSegmentUids: ReadonlySet<string>;
+  marks: SegmentRailMarks;
   segments: SourceSegment[];
   onJumpToSegment: (segmentUid: string) => void;
 }) {
   return (
-    <div className="mt-2 max-h-36 space-y-1 overflow-y-auto border-t pt-2">
+    <div className="mt-2 space-y-1 border-t pt-2">
       <div className="px-1 pb-0.5 text-[10px] text-muted-foreground">
         此位置有 {segments.length} 个片段 · 点击任一项定位
       </div>
       {segments.map((segment) => {
-        const hasNote = matchesSegmentUid(segment, noteSegmentUids);
-        const hasAnnotation = matchesSegmentUid(
-          segment,
-          annotationSegmentUids
-        );
+        const summary = summarizeSegmentRailMarks([segment], marks);
 
         return (
           <button
-            className="block w-full rounded-md bg-muted/55 px-2 py-1.5 text-left transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
+            className={cn('block w-full rounded-md border-l-2 bg-muted/55 px-2 py-1.5 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              summary.bookmarks ? 'border-[var(--reader-ribbon)]' : summary.notes ? 'border-info' : summary.annotations ? 'border-warning' : 'border-transparent')}
             key={segment.uid}
             type="button"
             onClick={() => onJumpToSegment(segment.uid)}
@@ -127,22 +101,8 @@ function SegmentList({
               <span>第 {segment.page_idx + 1} 页</span>
               <span>·</span>
               <span>{segmentTypeLabel(segment.segment_type)}</span>
-              {hasNote ? (
-                <StickyNote
-                  aria-label="该片段有笔记"
-                  className="ml-auto text-violet-600"
-                  size={12}
-                />
-              ) : null}
-              {hasAnnotation ? (
-                <MessageSquareText
-                  aria-label="该片段有批注"
-                  className={hasNote ? undefined : 'ml-auto'}
-                  color="#c2410c"
-                  size={12}
-                />
-              ) : null}
             </div>
+            <MarkLabels summary={summary} />
             <div className="line-clamp-1 text-[11px] text-foreground/75">
               {segmentExcerpt(segment) || '无可预览文本'}
             </div>
@@ -151,6 +111,15 @@ function SegmentList({
       })}
     </div>
   );
+}
+
+function MarkLabels({ summary }: { summary: SegmentRailMarkSummary }) {
+  if (!summary.total) return null;
+  return <div className="mb-1.5 flex flex-wrap gap-1 text-[11px] leading-4">
+    {summary.bookmarks > 0 ? <span className="inline-flex items-center gap-1 rounded-sm bg-[var(--reader-bookmark-surface)] px-1 text-[var(--reader-ribbon)]"><Bookmark className="size-3 fill-current" aria-hidden="true" />收藏 {summary.bookmarks} 处</span> : null}
+    {summary.notes > 0 ? <span className="inline-flex items-center gap-1 rounded-sm bg-info-surface px-1 text-info"><StickyNote className="size-3" aria-hidden="true" />笔记 {summary.notes} 处</span> : null}
+    {summary.annotations > 0 ? <span className="inline-flex items-center gap-1 rounded-sm bg-warning-surface px-1 text-warning"><MessageSquareText className="size-3" aria-hidden="true" />批注 {summary.annotations} 处</span> : null}
+  </div>;
 }
 
 export function segmentExcerpt(segment: SourceSegment) {

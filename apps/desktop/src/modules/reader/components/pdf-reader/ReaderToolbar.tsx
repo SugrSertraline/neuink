@@ -43,14 +43,17 @@ import type { LibraryEntry } from '../../../library/components/LibrarySidebar';
 import { StatusBadge } from '../EntryDisplay';
 import { EntryContentHeader } from '../EntryContentHeader';
 import { useReadingSession } from '../../parallel-reading/ReadingSessionContext';
+import { PdfReadingModeControl } from './PdfReadingModeControl';
 
 export function ReaderToolbar({
+  navigation,
   entry,
   pageCount,
   segmentCount,
   recommendedTags,
   selectedRecommendedTagPaths,
   tagSuggestionBusy,
+  tagSuggestionError,
   tagSuggestionsOpen,
   translation,
   translationBusy,
@@ -58,6 +61,7 @@ export function ReaderToolbar({
   zoom,
   readerPreferences,
   currentPage = 1,
+  effectivePageDisplayMode,
   searchActiveMatchNumber = 0,
   searchMatchCount = 0,
   searchQuery = '',
@@ -84,12 +88,14 @@ export function ReaderToolbar({
   onZoomIn,
   onZoomOut
 }: {
+  navigation?: import('react').ReactNode;
   entry: LibraryEntry;
   pageCount: number;
   segmentCount: number;
   recommendedTags: TagRecommendation[];
   selectedRecommendedTagPaths: string[];
   tagSuggestionBusy: boolean;
+  tagSuggestionError?: string | null;
   tagSuggestionsOpen: boolean;
   translation: EntryTranslation | null;
   translationBusy: boolean;
@@ -97,6 +103,7 @@ export function ReaderToolbar({
   zoom: number;
   readerPreferences: ReaderPreferences;
   currentPage?: number;
+  effectivePageDisplayMode?: 'single' | 'dual';
   searchActiveMatchNumber?: number;
   searchMatchCount?: number;
   searchQuery?: string;
@@ -127,8 +134,8 @@ export function ReaderToolbar({
   const hasTranslation = Boolean(
     translation?.segments.some((segment) => segment.status === 'translated')
   );
-  const pageNavigation = <PageNavigationControls currentPage={currentPage} pageCount={pageCount}
-    pageStep={readerPreferences.pageDisplayMode === 'dual' ? 2 : 1} onCurrentPageChange={onCurrentPageChange} />;
+  const pageNavigation = <>{navigation}<PageNavigationControls currentPage={currentPage} pageCount={pageCount}
+    pageStep={(effectivePageDisplayMode ?? readerPreferences.pageDisplayMode) === 'dual' ? 2 : 1} onCurrentPageChange={onCurrentPageChange} /></>;
   const searchControls = <PdfSearchControls activeMatchNumber={searchActiveMatchNumber} matchCount={searchMatchCount}
     query={searchQuery} status={searchStatus} onNext={onSearchNext} onPrevious={onSearchPrevious} onQueryChange={onSearchQueryChange} />;
   const overflowMenu = (compact = false) => <ReaderToolbarOverflowMenu compact={compact} hasTranslation={hasTranslation}
@@ -138,9 +145,10 @@ export function ReaderToolbar({
     onReparsePdf={onReparsePdf} onRetryPdfParse={onRetryPdfParse} onRevealPdf={onRevealPdf} onStartPdfParse={onStartPdfParse} />;
 
   // The parallel-reading frame already owns the title and PDF/reflow switch.
-  if (readingSession) return <div aria-label="PDF 阅读工具" data-reader-compact-toolbar className="flex h-9 min-w-0 shrink-0 items-center gap-1 border-b bg-background px-2 py-0.5 text-xs">
+  if (readingSession) return <div aria-label="PDF 阅读工具" data-reader-compact-toolbar className="flex min-h-9 min-w-0 shrink-0 flex-wrap items-center gap-1 border-b bg-background px-2 py-1 text-xs">
     {pageNavigation}
     <div className="min-w-0 flex-1" />
+    <PdfReadingModeControl preferences={readerPreferences} onChange={onReaderPreferencesChange} />
     <Popover>
       <PopoverTrigger asChild><Button size="sm" variant="outline" className="px-2 text-xs" aria-label="缩放与阅读显示" title="调整缩放、单页/双页与悬停预览">{Math.round(zoom * 100)}%</Button></PopoverTrigger>
       <PopoverContent viewportAligned align="end" className="w-72 max-w-[calc(100vw-2rem)] space-y-3 text-xs">
@@ -154,6 +162,7 @@ export function ReaderToolbar({
         </Button>
         <HoverPreviewControls preferences={readerPreferences} onChange={onReaderPreferencesChange} />
         {entry.status === 'Parsed' && recommendedTags.length > 0 ? <RecommendedTagControls busy={tagSuggestionBusy} open={tagSuggestionsOpen}
+          error={tagSuggestionError} appliedPaths={entry.tags}
           recommendedTags={recommendedTags} selectedRecommendedTagPaths={selectedRecommendedTagPaths} onApply={onApplyRecommendedTags}
           onDismiss={onDismissRecommendedTags} onOpenChange={onTagSuggestionsOpenChange} onToggleTag={onRecommendedTagToggle} /> : null}
         <p className="break-words text-muted-foreground">{entry.pdfFileName} · {segmentCount} 个区域</p>
@@ -284,6 +293,8 @@ export function ReaderToolbar({
 
         {entry.status === 'Parsed' && recommendedTags.length > 0 ? (
           <RecommendedTagControls
+            error={tagSuggestionError}
+            appliedPaths={entry.tags}
             busy={tagSuggestionBusy}
             open={tagSuggestionsOpen}
             recommendedTags={recommendedTags}
@@ -301,6 +312,8 @@ export function ReaderToolbar({
         />
 
         {overflowMenu()}
+
+        <PdfReadingModeControl preferences={readerPreferences} onChange={onReaderPreferencesChange} />
 
         <Button
           className="shrink-0"
@@ -333,7 +346,7 @@ export function ReaderToolbar({
         </div>
       </EntryContentHeader>
 
-      <div className="flex min-w-0 flex-wrap items-center gap-2 border-t bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground">
+      <div data-material="reader-toolbar-row" className="flex min-w-0 flex-wrap items-center gap-2 border-t bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground">
         <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
           {entry.pdfFileName ? (
             <span className="min-w-0 truncate font-medium text-foreground" title={entry.pdfFileName}>
@@ -407,7 +420,7 @@ function ReaderToolbarOverflowMenu({
           {compact ? translationBusy ? '翻译中' : '工具' : <MoreHorizontal size={14} aria-hidden="true" />}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent viewportAligned={compact} align="end">
+      <DropdownMenuContent viewportAligned align="end">
         {translationBusy ? (
           <DropdownMenuItem onSelect={onPauseTranslation}>
             <Pause size={14} aria-hidden="true" />
@@ -420,7 +433,7 @@ function ReaderToolbarOverflowMenu({
         {!translationBusy && hasTranslation ? (
           <DropdownMenuItem onSelect={onExportTranslation}>
             <Download size={14} aria-hidden="true" />
-            {onExportPaper ? '生成内部译文笔记（已译片段）' : '导出译文笔记'}
+            {onExportPaper ? <span>生成内部译文笔记<span className="block text-xs text-muted-foreground">仅包含已翻译片段</span></span> : '导出译文笔记'}
           </DropdownMenuItem>
         ) : null}
         {parsed ? (
@@ -592,7 +605,7 @@ function PdfSearchControls({
       }}
     >
       <div className="relative min-w-28 max-w-48 flex-1">
-        <Search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" size={13} aria-hidden="true" />
+        <Search data-slot="search-input-icon" className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" size={13} aria-hidden="true" />
         <Input
           aria-label="在当前 PDF 中查找"
           className="h-7 w-full pl-7 pr-7 text-xs"
@@ -639,6 +652,8 @@ function PdfSearchControls({
 }
 
 function RecommendedTagControls({
+  error,
+  appliedPaths,
   busy,
   open,
   recommendedTags,
@@ -648,6 +663,8 @@ function RecommendedTagControls({
   onOpenChange,
   onToggleTag
 }: {
+  error?: string | null;
+  appliedPaths: string[];
   busy: boolean;
   open: boolean;
   recommendedTags: TagRecommendation[];
@@ -657,7 +674,7 @@ function RecommendedTagControls({
   onOpenChange: (open: boolean) => void;
   onToggleTag: (tag: TagRecommendation) => void;
 }) {
-  const selected = new Set(selectedRecommendedTagPaths);
+  const selected = new Set(selectedRecommendedTagPaths.filter(path => !appliedPaths.includes(path)));
   const selectedCount = selected.size;
 
   return (
@@ -667,7 +684,7 @@ function RecommendedTagControls({
           aria-label={`推荐标签 ${recommendedTags.length} 项`}
           className="shrink-0"
           size="sm"
-          title="查看并保存解析生成的推荐标签"
+          title="查看条目概览中生成的推荐标签"
           type="button"
           variant={open ? 'secondary' : 'outline'}
         >
@@ -679,20 +696,23 @@ function RecommendedTagControls({
       <PopoverContent align="start" className="w-[24rem] p-3" side="bottom" sideOffset={8}>
         <div className="grid gap-3">
           <div>
-            <p className="font-medium">解析完成后的推荐标签</p>
-            <p className="mt-1 text-xs text-muted-foreground">先保留有用的，再保存到当前条目。</p>
+            <p className="font-medium">推荐标签</p>
+            <p className="mt-1 text-xs text-muted-foreground">结果与条目概览同步；需要更新时可在概览中重新生成。</p>
           </div>
 
           <div className="grid gap-2">
             {recommendedTags.map((tag) => {
               const active = selected.has(tag.path);
+              const applied = appliedPaths.includes(tag.path);
               return (
                 <Button
                   key={tag.path}
                   className="h-auto justify-between px-3 py-2 text-left"
                   size="sm"
                   type="button"
-                  variant={active ? 'secondary' : 'outline'}
+                  variant={active || applied ? 'secondary' : 'outline'}
+                  disabled={busy || applied}
+                  aria-pressed={active || applied}
                   onClick={() => onToggleTag(tag)}
                 >
                   <span className="grid min-w-0 gap-0.5">
@@ -701,12 +721,13 @@ function RecommendedTagControls({
                       {tag.dimension} · {tag.reason}
                     </span>
                   </span>
-                  <Badge variant="outline">{Math.round(tag.confidence * 100)}%</Badge>
+                  <Badge variant="outline">{applied ? '已添加' : `${Math.round(tag.confidence * 100)}%`}</Badge>
                 </Button>
               );
             })}
           </div>
 
+          {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
           <div className="flex items-center justify-between gap-2 border-t pt-3">
             <Button
               disabled={busy}

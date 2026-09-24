@@ -10,6 +10,8 @@ import {
   SelectValue
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { ReflowContentControls } from './ReflowContentControls';
+import { resolveReflowContent, type ReflowComponentKey, type ReflowContentOverrides } from '@/shared/lib/reflowContentPreferences';
 import {
   DEFAULT_REFLOW_COMPONENT_PREFERENCES,
   type ReaderPreferences,
@@ -44,6 +46,11 @@ export function ReflowComponentControls({
   const updateComponents = (next: ReflowComponentPreferences) => {
     onChange({ ...preferences, reflowComponents: next });
   };
+  const contentControls = (key: ReflowComponentKey, label: string) => <ReflowContentControls component={key} label={label}
+    disabled={!components[key].visible} value={resolveReflowContent(key, preferences.reflowTranslationMode, components.content?.[key])}
+    onChange={(patch: ReflowContentOverrides) => updateComponents({ ...components, content: {
+      ...components.content, [key]: { ...components.content?.[key], ...patch },
+    } })} />;
 
   return (
     <Popover>
@@ -63,19 +70,20 @@ export function ReflowComponentControls({
 
       <PopoverContent
         align="end"
+        viewportAligned
         className="max-h-[min(34rem,calc(100vh-5rem))] w-80 overflow-y-auto p-0"
         sideOffset={8}
       >
         <div className="border-b px-3 py-2.5">
           <div className="text-sm font-semibold">组件显示</div>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            每类内容独立控制；关闭后只影响重排视图。
+            每个片段的原图、解析后内容分别控制，可同时显示。按类型批量设置，右键片段可单独覆盖。
           </p>
         </div>
 
         <div className="divide-y">
           {TEXT_COMPONENTS.map(({ key, label }) => (
-            <ComponentRow key={key} label={label}>
+            <div key={key}><ComponentRow label={label}>
               <Switch
                 aria-label={`显示${label}`}
                 checked={components[key].visible}
@@ -97,11 +105,11 @@ export function ReflowComponentControls({
                   })
                 }
               />
-            </ComponentRow>
+            </ComponentRow>{contentControls(key, label)}</div>
           ))}
 
           {VISUAL_COMPONENTS.map(({ key, label }) => (
-            <ComponentRow key={key} label={label}>
+            <div key={key}><ComponentRow label={label}>
               <Switch
                 aria-label={`显示${label}`}
                 checked={components[key].visible}
@@ -123,19 +131,8 @@ export function ReflowComponentControls({
                   })
                 }
               />
-            </ComponentRow>
+            </ComponentRow>{contentControls(key, label)}</div>
           ))}
-
-          <ComponentRow label="Mermaid 流程图">
-            <Switch
-              aria-label="显示 Mermaid 流程图"
-              checked={components.diagramVisible}
-              onCheckedChange={(diagramVisible) =>
-                updateComponents({ ...components, diagramVisible })
-              }
-            />
-            <span className="w-[6.5rem] text-right text-xs text-muted-foreground">解析后渲染</span>
-          </ComponentRow>
 
           <ComponentRow label="点击图片查看详情">
             <Switch

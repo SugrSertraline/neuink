@@ -130,7 +130,7 @@ describe('Sciverse assistant tools', () => {
   });
 
   it('does not convert remote citations into local workspace note links', () => {
-    const sources = sourcesFromMarkers(['S1', 'S2'], new Map([
+    const ledger = new Map([
       [1, {
         provider: 'sciverse' as const,
         doc_id: 'doc-42',
@@ -144,7 +144,10 @@ describe('Sciverse assistant tools', () => {
         quote: 'Local evidence',
         segment_uid: 'segment-3'
       }]
-    ]));
+    ]);
+
+    expect(() => sourcesFromMarkers(['S1', 'S2'], ledger)).toThrow('External evidence');
+    const sources = sourcesFromMarkers(['S2'], ledger);
 
     expect(sources).toEqual([{
       entryId: 'entry-1',

@@ -2,6 +2,38 @@ use serde::Serialize;
 
 use super::note_apply_store::{MarkdownPatchOperation, ProposalSource, VerifiedNoteProposal};
 
+pub(super) fn validate_source_placements(proposal: &VerifiedNoteProposal) -> Result<(), String> {
+    // A patch preview is not persisted; only newly inserted/replacement text can cite evidence.
+    let content = if matches!(proposal.action.as_str(), "patch" | "delete") {
+        proposal
+            .patch_operations
+            .iter()
+            .filter_map(|operation| match operation {
+                MarkdownPatchOperation::ReplaceExact { new_text, .. }
+                | MarkdownPatchOperation::ReplaceLines { new_text, .. } => Some(new_text.as_str()),
+                MarkdownPatchOperation::InsertAfter { text, .. }
+                | MarkdownPatchOperation::InsertBefore { text, .. }
+                | MarkdownPatchOperation::Append { text }
+                | MarkdownPatchOperation::InsertLines { text, .. } => Some(text.as_str()),
+                MarkdownPatchOperation::DeleteLines { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    } else {
+        proposal.markdown.clone()
+    };
+    for (index, source) in proposal.sources.iter().enumerate() {
+        let marker = source
+            .marker
+            .clone()
+            .unwrap_or_else(|| format!("S{}", index + 1));
+        if !content.contains(&format!("[{marker}]")) {
+            return Err(format!("来源 [{marker}] 缺少正文引用位置，请重新生成提案，将引用放在对应内容旁；不会自动追加到文末。"));
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn apply_markdown_action(
     action: &str,
     current: &str,

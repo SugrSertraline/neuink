@@ -34,7 +34,7 @@ export function ListHoverPreview({
             <li
               className="rounded-md border bg-background/70 px-2 py-1.5 text-[inherit] leading-[inherit] transition-colors hover:border-primary/40 hover:bg-primary/5"
               key={`${item.marker ?? 'item'}-${index}`}
-              onPointerEnter={() => onItemHover(regions[index]?.bbox ?? null)}
+              onPointerEnter={() => onItemHover(findListItemRegion(item, regions)?.bbox ?? null)}
               onPointerLeave={() => onItemHover(null)}
             >
               <div>
@@ -49,26 +49,26 @@ export function ListHoverPreview({
   );
 }
 
-export function listItemTextAtIndex(text: string, index: number) {
-  const parsedItem = parseListItems(text)[index];
-  if (parsedItem) {
-    return `${parsedItem.marker ?? '•'} ${parsedItem.text}`;
-  }
-
-  const nonEmptyLines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (nonEmptyLines.length > 1 || index === 0) {
-    return nonEmptyLines[index] ?? null;
-  }
-  return null;
+function findListItemRegion(item: ListItem, regions: ListItemRegion[]) {
+  const normalized = (value: string) => value.replace(/\s+/g, ' ').trim();
+  const number = (marker: string | null) => marker?.match(/^(?:\[(\d+)\]|(\d+)[.)])$/)?.slice(1).find(Boolean);
+  const marker = number(item.marker);
+  const matches = regions.filter(region => {
+    const parsed = parseListItems(region.text);
+    if (parsed.length > 1) return false;
+    const candidate = parsed[0];
+    if (marker && candidate && number(candidate.marker)) return marker === number(candidate.marker);
+    return normalized(candidate?.text ?? region.text) === normalized(item.text);
+  });
+  return matches.length === 1 ? matches[0] : null;
 }
 
 export function parseListItems(text: string): ListItem[] {
   const items: ListItem[] = [];
 
-  for (const line of text.split(/\r?\n/)) {
+  // MinerU/Markdown may wrap bibliography markers in bullets or emphasis.
+  const normalized = text.replace(/(^|\n)(\s*)(?:[-*+]\s+)?(?:\*\*|__)?(?:\\?\[\s*(\d+)\s*\\?\]|［\s*(\d+)\s*］)(?:\*\*|__)?(?=\s)/g, '$1$2[$3$4]');
+  for (const line of normalized.split(/\r?\n/)) {
     const match = line.match(/^\s*((?:[-*+])|(?:\d+[.)])|(?:\[[^\]]+\]))\s+(.*)$/);
     if (match) {
       items.push({ marker: match[1], text: match[2] });

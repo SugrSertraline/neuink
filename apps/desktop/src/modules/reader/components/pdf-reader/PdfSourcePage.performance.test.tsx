@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cloneElement, Profiler, type ProfilerOnRenderCallback } from 'react';
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 
@@ -21,16 +21,38 @@ vi.mock('./PdfCanvasPage', () => ({
 }));
 
 import { PdfSourcePage } from './PdfSourcePage';
+import * as pdfRenderQueue from './pdfRenderQueue';
 import type { PageSegments, SegmentRegionItem } from './types';
 
 const originalResizeObserver = globalThis.ResizeObserver;
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   globalThis.ResizeObserver = originalResizeObserver;
 });
 
 describe('PdfSourcePage performance boundaries', () => {
+  it('restores hover on the next pointer frame after scrolling without blocking PDF rendering', () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('PointerEvent', MouseEvent);
+    const interaction = vi.spyOn(pdfRenderQueue, 'notifyPdfInteraction');
+    const result = render(cloneElement(pdfSourcePage(createPage(1)), { hoverPreviewShowOriginal: true }));
+    const hitLayer = result.getByTestId('pdf-page-hit-layer-0');
+    vi.spyOn(hitLayer, 'getBoundingClientRect').mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 1000, bottom: 1000, width: 1000, height: 1000, toJSON: () => ({}),
+    });
+    fireEvent.pointerEnter(hitLayer, { buttons: 0, clientX: 100, clientY: 100 });
+    expect(document.querySelector('[data-slot="pointer-preview"]')).toBeTruthy();
+    fireEvent.scroll(document);
+    expect(document.querySelector('[data-slot="pointer-preview"]')).toBeNull();
+    fireEvent.pointerMove(hitLayer, { buttons: 0, clientX: 110, clientY: 110 });
+    act(() => { vi.advanceTimersByTime(20); });
+    expect(document.querySelector('[data-slot="pointer-preview"]')).toBeTruthy();
+    expect(interaction).not.toHaveBeenCalled();
+  });
   it('updates offscreen page widths when a split is opened, resized, and closed', () => {
     const page = pdfSourcePage(createPage(0));
     const result = render(page);

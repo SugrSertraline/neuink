@@ -24,7 +24,8 @@ export function useAssistantAutoScroll({
   const scrollToBottom = useCallback(() => {
     const scroll = () => {
       const container = containerRef.current;
-      if (!container) return;
+      // A user navigation can supersede either queued animation frame.
+      if (!container || !stickToBottomRef.current) return;
       container.scrollTop = container.scrollHeight;
       lastScrollTopRef.current = container.scrollTop;
       endRef.current?.scrollIntoView({ block: 'end' });
@@ -36,6 +37,7 @@ export function useAssistantAutoScroll({
     setStickToBottom(true);
     scrollToBottom();
   }, [scrollToBottom, setStickToBottom]);
+  const pauseAutoScroll = useCallback(() => setStickToBottom(false), [setStickToBottom]);
 
   const handleScroll = useCallback(() => {
     const element = containerRef.current;
@@ -69,5 +71,5 @@ export function useAssistantAutoScroll({
     return () => observer.disconnect();
   }, [scrollToBottom]);
 
-  return { containerRef, contentRef, endRef, forceNextScroll, handleScroll, isAtBottom };
+  return { containerRef, contentRef, endRef, forceNextScroll, pauseAutoScroll, handleScroll, isAtBottom };
 }

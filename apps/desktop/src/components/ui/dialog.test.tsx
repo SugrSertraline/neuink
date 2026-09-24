@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './dialog';
+import { Popover, PopoverContent, PopoverTrigger } from './popover';
 
 afterEach(cleanup);
 describe('Dialog bounded layout', () => {
@@ -36,5 +37,18 @@ describe('Dialog bounded layout', () => {
     expect(dialog.dataset.layout).toBe('default');
     expect(dialog.className).toContain('sm:max-w-sm');
     expect(dialog.className).not.toContain('h-[min(42rem,calc(100%-2rem))]');
+  });
+  it('keeps a nested popover above the dialog and Escape returns focus to its trigger', async () => {
+    render(<Dialog defaultOpen><DialogContent><DialogTitle>设置</DialogTitle><DialogDescription>阅读设置</DialogDescription>
+      <Popover><PopoverTrigger>阅读选项</PopoverTrigger><PopoverContent viewportAligned><button>当前论文</button></PopoverContent></Popover>
+    </DialogContent></Dialog>);
+    fireEvent.click(screen.getByRole('button', { name: '阅读选项' }));
+    const content = screen.getByRole('button', { name: '当前论文' }).closest('[data-slot="popover-content"]')!;
+    expect(content.className).toContain('z-[var(--z-dialog-popover)]');
+    expect(content.closest('[data-slot="overlay-viewport"]')?.className).toContain('z-[var(--z-dialog-popover)]');
+    fireEvent.keyDown(content, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('button', { name: '当前论文' })).toBeNull());
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: '阅读选项' })));
   });
 });

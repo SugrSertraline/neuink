@@ -1,3 +1,4 @@
+import { PaperTextPreview as SourceSnapshotPreview } from '../navigation/PaperReferences';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
@@ -10,7 +11,6 @@ import { hoverInteractionBlocked } from '@/components/ui/hover-interactions';
 import { cn } from "@/lib/utils";
 import {
   resolveMineruAssetUrl,
-  SourceSnapshotPreview,
 } from "@/shared/components/SourceSnapshotPreview";
 import { useToast } from "@/shared/hooks/useToast";
 import type { TranslatedSegment } from "@/shared/ipc/workspaceApi";
@@ -24,6 +24,14 @@ import {
   segmentDisplayLabel,
 } from "../pdf-reader/readerUtils";
 import { SegmentActionMenu } from "../pdf-reader/SegmentActionMenu";
+import { useParagraphTranslation } from './ParagraphTranslationContext';
+import { hasMatchingDocumentTranslation, hasSentenceTranslation, paragraphTranslationRunning } from './paragraphTranslationState';
+import { ParagraphTranslationActions, ParagraphTranslationContent } from './ParagraphTranslationControls';
+import { isVisualReflowComponent, resolveReflowContent, type ReflowContentPreference } from '@/shared/lib/reflowContentPreferences';
+import { useReflowSegmentPreferences } from './ReflowSegmentPreferences';
+import { ReflowSegmentContentActions } from './ReflowContentControls';
+import { ReflowContentLayers, parsedReflowMarkdown } from './ReflowContentLayers';
+import type { ParagraphTranslation } from '@/shared/ipc/paragraphTranslationApi';
 import { SegmentRail } from "../pdf-reader/SegmentRail";
 import { SegmentRailLayout } from "../pdf-reader/SegmentRailLayout";
 import { PDF_RAIL_WIDTH } from "../pdf-reader/readerConstants";
@@ -49,6 +57,7 @@ import {
   type ReflowPreviewPointerState
 } from './ReflowSourcePreview';
 import {
+  reflowComponentKeyForGroup,
   reflowGroupTextScale,
   reflowGroupVisualSize,
   useReflowComponentPreferences
@@ -62,6 +71,8 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
   hoverPreviewEnabled,
   notesBySegmentUid,
   pdfDocument,
+  pdfPreviewError,
+  onRetryPdfPreview,
   reflowTranslationMode,
   segmentGroup,
   translationBySegmentUid,
@@ -89,6 +100,8 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
   hoverPreviewEnabled: boolean;
   notesBySegmentUid: Map<string, SegmentBlockNote>;
   pdfDocument: PDFDocumentProxy | null;
+  pdfPreviewError?: string | null;
+  onRetryPdfPreview?: () => void;
   reflowTranslationMode: ReflowTranslationMode;
   segmentGroup: ReflowSegmentGroup;
   translationBySegmentUid: Map<string, TranslatedSegment>;
@@ -113,6 +126,14 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
   onTranslateSegment?: (segment: SourceSegment) => void;
 }) {
   const componentPreferences = useReflowComponentPreferences();
+  const paragraphTranslation = useParagraphTranslation(segmentGroup.body);
+  const segmentPreferences = useReflowSegmentPreferences(logicalSegmentUid(segmentGroup.body));
+  const componentKey = reflowComponentKeyForGroup(segmentGroup);
+  const componentContent = componentPreferences.content?.[componentKey];
+  const content = resolveReflowContent(componentKey, reflowTranslationMode, {
+    ...(paragraphTranslation.record ? { translation: true, translationView: paragraphTranslation.record.view } : {}),
+    ...componentContent,
+  }, segmentPreferences.override);
   const componentTextScale = reflowGroupTextScale(segmentGroup, componentPreferences);
   const relatedImagePath =
     segmentGroup.assetPath ?? segmentGroup.body.asset_path ?? null;
@@ -145,6 +166,7 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
     event: ReactMouseEvent<HTMLElement>,
     segment = segmentGroup.body,
   ) => {
+    if ((event.target as Element).closest('[data-paper-reference]')) { onPreviewChange(null); return; }
     if (!hoverPreviewEnabled || event.buttons !== 0 || hoverInteractionBlocked()) {
       onPreviewChange(null);
       return;
@@ -192,6 +214,8 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
       style={{ fontSize: `${componentTextScale}em` }}
       tabIndex={0}
       onClick={(event) => {
+        const selection = window.getSelection();
+        if (selection?.toString().trim() && selection.anchorNode && event.currentTarget.contains(selection.anchorNode)) return;
         if (altClickOpensNote && event.altKey) {
           onOpenSegmentNote(segmentGroup.body);
           return;
@@ -203,6 +227,13 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
         setMenuPosition({ x: event.clientX, y: event.clientY });
       }}
       onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+          event.preventDefault();
+          const bounds = event.currentTarget.getBoundingClientRect();
+          setMenuPosition({ x: bounds.left + 16, y: bounds.top + 24 });
+          return;
+        }
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           onActivateSegment(segmentGroup.body, { jumpToPdf: true });
@@ -267,8 +298,12 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
           <MineruMetadataBadges segment={segmentGroup.body} />
         </div>
 
-        {segmentGroup.kind === "visual" ? (
-          <VisualReflowContent
+          <div data-reading-selection-source={segmentGroup.body.uid}>
+          <ReflowGroupContent
+            content={content}
+            paragraphRecord={paragraphTranslation.record}
+            pdfError={pdfPreviewError}
+            onRetryPdf={onRetryPdfPreview}
             entryId={entryId}
             reflowTranslationMode={reflowTranslationMode}
             relatedImagePath={relatedImagePath}
@@ -280,22 +315,7 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
             onPreviewChange={onPreviewChange}
             onRequirePdfDocument={onRequirePdfDocument}
           />
-        ) : (
-          <TextReflowContent
-            entryId={entryId}
-            hoverPreviewEnabled={hoverPreviewEnabled}
-            onPreviewChange={onPreviewChange}
-            pdfDocument={pdfDocument}
-            reflowTranslationMode={reflowTranslationMode}
-            relatedImagePath={relatedImagePath}
-            segment={segmentGroup.body}
-            translatedText={
-              translationBySegmentUid.get(segmentGroup.body.uid)
-                ?.translated_text ?? null
-            }
-            workspaceRoot={workspaceRoot}
-          />
-        )}
+          </div>
       </div>
       {menuPosition ? (
         <SegmentActionMenu
@@ -317,6 +337,20 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
           onCopySourceLink={onCopySourceLink}
           onAddAssistantContext={onAddAssistantContext}
           onTranslateSegment={onTranslateSegment}
+          displayActions={<ReflowSegmentContentActions component={componentKey} value={content} overridden={Boolean(segmentPreferences.override)}
+            sentenceTranslationDisabled={!paragraphTranslation.context?.ready}
+            onChange={patch => {
+              segmentPreferences.update(patch);
+              if (patch?.translationView === 'sentences' && !hasSentenceTranslation(paragraphTranslation.record)
+                && !paragraphTranslationRunning(paragraphTranslation.record)
+                && !paragraphTranslation.context?.pending.has(segmentGroup.body.uid)) {
+                paragraphTranslation.context?.translate(segmentGroup.body.uid, true);
+              }
+              setMenuPosition(null);
+            }} />}
+          translationActions={paragraphTranslation.context ? <ParagraphTranslationActions segment={segmentGroup.body} close={() => setMenuPosition(null)}
+            hasDocumentTranslation={hasMatchingDocumentTranslation(segmentGroup.body, translationBySegmentUid.get(segmentGroup.body.uid))}
+            viewControls={false} onTranslate={view => segmentPreferences.update({ translation: true, ...(view ? { translationView: view } : {}) })} /> : undefined}
           onHideSegment={onHideSegment}
           onOpenSourceBacklink={onOpenSourceBacklink}
         />
@@ -325,7 +359,11 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
   );
 });
 
-function VisualReflowContent({
+function ReflowGroupContent({
+  content,
+  paragraphRecord,
+  pdfError,
+  onRetryPdf,
   entryId,
   reflowTranslationMode,
   relatedImagePath,
@@ -337,6 +375,10 @@ function VisualReflowContent({
   onPreviewChange,
   onRequirePdfDocument,
 }: {
+  content: ReflowContentPreference;
+  paragraphRecord?: ParagraphTranslation;
+  pdfError?: string | null;
+  onRetryPdf?: () => void;
   entryId: string;
   reflowTranslationMode: ReflowTranslationMode;
   relatedImagePath: string | null;
@@ -349,16 +391,29 @@ function VisualReflowContent({
   onRequirePdfDocument: () => void;
 }) {
   const componentPreferences = useReflowComponentPreferences();
-  const bodyText = segmentGroup.body.markdown ?? segmentGroup.body.text;
 
   return (
     <div className="grid min-w-0 gap-3">
-      <SegmentText
+      <ReflowContentLayers
         entryId={entryId}
+        content={content}
+        pdfDocument={pdfDocument}
+        pdfError={pdfError}
+        onRequirePdfDocument={onRequirePdfDocument}
+        onRetryPdf={onRetryPdf}
         imageDetailEnabled={componentPreferences.imageClickToOpen}
-        imageSize={reflowGroupVisualSize(segmentGroup, componentPreferences)}
-        originalText={bodyText || segmentGroup.body.text}
-        reflowTranslationMode={reflowTranslationMode}
+        size={reflowGroupVisualSize(segmentGroup, componentPreferences)}
+        parsedContent={isVisualReflowComponent(reflowComponentKeyForGroup(segmentGroup)) ? undefined : <TextReflowContent
+          entryId={entryId} hoverPreviewEnabled={hoverPreviewEnabled} onPreviewChange={onPreviewChange} pdfDocument={pdfDocument}
+          reflowTranslationMode="source" relatedImagePath={null}
+          segment={{ ...segmentGroup.body, markdown: parsedReflowMarkdown(segmentGroup.body.markdown ?? segmentGroup.body.text) }}
+          translatedText={null} workspaceRoot={workspaceRoot} />}
+        translationContent={isVisualReflowComponent(reflowComponentKeyForGroup(segmentGroup)) ? undefined : <TextReflowContent
+          entryId={entryId} hoverPreviewEnabled={hoverPreviewEnabled} onPreviewChange={onPreviewChange} pdfDocument={pdfDocument}
+          reflowTranslationMode="translation" relatedImagePath={null} segment={segmentGroup.body}
+          translatedText={translationBySegmentUid.get(segmentGroup.body.uid)?.translated_text ?? null} workspaceRoot={workspaceRoot} />}
+        pairedContent={paragraphRecord ? <ParagraphTranslationContent record={paragraphRecord} entryId={entryId} root={workspaceRoot}
+          showOriginal={content.parsed} view={content.translationView} /> : undefined}
         relatedImagePath={relatedImagePath}
         segment={segmentGroup.body}
         translatedText={
@@ -514,7 +569,7 @@ function TextReflowContent({
           )}
           segmentType={segment.segment_type}
           sourceEntryId={entryId}
-          showMermaidDiagrams={componentPreferences.diagramVisible}
+          showMermaidDiagrams
           workspaceRoot={workspaceRoot}
         />
       </div>
@@ -679,6 +734,8 @@ function RoleText({
   onRequirePdfDocument: () => void;
 }) {
   const componentPreferences = useReflowComponentPreferences();
+  const content = resolveReflowContent('supportingText', reflowTranslationMode, componentPreferences.content?.supportingText);
+  if (!content.image && !content.parsed && !content.translation) return null;
   return (
     <div
       className={cn(
@@ -715,15 +772,9 @@ function RoleText({
       <div className="mb-1 text-[11px] font-semibold text-muted-foreground">
         {label}
       </div>
-      <SegmentText
-        entryId={entryId}
-        originalText={segment.markdown ?? segment.text}
-        reflowTranslationMode={reflowTranslationMode}
-        relatedImagePath={relatedImagePath}
-        segment={segment}
-        translatedText={translatedText}
-        workspaceRoot={workspaceRoot}
-      />
+      <ReflowContentLayers entryId={entryId} content={content} relatedImagePath={segment.asset_path ?? null} segment={segment}
+        translatedText={translatedText} workspaceRoot={workspaceRoot} pdfDocument={pdfDocument} onRequirePdfDocument={onRequirePdfDocument}
+        size="standard" imageDetailEnabled={componentPreferences.imageClickToOpen} />
     </div>
   );
 }
@@ -930,7 +981,7 @@ function InteractiveListItems({
                 relatedImagePath={relatedImagePath}
                 segmentType={segment.segment_type}
                 sourceEntryId={entryId || null}
-                showMermaidDiagrams={componentPreferences.diagramVisible}
+                showMermaidDiagrams
                 workspaceRoot={workspaceRoot}
               />
             </div>
@@ -986,7 +1037,7 @@ function SegmentText({
         relatedImagePath={relatedImagePath}
         segmentType={segment.segment_type}
         sourceEntryId={entryId || null}
-        showMermaidDiagrams={componentPreferences.diagramVisible}
+        showMermaidDiagrams
         workspaceRoot={workspaceRoot}
       />
     );
@@ -1003,7 +1054,7 @@ function SegmentText({
           relatedImagePath={relatedImagePath}
           segmentType={segment.segment_type}
           sourceEntryId={entryId || null}
-          showMermaidDiagrams={componentPreferences.diagramVisible}
+          showMermaidDiagrams
           workspaceRoot={workspaceRoot}
         />
         <div className="min-w-0 border-t pt-2 text-[0.95em] text-muted-foreground">
@@ -1012,7 +1063,7 @@ function SegmentText({
             markdown={translatedText}
             segmentType={segment.segment_type}
             sourceEntryId={entryId || null}
-            showMermaidDiagrams={componentPreferences.diagramVisible}
+            showMermaidDiagrams
             workspaceRoot={workspaceRoot}
           />
         </div>
@@ -1029,7 +1080,7 @@ function SegmentText({
       relatedImagePath={relatedImagePath}
       segmentType={segment.segment_type}
       sourceEntryId={entryId || null}
-      showMermaidDiagrams={componentPreferences.diagramVisible}
+      showMermaidDiagrams
       workspaceRoot={workspaceRoot}
     />
   );

@@ -1,6 +1,4 @@
 import {
-  ChevronDown,
-  ChevronRight,
   FolderPlus,
   Hash,
   Pencil,
@@ -12,6 +10,7 @@ import {
 import { useState, type FormEvent } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { DisclosureIcon } from '@/components/ui/disclosure-icon';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
@@ -77,8 +76,8 @@ export function TagEditorNode({
         )}
       >
         {hasChildren ? (
-          <Button size="icon-sm" title={open ? '收起' : '展开'} type="button" variant="ghost" onClick={() => setOpen(!open)}>
-            {open ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronRight size={13} aria-hidden="true" />}
+          <Button aria-expanded={open} aria-label={`${open ? '收起' : '展开'} ${node.name}`} size="icon-sm" title={open ? '收起' : '展开'} type="button" variant="ghost" onClick={() => setOpen(!open)}>
+            <DisclosureIcon open={open} />
           </Button>
         ) : (
           <span className="grid size-7 place-items-center text-muted-foreground">

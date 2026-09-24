@@ -14,13 +14,12 @@ describe('AgentSettingsSection information architecture', () => {
   it('shows every runtime subagent grouped by its actual responsibility', () => {
     const { getAllByText, getByText, queryByText } = renderSection('subagents');
 
-    expect(getAllByText('TaskOrchestratorAgent')).toHaveLength(2);
-    expect(getByText('MemoryAgent')).toBeTruthy();
-    expect(getByText('EvidenceAgent')).toBeTruthy();
-    expect(getByText('PatchPlannerAgent')).toBeTruthy();
-    expect(getByText('系统流程')).toBeTruthy();
+    expect(queryByText('TaskOrchestratorAgent')).toBeNull();
+    expect(queryByText('MemoryAgent')).toBeNull();
+    expect(getAllByText('EvidenceAgent')).toHaveLength(2);
+    expect(queryByText('PatchPlannerAgent')).toBeNull();
+    expect(queryByText('系统流程')).toBeNull();
     expect(getByText('任务执行')).toBeTruthy();
-    expect(queryByText('SkillSelectorAgent')).toBeNull();
   });
 
   it('separates the main agent identity, permissions, and worker assignments', () => {
@@ -33,13 +32,9 @@ describe('AgentSettingsSection information architecture', () => {
     expect(queryByLabelText('Agent 运行链路')).toBeNull();
   });
 
-  it('describes Skills as semantically selected packages rather than keyword routes', () => {
-    const { getByText, queryByLabelText, queryByRole } = renderSection('skills');
-
-    expect(getByText(/由 TaskOrchestratorAgent 根据任务语义选择/)).toBeTruthy();
-    expect(getByText(/不会自行运行/)).toBeTruthy();
-    expect(queryByRole('button', { name: '新建 Skill' })).toBeNull();
-    expect(queryByLabelText('Agent 运行链路')).toBeNull();
+  it('does not offer skill loading in assistant permissions', () => {
+    const { queryByLabelText } = renderSection('main-agent');
+    expect(queryByLabelText('允许加载 Skills')).toBeNull();
   });
 });
 
@@ -52,19 +47,12 @@ function renderSection(view: AgentSettingsView) {
       llmProfiles={[{ id: 'profile-1', model: 'test-model', name: '测试模型' }]}
       runtimeSettings={runtimeSettings}
       selectedAgentId={null}
-      selectedSkillPackageId={null}
       view={view}
       onAddAgent={vi.fn()}
-      onAddSkillPackage={vi.fn()}
-      onImportSkillPackage={vi.fn()}
-      onOpenSkillPackageFolder={vi.fn()}
       onRemoveAgent={vi.fn()}
-      onRemoveSkillPackage={vi.fn()}
       onSelectAgent={vi.fn()}
-      onSelectSkillPackage={vi.fn()}
       onUpdateAgent={vi.fn()}
       onUpdateRuntimeSettings={vi.fn()}
-      onUpdateSkillPackage={vi.fn()}
     />
   );
 }

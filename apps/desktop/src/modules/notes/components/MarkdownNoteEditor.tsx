@@ -20,6 +20,7 @@ import { createPortal } from 'react-dom';
 
 import { cn } from '@/lib/utils';
 import { useToast } from '@/shared/hooks/useToast';
+import { NoteReviewBanner } from '@/modules/assistant/review/NoteReviewBanner';
 import { ReadingExportDialog } from '@/modules/reader/export/ReadingExportDialog';
 import type { NoteDocument, NoteOwner, SourceLink } from '@/shared/types/domain';
 
@@ -576,6 +577,8 @@ export function MarkdownNoteEditor({
             : 'grid-rows-[auto_minmax(0,1fr)]'
         )}
       >
+        <div className="min-w-0">
+        <NoteReviewBanner entryId={entryId} noteId={noteId} />
         <MarkdownNoteHeader
           canEdit={canEdit}
           canRedo={editor?.can().redo() ?? false}
@@ -607,6 +610,7 @@ export function MarkdownNoteEditor({
           onTakeOver={takeOverEditing}
           onUndo={() => editor?.chain().focus().undo().run()}
         />
+        </div>
         <ReadingExportDialog entryId={entryId} tagId={noteOwner?.kind === 'tag_reading' ? noteOwner.tag_id : undefined} entryTitle={entryTitle ?? fallbackTitle} workspaceRoot={workspaceRoot} noteId={noteId} open={exportOpen} onOpenChange={setExportOpen} />
         {conflict ? (
           <MarkdownNoteConflictPanel

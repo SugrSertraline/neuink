@@ -1,7 +1,7 @@
-import { Eye, PanelRight, RotateCcw, Trash2 } from 'lucide-react';
-import { Fragment, type HTMLAttributes } from 'react';
+import { Trash2 } from 'lucide-react';
+import type { HTMLAttributes } from 'react';
 import { Button } from '@/components/ui/button';
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
+import { LibraryPaperContextMenu, type LibraryPaperActions } from './LibraryPaperContextMenu';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
 import type { EntryReadingState } from '@/shared/types/domain';
@@ -23,7 +23,7 @@ export const ENTRY_LIBRARY_COLUMNS: Array<{ id: EntryLibraryColumnId; label: str
   { id: 'actions', label: '操作' }
 ];
 
-type LibraryPaperTableProps = {
+export type LibraryPaperCollectionProps = LibraryPaperActions & {
   active: boolean;
   entries: LibraryEntry[];
   status: 'loading' | 'ready' | 'error';
@@ -31,14 +31,11 @@ type LibraryPaperTableProps = {
   readingStates: Record<string, EntryReadingState>;
   selectedEntryId: string | null;
   draggingEntryId: string | null;
+  getRowProps: (entry: LibraryEntry) => HTMLAttributes<HTMLElement>;
+};
+type LibraryPaperTableProps = LibraryPaperCollectionProps & {
   visibleColumns: ReadonlySet<EntryLibraryColumnId>;
   pinnedEdges: ReadonlySet<'left' | 'right'>;
-  reparseDisabled: boolean;
-  getRowProps: (entry: LibraryEntry) => HTMLAttributes<HTMLTableRowElement>;
-  onOpen: (entryId: string) => void;
-  onOpenInSidePane: (entryId: string) => void;
-  onReparse: (entry: LibraryEntry) => void;
-  onDelete: (entry: LibraryEntry) => void;
 };
 
 const headCellClass = 'h-8 overflow-hidden border-b border-border bg-muted px-3 text-left text-[11px] font-medium text-muted-foreground';
@@ -51,10 +48,9 @@ export function LibraryPaperTable({ active, entries, status, emptyMessage, readi
   const leftPinnedColumnId = pinnedEdges.has('left') ? shownColumns[0]?.id ?? null : null;
   const lastColumnId = shownColumns[shownColumns.length - 1]?.id ?? null;
   const rightPinnedColumnId = pinnedEdges.has('right') && lastColumnId !== leftPinnedColumnId ? lastColumnId : null;
-  const { getColumnWidth, getResizeHandleProps, tableShellRef } = useEntryLibraryColumnWidths({ active, leftPinnedColumnId, rightPinnedColumnId, visibleColumns });
-  const tableWidth = shownColumns.reduce((total, column) => total + getColumnWidth(column.id), 0);
-  const spacerBefore = shownColumns.length > 1 ? rightPinnedColumnId ?? lastColumnId : null;
-  const getPin = (id: EntryLibraryColumnId) => id === leftPinnedColumnId ? 'left' : id === rightPinnedColumnId ? 'right' : undefined;
+  const { getColumnWidth, getResizeHandleProps, hasHorizontalOverflow, tableShellRef } = useEntryLibraryColumnWidths({ active, leftPinnedColumnId, rightPinnedColumnId, visibleColumns });
+  const tableWidth = Math.round(shownColumns.reduce((total, column) => total + getColumnWidth(column.id), 0));
+  const getPin = (id: EntryLibraryColumnId) => !hasHorizontalOverflow ? undefined : id === leftPinnedColumnId ? 'left' : id === rightPinnedColumnId ? 'right' : undefined;
   const alignment = (id: EntryLibraryColumnId) => numericColumns.has(id) ? 'text-right tabular-nums' : id === 'actions' ? 'text-center' : 'text-left';
 
   return <div ref={tableShellRef} className="entry-library-table-shell min-h-0 min-w-0 flex-1 [&>[data-slot=table-container]]:isolate [&>[data-slot=table-container]]:h-full [&>[data-slot=table-container]]:overflow-auto [&>[data-slot=table-container]]:overscroll-contain">
@@ -63,56 +59,39 @@ export function LibraryPaperTable({ active, entries, status, emptyMessage, readi
       <colgroup>
         {shownColumns.map(column => {
           const width = getColumnWidth(column.id);
-          return <Fragment key={column.id}>
-            {spacerBefore === column.id ? <col data-responsive-spacer="true" /> : null}
-            <col style={{ width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }} />
-          </Fragment>;
+          return <col key={column.id} style={{ width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }} />;
         })}
-        {spacerBefore === null ? <col data-responsive-spacer="true" /> : null}
       </colgroup>
       <TableHeader className="sticky top-0 z-20 bg-muted">
         <TableRow>
-          {shownColumns.map(column => <Fragment key={column.id}>
-            {spacerBefore === column.id ? <TableHead aria-hidden="true" className={cn(headCellClass, 'px-0')} /> : null}
-            <TableHead aria-label={column.label} scope="col" className={cn(headCellClass, alignment(column.id), !getPin(column.id) && 'relative')} pin={getPin(column.id)}>
+          {shownColumns.map(column =>
+            <TableHead key={column.id} aria-label={column.label} scope="col" className={cn(headCellClass, alignment(column.id), !getPin(column.id) && 'relative')} pin={getPin(column.id)}>
               {column.label}<span {...getResizeHandleProps(column.id, column.label)} />
             </TableHead>
-          </Fragment>)}
-          {spacerBefore === null ? <TableHead aria-hidden="true" className={cn(headCellClass, 'px-0')} /> : null}
+          )}
         </TableRow>
       </TableHeader>
       <TableBody>
         {status !== 'ready' || !entries.length ? <TableRow>
-          <TableCell colSpan={shownColumns.length + 1} role={status === 'error' ? 'alert' : undefined}
+          <TableCell colSpan={shownColumns.length} role={status === 'error' ? 'alert' : undefined}
             className={cn('whitespace-normal px-3 py-8 text-center text-xs', status === 'error' ? 'text-destructive' : 'text-muted-foreground')}>
             {status === 'loading' ? '正在打开条目库...' : status === 'error' ? '无法加载标签和论文，请重新打开工作区后重试。' : emptyMessage}
           </TableCell>
-        </TableRow> : entries.map(item => <ContextMenu key={item.id}>
-          <ContextMenuTrigger asChild>
+        </TableRow> : entries.map(item => <LibraryPaperContextMenu key={item.id} entry={item}
+          reparseDisabled={reparseDisabled} onOpen={onOpen} onOpenInSidePane={onOpenInSidePane} onReparse={onReparse} onDelete={onDelete}>
             <TableRow {...getRowProps(item)} tabIndex={0} data-entry-id={item.id} data-allow-context-menu="true"
               data-state={item.id === selectedEntryId ? 'selected' : undefined}
               className={cn('group cursor-pointer bg-card hover:bg-muted has-aria-expanded:bg-muted data-[state=selected]:bg-accent outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring', item.id === draggingEntryId && '[&>[data-slot=table-cell]>*]:opacity-55')}>
-              {shownColumns.map(column => <Fragment key={column.id}>
-                {spacerBefore === column.id ? <TableCell aria-hidden="true" className={cn(bodyCellClass, 'px-0')} /> : null}
-                <TableCell className={cn(bodyCellClass, alignment(column.id))} pin={getPin(column.id)}>
+              {shownColumns.map(column =>
+                <TableCell key={column.id} className={cn(bodyCellClass, alignment(column.id))} pin={getPin(column.id)}>
                   {column.id === 'actions' ? <Button aria-label="移到回收站" title="移到回收站" size="icon-xs" variant="ghost"
                     className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                     onClick={event => { event.stopPropagation(); onDelete(item); }}><Trash2 size={14} aria-hidden="true" /></Button>
                     : <PaperCell column={column.id} entry={item} state={readingStates[item.id]} />}
                 </TableCell>
-              </Fragment>)}
-              {spacerBefore === null ? <TableCell aria-hidden="true" className={cn(bodyCellClass, 'px-0')} /> : null}
+              )}
             </TableRow>
-          </ContextMenuTrigger>
-          <ContextMenuContent className="w-44" data-allow-context-menu="true">
-            <ContextMenuLabel className="truncate">{item.title}</ContextMenuLabel>
-            <ContextMenuSeparator />
-            <ContextMenuItem onSelect={() => onOpen(item.id)}><Eye size={13} aria-hidden="true" />查看详情</ContextMenuItem>
-            <ContextMenuItem onSelect={() => onOpenInSidePane(item.id)}><PanelRight size={13} aria-hidden="true" />在右侧打开</ContextMenuItem>
-            {item.status === 'Parsed' || item.status === 'Failed' ? <ContextMenuItem disabled={reparseDisabled} onSelect={() => onReparse(item)}><RotateCcw size={13} aria-hidden="true" />重新解析</ContextMenuItem> : null}
-            <ContextMenuItem variant="destructive" onSelect={() => onDelete(item)}><Trash2 size={13} aria-hidden="true" />移到回收站</ContextMenuItem>
-          </ContextMenuContent>
-        </ContextMenu>)}
+        </LibraryPaperContextMenu>)}
       </TableBody>
     </Table>
   </div>;

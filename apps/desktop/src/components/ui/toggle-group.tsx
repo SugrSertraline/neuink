@@ -76,6 +76,7 @@ function ToggleGroupItem({
         className
       )}
       {...props}
+      data-ui="toggle-group-item"
     >
       {children}
     </ToggleGroupPrimitive.Item>

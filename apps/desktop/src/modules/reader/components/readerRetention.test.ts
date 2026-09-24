@@ -18,5 +18,6 @@ describe('reader retention', () => {
     expect(isHeavyReaderSurface({ kind: 'pdf', entryId: 'entry-a' })).toBe(true);
     expect(isHeavyReaderSurface({ kind: 'reflow', entryId: 'entry-a' })).toBe(true);
     expect(isHeavyReaderSurface({ kind: 'library' } as WorkspaceSurface)).toBe(false);
+    expect(isHeavyReaderSurface({ kind: 'relations' })).toBe(false);
   });
 });

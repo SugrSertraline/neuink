@@ -2,6 +2,7 @@ use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -19,6 +20,7 @@ pub fn atomic_write_json<T: Serialize>(
 
 pub fn atomic_write(path: impl AsRef<Path>, bytes: &[u8]) -> Result<(), WorkspaceError> {
     let path = path.as_ref();
+    ensure_file_destination(path)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -28,9 +30,11 @@ pub fn atomic_write(path: impl AsRef<Path>, bytes: &[u8]) -> Result<(), Workspac
         .write(true)
         .create_new(true)
         .open(&tmp_path)?;
-    tmp_file.write_all(bytes)?;
-    tmp_file.sync_all()?;
+    // Covers write/sync/rename failures as well as the successful path.
+    let _temporary = TemporaryFile(tmp_path.clone());
+    let write_result = tmp_file.write_all(bytes).and_then(|_| tmp_file.sync_all());
     drop(tmp_file);
+    write_result?;
 
     match fs::rename(&tmp_path, path) {
         Ok(()) => Ok(()),
@@ -47,10 +51,9 @@ fn replace_existing(
     tmp_path: &Path,
     original_error: std::io::Error,
 ) -> Result<(), WorkspaceError> {
-    let backup_path = backup_path_for(path);
-    if backup_path.exists() {
-        fs::remove_file(&backup_path)?;
-    }
+    ensure_file_destination(path)?;
+    // Never remove another save's backup or a user's similarly named file.
+    let backup_path = tmp_path.with_extension("bak");
 
     fs::rename(path, &backup_path)?;
     match fs::rename(tmp_path, path) {
@@ -70,6 +73,7 @@ fn replace_existing(
 }
 
 fn temp_path_for(path: &Path) -> PathBuf {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
@@ -78,15 +82,31 @@ fn temp_path_for(path: &Path) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or_default();
-    path.with_file_name(format!("{file_name}.{nonce}.tmp"))
+    let sequence = NEXT.fetch_add(1, Ordering::Relaxed);
+    path.with_file_name(format!(
+        "{file_name}.{}.{nonce}.{sequence}.tmp",
+        std::process::id()
+    ))
 }
 
-fn backup_path_for(path: &Path) -> PathBuf {
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("neuink-write");
-    path.with_file_name(format!("{file_name}.bak"))
+fn ensure_file_destination(path: &Path) -> Result<(), WorkspaceError> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if !meta.file_type().is_file() => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "save destination is not a regular file",
+        )
+        .into()),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+struct TemporaryFile(PathBuf);
+impl Drop for TemporaryFile {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
 }
 
 #[cfg(test)]
@@ -107,6 +127,40 @@ mod tests {
         atomic_write(&path, br#"{"title":"A"}"#).unwrap();
 
         assert_eq!(fs::read_to_string(path).unwrap(), r#"{"title":"A"}"#);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rejects_directory_destinations_without_moving_them_or_leaving_temporary_files() {
+        let dir = std::env::temp_dir().join(format!("neuink_atomic_directory_{}", unique_suffix()));
+        let target = dir.join("note.json");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("user-file"), "keep").unwrap();
+        assert!(atomic_write(&target, b"replacement").is_err());
+        assert_eq!(
+            fs::read_to_string(target.join("user-file")).unwrap(),
+            "keep"
+        );
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn failed_replacement_preserves_files_and_removes_temporary_file() {
+        let dir = std::env::temp_dir().join(format!("neuink_atomic_locked_{}", unique_suffix()));
+        fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("note.json");
+        fs::write(&target, "keep").unwrap();
+        // Force the fallback directly: an absent temporary file cannot replace
+        // the destination; the original file must be restored.
+        assert!(super::replace_existing(
+            &target,
+            &dir.join("missing.tmp"),
+            std::io::Error::from(std::io::ErrorKind::PermissionDenied)
+        )
+        .is_err());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "keep");
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
         fs::remove_dir_all(dir).unwrap();
     }
 

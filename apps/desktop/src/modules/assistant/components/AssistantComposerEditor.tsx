@@ -261,7 +261,7 @@ export function AssistantComposerEditor({
   };
 
   return (
-    <div className="relative min-w-0 rounded-md border bg-background transition focus-within:ring-2 focus-within:ring-ring/30">
+    <div data-material="composer" className="relative min-w-0 rounded-md border bg-background transition focus-within:ring-2 focus-within:ring-ring/30">
       <div className="min-w-0 p-2">
         <EditorContent editor={editor} />
         {!serializeComposer(editor?.getJSON() ?? { type: 'doc' }).text.trim() && !disabled ? (

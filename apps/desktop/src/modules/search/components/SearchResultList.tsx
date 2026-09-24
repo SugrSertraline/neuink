@@ -1,8 +1,8 @@
+import { searchSettings, settingsCategory } from '@/modules/settings/settingsCatalog';
 import { AlertTriangle, FileText, StickyNote, TextSearch } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import {
-  CommandEmpty,
   CommandGroup,
   CommandItem,
   CommandList
@@ -30,9 +30,25 @@ type SearchResultListProps = {
   results: SearchResults | null;
   root: string | null;
   onOpenResult: (hit: SearchHit) => void;
+  settingsQuery?: string;
+  onOpenSetting?: (id: string) => void;
 };
 
-export function SearchResultList({
+export function SearchResultList(props: SearchResultListProps) {
+  const settings = props.onOpenSetting ? searchSettings(props.settingsQuery ?? '') : [];
+  if (!settings.length && !props.results?.total_hit_count) return <SearchDocumentResults {...props} />;
+  return <CommandList className={cn('search-result-scrollbar min-h-0 max-h-none overflow-x-hidden overflow-y-scroll overscroll-contain', props.className)}>
+    {settings.length > 0 && <CommandGroup heading="设置" className="p-2">
+      {settings.map(item => <CommandItem key={item.id} value={`setting:${item.id}`} onSelect={() => props.onOpenSetting?.(item.id)} className="items-start py-2.5">
+        <span className="min-w-0 flex-1"><span className="block text-[13px]">{item.title}</span>
+          <span className="mt-1 block text-xs text-muted-foreground">设置 › {settingsCategory(item.tab).title}</span></span>
+      </CommandItem>)}
+    </CommandGroup>}
+    {(!settings.length || Boolean(props.results?.total_hit_count)) && <SearchDocumentResults {...props} className={undefined} />}
+  </CommandList>;
+}
+
+function SearchDocumentResults({
   className,
   hoverPreviewEnabled = true,
   results,
@@ -47,7 +63,7 @@ export function SearchResultList({
             <TextSearch aria-hidden="true" />
           </EmptyMedia>
           <EmptyTitle>输入关键词开始搜索</EmptyTitle>
-          <EmptyDescription>搜索条目、标签、笔记和原文片段。</EmptyDescription>
+          <EmptyDescription>搜索条目、标签、笔记、原文片段和设置。</EmptyDescription>
         </EmptyHeader>
       </Empty>
     );
@@ -71,12 +87,7 @@ export function SearchResultList({
   }
 
   return (
-    <CommandList
-      className={cn(
-        'search-result-scrollbar min-h-0 max-h-none overflow-x-hidden overflow-y-scroll overscroll-contain',
-        className
-      )}
-    >
+    <div>
       <div className="space-y-3 p-2">
         <SearchWarnings warnings={warnings} />
         {results.entries.map((entry) => (
@@ -131,12 +142,8 @@ export function SearchResultList({
           </CommandGroup>
         ))}
       </div>
-      <CommandEmpty>
-        <div className="py-6 text-center text-xs text-muted-foreground">
-          没有可显示的结果
-        </div>
-      </CommandEmpty>
-    </CommandList>
+
+    </div>
   );
 }
 

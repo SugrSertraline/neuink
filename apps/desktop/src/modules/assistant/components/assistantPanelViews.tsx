@@ -35,6 +35,7 @@ type ChatMessageCallbacks = Pick<
 
 type AssistantConversationHistoryProps = {
   busy: boolean;
+  runningConversationIds?: string[];
   conversationId: string | null;
   error: string | null;
   items: ConversationMeta[];
@@ -49,6 +50,7 @@ type AssistantConversationHistoryProps = {
 
 export function AssistantConversationHistory({
   busy,
+  runningConversationIds = [],
   conversationId,
   error,
   items,
@@ -90,6 +92,7 @@ export function AssistantConversationHistory({
           </div>
         ) : items.length > 0 ? (
           items.map((item) => {
+            const running = runningConversationIds.includes(item.id);
             const historyContextItems = item.context_items ?? [];
             return (
               <div
@@ -105,7 +108,7 @@ export function AssistantConversationHistory({
                 >
                   <span className="line-clamp-2">{item.title}</span>
                   <span className="block text-[10px] text-muted-foreground">
-                    {item.message_count} messages
+                    {running ? '运行中 · ' : ''}{item.message_count} 条消息
                   </span>
                   {historyContextItems.length > 0 ? (
                     <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">
@@ -116,7 +119,7 @@ export function AssistantConversationHistory({
                 <Button
                   aria-label={`重命名对话 ${item.title}`}
                   className="self-center text-muted-foreground"
-                  disabled={busy}
+                  disabled={busy || running}
                   size="icon-xs"
                   title="重命名对话"
                   type="button"
@@ -128,7 +131,7 @@ export function AssistantConversationHistory({
                 <Button
                   aria-label={`导出对话 ${item.title}`}
                   className="self-center text-muted-foreground"
-                  disabled={busy}
+                  disabled={busy || running}
                   size="icon-xs"
                   title="导出为笔记"
                   type="button"
@@ -140,7 +143,7 @@ export function AssistantConversationHistory({
                 <Button
                   aria-label={`删除对话 ${item.title}`}
                   className="mr-1 self-center text-muted-foreground hover:text-destructive"
-                  disabled={busy}
+                  disabled={busy || running}
                   size="icon-xs"
                   title="删除对话"
                   type="button"
@@ -161,6 +164,9 @@ export function AssistantConversationHistory({
 }
 
 type AssistantMessageListProps = ChatMessageCallbacks & {
+  awaitingApproval?: boolean;
+  proposalsDisabled?: boolean;
+  decidingProposalId?: string | null;
   contentRef: RefObject<HTMLDivElement>;
   endRef: RefObject<HTMLDivElement>;
   hiddenMessageCount: number;
@@ -178,6 +184,9 @@ type AssistantMessageListProps = ChatMessageCallbacks & {
 };
 
 export function AssistantMessageList({
+  awaitingApproval,
+  proposalsDisabled,
+  decidingProposalId,
   contentRef,
   endRef,
   hiddenMessageCount,
@@ -222,6 +231,9 @@ export function AssistantMessageList({
               ) : null}
               {renderedMessages.map((message) => (
                 <ChatMessage
+                  awaitingApproval={awaitingApproval && message.message_id === streamingMessageId}
+                  proposalsDisabled={proposalsDisabled}
+                  decidingProposalId={decidingProposalId}
                   key={message.message_id}
                   message={message}
                   noteProposals={
@@ -243,7 +255,7 @@ export function AssistantMessageList({
               ))}
             </>
           ) : (
-            <div className="grid h-full min-h-48 min-w-0 place-items-center overflow-hidden rounded-md border border-dashed bg-muted/20 p-4 text-center text-xs leading-5 text-muted-foreground">
+            <div data-material="sidebar-empty" className="grid h-full min-h-48 min-w-0 place-items-center overflow-hidden rounded-md border border-dashed bg-muted/20 p-4 text-center text-xs leading-5 text-muted-foreground">
               <span className="block max-w-[13.5rem] whitespace-normal break-words">
                 Ask about the current content or pinned context.
               </span>

@@ -1,0 +1,36 @@
+.relations-page { container: relations / inline-size; }
+.relation-stage { background: radial-gradient(ellipse at 50% 45%, var(--card) 20%, color-mix(in srgb, var(--muted) 45%, var(--card)) 100%); }
+.relation-viewport { touch-action: none; }
+.relation-viewport:focus-visible { box-shadow: inset 0 0 0 2px var(--ring); }
+.relation-webgl canvas { display: block; }
+.relation-node-label {
+  max-width: 176px; transform: translate(13px, -50%); color: var(--foreground);
+  background: color-mix(in srgb, var(--card) 65%, transparent); cursor: pointer;
+  border: 1px solid transparent; white-space: nowrap;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.relation-node-label[data-kind=tag] { font-weight: 500; }
+.relation-node-label[data-hovered=true], .relation-node-label:focus-visible, .relation-node-label[aria-pressed=true] {
+  color: var(--primary); background: var(--popover); border-color: color-mix(in srgb, var(--primary) 28%, var(--border));
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--foreground) 6%, transparent); outline: none;
+}
+.relation-node-label:focus-visible { outline: 2px solid var(--ring); }
+.relation-node-label svg { flex-shrink: 0; }
+.relation-node-label:disabled { pointer-events: none; }
+.relation-stage[data-presentation="planar"] .relation-node-label { max-width: 154px; border-color: var(--border); background: var(--card); padding: 5px 7px; }
+.relation-stage[data-presentation="planar"] .relation-node-label[aria-pressed=true] { border-color: var(--primary); background: var(--accent); font-weight: 600; }
+.relation-stage[data-presentation="spatial"] .relation-webgl canvas { cursor: grab; }
+.relation-stage .relation-webgl canvas.clickable { cursor: pointer; }
+.relation-stage[data-presentation="spatial"] .relation-webgl canvas:active,
+.relation-stage[data-presentation="planar"] .relation-webgl canvas:active { cursor: grabbing; }
+.relation-legend-tag { color: var(--chart-1); }
+.relation-legend-entry { color: var(--chart-3); }
+.relation-legend-note { color: var(--warning); }
+.relation-detail-bubble { width: min(340px, calc(100vw - 32px)); }
+.relation-details { width: 100%; max-height: min(460px, var(--radix-popover-content-available-height)); }
+.relation-detail-bubble[data-compact=true] .relation-details { max-height: min(168px, var(--radix-popover-content-available-height)); }
+.relation-details > div { overscroll-behavior: contain; scrollbar-gutter: stable; }
+@media (prefers-reduced-motion: reduce) {
+  .relation-detail-bubble { animation: none; }
+  .relation-node-label { transition: none; }
+}

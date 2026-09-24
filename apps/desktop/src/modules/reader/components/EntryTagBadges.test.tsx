@@ -33,9 +33,7 @@ describe('EntryTagBadges', () => {
     expect(view.getByText('一个很长的研究主题名称').closest('[data-slot=badge]')).toBeTruthy();
     expect(trigger.getAttribute('title')).toBeNull();
     fireEvent.pointerEnter(trigger);
-    await tick(HOVER_TIMING.open - 1);
-    expect(view.queryByRole('tooltip')).toBeNull();
-    await tick(1);
+    await tick(0);
     await tick(32); // Let the portal measure its position before testing visibility.
     const preview = view.getByRole('tooltip', { name: '条目标签' });
     for (const path of paths) expect(within(preview).getByRole('listitem', { name: path })).toBeTruthy();

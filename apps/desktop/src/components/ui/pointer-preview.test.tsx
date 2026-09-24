@@ -56,10 +56,9 @@ function ReaderPreview({ segment = 'one' }) {
   return visible ? <div data-hover-surface="true">阅读预览</div> : null;
 }
 describe('reader hover timing', () => {
-  it('does not flash while crossing a segment and cancels pending work on dismissal', async () => {
+  it('opens immediately and stays closed after explicit dismissal', async () => {
     render(<ReaderPreview />);
-    await tick(HOVER_TIMING.reader - 1);
-    expect(screen.queryByText('阅读预览')).toBeNull();
+    expect(screen.getByText('阅读预览')).toBeTruthy();
     fireEvent.keyDown(document, { key: 'Escape' });
     await tick(1000);
     expect(screen.queryByText('阅读预览')).toBeNull();

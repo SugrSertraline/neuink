@@ -1345,3 +1345,153 @@ fn create_parsed_entry_with_segment(
         .unwrap();
     entry
 }
+
+#[test]
+fn segment_note_bookmark_survives_reopen_text_changes_and_trash() {
+    let root = std::env::temp_dir().join(format!("neuink_bookmark_{}", unique_suffix()));
+    let workspace = Workspace::create(&root).unwrap();
+    let entry = workspace.create_entry("Bookmark paper").unwrap();
+    let segment = neuink_domain::SourceSegment::new(
+        neuink_domain::SegmentType::Paragraph,
+        2,
+        None,
+        "Source".into(),
+    )
+    .with_relation_groups(Some("logical-bookmark".into()), None);
+    let uid = segment.uid.clone();
+    workspace.write_segments(&entry.id, &[segment]).unwrap();
+    let notes = workspace
+        .set_segment_note_bookmark(
+            &entry.id,
+            neuink_domain::SegmentUid::from_string("logical-bookmark"),
+            true,
+        )
+        .unwrap();
+    assert_eq!(notes.len(), 1);
+    assert!(notes[0].bookmarked);
+    assert!(notes[0].text.is_empty());
+    assert_eq!(notes[0].segment_uid, uid);
+    workspace
+        .upsert_segment_note(&entry.id, uid.clone(), "Keep this text".into())
+        .unwrap();
+    let notes = workspace
+        .set_segment_note_bookmark(&entry.id, uid.clone(), false)
+        .unwrap();
+    assert_eq!(notes[0].text, "Keep this text");
+    workspace
+        .set_segment_note_bookmark(&entry.id, uid.clone(), true)
+        .unwrap();
+    workspace
+        .upsert_segment_note(&entry.id, uid.clone(), String::new())
+        .unwrap();
+    let reopened = Workspace::open(&root).unwrap();
+    assert!(reopened.read_segment_notes(&entry.id).unwrap()[0].bookmarked);
+    reopened.delete_segment_note(&entry.id, uid).unwrap();
+    assert!(reopened.read_segment_notes(&entry.id).unwrap().is_empty());
+    let trash = reopened.list_trash_items().unwrap();
+    reopened
+        .restore_trash_item(&entry.id, &trash[0].trash_id)
+        .unwrap();
+    assert!(reopened.read_segment_notes(&entry.id).unwrap()[0].bookmarked);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn legacy_segment_note_and_missing_bookmark_source_are_handled() {
+    let note: neuink_domain::SegmentBlockNote = serde_json::from_value(json!({
+        "segment_uid": "legacy", "text": "old note", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"
+    })).unwrap();
+    assert!(!note.bookmarked);
+    let root = std::env::temp_dir().join(format!("neuink_bookmark_{}", unique_suffix()));
+    let workspace = Workspace::create(&root).unwrap();
+    let entry = workspace.create_entry("Paper").unwrap();
+    let segment = neuink_domain::SourceSegment::new(
+        neuink_domain::SegmentType::Paragraph,
+        0,
+        None,
+        "Source".into(),
+    );
+    let uid = segment.uid.clone();
+    workspace.write_segments(&entry.id, &[segment]).unwrap();
+    workspace
+        .set_segment_note_bookmark(&entry.id, uid.clone(), true)
+        .unwrap();
+    workspace.write_segments(&entry.id, &[]).unwrap();
+    assert!(
+        !workspace
+            .set_segment_note_bookmark(&entry.id, uid.clone(), false)
+            .unwrap()[0]
+            .bookmarked
+    );
+    assert!(workspace
+        .set_segment_note_bookmark(&entry.id, uid, true)
+        .is_err());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn segment_note_body_and_bookmark_writes_do_not_overwrite_each_other() {
+    let root = std::env::temp_dir().join(format!("neuink_bookmark_{}", unique_suffix()));
+    let workspace = Workspace::create(&root).unwrap();
+    let second = Workspace::open(&root).unwrap();
+    let entry = workspace.create_entry("Concurrent note").unwrap();
+    let segment = neuink_domain::SourceSegment::new(
+        neuink_domain::SegmentType::Paragraph,
+        0,
+        None,
+        "Source".into(),
+    );
+    let uid = segment.uid.clone();
+    workspace.write_segments(&entry.id, &[segment]).unwrap();
+    let barrier = std::sync::Barrier::new(2);
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            barrier.wait();
+            workspace
+                .upsert_segment_note(&entry.id, uid.clone(), "Keep the edited body".into())
+                .unwrap();
+        });
+        scope.spawn(|| {
+            barrier.wait();
+            second
+                .set_segment_note_bookmark(&entry.id, uid.clone(), true)
+                .unwrap();
+        });
+    });
+    let notes = workspace.read_segment_notes(&entry.id).unwrap();
+    assert_eq!(notes.len(), 1);
+    assert!(notes[0].bookmarked);
+    assert_eq!(notes[0].text, "Keep the edited body");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn segment_note_compare_and_write_is_atomic_and_preserves_bookmarks() {
+    let root = std::env::temp_dir().join(format!("neuink_segment_cas_{}", unique_suffix()));
+    let workspace = Workspace::create(&root).unwrap();
+    let entry = workspace.create_entry("Concurrent note").unwrap();
+    let segment = neuink_domain::SourceSegment::new(neuink_domain::SegmentType::Paragraph, 0, None, "Source".into());
+    let uid = segment.uid.clone();
+    workspace.write_segments(&entry.id, &[segment]).unwrap();
+    workspace.set_segment_note_bookmark(&entry.id, uid.clone(), true).unwrap();
+    let barrier = Barrier::new(2);
+    let results = std::thread::scope(|scope| {
+        let handles: Vec<_> = ["AI", "manual"].into_iter().map(|text| {
+            let (root, id, uid, barrier) = (&root, &entry.id, &uid, &barrier);
+            scope.spawn(move || {
+                let writer = Workspace::open(root).unwrap();
+                barrier.wait();
+                writer.upsert_segment_note_if_text(id, uid.clone(), text.into(), Some(""))
+            })
+        }).collect();
+        handles.into_iter().map(|handle| handle.join().unwrap()).collect::<Vec<_>>()
+    });
+    assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
+    assert_eq!(results.iter().filter(|r| matches!(r, Err(WorkspaceError::SegmentNoteConflict(_)))).count(), 1);
+    let notes = workspace.read_segment_notes(&entry.id).unwrap();
+    assert!(notes[0].bookmarked);
+    workspace.upsert_segment_note(&entry.id, uid.clone(), "new manual edit".into()).unwrap();
+    assert!(matches!(workspace.upsert_segment_note_if_text(&entry.id, uid, "stale AI".into(), Some(&notes[0].text)), Err(WorkspaceError::SegmentNoteConflict(_))));
+    assert_eq!(workspace.read_segment_notes(&entry.id).unwrap()[0].text, "new manual edit");
+    fs::remove_dir_all(root).unwrap();
+}

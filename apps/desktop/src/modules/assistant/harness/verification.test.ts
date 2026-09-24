@@ -8,8 +8,7 @@ import type { GroundedAnswer } from '../sdk/qna';
 import { verifyHarnessResult } from './verification';
 
 const activeExecution = {
-  agent: { permissions: { canWriteProposals: true } },
-  skillPackages: []
+  agent: { permissions: { canWriteProposals: true } }
 } as unknown as AgentExecutionSelection;
 
 const invocationPlan = {
@@ -19,7 +18,6 @@ const invocationPlan = {
   mode: 'agent_execute',
   noteEditMode: 'append',
   rationale: '',
-  skillIdsToLoad: [],
   subagentTasks: [],
   writePolicy: 'proposal_only'
 } satisfies AgentInvocationPlan;

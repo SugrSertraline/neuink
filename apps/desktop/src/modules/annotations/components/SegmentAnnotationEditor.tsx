@@ -22,6 +22,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { annotationPaperProps } from '../annotationPaper';
 import { pageLabel } from "@/shared/lib/uiTerminology";
 import type {
   Annotation,
@@ -482,6 +483,7 @@ export function SegmentAnnotationEditor({
               <AnnotationForm
                 busy={busy}
                 draft={draft}
+                paperProps={annotationPaperProps(editingAnnotation ?? draft)}
                 mode={editorMode}
                 selectionScoped={Boolean(editingAnnotation?.text_selection)}
               onCancel={cancelEditing}
@@ -564,6 +566,7 @@ function AnnotationCard({
   return (
     <div
       aria-pressed={selected}
+      {...annotationPaperProps(annotation)}
       className={cn(
         "grid w-full gap-2 rounded-md border bg-white px-3 py-3 text-left transition-colors hover:border-primary/30 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         selected && "border-primary/35 bg-primary/5",
@@ -629,6 +632,7 @@ function AnnotationCard({
 function AnnotationForm({
   busy,
   draft,
+  paperProps,
   mode,
   selectionScoped,
   onCancel,
@@ -637,6 +641,7 @@ function AnnotationForm({
 }: {
   busy: boolean;
   draft: AnnotationDraft;
+  paperProps: ReturnType<typeof annotationPaperProps>;
   mode: Exclude<EditorMode, "idle">;
   selectionScoped: boolean;
   onCancel: () => void;
@@ -648,7 +653,7 @@ function AnnotationForm({
   const selectedType = getAnnotationTypeDefinition(draft.kind);
 
   return (
-    <section className="grid min-h-full grid-rows-[auto_auto_minmax(0,1fr)] gap-3 rounded-md border bg-white p-3">
+    <section {...paperProps} className="grid min-h-full grid-rows-[auto_auto_minmax(0,1fr)] gap-3 rounded-md border bg-white p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-foreground">

@@ -1,10 +1,12 @@
+import { ADVANCED_ASSISTANT_SETTINGS_VISIBLE, readSettingsTab, rememberSettingsTab, visibleSettingsTab, type SettingsTab, type SettingsNavigationTarget } from '../settingsCatalog';
+import { useSettingsAutosave } from '../useSettingsAutosave';
 import { open } from '@tauri-apps/plugin-dialog';
 import {
   ChevronDown,
   ChevronUp,
   KeyRound
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { useToast } from '@/shared/hooks/useToast';
 import { Button } from '@/components/ui/button';
@@ -20,9 +22,7 @@ import {
   clearLlmSettings,
   deleteLlmProfile,
   getLlmSettings,
-  importSkillPackageArchive,
   loadAgentRuntimeSettings,
-  listSkillPackages,
   openPathInFileManager,
   saveAgentRuntimeSettings,
   saveLlmSettings,
@@ -43,9 +43,7 @@ import {
   type WorkspaceSettings
 } from '@/shared/ipc/workspaceApi';
 import {
-  createBlankSkillPackage,
   equalAgentRuntimeSettings,
-  mergeRegistrySkillPackages,
   normalizeAgentRuntimeSettings,
   readAgentRuntimeSettings
 } from '@/shared/lib/agentRuntimeSettings';
@@ -57,8 +55,7 @@ import type { AppThemePreset, AppThemePresetId } from '@/shared/lib/themePresets
 import type { UiScale } from '@/shared/lib/uiScale';
 import type {
   AgentProfile,
-  AgentRuntimeSettings,
-  SkillPackage
+  AgentRuntimeSettings
 } from '@/shared/types/agentRuntime';
 
 import {
@@ -78,6 +75,7 @@ import {
 } from './providerPresets';
 
 type SettingsPanelProps = {
+  navigationTarget?: SettingsNavigationTarget;
   onBack?: () => void;
   parserEndpoint: string;
   parserApiKey: string;
@@ -129,6 +127,7 @@ const DEFAULT_TRANSLATION_AUTOMATION: TranslationAutomationSettings = {
 
 
 export function SettingsPanel({
+  navigationTarget,
   onBack,
   parserEndpoint,
   parserApiKey,
@@ -194,31 +193,16 @@ export function SettingsPanel({
   const [pendingWorkspaceAction, setPendingWorkspaceAction] = useState<PendingWorkspaceAction | null>(null);
   const [profileTestStates, setProfileTestStates] = useState<Record<string, ProfileTestState>>({});
 
-  useEffect(() => {
-    setDraftReaderPreferences(readerPreferences);
-    setSavedReaderPreferences(readerPreferences);
-  }, [readerPreferences]);
-  const savedProfileFingerprintRef = useRef<string | null>(null);
-  const profileSaveRequestRef = useRef(0);
-  const pendingSavedParserEndpointRef = useRef<string | null>(null);
-  const autoSaveToastTimerRef = useRef<number | null>(null);
-  const announceAutoSave = (description: string) => {
-    if (autoSaveToastTimerRef.current !== null) {
-      window.clearTimeout(autoSaveToastTimerRef.current);
-    }
-    autoSaveToastTimerRef.current = window.setTimeout(() => {
-      autoSaveToastTimerRef.current = null;
-      notify({ tone: 'success', title: '设置已自动保存', description });
-    }, 450);
-  };
-  useEffect(
-    () => () => {
-      if (autoSaveToastTimerRef.current !== null) {
-        window.clearTimeout(autoSaveToastTimerRef.current);
-      }
-    },
-    []
-  );
+  const [modelsReady, setModelsReady] = useState(false);
+  const [workspaceReady, setWorkspaceReady] = useState(false);
+  const [runtimeReady, setRuntimeReady] = useState(false);
+  const [loadErrors, setLoadErrors] = useState<Record<string, string>>({});
+  const [reloadModels, setReloadModels] = useState(0);
+  const [reloadWorkspace, setReloadWorkspace] = useState(0);
+  const [reloadRuntime, setReloadRuntime] = useState(0);
+  const loadFailed = (key: string, error: unknown) => setLoadErrors(current => ({ ...current, [key]: error instanceof Error ? error.message : String(error) }));
+  const clearLoadError = (key: string) => setLoadErrors(current => { const next = { ...current }; delete next[key]; return next; });
+  const [savedTranslationAutomation, setSavedTranslationAutomation] = useState(DEFAULT_TRANSLATION_AUTOMATION);
   const [draftAssistantProfileId, setDraftAssistantProfileId] = useState<string | null>(null);
   const [draftTranslationProfileId, setDraftTranslationProfileId] = useState<string | null>(null);
   const [draftAgentRuntimeSettings, setDraftAgentRuntimeSettings] = useState<AgentRuntimeSettings>(() =>
@@ -230,22 +214,8 @@ export function SettingsPanel({
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(
     draftAgentRuntimeSettings.subagents[0]?.id ?? null
   );
-  const [selectedSkillPackageId, setSelectedSkillPackageId] = useState<string | null>(
-    draftAgentRuntimeSettings.skillPackages[0]?.id ?? null
-  );
-  const [activeSettingsTab, setActiveSettingsTab] = useState<
-    | 'models'
-    | 'tasks'
-    | 'data'
-    | 'appearance'
-    | 'reader'
-    | 'external-tools'
-    | 'main-agent'
-    | 'subagents'
-    | 'skills'
-  >(
-    'models'
-  );
+  const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>(readSettingsTab);
+  useEffect(() => rememberSettingsTab(activeSettingsTab), [activeSettingsTab]);
   const editingProfile = useMemo(
     () => settings.profiles.find((profile) => profile.id === editingId) ?? null,
     [editingId, settings.profiles]
@@ -265,70 +235,56 @@ export function SettingsPanel({
 
   useEffect(() => {
     let cancelled = false;
-    void getLlmSettings().then((nextSettings) => {
-      if (cancelled) {
-        return;
-      }
+    setModelsReady(false);
+    clearLoadError('models');
+    void getLlmSettings().then(nextSettings => {
+      if (cancelled) return;
       applySettings(nextSettings);
-      const target = nextSettings.profiles[0] ?? null;
-      if (target) {
-        fillForm(target);
-        // 仅用于初始化编辑表单，不应让第一条模型卡片呈现为已选中状态。
-        setEditingId(null);
-      }
-      setDraftAssistantProfileId(nextSettings.assistant_profile_id);
-      setDraftTranslationProfileId(nextSettings.translation_profile_id);
-      onSettingsChanged?.(nextSettings);
-    });
-    void getWorkspaceSettings()
-      .then((nextWorkspaceSettings) => {
-        if (cancelled) {
-          return;
-        }
-        setWorkspaceSettings(nextWorkspaceSettings);
-        setTranslationAutomation(
-          nextWorkspaceSettings.translation_automation ?? DEFAULT_TRANSLATION_AUTOMATION
-        );
-      })
-      .catch(() => undefined);
+      const target = nextSettings.profiles[0];
+      if (target) { fillForm(target); setEditingId(null); }
+      setModelsReady(true);
+    }).catch(error => { if (!cancelled) loadFailed('models', error); });
+    return () => { cancelled = true; };
+  }, [reloadModels]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [onSettingsChanged]);
+  useEffect(() => {
+    let cancelled = false;
+    setWorkspaceReady(false);
+    clearLoadError('workspace');
+    void getWorkspaceSettings().then(nextSettings => {
+      if (cancelled) return;
+      setWorkspaceSettings(nextSettings);
+      const automation = nextSettings.translation_automation ?? DEFAULT_TRANSLATION_AUTOMATION;
+      setTranslationAutomation(automation);
+      setSavedTranslationAutomation(automation);
+      setWorkspaceReady(true);
+    }).catch(error => { if (!cancelled) loadFailed('workspace', error); });
+    return () => { cancelled = true; };
+  }, [reloadWorkspace]);
 
   useEffect(() => {
     const currentRoot = workspaceRoot ?? workspaceSettings?.root ?? '';
-    if (!currentRoot) {
-      return;
-    }
+    setRuntimeReady(false);
+    clearLoadError('runtime');
+    if (!currentRoot || !ADVANCED_ASSISTANT_SETTINGS_VISIBLE) return;
     let cancelled = false;
-    void Promise.all([loadAgentRuntimeSettings(currentRoot), listSkillPackages(currentRoot)])
-      .then(([workspaceRuntimeSettings, registrySkills]) => {
+    void loadAgentRuntimeSettings(currentRoot)
+      .then((workspaceRuntimeSettings) => {
         if (cancelled) {
           return;
         }
-        const nextSettings = mergeRegistrySkillPackages(
-          normalizeAgentRuntimeSettings(workspaceRuntimeSettings ?? readAgentRuntimeSettings()),
-          registrySkills
-        );
+        const nextSettings = normalizeAgentRuntimeSettings(workspaceRuntimeSettings ?? readAgentRuntimeSettings());
         setDraftAgentRuntimeSettings(nextSettings);
         setSavedAgentRuntimeSettings(nextSettings);
+        setRuntimeReady(true);
       })
-      .catch(() => undefined);
+      .catch(error => { if (!cancelled) loadFailed('runtime', error); });
     return () => {
       cancelled = true;
     };
-  }, [workspaceRoot, workspaceSettings?.root]);
+  }, [workspaceRoot, workspaceSettings?.root, reloadRuntime]);
 
   useEffect(() => {
-    if (
-      pendingSavedParserEndpointRef.current &&
-      parserEndpoint !== pendingSavedParserEndpointRef.current
-    ) {
-      return;
-    }
-    pendingSavedParserEndpointRef.current = null;
     setCustomParserEndpoint(parserEndpoint);
     setSavedParserEndpoint(parserEndpoint);
   }, [parserEndpoint]);
@@ -338,30 +294,16 @@ export function SettingsPanel({
     setSavedParserApiKey(parserApiKey);
   }, [parserApiKey]);
 
-  useEffect(() => {
-    if (customParserEndpoint === savedParserEndpoint) {
-      return;
-    }
-    pendingSavedParserEndpointRef.current = customParserEndpoint;
-    const timer = window.setTimeout(() => {
-      setSavedParserEndpoint(customParserEndpoint);
-      onParserEndpointChange(customParserEndpoint);
-      announceAutoSave('解析 URL 已更新。');
-    }, 1500);
-    return () => window.clearTimeout(timer);
-  }, [customParserEndpoint, savedParserEndpoint, onParserEndpointChange]);
-
-  useEffect(() => {
-    if (customParserApiKey === savedParserApiKey) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      setSavedParserApiKey(customParserApiKey);
-      onParserApiKeyChange(customParserApiKey);
-      announceAutoSave('解析 API Key 已更新。');
-    }, 1500);
-    return () => window.clearTimeout(timer);
-  }, [customParserApiKey, savedParserApiKey, onParserApiKeyChange]);
+  const parserEndpointSave = useSettingsAutosave({
+    closeScope: 'settings',
+    value: customParserEndpoint, savedValue: savedParserEndpoint, equal: Object.is, delay: 500,
+    save: onParserEndpointChange, onSaved: setSavedParserEndpoint
+  });
+  const parserKeySave = useSettingsAutosave({
+    closeScope: 'settings',
+    value: customParserApiKey, savedValue: savedParserApiKey, equal: Object.is, delay: 500,
+    save: onParserApiKeyChange, onSaved: setSavedParserApiKey
+  });
 
   useEffect(() => {
     setDraftReaderPreferences(readerPreferences);
@@ -374,37 +316,55 @@ export function SettingsPanel({
         ? current
         : draftAgentRuntimeSettings.subagents[0]?.id ?? null
     );
-    setSelectedSkillPackageId((current) =>
-      draftAgentRuntimeSettings.skillPackages.some((skillPackage) => skillPackage.id === current)
-        ? current
-        : draftAgentRuntimeSettings.skillPackages[0]?.id ?? null
-    );
   }, [draftAgentRuntimeSettings]);
 
-  useEffect(() => {
-    const root = workspaceRoot ?? workspaceSettings?.root ?? '';
-    if (!root || equalAgentRuntimeSettings(draftAgentRuntimeSettings, savedAgentRuntimeSettings)) {
-      return;
+  const runtimeRoot = workspaceRoot ?? workspaceSettings?.root ?? '';
+  const readerSave = useSettingsAutosave({
+    closeScope: 'settings', delay: 0,
+    value: draftReaderPreferences, savedValue: savedReaderPreferences, equal: equalReaderPreferences,
+    save: onReaderPreferencesChange, onSaved: setSavedReaderPreferences
+  });
+  const runtimeSave = useSettingsAutosave({
+    closeScope: 'settings',
+    value: draftAgentRuntimeSettings, savedValue: savedAgentRuntimeSettings, equal: equalAgentRuntimeSettings,
+    enabled: ADVANCED_ASSISTANT_SETTINGS_VISIBLE && runtimeReady && Boolean(runtimeRoot), scope: runtimeRoot,
+    save: value => saveAgentRuntimeSettings(runtimeRoot, normalizeAgentRuntimeSettings(value)),
+    onSaved: setSavedAgentRuntimeSettings
+  });
+  const translationSave = useSettingsAutosave({
+    closeScope: 'settings',
+    value: translationAutomation, savedValue: savedTranslationAutomation, equal: equalJson, enabled: workspaceReady,
+    save: value => updateTranslationAutomationSettings(value.auto_translate_pdf, value.segment_types),
+    onSaved: setSavedTranslationAutomation
+  });
+  const taskAssignments = useMemo(() => ({ assistant: draftAssistantProfileId, translation: draftTranslationProfileId }), [draftAssistantProfileId, draftTranslationProfileId]);
+  const savedTaskAssignments = useMemo(() => ({ assistant: settings.assistant_profile_id, translation: settings.translation_profile_id }), [settings.assistant_profile_id, settings.translation_profile_id]);
+  const taskSave = useSettingsAutosave({
+    closeScope: 'settings',
+    value: taskAssignments, savedValue: savedTaskAssignments, equal: equalJson, enabled: modelsReady && !busy,
+    save: async value => {
+      if (value.assistant && value.assistant !== savedTaskAssignments.assistant) await setTaskLlmProfile('assistant', value.assistant);
+      if (value.translation && value.translation !== savedTaskAssignments.translation) await setTaskLlmProfile('translation', value.translation);
+    },
+    onSaved: value => {
+      const next = { ...settings, assistant_profile_id: value.assistant, translation_profile_id: value.translation,
+        assistant_profile: settings.profiles.find(profile => profile.id === value.assistant) ?? null,
+        translation_profile: settings.profiles.find(profile => profile.id === value.translation) ?? null };
+      setSettings(next);
+      onSettingsChanged?.(next);
     }
-
-    const timer = window.setTimeout(() => {
-      const nextSettings = normalizeAgentRuntimeSettings(draftAgentRuntimeSettings);
-      void saveAgentRuntimeSettings(root, nextSettings)
-        .then(() => {
-          setSavedAgentRuntimeSettings(nextSettings);
-          announceAutoSave('Agent 与 Skill 设置已更新。');
-        })
-        .catch((caught) => {
-          notify({
-            tone: 'danger',
-            title: 'Agent 设置保存失败',
-            description: caught instanceof Error ? caught.message : String(caught)
-          });
-        });
-    }, 500);
-
-    return () => window.clearTimeout(timer);
-  }, [draftAgentRuntimeSettings, savedAgentRuntimeSettings, workspaceRoot, workspaceSettings?.root]);
+  });
+  const feedback: Array<{ key: string; message: string; error?: boolean; retry?: () => void }> = [
+    ...Object.entries(loadErrors).map(([key, error]) => ({ key, error: true,
+      message: `${key === 'models' ? '模型' : key === 'workspace' ? '资料库' : '助手与技能'}配置加载失败：${error}`,
+      retry: () => key === 'models' ? setReloadModels(n => n + 1) : key === 'workspace' ? setReloadWorkspace(n => n + 1) : setReloadRuntime(n => n + 1) })),
+    ...([['阅读偏好', readerSave], ['解析地址', parserEndpointSave], ['解析凭据', parserKeySave], ['助手与技能', runtimeSave], ['自动翻译', translationSave], ['任务模型', taskSave]] as const)
+      .filter(([, status]) => status.dirty || status.error || status.saving)
+      .map(([key, status]) => ({ key, error: Boolean(status.error), message: `${key}：${status.error ? '保存失败，修改已保留' : status.saving ? '保存中…' : '未保存'}`, retry: status.error ? status.retry : undefined }))
+  ];
+  if (!feedback.length && (!modelsReady || !workspaceReady || (ADVANCED_ASSISTANT_SETTINGS_VISIBLE && Boolean(runtimeRoot) && !runtimeReady))) {
+    feedback.push({ key: 'loading', message: '正在读取配置…' });
+  }
 
   const applySettings = (nextSettings: LlmSettingsState) => {
     setSettings(nextSettings);
@@ -413,19 +373,7 @@ export function SettingsPanel({
     onSettingsChanged?.(nextSettings);
   };
 
-  const saveTranslationAutomation = (nextSettings: TranslationAutomationSettings) => {
-    setTranslationAutomation(nextSettings);
-    void updateTranslationAutomationSettings(
-      nextSettings.auto_translate_pdf,
-      nextSettings.segment_types
-    )
-      .then((nextWorkspaceSettings) => {
-        setWorkspaceSettings(nextWorkspaceSettings);
-        setTranslationAutomation(nextWorkspaceSettings.translation_automation);
-        announceAutoSave('PDF 自动翻译设置已更新。');
-      })
-      .catch((caught) => notifyFailure('自动保存失败', caught));
-  };
+  const saveTranslationAutomation = (nextSettings: TranslationAutomationSettings) => setTranslationAutomation(nextSettings);
 
   const fillForm = (profile: LlmProfile) => {
     setEditingId(profile.id);
@@ -438,69 +386,7 @@ export function SettingsPanel({
     setTemperature(profile.temperature == null ? '0.2' : String(profile.temperature));
     setTopP(profile.top_p == null ? '' : String(profile.top_p));
     setMaxOutputTokens(profile.max_output_tokens == null ? '' : String(profile.max_output_tokens));
-    savedProfileFingerprintRef.current = profileFingerprint(profile);
   };
-
-  useEffect(() => {
-    if (!editingId || !baseUrl.trim() || !model.trim()) {
-      return;
-    }
-
-    const fingerprint = profileFingerprint({
-      api_key: apiKey || null,
-      api_protocol: apiProtocol,
-      base_url: baseUrl,
-      id: editingId,
-      max_context_length: Number(maxContextLength) || null,
-      max_output_tokens: Number(maxOutputTokens) || null,
-      model,
-      name: name || model,
-      temperature: parseOptionalNumber(temperature) ?? null,
-      top_p: parseOptionalNumber(topP) ?? null
-    });
-    if (fingerprint === savedProfileFingerprintRef.current) {
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      const requestId = profileSaveRequestRef.current + 1;
-      profileSaveRequestRef.current = requestId;
-      void saveLlmSettings({
-        profileId: editingId,
-        name: name || model,
-        baseUrl,
-        apiProtocol,
-        model,
-        apiKey,
-        maxContextLength: Number(maxContextLength) || undefined,
-        temperature: parseOptionalNumber(temperature),
-        topP: parseOptionalNumber(topP),
-        maxOutputTokens: Number(maxOutputTokens) || undefined
-      })
-        .then((nextSettings) => {
-          if (requestId !== profileSaveRequestRef.current) {
-            return;
-          }
-          savedProfileFingerprintRef.current = fingerprint;
-          applySettings(nextSettings);
-          announceAutoSave('模型配置已更新。');
-        })
-        .catch((caught) => notifyFailure('模型配置自动保存失败', caught));
-    }, 1300);
-
-    return () => window.clearTimeout(timer);
-  }, [
-    apiKey,
-    apiProtocol,
-    baseUrl,
-    editingId,
-    maxContextLength,
-    maxOutputTokens,
-    model,
-    name,
-    temperature,
-    topP
-  ]);
 
   const updateAgentRuntimeSettings = (nextSettings: AgentRuntimeSettings) => {
     setDraftAgentRuntimeSettings(normalizeAgentRuntimeSettings(nextSettings));
@@ -522,50 +408,6 @@ export function SettingsPanel({
     });
   };
 
-  const updateSkillPackage = (nextSkillPackage: SkillPackage) => {
-    updateAgentRuntimeSettings({
-      ...draftAgentRuntimeSettings,
-      skillPackages: draftAgentRuntimeSettings.skillPackages.map((skillPackage) =>
-        skillPackage.id === nextSkillPackage.id ? nextSkillPackage : skillPackage
-      )
-    });
-  };
-
-  const importSkillPackage = async () => {
-    const selected = await open({
-      filters: [{ name: 'Skill Package', extensions: ['zip'] }],
-      multiple: false
-    });
-    if (typeof selected !== 'string') {
-      return;
-    }
-    setBusy(true);
-    try {
-      const currentRoot = workspaceRoot ?? workspaceSettings?.root ?? '';
-      if (!currentRoot) {
-        notify({ title: '无法导入 Skill', description: '请先打开或配置工作区。' });
-        return;
-      }
-      const nextSkillPackage = await importSkillPackageArchive(currentRoot, selected);
-      updateAgentRuntimeSettings({
-        ...draftAgentRuntimeSettings,
-        skillPackages: [
-          ...draftAgentRuntimeSettings.skillPackages.filter(
-            (skillPackage) => skillPackage.id !== nextSkillPackage.id
-          ),
-          nextSkillPackage
-        ]
-      });
-      setSelectedSkillPackageId(nextSkillPackage.id);
-      setActiveSettingsTab('skills');
-      notify({ tone: 'success', title: '技能包已导入', description: '设置将自动保存。' });
-    } catch (caught) {
-      notifyFailure('导入 Skill 失败', caught);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const newProfile = () => {
     setEditingId(null);
     setName('');
@@ -582,11 +424,10 @@ export function SettingsPanel({
   const createProfile = async () => {
     if (!baseUrl.trim() || !model.trim()) {
       notify({ tone: 'danger', title: '无法创建模型配置', description: '请先填写 Base URL 和模型 ID。' });
-      return;
+      return false;
     }
     setBusy(true);
     try {
-      profileSaveRequestRef.current += 1;
       const previousProfileIds = new Set(settings.profiles.map((profile) => profile.id));
       const nextSettings = await saveLlmSettings({
         name: name || model,
@@ -605,12 +446,14 @@ export function SettingsPanel({
         fillForm(createdProfile);
       }
       notify({ tone: 'success', title: '模型配置已创建', description: name || model });
+      return true;
     } catch (caught) {
       notify({
         tone: 'danger',
         title: '创建模型配置失败',
         description: caught instanceof Error ? caught.message : String(caught)
       });
+      return false;
     } finally {
       setBusy(false);
     }
@@ -619,7 +462,7 @@ export function SettingsPanel({
   const saveCurrentProfile = async () => {
     if (!editingId || !baseUrl.trim() || !model.trim()) {
       notify({ tone: 'danger', title: '无法保存模型配置', description: '请先填写 Base URL 和模型 ID。' });
-      return;
+      return false;
     }
     setBusy(true);
     try {
@@ -641,12 +484,14 @@ export function SettingsPanel({
         fillForm(savedProfile);
       }
       notify({ tone: 'success', title: '模型配置已保存', description: name || model });
+      return true;
     } catch (caught) {
       notify({
         tone: 'danger',
         title: '保存模型配置失败',
         description: caught instanceof Error ? caught.message : String(caught)
       });
+      return false;
     } finally {
       setBusy(false);
     }
@@ -714,74 +559,6 @@ export function SettingsPanel({
       });
     } finally {
       setModelRefreshBusy(false);
-    }
-  };
-
-  const saveAll = async () => {
-    setBusy(true);
-    setWorkspaceBusy(true);
-    try {
-      let nextSettings = settings;
-      if (baseUrl.trim() && model.trim()) {
-        nextSettings = await saveLlmSettings({
-          profileId: editingId ?? undefined,
-          name: name || model || 'Untitled model',
-          baseUrl,
-          apiProtocol,
-          model,
-          apiKey,
-          maxContextLength: Number(maxContextLength) || undefined,
-          temperature: parseOptionalNumber(temperature),
-          topP: parseOptionalNumber(topP),
-          maxOutputTokens: Number(maxOutputTokens) || undefined
-        });
-        const savedProfile = editingId
-          ? nextSettings.profiles.find((profile) => profile.id === editingId) ?? null
-          : nextSettings.profiles[nextSettings.profiles.length - 1] ?? null;
-        if (savedProfile) {
-          fillForm(savedProfile);
-          const assistantTarget = draftAssistantProfileId ?? nextSettings.assistant_profile_id;
-          const translationTarget = draftTranslationProfileId ?? nextSettings.translation_profile_id;
-          if (assistantTarget && assistantTarget !== nextSettings.assistant_profile_id) {
-            nextSettings = await setTaskLlmProfile('assistant', assistantTarget);
-          }
-          if (translationTarget && translationTarget !== nextSettings.translation_profile_id) {
-            nextSettings = await setTaskLlmProfile('translation', translationTarget);
-          }
-        }
-      } else if (settings.profiles.length > 0) {
-        if (draftAssistantProfileId && draftAssistantProfileId !== settings.assistant_profile_id) {
-          nextSettings = await setTaskLlmProfile('assistant', draftAssistantProfileId);
-        }
-        if (draftTranslationProfileId && draftTranslationProfileId !== nextSettings.translation_profile_id) {
-          nextSettings = await setTaskLlmProfile('translation', draftTranslationProfileId);
-        }
-      }
-
-      applySettings(nextSettings);
-      const normalizedRuntimeSettings = normalizeAgentRuntimeSettings(draftAgentRuntimeSettings);
-      const agentRuntimeRoot = workspaceRoot ?? workspaceSettings?.root ?? '';
-      if (agentRuntimeRoot) {
-        await saveAgentRuntimeSettings(agentRuntimeRoot, normalizedRuntimeSettings);
-      }
-      setDraftAgentRuntimeSettings(normalizedRuntimeSettings);
-      setSavedAgentRuntimeSettings(normalizedRuntimeSettings);
-      const nextParserEndpoint = customParserEndpoint.trim();
-      const nextParserApiKey = customParserApiKey.trim();
-      pendingSavedParserEndpointRef.current = nextParserEndpoint;
-      setSavedParserEndpoint(nextParserEndpoint);
-      setSavedParserApiKey(nextParserApiKey);
-      onParserEndpointChange(nextParserEndpoint);
-      onParserApiKeyChange(nextParserApiKey);
-      onReaderPreferencesChange(draftReaderPreferences);
-      setSavedReaderPreferences(draftReaderPreferences);
-
-      notify({ tone: 'success', title: '设置已保存', description: '模型、任务和解析来源已应用。' });
-    } catch (caught) {
-      notifyFailure('保存设置失败', caught);
-    } finally {
-      setBusy(false);
-      setWorkspaceBusy(false);
     }
   };
 
@@ -1010,6 +787,12 @@ export function SettingsPanel({
     <>
       <SettingsPanelLayout
       activeSettingsTab={activeSettingsTab}
+      navigationTarget={navigationTarget}
+      modelsUnavailable={!modelsReady}
+      modelMutationBusy={taskSave.dirty || taskSave.saving}
+      workspaceSettingsUnavailable={!workspaceReady}
+      runtimeUnavailable={!runtimeReady}
+      feedback={feedback}
       apiKey={apiKey}
       apiProtocol={apiProtocol}
       baseUrl={baseUrl}
@@ -1087,12 +870,7 @@ export function SettingsPanel({
       onNewProfile={newProfile}
       onParserEndpointChange={setCustomParserEndpoint}
       onParserApiKeyChange={setCustomParserApiKey}
-      onReaderPreferencesChange={(nextPreferences) => {
-        setDraftReaderPreferences(nextPreferences);
-        setSavedReaderPreferences(nextPreferences);
-        onReaderPreferencesChange(nextPreferences);
-        announceAutoSave('阅读设置已更新。');
-      }}
+      onReaderPreferencesChange={setDraftReaderPreferences}
       onProviderPresetSelect={(value) => {
         if (value === '__custom__') {
           newProfile();
@@ -1115,7 +893,7 @@ export function SettingsPanel({
       onDeleteProfile={(profileId) => deleteProfile(profileId)}
       onSaveProfile={() => saveCurrentProfile()}
       onResetWorkspaceRoot={() => void resetWorkspaceRoot()}
-      onSetActiveSettingsTab={setActiveSettingsTab}
+      onSetActiveSettingsTab={tab => setActiveSettingsTab(visibleSettingsTab(tab))}
       onAddAgent={() => {
         notify({
           title: '暂不支持新增子 Agent',
@@ -1123,30 +901,9 @@ export function SettingsPanel({
         });
         setActiveSettingsTab('subagents');
       }}
-      onAddSkillPackage={() => {
-        const nextSkillPackage = createBlankSkillPackage(
-          draftAgentRuntimeSettings.skillPackages.length + 1
-        );
-        updateAgentRuntimeSettings({
-          ...draftAgentRuntimeSettings,
-          skillPackages: [...draftAgentRuntimeSettings.skillPackages, nextSkillPackage]
-        });
-        setSelectedSkillPackageId(nextSkillPackage.id);
-        setActiveSettingsTab('skills');
-      }}
-      onImportSkillPackage={() => void importSkillPackage()}
       onSetTaskProfile={(task, profileId) => {
-        if (task === 'assistant') {
-          setDraftAssistantProfileId(profileId);
-        } else {
-          setDraftTranslationProfileId(profileId);
-        }
-        void setTaskLlmProfile(task, profileId)
-          .then((nextSettings) => {
-            applySettings(nextSettings);
-            announceAutoSave('任务模型已更新。');
-          })
-          .catch((caught) => notifyFailure('任务模型自动保存失败', caught));
+        if (task === 'assistant') setDraftAssistantProfileId(profileId);
+        else setDraftTranslationProfileId(profileId);
       }}
       onTemperatureChange={setTemperature}
       onTest={() => void test()}
@@ -1178,44 +935,11 @@ export function SettingsPanel({
         void agentId;
         notify({ title: '内置子 Agent 不能删除', description: '可以在 Agent 设置中将其停用。' });
       }}
-      onRemoveSkillPackage={(skillPackageId) => {
-        updateAgentRuntimeSettings({
-          ...draftAgentRuntimeSettings,
-          mainAssistant: {
-            ...draftAgentRuntimeSettings.mainAssistant,
-            allowedSkillPackageIds: draftAgentRuntimeSettings.mainAssistant.allowedSkillPackageIds.filter(
-              (id) => id !== skillPackageId
-            )
-          },
-          subagents: draftAgentRuntimeSettings.subagents.map((agent) => ({
-            ...agent,
-            allowedSkillPackageIds: agent.allowedSkillPackageIds.filter(
-              (id) => id !== skillPackageId
-            )
-          })),
-          skillPackages: draftAgentRuntimeSettings.skillPackages.filter(
-            (skillPackage) => skillPackage.id !== skillPackageId
-          )
-        });
-      }}
-      onOpenSkillPackageFolder={(skillPackage) => {
-        const path = skillPackage.packagePath ?? skillPackage.skillMarkdownPath;
-        if (!path) {
-          notify({ title: '无法打开 Skill 目录', description: '这个 Skill 还没有本地安装目录。' });
-          return;
-        }
-        void openPathInFileManager(path).catch((caught) => {
-          notifyFailure('打开 Skill 目录失败', caught);
-        });
-      }}
       onSelectAgent={setSelectedAgentId}
-      onSelectSkillPackage={setSelectedSkillPackageId}
       onUpdateAgent={updateAgent}
       onUpdateRuntimeSettings={updateAgentRuntimeSettings}
-      onUpdateSkillPackage={updateSkillPackage}
       runtimeSettings={draftAgentRuntimeSettings}
       selectedAgentId={selectedAgentId}
-      selectedSkillPackageId={selectedSkillPackageId}
       />
       <Dialog
         open={Boolean(pendingWorkspaceAction)}
@@ -1285,98 +1009,6 @@ function formatEndpointForDisplay(value: string) {
   return trimmed;
 }
 
-type PendingSettingsDraft = {
-  apiProtocol: LlmApiProtocol;
-  baseUrl: string;
-  customParserEndpoint: string;
-  customParserApiKey: string;
-  draftAgentRuntimeSettings: AgentRuntimeSettings;
-  draftAssistantProfileId: string | null;
-  draftTranslationProfileId: string | null;
-  effectiveParserEndpoint: string;
-  editingId: string | null;
-  name: string;
-  apiKey: string;
-  maxContextLength: string;
-  maxOutputTokens: string;
-  model: string;
-  readerPreferences: ReaderPreferences;
-  savedParserEndpoint: string;
-  savedParserApiKey: string;
-  savedReaderPreferences: ReaderPreferences;
-  savedAgentRuntimeSettings: AgentRuntimeSettings;
-  settings: LlmSettingsState;
-  temperature: string;
-  topP: string;
-};
-
-function profileFingerprint(profile: {
-  api_key: string | null;
-  api_protocol: LlmApiProtocol;
-  base_url: string;
-  id: string;
-  max_context_length: number | null;
-  max_output_tokens: number | null;
-  model: string;
-  name: string;
-  temperature: number | null;
-  top_p: number | null;
-}) {
-  return JSON.stringify({
-    apiKey: profile.api_key ?? '',
-    apiProtocol: profile.api_protocol,
-    baseUrl: profile.base_url.trim(),
-    maxContextLength: profile.max_context_length,
-    maxOutputTokens: profile.max_output_tokens,
-    model: profile.model.trim(),
-    name: profile.name.trim(),
-    temperature: profile.temperature,
-    topP: profile.top_p
-  });
-}
-
-function hasPendingChanges(draft: PendingSettingsDraft) {
-  const editingProfile = draft.settings.profiles.find((profile) => profile.id === draft.editingId) ?? null;
-  const isEditingNewProfile = !draft.editingId && draft.baseUrl.trim() && draft.model.trim();
-  const modelChanged = editingProfile
-    ? editingProfile.name !== (draft.name || draft.model || 'Untitled model') ||
-      editingProfile.base_url !== normalizeBaseUrl(draft.baseUrl) ||
-      resolveLlmApiProtocol(editingProfile.api_protocol) !== draft.apiProtocol ||
-      editingProfile.model !== draft.model.trim() ||
-      (editingProfile.api_key ?? '') !== draft.apiKey.trim() ||
-      String(editingProfile.max_context_length ?? 8192) !== String(Number(draft.maxContextLength) || 8192) ||
-      String(editingProfile.temperature ?? 0.2) !== String(parseOptionalNumber(draft.temperature) ?? 0.2) ||
-      String(editingProfile.top_p ?? '') !== String(parseOptionalNumber(draft.topP) ?? '') ||
-      String(editingProfile.max_output_tokens ?? '') !== String(Number(draft.maxOutputTokens) || '')
-    : Boolean(isEditingNewProfile);
-
-  const assistantChanged =
-    draft.draftAssistantProfileId != null &&
-    draft.draftAssistantProfileId !== draft.settings.assistant_profile_id;
-  const translationChanged =
-    draft.draftTranslationProfileId != null &&
-    draft.draftTranslationProfileId !== draft.settings.translation_profile_id;
-  const parserChanged =
-    draft.effectiveParserEndpoint.trim() !== draft.savedParserEndpoint.trim() ||
-    draft.customParserApiKey !== draft.savedParserApiKey;
-  const readerPreferencesChanged = !equalReaderPreferences(
-    draft.readerPreferences,
-    draft.savedReaderPreferences
-  );
-  const agentRuntimeChanged = !equalAgentRuntimeSettings(
-    normalizeAgentRuntimeSettings(draft.draftAgentRuntimeSettings),
-    normalizeAgentRuntimeSettings(draft.savedAgentRuntimeSettings)
-  );
-
-  return (
-    modelChanged ||
-    assistantChanged ||
-    translationChanged ||
-    parserChanged ||
-    agentRuntimeChanged ||
-    readerPreferencesChanged
-  );
-}
 function readModelCatalogCache(): ModelCatalogCache {
   if (typeof window === 'undefined') {
     return {};
@@ -1485,3 +1117,5 @@ function ProviderLogo({ preset }: { preset: ProviderPreset }) {
     </span>
   );
 }
+
+function equalJson<T>(left: T, right: T) { return JSON.stringify(left) === JSON.stringify(right); }

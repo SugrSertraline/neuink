@@ -155,6 +155,7 @@ export type SourceSegment = {
 export type SegmentBlockNote = {
   segment_uid: string;
   text: string;
+  bookmarked?: boolean;
   created_at: string;
   updated_at: string;
 };

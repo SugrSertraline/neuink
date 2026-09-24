@@ -107,7 +107,7 @@ export function hasPersistableAssistantContext(
   items: AssistantContextItem[],
   snapshot?: AssistantComposerSnapshot | null
 ) {
-  return items.length > 0 || (snapshot?.mentions.length ?? 0) > 0;
+  return items.length > 0 || (snapshot?.mentions.length ?? 0) > 0 || snapshot?.executionMode === 'plan';
 }
 
 export function composerBlocksForContextItems(items: AssistantContextItem[]) {

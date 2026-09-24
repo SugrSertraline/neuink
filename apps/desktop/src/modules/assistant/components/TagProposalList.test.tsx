@@ -17,13 +17,13 @@ describe('TagProposalList', () => {
       <TagProposalList proposals={[proposal]} onApply={onApply} />
     );
 
-    const title = getByText(`添加 Tag：${proposal.name} · 1 个 Entry`);
+    const title = getByText(`添加标签：${proposal.name} · 1 个条目`);
     expect(title.className).toContain('break-words');
     expect(title.className).not.toContain('truncate');
     expect(container.querySelector('.tag-proposal-list')).toBeTruthy();
     expect(container.querySelector('.tag-proposal-actions')).toBeTruthy();
 
-    fireEvent.click(getByRole('button', { name: 'Apply' }));
+    fireEvent.click(getByRole('button', { name: '确认应用' }));
     expect(onApply).toHaveBeenCalledWith(proposal);
   });
 });

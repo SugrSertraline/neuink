@@ -1,3 +1,4 @@
+import { ReadingStateRetention } from './navigation/ReadingStateRetention';
 import {
   useEffect,
   useRef,
@@ -6,8 +7,12 @@ import {
   type PointerEvent as ReactPointerEvent
 } from 'react';
 import type { WorkspacePaneId, WorkspaceSurface, WorkspaceSurfaceLayout } from '@/app/workspaceSurface';
+import { NoteReviewPage } from '@/modules/assistant/review/NoteReviewPage';
 import { entryContentId, entryContentSurface, surfaceKey, noteSurface } from '@/app/workspaceSurface';
 import { useWorkspaceNotes } from '@/modules/notes/WorkspaceNotesContext';
+import { RelationsPage } from '@/modules/relations/RelationsPage';
+import { RelationReturnFrame } from '@/modules/relations/RelationReturnFrame';
+import { WorkspaceSurfaceDeck } from './WorkspaceSurfaceDeck';
 import { OwnedNoteSurfaceView } from '@/modules/notes/components/OwnedNoteSurfaceView';
 import { TagDetailsView } from '@/modules/library/components/TagDetailsView';
 import { ReadingSessionContext, type ReadingNoteBinding } from '../parallel-reading/ReadingSessionContext';
@@ -58,13 +63,15 @@ import { CreateEntryPanel } from './CreateEntryPanel';
 import { MineruClientImportGuide } from './MineruClientImportGuide';
 import { EntryLibraryView } from './EntryLibraryView';
 import { EntryWorkspaceView } from './EntryWorkspaceView';
+import type { EntryPdfHandlers } from '@/modules/library/components/EntryPdfActions';
 import { SourceLinksSurface } from './SourceLinksSurface';
 import { isHeavyReaderSurface } from './readerRetention';
 import { useHeavyReaderRetention } from './useHeavyReaderRetention';
 import { hasUnsavedSegmentEditors } from './segmentEditorDirtyRegistry';
 import { useSourceBacklinks } from './useSourceBacklinks';
+import { setSegmentNoteBookmark } from '@/shared/ipc/workspaceApi';
 
-type ReaderPaneProps = {
+type ReaderPaneProps = EntryPdfHandlers & {
   librarySection: 'papers' | 'notes';
   onLibrarySectionChange: (section: 'papers' | 'notes') => void;
   onOpenTagLibrary: (tagId: string, section?: 'papers' | 'notes') => void;
@@ -115,7 +122,7 @@ type ReaderPaneProps = {
   onDeleteMarkdownNote: (entryId: string, noteId: string) => Promise<void> | void;
   onDeleteTag: (tagId: string) => Promise<void> | void;
   onOpenCreateEntryTab: () => void;
-  onOpenEntryExplorer: (entryId: string) => void;
+  onOpenEntryExplorer: (entryId: string, explicitContentId?: 'overview') => void;
   onOpenEntryInSidePane: (entryId: string) => void;
   onOpenEntryNote: (entryId: string, noteId: string) => void;
   onOpenAnnotation: (record: AnnotationCatalogRecord) => void;
@@ -262,6 +269,9 @@ export function ReaderPane({
   onActiveSegmentChange,
   onApplyEntryTagPaths,
   onUpdateEntry,
+  onAttachPdf,
+  onCreatePdfVersion,
+  onImportMineruClientResult,
   onExportTranslationNote,
   onSaveSegmentNote,
   onDeleteSegmentNote,
@@ -305,6 +315,10 @@ export function ReaderPane({
   const linkedRequestKeyRef = useRef(0);
   const previousPdfJumpByEntryIdRef = useRef(pdfJumpByEntryId);
   const noteCatalog = useWorkspaceNotes();
+  const [relationOrigins, setRelationOrigins] = useState<Set<string>>(() => new Set());
+  useEffect(() => setRelationOrigins(new Set()), [workspaceRoot]);
+  const markRelationOrigin = (surface: WorkspaceSurface) => setRelationOrigins(current => new Set([...current, surfaceKey(surface)]));
+  const hasRelationsPage = [...surfaceLayout.leftTabs, ...surfaceLayout.rightTabs].some(surface => surface.kind === 'relations');
   const sourceBacklinksByEntryId = useSourceBacklinks(entries, markdownNoteRefreshById, onReadMarkdownNote, noteCatalog?.catalog.notes);
   const [noteBindings, setNoteBindings] = useState<Record<string, ReadingNoteBinding | null>>({});
   const [isWorkspaceSplitResizing, setIsWorkspaceSplitResizing] = useState(false);
@@ -551,11 +565,11 @@ export function ReaderPane({
   };
   const renderLibraryView = (standalone = false) =>
     <EntryLibraryView
+        onOpenRelations={() => onOpenSurface({ kind: 'relations' })}
         activeTag={activeTag}
         section={librarySection} onSectionChange={onLibrarySectionChange}
         onUpdateTagDescription={onUpdateTagDescription}
         onOpenTagNote={(target, label) => onOpenSurface(noteSurface(target, label))}
-        onManageTags={() => onOpenSurface({ kind: 'tag-editor' })}
         onOpenTrash={onOpenTrash}
         entries={entries}
         standalone={standalone}
@@ -573,7 +587,6 @@ export function ReaderPane({
         onOpenCreateEntryTab={onOpenCreateEntryTab}
         onOpenEntryExplorer={onOpenEntryExplorer}
         onOpenEntryInSidePane={onOpenEntryInSidePane}
-        onOpenTagReading={onOpenTagReading}
         onRestoreTagArchive={onRestoreTagArchive}
         onPurgeEntry={onPurgeEntry}
         onPurgeTrashItem={onPurgeTrashItem}
@@ -725,6 +738,9 @@ export function ReaderPane({
         }
         onApplyEntryTagPaths={onApplyEntryTagPaths}
         onUpdateEntry={onUpdateEntry}
+        onAttachPdf={onAttachPdf}
+        onCreatePdfVersion={onCreatePdfVersion}
+        onImportMineruClientResult={onImportMineruClientResult}
         onCreateMarkdownSourceLink={onCreateMarkdownSourceLink}
         onImportMarkdownNoteSegmentAsset={onImportMarkdownNoteSegmentAsset}
         onReadMarkdownNote={onReadMarkdownNote}
@@ -851,6 +867,12 @@ export function ReaderPane({
         onSaveMarkdownNote={onSaveMarkdownNote}
         onSaveAnnotation={saveLinkedAnnotation}
         onSaveSegmentNote={saveLinkedSegmentNote}
+        onSetSegmentBookmark={async (uid, bookmarked) => {
+          if (!workspaceRoot) throw new Error('请先打开资料库');
+          const notes = await setSegmentNoteBookmark(workspaceRoot, parsed.entryId, uid, bookmarked);
+          setSegmentNoteReloadByEntryId(current => ({ ...current, [parsed.entryId]: (current[parsed.entryId] ?? 0) + 1 }));
+          return notes;
+        }}
         onDeleteSegmentNote={deleteLinkedSegmentNote}
         onEmptyEntryTrash={onEmptyEntryTrash}
         onPurgeEntry={onPurgeEntry}
@@ -882,8 +904,9 @@ export function ReaderPane({
       onSelectTag={onSelectTag}
     />
   );
-  const renderSettingsPanel = () => (
+  const renderSettingsPanel = (surface: Extract<WorkspaceSurface, { kind: 'settings' }>) => (
     <SettingsPanel
+      navigationTarget={surface.target}
       parserEndpoint={parserEndpoint}
       parserApiKey={parserApiKey}
       readerPreferences={readerPreferences}
@@ -903,6 +926,7 @@ export function ReaderPane({
     />
   );
   const renderSurface = (surface: WorkspaceSurface, sibling: WorkspaceSurface | null, pane: WorkspacePaneId) => {
+    if (surface.kind === 'note-review') return <NoteReviewPage key={surface.proposalId} proposalId={surface.proposalId} onOpenNote={onOpenEntryNote} />;
     if (surface.kind === 'tag-details') return <TagDetailsView key={`${workspaceRoot}:${surface.tagId}`} root={workspaceRoot} tagId={surface.tagId} tags={tags} entries={entries} initialView={surface.view}
       onDescription={onUpdateTagDescription} onOpenNote={(target, label) => onOpenSurface(noteSurface(target, label), pane)}
       onOpenEntry={(entry) => onOpenSurface({ kind: 'entry-overview', entryId: entry.id, contextTagId: surface.tagId }, pane)}
@@ -989,13 +1013,30 @@ export function ReaderPane({
       const entry = entries.find((entry) => entry.id === surface.entryId);
       if (!entry || !['pdf', 'reflow', 'entry-overview'].includes(surface.kind)) return reader;
       const note = sibling?.kind === 'owned-note' ? noteBindings[noteTargetKey(sibling.target)] ?? undefined : undefined;
-      return note ? <ReadingSessionContext.Provider value={{ active: surfaceLayout.focusedPane === pane, onReady: () => undefined, note }}>{reader}</ReadingSessionContext.Provider> : reader;
+      // Keep the provider in place even while the paired note is loading or closing.
+      return <ReadingSessionContext.Provider value={note ? { active: surfaceLayout.focusedPane === pane, onReady: () => undefined, note } : null}>{reader}</ReadingSessionContext.Provider>;
     }
     switch (surface.kind) {
+      case 'relations':
+        return <RelationsPage key={workspaceRoot} entries={entries} tags={tags} trashedEntries={trashedEntries}
+          active={surfaceLayout[pane]?.kind === 'relations'}
+          catalog={noteCatalog?.catalog ?? { notes: [], errors: [] }} loading={status === 'loading' || Boolean(noteCatalog?.loading)}
+          error={status === 'error' ? '资料库读取失败，请在条目库检查工作区。' : noteCatalog?.error ?? null}
+          onRefresh={() => noteCatalog?.refresh()} onBack={() => onOpenSurface({ kind: 'library' })}
+          onOpen={node => {
+            if (!node.available) return;
+            if (node.tag) { markRelationOrigin({ kind: 'library' }); onOpenTagLibrary(node.tag.id); return; }
+            const target = node.target ? noteSurface(node.target, node.title) : node.entry ? { kind: 'entry-overview' as const, entryId: node.entry.id } : null;
+            if (target) { markRelationOrigin(target); onOpenSurface(target); }
+          }} onSource={evidence => {
+            if (!evidence.canLocate) return;
+            markRelationOrigin({ kind: 'pdf', entryId: evidence.source.entry_id });
+            onOpenSourceLink({ sourceEntryId: evidence.source.entry_id, page: evidence.source.page, segmentUid: evidence.source.segment_uid, originPane: pane });
+          }} />;
       case 'library':
         return renderLibraryView(true);
       case 'settings':
-        return <div className="h-full min-h-0 overflow-hidden">{renderSettingsPanel()}</div>;
+        return <div className="h-full min-h-0 overflow-hidden">{renderSettingsPanel(surface)}</div>;
       case 'create-entry':
         return <div className="h-full min-h-0 overflow-hidden">{renderCreateEntryPanel()}</div>;
       case 'mineru-client-guide':
@@ -1006,25 +1047,23 @@ export function ReaderPane({
         return <EmptyPane />;
     }
   };
-  const renderPaneSurfaces = (
-    tabs: WorkspaceSurface[],
-    active: WorkspaceSurface,
+  const renderRetainedSurface = (
+    surface: WorkspaceSurface,
     sibling: WorkspaceSurface | null,
-    pane: WorkspacePaneId
-  ) => tabs.map((surface) => {
+    pane: WorkspacePaneId,
+    activeSurface: boolean
+  ) => {
     const key = surfaceKey(surface);
-    const activeSurface = key === surfaceKey(active);
     const shouldMount =
       activeSurface || hasUnsavedSegmentEditors(key) || !isHeavyReaderSurface(surface) || !expiredHeavySurfaceKeys.has(key);
     return (
-      <div
-        className={activeSurface ? 'workspace-pane-surface is-active' : 'workspace-pane-surface'}
-        key={key}
-      >
-        {shouldMount ? renderSurface(activeSurface ? active : surface, sibling, pane) : null}
-      </div>
+        <RelationReturnFrame visible={hasRelationsPage && relationOrigins.has(key)} onReturn={() => onOpenSurface({ kind: 'relations' })}>
+          <ReadingStateRetention key={workspaceRoot}>
+            {shouldMount ? renderSurface(surface, sibling, pane) : null}
+          </ReadingStateRetention>
+        </RelationReturnFrame>
     );
-  });
+  };
   const activePairing = surfaceLayout.right
     ? resolveWorkspaceSurfacePair(surfaceLayout.left, surfaceLayout.right)
     : null;
@@ -1041,20 +1080,13 @@ export function ReaderPane({
                 : 'workspace-split'
             }
           >
-            <div
-              className="workspace-pane"
-              data-workspace-drop-pane="left"
-              data-workspace-surface-kind={surfaceLayout.left.kind}
-              data-workspace-tab-count={surfaceLayout.leftTabs.length}
-              onPointerDown={() => onFocusSurface('left')}
-            >
-              {renderPaneSurfaces(surfaceLayout.leftTabs, surfaceLayout.left, surfaceLayout.right, 'left')}
-            </div>
+            <WorkspaceSurfaceDeck layout={surfaceLayout} onFocus={onFocusSurface} renderSurface={renderRetainedSurface} />
             {surfaceLayout.right ? (
               <>
                 <div
                   aria-label="调整分屏宽度"
                   className="workspace-pane-divider is-resizable"
+                  style={{ gridColumn: 2, gridRow: 1 }}
                   role="separator"
                   tabIndex={0}
                   aria-orientation="vertical"
@@ -1071,15 +1103,6 @@ export function ReaderPane({
                     style={{ transform: `translate3d(${workspaceSplitPreviewLeft}px, 0, 0)` }}
                   />
                 ) : null}
-                <div
-                  className="workspace-pane"
-                  data-workspace-drop-pane="right"
-                  data-workspace-surface-kind={surfaceLayout.right.kind}
-                  data-workspace-tab-count={surfaceLayout.rightTabs.length}
-                  onPointerDown={() => onFocusSurface('right')}
-                >
-                  {renderPaneSurfaces(surfaceLayout.rightTabs, surfaceLayout.right, surfaceLayout.left, 'right')}
-                </div>
               </>
             ) : null}
           </div>

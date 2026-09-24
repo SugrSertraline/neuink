@@ -26,9 +26,26 @@ mod note_apply_content;
 mod note_apply_store;
 #[cfg(test)]
 mod note_apply_tests;
-mod skill_package;
+#[cfg(test)]
+mod note_apply_recovery_tests;
+mod tag_recommendations;
 
 pub use note_apply::{ApplyNoteProposalRequest, ApplyNoteProposalResponse};
+
+#[tauri::command]
+pub fn read_agent_execution(root: PathBuf, id: String) -> Result<Option<neuink_workspace::agent_execution::AgentExecution>, String> {
+    neuink_workspace::agent_execution::read(&root, &id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn save_agent_execution(root: PathBuf, record: neuink_workspace::agent_execution::AgentExecution) -> Result<neuink_workspace::agent_execution::AgentExecution, String> {
+    neuink_workspace::agent_execution::save(&root, record).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn list_agent_executions(root: PathBuf, conversation_id: String) -> Result<Vec<neuink_workspace::agent_execution::AgentExecution>, String> {
+    neuink_workspace::agent_execution::list(&root, &conversation_id).map_err(|e| e.to_string())
+}
 
 #[tauri::command]
 pub fn apply_note_proposal(
@@ -106,8 +123,6 @@ pub struct AnalyzeEntryTagsRequest {
     pub entry_id: EntryId,
     #[serde(default)]
     pub instruction: String,
-    #[serde(default)]
-    pub skill_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -122,7 +137,7 @@ pub struct TagRecommendation {
 #[derive(Clone, Debug, Serialize)]
 pub struct AnalyzeEntryTagsResponse {
     pub recommendations: Vec<TagRecommendation>,
-    pub skill_version: String,
+    pub policy_version: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -319,14 +334,6 @@ pub fn list_tools<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Vec<ToolDescri
 }
 
 #[tauri::command]
-pub async fn run_agent_subagent_task<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
-    request: agent_runtime::RunAgentSubagentTaskRequest,
-) -> Result<agent_runtime::RunAgentSubagentTaskResponse, String> {
-    agent_runtime::run_agent_subagent_task_impl(app, request).await
-}
-
-#[tauri::command]
 pub async fn analyze_entry_tags<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     request: AnalyzeEntryTagsRequest,
@@ -338,36 +345,17 @@ pub async fn analyze_entry_tags<R: tauri::Runtime>(
     if context.markdown.trim().is_empty() {
         return Ok(AnalyzeEntryTagsResponse {
             recommendations: Vec::new(),
-            skill_version: "empty-document".to_string(),
+            policy_version: "tag-recommendations-v3".to_string(),
         });
     }
 
     let tags = workspace.list_tags().map_err(|error| error.to_string())?;
     let existing_paths = tag_paths(&tags);
-    let tag_skill = match request.skill_id.as_deref() {
-        Some(skill_id) => skill_package::load_skill_package(
-            app.clone(),
-            skill_package::LoadSkillPackageRequest {
-                root: request.root.clone(),
-                skill_id: skill_id.to_string(),
-            },
-        )?,
-        None => select_skill_for_task(&app, &request.root, &profile, &request.instruction).await?,
-    };
-    if !tag_skill.enabled || tag_skill.readme.trim().is_empty() {
-        return Err("Selected Tag Skill is disabled or has no instructions.".to_string());
-    }
-    let skill_instructions = tag_skill.readme.as_str();
-    let skill_version = format!("{}:{}", tag_skill.id, tag_skill.version);
-
-    let system_prompt = format!(
-        "You are Neuink's paper tagging agent.\n\n{}\n\nReturn JSON only, with this exact shape: {{\"tags\":[{{\"path\":\"Domain/Method/Leaf\",\"dimension\":\"problem|method|domain|application|dataset\",\"reason\":\"short grounded reason\",\"confidence\":0.0}}]}}.\nRules: propose 2-6 concise, complete taxonomy paths; reuse an existing path when appropriate, but you may propose a new path when it is more accurate. Never emit raw sentence fragments, truncated words, generic roots such as 主题, or a tag unless it represents a stable research concept. Do not apply or create tags yourself.",
-        trim_to_char_budget(skill_instructions.to_string(), 12_000).0,
-    );
+    let system_prompt = tag_recommendations::system_prompt();
     let user_prompt = format!(
-        "User tagging request (follow language, naming, granularity, and count preferences when specified):\n{}\n\nExisting tag tree:\n{}\n\nPaper content:\n{}",
+        "用户标签需求（遵循命名、粒度和数量偏好；输出仍须使用简体中文）：\n{}\n\n已有标签树：\n{}\n\n文档内容：\n{}",
         if request.instruction.trim().is_empty() {
-            "Suggest useful tags for this paper."
+            "请根据文档内容推荐有用的中文标签，并用中文说明理由。"
         } else {
             request.instruction.trim()
         },
@@ -379,81 +367,12 @@ pub async fn analyze_entry_tags<R: tauri::Runtime>(
         trim_to_char_budget(context.markdown, 24_000).0,
     );
     let answer = complete_tag_chat(&profile, system_prompt, user_prompt).await?;
-    let recommendations = parse_tag_recommendations(&answer, &existing_paths)?;
+    let recommendations = tag_recommendations::parse_tag_recommendations(&answer, &existing_paths)?;
 
     Ok(AnalyzeEntryTagsResponse {
         recommendations,
-        skill_version,
+        policy_version: "tag-recommendations-v3".to_string(),
     })
-}
-
-async fn select_skill_for_task<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-    root: &std::path::Path,
-    profile: &LlmProfile,
-    instruction: &str,
-) -> Result<skill_package::ImportedSkillPackage, String> {
-    let candidates = skill_package::list_skill_packages(
-        app.clone(),
-        skill_package::ListSkillPackagesRequest {
-            root: root.to_path_buf(),
-        },
-    )?
-    .into_iter()
-    .filter(|skill| skill.enabled)
-    .collect::<Vec<_>>();
-    if candidates.is_empty() {
-        return Err("Skill Registry has no enabled Skills.".to_string());
-    }
-    let metadata = candidates
-        .iter()
-        .map(|skill| {
-            json!({
-                "category": skill.category,
-                "description": skill.description,
-                "id": skill.id,
-                "name": skill.name,
-                "triggers": skill.triggers,
-            })
-        })
-        .collect::<Vec<_>>();
-    let answer = complete_tag_chat(
-        profile,
-        "You are Neuink SkillSelectorAgent. Select exactly one Skill from registry metadata for the task. Return JSON only: {\"skill_id\":\"exact-id\",\"reason\":\"short reason\"}. Never invent an id and do not execute the task.".to_string(),
-        format!(
-            "Task:\n{}\n\nSkill Registry:\n{}",
-            if instruction.trim().is_empty() {
-                "Suggest useful tags for this paper."
-            } else {
-                instruction.trim()
-            },
-            serde_json::to_string(&metadata).map_err(|error| error.to_string())?
-        ),
-    )
-    .await?;
-    let selected_id = parse_selected_skill_id(&answer)?;
-    candidates
-        .into_iter()
-        .find(|skill| skill.id == selected_id)
-        .ok_or_else(|| "SkillSelectorAgent selected an unavailable Skill.".to_string())
-}
-
-fn parse_selected_skill_id(answer: &str) -> Result<String, String> {
-    let start = answer
-        .find('{')
-        .ok_or_else(|| "SkillSelectorAgent returned no JSON.".to_string())?;
-    let end = answer
-        .rfind('}')
-        .ok_or_else(|| "SkillSelectorAgent returned invalid JSON.".to_string())?;
-    let payload: Value = serde_json::from_str(&answer[start..=end])
-        .map_err(|error| format!("SkillSelectorAgent returned invalid JSON: {error}"))?;
-    payload
-        .get("skill_id")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-        .ok_or_else(|| "SkillSelectorAgent selected no Skill.".to_string())
 }
 
 #[tauri::command]
@@ -499,30 +418,6 @@ pub fn prune_agent_runs(
     request: agent_run_registry::PruneAgentRunsRequest,
 ) -> Result<agent_run_registry::PruneAgentRunsResponse, String> {
     agent_run_registry::prune_agent_runs(request)
-}
-
-#[tauri::command]
-pub fn import_skill_package_archive<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
-    request: skill_package::ImportSkillPackageArchiveRequest,
-) -> Result<skill_package::ImportedSkillPackage, String> {
-    skill_package::import_skill_package_archive(app, request)
-}
-
-#[tauri::command]
-pub fn list_skill_packages<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
-    request: skill_package::ListSkillPackagesRequest,
-) -> Result<Vec<skill_package::ImportedSkillPackage>, String> {
-    skill_package::list_skill_packages(app, request)
-}
-
-#[tauri::command]
-pub fn load_skill_package<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
-    request: skill_package::LoadSkillPackageRequest,
-) -> Result<skill_package::ImportedSkillPackage, String> {
-    skill_package::load_skill_package(app, request)
 }
 
 #[tauri::command]
@@ -593,6 +488,16 @@ fn normalized_sciverse_schema_payload(value: Value) -> Result<Value, String> {
 }
 
 #[tauri::command]
+pub async fn list_mcp_tools(root: std::path::PathBuf, server_id: String, call_id: String) -> Result<Value, String> {
+    agent_runtime::list_mcp_tools(root, server_id, call_id).await
+}
+
+#[tauri::command]
+pub fn cancel_mcp_call(call_id: String) {
+    agent_runtime::cancel_mcp_call(&call_id);
+}
+
+#[tauri::command]
 pub async fn invoke_tool<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     request: InvokeToolRequest,
@@ -634,7 +539,7 @@ pub async fn invoke_tool<R: tauri::Runtime>(
             read_entry_assistant_context(args).map(|response| json!(response))
         }
         name if name.starts_with("mcp.") => {
-            agent_runtime::invoke_mcp_tool(name.to_string(), request.args)
+            agent_runtime::invoke_mcp_tool(name.to_string(), request.args).await
         }
         _ => Err(format!("unknown tool: {}", request.name)),
     }
@@ -1088,87 +993,4 @@ async fn complete_tag_chat(
     }
     let payload = response.text().await.map_err(|error| error.to_string())?;
     crate::commands::llm_http::parse_chat_response(profile.api_protocol, &payload)
-}
-
-fn parse_tag_recommendations(
-    content: &str,
-    existing_paths: &[String],
-) -> Result<Vec<TagRecommendation>, String> {
-    #[derive(Deserialize)]
-    struct ModelTagResponse {
-        #[serde(default)]
-        tags: Vec<ModelTag>,
-    }
-    #[derive(Deserialize)]
-    struct ModelTag {
-        confidence: Option<f32>,
-        dimension: Option<String>,
-        path: String,
-        reason: Option<String>,
-    }
-
-    let content = content
-        .trim()
-        .trim_start_matches("```json")
-        .trim_start_matches("```")
-        .trim_end_matches("```")
-        .trim();
-    let parsed: ModelTagResponse = serde_json::from_str(content)
-        .map_err(|error| format!("Tag analysis returned invalid JSON: {error}"))?;
-    let existing = existing_paths
-        .iter()
-        .map(|path| normalize_tag_path_key(path))
-        .collect::<HashSet<_>>();
-    let mut seen = HashSet::new();
-    let mut recommendations = Vec::new();
-    for tag in parsed.tags {
-        let path = normalize_tag_path(&tag.path);
-        let key = normalize_tag_path_key(&path);
-        if path.is_empty() || path.split('/').count() > 5 || !seen.insert(key.clone()) {
-            continue;
-        }
-        if path
-            .split('/')
-            .any(|part| part.eq_ignore_ascii_case("主题"))
-        {
-            continue;
-        }
-        recommendations.push(TagRecommendation {
-            confidence: tag.confidence.unwrap_or(0.6).clamp(0.0, 1.0),
-            dimension: tag
-                .dimension
-                .unwrap_or_else(|| "research".to_string())
-                .trim()
-                .to_string(),
-            path,
-            reason: tag
-                .reason
-                .unwrap_or_else(|| "模型基于论文内容提出的标签".to_string())
-                .trim()
-                .to_string(),
-            source: if existing.contains(&key) {
-                "existing"
-            } else {
-                "new"
-            }
-            .to_string(),
-        });
-        if recommendations.len() == 6 {
-            break;
-        }
-    }
-    Ok(recommendations)
-}
-
-fn normalize_tag_path(path: &str) -> String {
-    path.split('/')
-        .map(|part| part.trim().split_whitespace().collect::<Vec<_>>().join(" "))
-        .filter(|part| !part.is_empty())
-        .map(|part| part.chars().take(48).collect::<String>())
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
-fn normalize_tag_path_key(path: &str) -> String {
-    normalize_tag_path(path).to_lowercase()
 }

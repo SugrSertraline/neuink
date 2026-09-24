@@ -252,6 +252,8 @@ pub fn delete_conversation(request: ConversationRequest) -> Result<(), String> {
     }
     fs::remove_file(path).map_err(|error| error.to_string())?;
     update_conversation_index_after_delete(&layout, &request.conversation_id);
+    neuink_workspace::agent_execution::delete_for_conversation(layout.root(), request.conversation_id.as_str())
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -637,5 +639,39 @@ mod tests {
             "neuink-ipc-conversation-index-{}-{unique}",
             std::process::id()
         ))
+    }
+
+    #[test]
+    fn execution_checkpoints_follow_real_conversation_lifecycle() {
+        use crate::commands::assistant::{list_agent_executions, read_agent_execution, save_agent_execution};
+        use neuink_workspace::agent_execution::AgentExecution;
+
+        let root = test_workspace_root();
+        Workspace::create(&root).expect("create workspace");
+        let mut conversation = create_conversation(CreateConversationRequest {
+            root: root.clone(), title: "Checkpoint integration".into(),
+            scope_snapshot: ScopeSnapshot::default(),
+        }).expect("create through production command");
+        let layout = WorkspaceLayout::new(&root);
+        // Exercise the actual generator AND a deterministic member of its NanoID alphabet.
+        for id in [conversation.id.clone(), ConversationId::from_string("7ifDV_d90PAk6BE9")] {
+            conversation.id = id.clone();
+            atomic_write_json(conversation_file(&layout, &id), &conversation).expect("save conversation");
+            let record: AgentExecution = serde_json::from_value(json!({
+                "id": format!("execution-{}", id.as_str()), "conversationId": id.as_str(),
+                "revision": 0, "status": "running", "updatedAt": "",
+                "payload": {"version": 1, "question": "test"}
+            })).expect("decode the frontend wire shape");
+            let first = save_agent_execution(root.clone(), record.clone()).expect("save checkpoint");
+            assert_eq!(first.revision, 1);
+            assert!(save_agent_execution(root.clone(), record).is_err(), "stale writer must fail");
+            let read = read_agent_execution(root.clone(), first.id.clone()).unwrap().unwrap();
+            assert_eq!(serde_json::to_value(&read).unwrap()["conversationId"], id.as_str());
+            assert_eq!(list_agent_executions(root.clone(), id.as_str().into()).unwrap().len(), 1);
+            delete_conversation(ConversationRequest { root: root.clone(), conversation_id: id }).unwrap();
+            assert!(read_agent_execution(root.clone(), first.id.clone()).unwrap().is_none());
+            assert!(save_agent_execution(root.clone(), first).is_err(), "must not recreate deleted conversation");
+        }
+        fs::remove_dir_all(root).expect("remove isolated test workspace");
     }
 }

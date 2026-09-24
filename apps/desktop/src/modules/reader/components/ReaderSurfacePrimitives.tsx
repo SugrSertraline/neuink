@@ -15,7 +15,7 @@ export function ReaderSurfaceBody({
   width?: 'reading' | 'wide' | 'full';
 }) {
   return (
-    <div className={cn('min-h-0 overflow-auto px-4 py-4 sm:px-6 sm:py-5', className)}>
+    <div data-reader-body data-reader-scroll className={cn('min-h-0 overflow-auto px-4 py-4 sm:px-6 sm:py-5', className)}>
       <div
         className={cn(
           'mx-auto grid min-w-0 gap-4',

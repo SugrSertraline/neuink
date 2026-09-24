@@ -37,6 +37,7 @@ export type AssistantContext = {
 
 export type AssistantContextAddOptions = {
   draftQuestion?: string;
+  selectionText?: string;
 };
 
 export type AssistantComposerMentionRole = 'evidence' | 'read' | 'write';
@@ -69,6 +70,7 @@ export type AssistantComposerMention = {
 };
 
 export type AssistantComposerSnapshot = {
+  executionMode?: 'act' | 'plan';
   mentions: AssistantComposerMention[];
   text: string;
 };
@@ -156,6 +158,8 @@ export type AssistantTaskPlanMissing =
   | 'write_confirmation';
 
 export type AssistantTaskPlan = {
+  /** Application policy, not a model-generated intent classification. */
+  executionMode?: 'act' | 'plan';
   attachments: AssistantContextPlanItem[];
   capabilities: AssistantTaskCapability[];
   citationPolicy?: 'none' | 'preserve' | 'required';
@@ -263,6 +267,7 @@ export type AssistantTaskState = {
 };
 
 export type AssistantTagProposal = {
+  entryTitles?: Record<string, string>;
   action: 'attach' | 'create' | 'detach' | 'rename';
   appliedAt?: string;
   createdAt: string;
@@ -273,7 +278,6 @@ export type AssistantTagProposal = {
   name?: string;
   newName?: string;
   rationale?: string;
-  skillVersion?: string;
   status: 'applied' | 'applying' | 'error' | 'pending' | 'rejected';
   tagId?: TagId;
 };
@@ -316,8 +320,10 @@ export type AssistantSubagentTaskPlan = {
 };
 
 export type AgentInvocationPlan = {
+  responseStyle?: 'lightweight_chat';
+  executionMode?: 'act' | 'plan';
   enabledToolIds: string[];
-  failurePolicy?: 'allow_general_fallback' | 'stop';
+  failurePolicy?: 'stop';
   missing: string[];
   mode: AssistantInvocationMode;
   noteEditMode?: AssistantNoteEditMode;
@@ -325,7 +331,6 @@ export type AgentInvocationPlan = {
   rationale: string;
   requiredToolIds?: string[];
   sourcePolicy?: 'active_context_only' | 'mixed' | 'none' | 'sciverse_only' | 'workspace_only';
-  skillIdsToLoad: string[];
   subagentTasks: AssistantSubagentTaskPlan[];
   writePolicy: AssistantWritePolicy;
 };
@@ -356,7 +361,6 @@ export type AssistantAgentRunNode = {
   inputSummary?: string;
   kind: AssistantAgentRunNodeKind;
   outputSummary?: string;
-  skillIds?: string[];
   sourceCount?: number;
   startedAt: string;
   status: AssistantAgentRunNodeStatus;
@@ -365,6 +369,8 @@ export type AssistantAgentRunNode = {
 };
 
 export type AssistantAgentRun = {
+  executionId?: string;
+  modelUsage?: { turns: number; toolCalls: number; inputTokens: number; outputTokens: number };
   durationMs?: number;
   endedAt?: string;
   id: string;
@@ -395,9 +401,11 @@ export type AssistantActiveSurfaceSnapshot = {
     | 'annotations'
     | 'create-entry'
     | 'mineru-client-guide'
+    | 'note-review'
     | 'entry-overview'
     | 'entry-trash'
     | 'library'
+    | 'relations'
     | 'note'
     | 'pdf'
     | 'reflow'

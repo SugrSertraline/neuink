@@ -5,6 +5,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { App } from './app/App';
 import { ToastProvider } from './shared/components/ToastProvider';
 import { TagPreferencesProvider } from './shared/components/TagPreferencesProvider';
+import { AppearanceProvider } from './shared/components/AppearanceProvider';
 import './styles/globals.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
@@ -12,7 +13,7 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
     <ToastProvider>
       <TooltipProvider>
         <TagPreferencesProvider>
-          <App />
+          <AppearanceProvider><App /></AppearanceProvider>
         </TagPreferencesProvider>
       </TooltipProvider>
     </ToastProvider>

@@ -1,0 +1,215 @@
+/* Independent WebView material. Only the backdrop is refracted; PDF and editors stay sharp.
+   useGlassMaterial supplies bounded geometry maps and one event-driven light source. */
+
+:root[data-appearance="liquid-glass"] :is(.app, [data-material="app-background"]) { background: var(--glass-ambient); }
+:root[data-appearance="liquid-glass"] :is(.titlebar, .activitybar, .app-sidebar, .tabsbar, .statusbar) {
+  background: var(--glass-face), var(--glass-surface);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: var(--glass-rim);
+  border-color: var(--glass-chrome-edge);
+}
+/* One backdrop per navigation group. Child controls transmit that material without blurring it again.
+   Keep these owners aligned with materialContainers in useGlassMaterial. */
+:root[data-appearance="liquid-glass"] :is(.titlebar, .app-sidebar, .tabsbar, .statusbar, [data-material="workspace-heading"], [data-material="workspace-toolbar"], [data-material="reader-toolbar"], [data-material="reader-popover"], [data-slot="dialog-content"], [data-slot="popover-content"], [data-slot="hover-card-content"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="context-menu-content"], [data-slot="context-menu-sub-content"], [data-slot="select-content"], .reflow-toolbar > .entry-content-header, .reflow-toolbar > [data-reader-compact-toolbar]) {
+  --glass-control-filter: none;
+  --muted-foreground: var(--glass-muted-foreground);
+}
+:root[data-appearance="liquid-glass"] .activitybar {
+  background: transparent; border-color: transparent; box-shadow: none;
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+:root[data-appearance="liquid-glass"] .app-sidebar {
+  margin: 6px 6px 8px; width: auto;
+  border: 1px solid var(--glass-edge); border-radius: var(--glass-panel-radius);
+  box-shadow: 0 4px 16px var(--glass-shadow);
+}
+/* Inner headings transmit the sidebar's ambient light without stacking large blur surfaces. */
+:root[data-appearance="liquid-glass"] :is(.side-head, [data-material="sidebar-toolbar"], [data-material="section-heading"]) {
+  background: var(--glass-toolbar); color: var(--sidebar-foreground);
+  border-color: var(--glass-chrome-edge); box-shadow: none;
+}
+:root[data-appearance="liquid-glass"] :is([data-material="sidebar-canvas"], [data-material="sidebar-empty"]) { background: transparent; }
+:root[data-appearance="liquid-glass"] :is([data-material="workspace-heading"], [data-material="workspace-toolbar"]) {
+  background: var(--glass-surface);
+  -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
+  border-color: var(--glass-chrome-edge); box-shadow: none;
+}
+/* Repeating the ambient field in every pane turns transparency into a flat tinted page. */
+:root[data-appearance="liquid-glass"] :is([data-material="library-workspace"], .settings-page, .reflow-toolbar) { background: var(--background); }
+:root[data-appearance="liquid-glass"] .reflow-toolbar > :is(.entry-content-header, [data-reader-compact-toolbar]) {
+  background: var(--glass-face), var(--glass-surface); box-shadow: var(--glass-rim);
+  -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
+}
+:root[data-appearance="liquid-glass"] :is(.settings-page-head, .settings-category-nav, .settings-category-select, .settings-subnav, .settings-feedback) {
+  background: var(--glass-face), var(--glass-surface); border-color: var(--glass-chrome-edge);
+}
+:root[data-appearance="liquid-glass"] .settings-content { background: transparent; }
+:root[data-appearance="liquid-glass"] .settings-category-nav [aria-current="page"] {
+  background: var(--glass-face), var(--glass-control-hover);
+  --glass-control-elevation: var(--glass-control-shadow);
+}
+:root[data-appearance="liquid-glass"] .appearance-exit { color: var(--primary); flex-shrink: 0; }
+:root[data-appearance="liquid-glass"] .appearance-exit:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+/* Window chrome reuses its existing geometry, handlers and drag regions. */
+:root[data-appearance="liquid-glass"] :is(.title-search, .activitybar button, .workspace-surface-tab, .workspace-tabs-overflow, [data-tab-close], .win-btn) {
+  transition: background-color var(--glass-motion), box-shadow var(--glass-motion), color var(--glass-motion);
+}
+:root[data-appearance="liquid-glass"] .title-search {
+  background: var(--glass-face), var(--glass-control); border-color: var(--glass-edge); box-shadow: var(--glass-control-shadow);
+  border-radius: var(--glass-control-radius);
+}
+:root[data-appearance="liquid-glass"] .title-search:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+:root[data-appearance="liquid-glass"] :is(.title-search, .activitybar button, .workspace-tabs-overflow, [data-tab-close]):hover {
+  background-color: var(--glass-control-hover); box-shadow: var(--glass-rim);
+}
+:root[data-appearance="liquid-glass"] .activitybar button { border-radius: var(--glass-control-radius); }
+:root[data-appearance="liquid-glass"] .activitybar button.active { background: var(--glass-face), var(--glass-control-hover); color: var(--accent-foreground); border-color: var(--glass-edge); box-shadow: var(--glass-control-shadow); }
+:root[data-appearance="liquid-glass"] .workspace-surface-tab { background: var(--glass-control); border-color: transparent; border-radius: var(--glass-control-radius); }
+:root[data-appearance="liquid-glass"] .workspace-surface-tab:is(:hover, .is-active) { background: var(--glass-control-hover); box-shadow: var(--glass-rim); }
+:root[data-appearance="liquid-glass"] .workspace-surface-tab.is-active { color: var(--accent-foreground); background-image: var(--glass-face); border-color: var(--glass-edge); box-shadow: var(--glass-control-shadow); }
+:root[data-appearance="liquid-glass"] [data-material="disclosure-icon"] { transition: rotate var(--glass-motion) var(--glass-ease); }
+:root[data-appearance="liquid-glass"] [data-material="content-row"][data-interactive="true"]:hover { background: var(--glass-control); box-shadow: none; }
+:root[data-appearance="liquid-glass"] [data-material="content-row"][data-active="true"],
+:root[data-appearance="liquid-glass"] [data-material="sidebar-canvas"] [data-slot="command-item"][data-selected="true"] {
+  background: var(--accent); color: var(--accent-foreground); box-shadow: inset 2px 0 var(--primary);
+}
+:root[data-appearance="liquid-glass"] [data-material="content-row"][data-drag-over="true"] { background: var(--accent); border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
+
+/* Popovers inherit tokens through html, including those portalled beside a split reader. */
+/* Reflective edges follow the pointer without moving hit targets or replacing component children. */
+:root[data-appearance="liquid-glass"] [data-glass-positioned] { position: relative; }
+:root[data-appearance="liquid-glass"] :is([data-ui="button"], [data-ui="toggle"], [data-ui="toggle-group-item"], [data-slot="tabs-trigger"], [data-slot="select-trigger"], [data-slot="switch"], .title-search, .activitybar button, .workspace-surface-tab)[data-glass-light="active"]::after,
+:root[data-appearance="liquid-glass"] :is([data-slot="dialog-content"], [data-slot="popover-content"], [data-slot="hover-card-content"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="context-menu-content"], [data-slot="context-menu-sub-content"], [data-slot="select-content"], [data-material="reader-toolbar"], [data-material="reader-popover"])::after {
+  content: ''; position: absolute; inset: 0; padding: 1px; border-radius: inherit; pointer-events: none;
+  background: conic-gradient(from var(--glass-light-angle, 135deg), var(--glass-prism-colors)); opacity: .5;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  transition: opacity var(--glass-motion) var(--glass-ease);
+}
+:root[data-appearance="liquid-glass"] [data-glass-light="active"]::after { opacity: .85; }
+/* A local SVG lens filters the backdrop only, never the element's own text or icons. */
+:root[data-appearance="liquid-glass"] [style*="--glass-lens:"]:not([data-slot$="-content"]) {
+  -webkit-backdrop-filter: var(--glass-control-filter) var(--glass-lens);
+  backdrop-filter: var(--glass-control-filter) var(--glass-lens);
+}
+
+:root[data-appearance="liquid-glass"] [data-slot="dialog-overlay"] {
+  background: var(--glass-overlay); -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+:root[data-appearance="liquid-glass"] :is([data-slot="dialog-content"], [data-slot="popover-content"], [data-slot="hover-card-content"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="context-menu-content"], [data-slot="context-menu-sub-content"], [data-slot="select-content"]) {
+  background: var(--glass-face), var(--glass-popup); border-color: var(--glass-edge);
+  border-radius: var(--glass-panel-radius);
+  -webkit-backdrop-filter: var(--glass-popup-filter) var(--glass-lens, blur(0px)); backdrop-filter: var(--glass-popup-filter) var(--glass-lens, blur(0px));
+  box-shadow: var(--glass-popup-shadow);
+  animation-duration: var(--glass-motion); animation-timing-function: var(--glass-ease);
+}
+:root[data-appearance="liquid-glass"] :is([data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="context-menu-content"], [data-slot="context-menu-sub-content"], [data-slot="select-content"]) { padding: 6px; border-radius: calc(var(--glass-panel-radius) - 6px); }
+:root[data-appearance="liquid-glass"] [data-slot="dialog-content"] [data-slot="command"] { background: transparent; }
+:root[data-appearance="liquid-glass"] [data-slot="tooltip-content"] { background: var(--foreground); color: var(--card); }
+:root[data-appearance="liquid-glass"] :is(.workspace-pane, .entry-overview, .entry-library-table-shell, .markdown-note-scroll) { background: var(--card); }
+:root[data-appearance="liquid-glass"] .assistant-chat-message { background: var(--glass-input); box-shadow: none; }
+:root[data-appearance="liquid-glass"] .assistant-chat-message[data-message-role="user"] { background: var(--secondary); }
+:root[data-appearance="liquid-glass"] [data-glass-light="active"] {
+  /* Only the optical image overrides compound variant/hover selectors; semantic colour and focus rings remain intact. */
+  background-image: radial-gradient(ellipse 90px 54px at var(--glass-pointer-x) var(--glass-pointer-y), var(--glass-specular), var(--glass-specular-fade) 75%), var(--glass-face) !important;
+}
+
+/* A floating navigation layer. The original body remains the only scroll container. */
+:root[data-appearance="liquid-glass"] .reader-surface-frame { grid-template-rows: minmax(0, 1fr); background: var(--background); }
+:root[data-appearance="liquid-glass"] .reader-surface-frame > [data-reader-body] { grid-area: 1 / 1; }
+:root[data-appearance="liquid-glass"] .reader-surface-toolbar {
+  position: relative; grid-area: 1 / 1; align-self: start; z-index: 20;
+  margin: 8px 12px; border: 1px solid var(--glass-edge); border-radius: var(--glass-panel-radius);
+  background: var(--glass-face), var(--glass-popup); box-shadow: var(--glass-popup-shadow);
+  -webkit-backdrop-filter: var(--glass-filter) var(--glass-lens, blur(0px));
+  backdrop-filter: var(--glass-filter) var(--glass-lens, blur(0px));
+  transition: background-color var(--glass-motion) var(--glass-ease), box-shadow var(--glass-motion) var(--glass-ease);
+}
+:root[data-appearance="liquid-glass"] [data-material="reader-toolbar"][style*="--glass-lens:"] {
+  -webkit-backdrop-filter: var(--glass-filter) var(--glass-lens);
+  backdrop-filter: var(--glass-filter) var(--glass-lens);
+}
+:root[data-appearance="liquid-glass"] .reader-surface-toolbar :is(.entry-content-header, .pdf-reader-toolbar, [data-reader-compact-toolbar]) { background: transparent; border: 0; }
+:root[data-appearance="liquid-glass"] .reader-surface-toolbar > :first-child { border-radius: inherit; }
+:root[data-appearance="liquid-glass"] [data-material="reader-toolbar-row"] { background: transparent; border-color: var(--glass-chrome-edge); }
+:root[data-appearance="liquid-glass"] [data-reader-frame] :is(.pdf-document-scroll, .entry-overview-body) {
+  padding-top: calc(var(--reader-toolbar-height, 96px) + 24px);
+  scroll-padding-top: calc(var(--reader-toolbar-height, 96px) + 24px);
+}
+:root[data-appearance="liquid-glass"] .pdf-reader-surface [data-reader-rail] { top: calc(var(--reader-toolbar-height, 96px) + 24px); }
+:root[data-appearance="liquid-glass"] .pdf-reader-surface :is([data-reader-aux], .app-note-pane-resizer) { margin-top: calc(var(--reader-toolbar-height, 96px) + 24px); }
+:root[data-appearance="liquid-glass"] .pdf-reader-surface .app-note-pane-resizer { height: auto; }
+:root[data-appearance="liquid-glass"] .pdf-reader-surface .app-note-pane-resize-preview { top: calc(var(--reader-toolbar-height, 96px) + 24px); }
+:root[data-appearance="liquid-glass"] [data-reader-scrolled="true"] > .reader-surface-toolbar {
+  background-color: var(--glass-reader-scrolled); box-shadow: var(--glass-popup-shadow);
+}
+:root[data-appearance="liquid-glass"] [data-reader-scrolling="true"] > .reader-surface-toolbar {
+  background-color: var(--glass-reader-moving);
+}
+:root[data-appearance="liquid-glass"] [data-reader-scrolling="true"] > .reader-surface-toolbar::after { opacity: .7; }
+:root[data-appearance="liquid-glass"] .entry-overview-body { background: transparent; }
+:root[data-appearance="liquid-glass"] .entry-overview-summary {
+  background: var(--glass-overview-panel); border-color: var(--glass-edge); box-shadow: var(--glass-rim);
+}
+:root[data-appearance="liquid-glass"] .entry-overview-section { background: transparent; border-color: var(--glass-edge); box-shadow: none; }
+:root[data-appearance="liquid-glass"] .entry-overview-section > :first-child { background: transparent; border-color: var(--glass-chrome-edge); }
+:root[data-appearance="liquid-glass"] [data-material="reader-popover"] {
+  background: var(--glass-face), var(--glass-popup); border-color: var(--glass-edge); box-shadow: var(--glass-popup-shadow);
+  border-radius: var(--glass-panel-radius);
+  -webkit-backdrop-filter: var(--glass-popup-filter) var(--glass-lens, blur(0px));
+  backdrop-filter: var(--glass-popup-filter) var(--glass-lens, blur(0px));
+}
+:root[data-appearance="liquid-glass"] [data-material="reader-popover"][style*="--glass-lens:"] {
+  -webkit-backdrop-filter: var(--glass-popup-filter) var(--glass-lens); backdrop-filter: var(--glass-popup-filter) var(--glass-lens);
+}
+:root[data-appearance="liquid-glass"] [data-material="editor-toolbar"] { background: var(--glass-toolbar); border-color: var(--glass-edge); }
+:root[data-appearance="liquid-glass"] [data-material="editor-toolbar"] > div { background-color: transparent; }
+
+/* Users can request solid surfaces even if WebView doesn't expose the OS transparency preference. */
+:root[data-appearance="liquid-glass"][data-glass-transparency="reduced"] {
+  --glass-face: none; --glass-tinted-face: none; --glass-primary: var(--primary); --glass-primary-hover: var(--primary);
+  --glass-primary-foreground: var(--primary-foreground);
+  --glass-filter: none; --glass-control-filter: none; --glass-popup-filter: none;
+  --glass-surface: var(--sidebar); --glass-popup: var(--popover); --glass-toolbar: var(--sidebar);
+  --glass-control: var(--card); --glass-control-hover: var(--card); --glass-input: var(--card);
+  --glass-control-pressed: var(--accent); --glass-switch-track: var(--input); --glass-switch-thumb: var(--card);
+  --glass-ambient: var(--background); --glass-edge: var(--border); --glass-chrome-edge: var(--border);
+  --glass-prism-colors: transparent, transparent;
+  --glass-reader-scrolled: var(--popover); --glass-reader-moving: var(--popover); --glass-overview-panel: var(--card);
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more), (forced-colors: active) {
+  :root[data-appearance="liquid-glass"] {
+    --glass-face: none; --glass-tinted-face: none; --glass-primary: var(--primary); --glass-primary-hover: var(--primary);
+    --glass-primary-foreground: var(--primary-foreground);
+    --glass-filter: none; --glass-control-filter: none; --glass-popup-filter: none;
+    --glass-surface: var(--sidebar); --glass-popup: var(--popover); --glass-toolbar: var(--sidebar);
+    --glass-control: var(--card); --glass-control-hover: var(--card); --glass-input: var(--card);
+    --glass-control-pressed: var(--accent); --glass-switch-track: var(--input); --glass-switch-thumb: var(--card);
+    --glass-ambient: var(--background); --glass-edge: var(--foreground); --glass-chrome-edge: var(--border);
+    --glass-prism-colors: transparent, transparent;
+    --glass-reader-scrolled: var(--popover); --glass-reader-moving: var(--popover); --glass-overview-panel: var(--card);
+  }
+}
+@media (forced-colors: active) {
+  :root[data-appearance="liquid-glass"] {
+    --background: Canvas; --foreground: CanvasText; --card: Canvas; --muted: Canvas;
+    --popover: Canvas; --sidebar: Canvas; --glass-toolbar: Canvas; --glass-ambient: Canvas;
+    --primary: Highlight; --ring: Highlight; --border: ButtonBorder; --glass-edge: ButtonBorder;
+    --glass-muted-foreground: CanvasText;
+    --accent: Highlight; --accent-foreground: HighlightText; --glass-control-pressed: Highlight;
+    --glass-rim: 0 0 #0000; --glass-popup-shadow: 0 0 #0000;
+    --glass-control-shadow: 0 0 #0000; --glass-control-hover-shadow: 0 0 #0000;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root[data-appearance="liquid-glass"] { --glass-motion: 0ms; --glass-press-motion: 0ms; }
+  :root[data-appearance="liquid-glass"] :is([data-slot="dialog-content"], [data-slot="popover-content"], [data-slot="hover-card-content"], [data-slot="dropdown-menu-content"], [data-slot="context-menu-content"], [data-slot="select-content"], [data-slot="tooltip-content"]) { animation: none; }
+}
+/* Resizing retains native feedback but suspends the expensive material sampling. */
+:root[data-appearance="liquid-glass"] .app-shell.is-sidebar-resizing .app-sidebar {
+  -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--sidebar); filter: none; opacity: 1;
+}
+:root[data-appearance="liquid-glass"] [data-sidebar-panel-group][data-resizing="true"] { --glass-motion: 0ms; --glass-press-motion: 0ms; }
+:root[data-appearance="liquid-glass"] .workspace-tabsbar.is-tab-dragging .workspace-surface-tab { transition: none; }

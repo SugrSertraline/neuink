@@ -19,6 +19,7 @@ import type {
 import {
   conversationSourceKey,
   invokeAssistantTool,
+  invokeMcpTool,
   isLocalConversationSource,
   listTools
 } from '@/shared/ipc/assistantApi';
@@ -50,6 +51,7 @@ import { assistantContextCharBudget } from './contextBudget';
 import { runSubagentTask } from '../runtime/subagent';
 import type { AgentLoopGuard } from '../agent-core';
 import { buildEntryMetaProposal } from './entryMetaProposal';
+import { assertInlineNoteCitations } from './noteCitations';
 import {
   ENTRY_META_PROPOSAL_TOOL_DESCRIPTION,
   entryMetaProposalInputSchema,
@@ -250,24 +252,6 @@ export function normalizeToolInput(
   throw new Error(`Unsupported assistant tool: ${toolName}`);
 }
 
-export function mcpToolDescriptors(runtimeSettings?: AgentRuntimeSettings | null): AssistantToolDescriptor[] {
-  if (!runtimeSettings) {
-    return [];
-  }
-  return runtimeSettings.mcpServers
-    .filter((server) => server.enabled && server.allowedToolNames.length > 0)
-    .flatMap((server) =>
-      server.allowedToolNames.map((toolName) => ({
-        description: `Execute MCP tool ${toolName} through ${server.name}. This tool is permission-gated by Neuink Agent Runtime.`,
-        name: `mcp.${server.id}.${toolName}`,
-        parameters_schema: {
-          additionalProperties: true,
-          type: 'object'
-        }
-      }))
-    );
-}
-
 export function mcpToolIdsForAgent(
   runtimeSettings?: AgentRuntimeSettings | null,
   activeExecution?: AgentExecutionSelection | null
@@ -288,17 +272,16 @@ export async function executeTool(
   input: JsonObject,
   {
     addSource,
+    signal,
     contextBudget
   }: {
     addSource: (source: ConversationSourceLink) => number;
+    signal?: AbortSignal;
     contextBudget: number;
   }
 ) {
   if (toolName.startsWith('mcp.')) {
-    const result = await invokeAssistantTool<{
-      output?: unknown;
-      summary?: string;
-    }>(toolName, input);
+    const result = await invokeMcpTool(toolName, input, signal);
     return {
       modelOutput: result.output ?? result,
       sources: [],
@@ -688,7 +671,7 @@ export function noteProposalInputSchema(): JSONSchema7 {
       },
       markdown: {
         description:
-          'Markdown body to create, prepend, append, or use as the replacement note body. For patch, this can be a short human-readable summary or preview; patch_operations are authoritative.',
+          'Markdown body to create, prepend, append, or replace. Put each evidence marker [S#] inline beside the sentence, paragraph or list item it supports. Never collect citations at the end or on separate lines. For patch, this can be a summary; patch_operations are authoritative and their inserted/replacement text must contain the inline citations.',
         type: 'string'
       },
       note_id: {
@@ -775,7 +758,7 @@ export function noteProposalInputSchema(): JSONSchema7 {
       },
       source_markers: {
         description:
-          'Evidence markers from tool output or pinned context, such as S1 or [S2], that support the note content.',
+          'Only evidence markers actually cited inline in the note content, such as S1 or [S2]. This metadata does not insert citations. For patches, cite in the inserted/replacement text, not just the preview.',
         items: {
           type: 'string'
         },
@@ -801,28 +784,6 @@ export function readCurrentNoteInputSchema(): JSONSchema7 {
   return {
     additionalProperties: false,
     properties: {},
-    type: 'object'
-  } as JSONSchema7;
-}
-
-export function skillSearchInputSchema(): JSONSchema7 {
-  return {
-    additionalProperties: false,
-    properties: {
-      category: { type: 'string' },
-      query: { type: 'string' }
-    },
-    type: 'object'
-  } as JSONSchema7;
-}
-
-export function skillLoadInputSchema(): JSONSchema7 {
-  return {
-    additionalProperties: false,
-    properties: {
-      skill_id: { type: 'string' }
-    },
-    required: ['skill_id'],
     type: 'object'
   } as JSONSchema7;
 }
@@ -869,78 +830,6 @@ export function runSubagentInputSchema(
     required: ['agent_id', 'instruction'],
     type: 'object'
   } as JSONSchema7;
-}
-
-export function searchSkillsOutput(
-  input: unknown,
-  skillPackages: AgentExecutionSelection['skillPackages']
-) {
-  const object = asObject(input);
-  const category = optionalString(object.category)?.trim().toLowerCase() ?? '';
-  const query = optionalString(object.query)?.trim().toLowerCase() ?? '';
-  const matches = skillPackages.filter((skillPackage) => {
-    if (category && skillPackage.category !== category) {
-      return false;
-    }
-    if (!query) {
-      return true;
-    }
-    const haystack =
-      `${skillPackage.name}\n${skillPackage.description}\n${skillPackage.category}\n${skillPackage.triggers.join('\n')}`.toLowerCase();
-    return haystack.includes(query);
-  });
-  return {
-    modelOutput: {
-      items: matches.map((skillPackage) => ({
-        category: skillPackage.category,
-        description: skillPackage.description,
-        id: skillPackage.id,
-        name: skillPackage.name,
-        resources: skillPackage.resourcePaths ?? { assets: [], references: [], scripts: [] },
-        script_execution: skillPackage.scriptExecution ?? 'disabled',
-        suggested_tools: skillPackage.suggestedToolIds,
-        triggers: skillPackage.triggers
-      })),
-      kind: 'skill_package_search',
-      total: matches.length
-    },
-    summary:
-      matches.length > 0
-        ? `Found ${matches.length} skill package${matches.length === 1 ? '' : 's'} for the current agent.`
-        : 'No loaded skill packages matched the query.'
-  };
-}
-
-export function loadSkillOutput(
-  input: unknown,
-  skillPackages: AgentExecutionSelection['skillPackages']
-) {
-  const object = asObject(input);
-  const skillId = requiredString(object.skill_id, 'skill_id');
-  const skillPackage = skillPackages.find((item) => item.id === skillId);
-  if (!skillPackage) {
-    throw new Error('The requested skill package is not loaded for the current agent.');
-  }
-  return {
-    modelOutput: {
-      category: skillPackage.category,
-      description: skillPackage.description,
-      files: skillPackage.files.map((file) => file.path),
-      id: skillPackage.id,
-      kind: 'skill_package_load',
-      name: skillPackage.name,
-      readme: skillPackage.readme,
-      resources: skillPackage.resourcePaths ?? { assets: [], references: [], scripts: [] },
-      script_execution: skillPackage.scriptExecution ?? 'disabled',
-      script_policy:
-        'Scripts are auxiliary files only. Do not execute them unless they are exposed through MCP or an approved Tool Package with permissions.',
-      source_archive_path: skillPackage.sourceArchivePath,
-      suggested_tools: skillPackage.suggestedToolIds,
-      triggers: skillPackage.triggers,
-      version: skillPackage.version
-    },
-    summary: `Loaded skill package "${skillPackage.name}".`
-  };
 }
 
 export function buildNoteProposal(
@@ -1003,6 +892,7 @@ export function buildNoteProposal(
   if (!entryId) {
     throw new Error('A note proposal needs a target Entry.');
   }
+  entryIdOrSingleScope(entryId, scope);
 
   const entryTitle =
     targetKind === 'segment_note' && defaultSegmentTarget?.entryId === entryId
@@ -1069,10 +959,17 @@ export function buildNoteProposal(
   ) {
     throw new Error('Read the current target note before creating a line-precise patch proposal.');
   }
+  const citationMarkdown = action === 'patch' || action === 'delete'
+    ? patchOperationsPreview(patchOperations ?? [])
+    : markdown;
   const sourceMarkers = [
     ...stringArray(object.source_markers),
-    ...markersFromMarkdown(markdown)
+    ...markersFromMarkdown(citationMarkdown)
   ];
+  const sources = sourcesFromMarkers(sourceMarkers, sourceByMarker);
+  if (targetKind === 'markdown_note') {
+    assertInlineNoteCitations(citationMarkdown, sources.map(source => source.marker!));
+  }
   const beforeMarkdown = proposalBeforeMarkdown({
     action,
     contextSnapshot,
@@ -1104,7 +1001,7 @@ export function buildNoteProposal(
     patchOperations,
     rationale: optionalString(object.rationale) ?? undefined,
     segmentUid,
-    sources: sourcesFromMarkers(sourceMarkers, sourceByMarker),
+    sources,
     status: 'pending',
     targetKind,
     title
@@ -1581,14 +1478,12 @@ export function sourcesFromMarkers(
 
   for (const marker of markers) {
     const markerNumber = Number(marker.replace(/[[\]S\s]/gi, ''));
-    if (!Number.isFinite(markerNumber) || seen.has(markerNumber)) {
-      continue;
-    }
+    if (seen.has(markerNumber)) continue;
+    if (!Number.isInteger(markerNumber) || markerNumber < 1) throw new Error('Invalid evidence marker.');
 
     const source = sourceByMarker.get(markerNumber);
-    if (!source || !isLocalConversationSource(source)) {
-      continue;
-    }
+    if (!source) throw new Error(`Unknown evidence marker: S${markerNumber}`);
+    if (!isLocalConversationSource(source)) throw new Error('External evidence cannot be persisted as a local Source Link. Import the paper before creating a linked note.');
 
     seen.add(markerNumber);
     sources.push({

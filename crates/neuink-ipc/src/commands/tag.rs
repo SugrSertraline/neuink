@@ -150,7 +150,7 @@ fn apply_entry_tag_change(
     if request.entry_ids.is_empty() {
         return Err("Entry Tag proposal has no target Entry".to_string());
     }
-    let originals = request
+    request
         .entry_ids
         .iter()
         .map(|entry_id| {
@@ -159,31 +159,9 @@ fn apply_entry_tag_change(
                 .map_err(|error| error.to_string())
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let (tag_id, created_root) = resolve_tag(workspace, request)?;
-    let mut updated = Vec::new();
-    for original in &originals {
-        let mut next_tags = original.tags.clone();
-        if request.action == "attach" && !next_tags.contains(&tag_id) {
-            next_tags.push(tag_id.clone());
-        } else if request.action == "detach" {
-            next_tags.retain(|id| id != &tag_id);
-        }
-        if let Err(error) = workspace.update_entry_meta(
-            &original.id,
-            original.title.clone(),
-            original.fields.clone(),
-            next_tags,
-        ) {
-            rollback_tag_change(
-                workspace,
-                &updated,
-                created_root.as_ref(),
-                error.to_string(),
-            )?;
-        }
-        updated.push(original.clone());
-    }
-    Ok(())
+    let (tag_id, _) = resolve_tag(workspace, request)?;
+    workspace.apply_entry_tag_membership(&request.entry_ids, &tag_id, request.action == "attach")
+        .map_err(|error| error.to_string())
 }
 
 fn resolve_tag(
@@ -191,13 +169,19 @@ fn resolve_tag(
     request: &ApplyTagProposalRequest,
 ) -> Result<(TagId, Option<TagId>), String> {
     let tags = workspace.list_tags().map_err(|error| error.to_string())?;
-    let matched = tags.iter().find(|tag| {
-        request.tag_id.as_ref().is_some_and(|id| tag.id == *id)
-            || request
-                .name
-                .as_ref()
-                .is_some_and(|name| tag.name.eq_ignore_ascii_case(name))
-    });
+    if let Some(id) = &request.tag_id {
+        let tag = tags.iter().find(|tag| tag.id == *id)
+            .ok_or_else(|| "指定的标签已不存在，未按名称替换目标。".to_string())?;
+        if request.name.as_ref().is_some_and(|name| !tag.name.eq_ignore_ascii_case(name) && !full_tag_path(tag, &tags).eq_ignore_ascii_case(name)) {
+            return Err("标签名称与指定 ID 不一致，请重新确认目标。".into());
+        }
+        return Ok((tag.id.clone(), None));
+    }
+    let matched_tags: Vec<_> = tags.iter().filter(|tag| request.name.as_ref().is_some_and(|name| if name.contains('/') {
+        full_tag_path(tag, &tags).eq_ignore_ascii_case(name)
+    } else { tag.name.eq_ignore_ascii_case(name) })).collect();
+    if matched_tags.len() > 1 { return Err("存在同名标签，请使用明确的标签 ID 后重新确认。".into()); }
+    let matched = matched_tags.first().copied();
     match (matched, request.action.as_str()) {
         (Some(tag), _) => Ok((tag.id.clone(), None)),
         (None, "attach") => create_tag_path(workspace, request.name.clone()),
@@ -238,28 +222,16 @@ fn create_tag_path(
         .ok_or_else(|| "Tag attach path is empty".to_string())
 }
 
-fn rollback_tag_change(
-    workspace: &neuink_workspace::Workspace,
-    originals: &[EntryMeta],
-    created_tag: Option<&TagId>,
-    primary_error: String,
-) -> Result<(), String> {
-    for entry in originals.iter().rev() {
-        workspace
-            .update_entry_meta(
-                &entry.id,
-                entry.title.clone(),
-                entry.fields.clone(),
-                entry.tags.clone(),
-            )
-            .map_err(|error| format!("{primary_error}; Tag proposal rollback failed: {error}"))?;
+fn full_tag_path(tag: &TagMeta, tags: &[TagMeta]) -> String {
+    let mut names = vec![tag.name.as_str()];
+    let mut parent = tag.parent_id.as_ref();
+    for _ in 0..tags.len() {
+        let Some(value) = parent.and_then(|id| tags.iter().find(|tag| tag.id == *id)) else { break; };
+        names.push(value.name.as_str());
+        parent = value.parent_id.as_ref();
     }
-    if let Some(tag_id) = created_tag {
-        workspace
-            .delete_tag(tag_id)
-            .map_err(|error| format!("{primary_error}; Tag cleanup failed: {error}"))?;
-    }
-    Err(primary_error)
+    names.reverse();
+    names.join("/")
 }
 
 fn required_text(value: Option<String>, message: &str) -> Result<String, String> {

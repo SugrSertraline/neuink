@@ -1,4 +1,6 @@
+import { PdfReferenceLayer } from '../navigation/PdfReferenceLayer';
 import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { AssistantContextAddOptions } from '@/shared/types/assistant';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   MouseEvent as ReactMouseEvent,
@@ -36,8 +38,8 @@ import { SegmentActionMenu } from "./SegmentActionMenu";
 import { SegmentRegion } from "./SegmentRegion";
 import { logicalSegmentUid } from "./readerUtils";
 import type { PageSegments } from "./types";
+import { PdfAnnotationTabs } from './PdfAnnotationTabs';
 
-const PREVIEW_SUPPRESS_MS = 600;
 const EMPTY_ANNOTATIONS: Annotation[] = [];
 
 function PdfSourcePageImpl({
@@ -126,11 +128,11 @@ function PdfSourcePageImpl({
   onCopySourceLink?: (segment: SourceSegment) => void;
   onInsertSegmentImage?: (segment: SourceSegment) => void;
   onTranslateSegment?: (segment: SourceSegment) => void;
-  onOpenSegmentAnnotation: (segment: SourceSegment) => void;
+  onOpenSegmentAnnotation: (segment: SourceSegment, annotationId?: string) => void;
   onOpenSegmentNote: (segment: SourceSegment) => void;
   onOpenSegmentWorkspace?: (segment: SourceSegment) => void;
   onOpenSourceBacklink: (backlink: SourceBacklink) => void;
-  onAddAssistantContext?: (segment: SourceSegment) => void;
+  onAddAssistantContext?: (segment: SourceSegment, options?: AssistantContextAddOptions) => void;
   onCloseSegmentOverlay: () => void;
   onCreateTextSelectionAnnotation?: (input: {
     content: string;
@@ -187,7 +189,6 @@ function PdfSourcePageImpl({
       ),
     [activeAnnotationId, pageTextSelectionAnnotations],
   );
-  const previewSuppressUntilRef = useRef(0);
   const previewPointerInsideRef = useRef(false);
   const previewClearTimerRef = useRef<number | null>(null);
   const hoverAnimationFrameRef = useRef<number | null>(null);
@@ -223,7 +224,7 @@ function PdfSourcePageImpl({
     setLocalHoveredGroupUid(null);
   }, [hoverPreviewEnabled, suppressRegions]);
 
-  const clearFloatingSegmentUi = (suppressPreview = false) => {
+  const clearFloatingSegmentUi = () => {
     if (previewClearTimerRef.current !== null) {
       window.clearTimeout(previewClearTimerRef.current);
       previewClearTimerRef.current = null;
@@ -244,13 +245,10 @@ function PdfSourcePageImpl({
     setPreviewRegionId(null);
     setLocalHoveredGroupUid(null);
 
-    if (suppressPreview) {
-      previewSuppressUntilRef.current = Date.now() + PREVIEW_SUPPRESS_MS;
-    }
   };
 
   useEffect(() => {
-    const closeSelectionUi = () => clearFloatingSegmentUi(true);
+    const closeSelectionUi = () => clearFloatingSegmentUi();
     window.addEventListener('neuink:reader-surface-change', closeSelectionUi);
     window.addEventListener('blur', closeSelectionUi);
     return () => {
@@ -352,7 +350,6 @@ function PdfSourcePageImpl({
       hoverAnimationFrameRef.current = null;
     }
     pendingHoverSampleRef.current = null;
-    previewSuppressUntilRef.current = Date.now() + PREVIEW_SUPPRESS_MS;
     clearHoveredRegion();
   }, hoverPreviewEnabled);
 
@@ -362,13 +359,7 @@ function PdfSourcePageImpl({
     clientY: number,
     buttons: number,
   ) => {
-    notifyPdfInteraction();
     if (suppressRegions || !hoverPreviewEnabled || hoverInteractionBlocked()) {
-      clearHoveredRegion();
-      return;
-    }
-
-    if (Date.now() < previewSuppressUntilRef.current) {
       clearHoveredRegion();
       return;
     }
@@ -431,7 +422,6 @@ function PdfSourcePageImpl({
   };
 
   const queueHoveredSegmentUpdate = (event: ReactPointerEvent<HTMLDivElement>) => {
-    notifyPdfInteraction();
     pendingHoverSampleRef.current = {
       buttons: event.buttons,
       clientX: event.clientX,
@@ -631,7 +621,7 @@ function PdfSourcePageImpl({
     }
 
     if (actionMenu) {
-      clearFloatingSegmentUi(true);
+      clearFloatingSegmentUi();
     }
     const pointerDown = pointerDownRef.current;
     pointerDownRef.current = null;
@@ -711,8 +701,9 @@ function PdfSourcePageImpl({
       data-pdf-page-index={page.pageIdx}
       id={`pdf-page-${page.pageIdx}`}
     >
-      <div className="flex items-center justify-between px-1">
+      <div className="pdf-page-caption flex items-center justify-between gap-2 px-1">
         <Badge variant="outline">第 {page.pageIdx + 1} 页</Badge>
+        <PdfAnnotationTabs page={page} annotations={annotationsBySegmentUid} onOpen={onOpenSegmentAnnotation} visible={renderPriority === 'visible'} />
         <span className="text-xs text-muted-foreground">
           {page.segments.length} regions
         </span>
@@ -752,6 +743,7 @@ function PdfSourcePageImpl({
           clearHoveredRegion();
         }}
         onPointerMoveCapture={(event) => {
+          if ((event.target as Element).closest('[data-paper-reference], [data-hover-surface]')) { clearHoveredRegion(); return; }
           const pointerDown = pointerDownRef.current;
           if (pointerDown?.startedOnTextLayer && (event.buttons & 1) === 1) {
             const moved = Math.hypot(
@@ -767,6 +759,7 @@ function PdfSourcePageImpl({
           queueHoveredSegmentUpdate(event);
         }}
         onPointerUpCapture={(event) => {
+          if ((event.target as Element).closest('[data-paper-reference], [data-hover-surface]')) return;
           if (event.button !== 0) {
             return;
           }
@@ -777,6 +770,7 @@ function PdfSourcePageImpl({
           textSelectionGestureRef.current = false;
         }}
       >
+        <PdfReferenceLayer document={pdfDocument} pageIdx={page.pageIdx} enabled={renderEnabled && renderPriority === "visible" && !suppressRegions} />
         <PdfCanvasPage
           pageWidth={pageWidth}
           pdfDocument={pdfDocument}
@@ -896,7 +890,7 @@ function PdfSourcePageImpl({
 	            onAddAssistantContext={
               onAddAssistantContext
                 ? (segment) => {
-                    clearFloatingSegmentUi(true);
+                    clearFloatingSegmentUi();
                     onAddAssistantContext(segment);
                   }
                 : undefined
@@ -904,7 +898,7 @@ function PdfSourcePageImpl({
             onAddSourceLink={
               onAddSourceLink
                 ? (segment) => {
-                    clearFloatingSegmentUi(true);
+                    clearFloatingSegmentUi();
                     onAddSourceLink(segment);
                   }
                 : undefined
@@ -912,7 +906,7 @@ function PdfSourcePageImpl({
             onCopySourceLink={
               onCopySourceLink
                 ? (segment) => {
-                    clearFloatingSegmentUi(true);
+                    clearFloatingSegmentUi();
                     onCopySourceLink(segment);
                   }
                 : undefined
@@ -920,7 +914,7 @@ function PdfSourcePageImpl({
 	            onCopyContent={
 	              onCopyContent
 	                ? (segment) => {
-	                    clearFloatingSegmentUi(true);
+	                    clearFloatingSegmentUi();
 	                    onCopyContent(segment);
 	                  }
 	                : undefined
@@ -928,7 +922,7 @@ function PdfSourcePageImpl({
             onInsertSegmentImage={
               onInsertSegmentImage
                 ? (segment) => {
-                    clearFloatingSegmentUi(true);
+                    clearFloatingSegmentUi();
                     onInsertSegmentImage(segment);
                   }
                 : undefined
@@ -936,30 +930,36 @@ function PdfSourcePageImpl({
             onTranslateSegment={
               onTranslateSegment
                 ? (segment) => {
-                    clearFloatingSegmentUi(true);
+                    clearFloatingSegmentUi();
                     onTranslateSegment(segment);
                   }
                 : undefined
             }
             onOpenSegmentAnnotation={(segment) => {
-              clearFloatingSegmentUi(true);
+              clearFloatingSegmentUi();
               onOpenSegmentAnnotation(segment);
             }}
             onOpenSegmentNote={(segment) => {
-              clearFloatingSegmentUi(true);
+              clearFloatingSegmentUi();
               onOpenSegmentNote(segment);
             }}
             onOpenSegmentWorkspace={onOpenSegmentWorkspace}
-            onClose={() => clearFloatingSegmentUi(true)}
+            onClose={() => clearFloatingSegmentUi()}
           />
         ) : null}
-        {onCreateTextSelectionAnnotation ? (
-          <PdfTextSelectionToolbar
+        {onCreateTextSelectionAnnotation || onTranslateTextSelection || onAddAssistantContext ? (
+        <PdfTextSelectionToolbar
+          visible={renderPriority === 'visible'}
             autoTranslate={autoTranslateTextSelection}
             pending={pendingTextSelection}
             onApply={onCreateTextSelectionAnnotation}
             onClose={closeTextSelectionToolbar}
             onTranslate={onTranslateTextSelection}
+            onAsk={onAddAssistantContext ? ({ segment, text }, intent) => {
+              onAddAssistantContext(segment, { selectionText: text,
+                draftQuestion: intent === 'explain' ? '请解释刚刚选中的这段内容，并结合原文说明。' : undefined });
+              closeTextSelectionToolbar();
+            } : undefined}
           />
         ) : null}
       </div>

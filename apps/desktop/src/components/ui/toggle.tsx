@@ -41,6 +41,8 @@ const Toggle = React.forwardRef<
       data-slot="toggle"
       className={cn(toggleVariants({ variant, size, className }))}
       {...props}
+      data-ui="toggle"
+      data-variant={variant}
     />
   )
 })

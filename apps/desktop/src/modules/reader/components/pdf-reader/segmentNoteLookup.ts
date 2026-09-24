@@ -6,7 +6,7 @@ export function buildSegmentNoteLookup(notes: SegmentBlockNote[], segments: Sour
   const segmentByUid = new Map(segments.map((segment) => [segment.uid, segment]));
   const lookup = new Map<string, SegmentBlockNote>();
   for (const note of notes) {
-    if (!hasNoteText(note.text)) continue;
+    if (!hasNoteText(note.text) && !note.bookmarked) continue;
     lookup.set(note.segment_uid, note);
     const segment = segmentByUid.get(note.segment_uid);
     if (segment) lookup.set(logicalSegmentUid(segment), note);

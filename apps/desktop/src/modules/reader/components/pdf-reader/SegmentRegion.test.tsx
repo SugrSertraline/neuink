@@ -19,7 +19,11 @@ describe('PDF segment preview layout', () => {
     vi.restoreAllMocks();
   });
 
-  it('shows only the translation matching the hovered list item', async () => {
+  it.each([
+    { item: 'Second source item', source: '- First source item\n- Second source item', translated: '- 第一项译文\n- 第二项译文', expected: '第二项译文', absent: '第一项译文' },
+    { item: '[17] S. K. McGrath, Stakeholder defined', source: '[3] G. Lucassen, User stories\n[17] S. K. McGrath, Stakeholder defined', translated: '[17] 利益相关者的定义\n[3] 用户故事的使用', expected: '[17] 利益相关者的定义', absent: '用户故事的使用' },
+    { item: 'S. K. McGrath, Stakeholder defined', source: '[17] S. K. McGrath, Stakeholder defined\n[3] G. Lucassen, User stories', translated: '[17] 利益相关者的定义\n[3] 用户故事的使用', expected: '[17] 利益相关者的定义', absent: '用户故事的使用' },
+  ])('shows the translation matching the hovered source: $item', async ({ item, source, translated, expected, absent }) => {
     render(
       <SegmentRegion
         active
@@ -43,15 +47,15 @@ describe('PDF segment preview layout', () => {
         relatedImagePath={null}
         segment={{
           bbox: [100, 320, 900, 500],
-          markdown: 'Second source item',
+          markdown: item,
           mineru_metadata: {
             list_item_regions: JSON.stringify([
-              { bbox: [100, 320, 900, 500], text: 'Second source item' },
+              { bbox: [100, 320, 900, 500], text: item },
             ]),
           },
           page_idx: 0,
           segment_type: 'list',
-          text: 'Second source item',
+          text: item,
           uid: 'list-1:list-item:1',
         }}
         showRegions={false}
@@ -63,9 +67,9 @@ describe('PDF segment preview layout', () => {
           segment_type: 'list',
           segment_uid: 'list-1',
           source_hash: 'hash',
-          source_text: '- First source item\n- Second source item',
+          source_text: source,
           status: 'translated',
-          translated_text: '- 第一项译文\n- 第二项译文',
+          translated_text: translated,
           updated_at: '2026-07-17T00:00:00Z',
         }}
         translationMode="hover"
@@ -77,9 +81,9 @@ describe('PDF segment preview layout', () => {
     );
 
     await waitFor(() => {
-      expect(document.body.textContent).toContain('第二项译文');
+      expect(document.body.textContent).toContain(expected);
     });
-    expect(document.body.textContent).not.toContain('第一项译文');
+    expect(document.body.textContent).not.toContain(absent);
   });
 
   it('shows the saved note and annotations when their preview sections are enabled', async () => {

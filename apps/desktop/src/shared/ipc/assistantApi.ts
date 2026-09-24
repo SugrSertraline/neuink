@@ -12,7 +12,7 @@ import type {
   AssistantTagProposal,
   AssistantTaskPlan
 } from '../types/assistant';
-import type { AgentRuntimeSettings, SkillPackage } from '../types/agentRuntime';
+import type { AgentRuntimeSettings } from '../types/agentRuntime';
 import type { SearchMode, SearchResults } from './workspaceApi';
 
 export type LlmApiProtocol = 'openai_compatible' | 'anthropic' | 'google';
@@ -286,7 +286,7 @@ export type TagRecommendation = {
 
 export type AnalyzeEntryTagsResponse = {
   recommendations: TagRecommendation[];
-  skill_version: string;
+  policy_version: string;
 };
 
 export type ReadEntryAssistantContextResponse = {
@@ -357,14 +357,6 @@ export type AgentRuntimeTraceEvent = {
   id: string;
   label: string;
   summary: string;
-};
-
-export type RunAgentSubagentTaskResponse = {
-  agent_id: string;
-  agent_name: string;
-  answer: string;
-  sources: ConversationSourceLink[];
-  trace: AgentRuntimeTraceEvent[];
 };
 
 export async function getLlmSettings(): Promise<LlmSettingsState> {
@@ -446,32 +438,6 @@ export async function invokeAssistantTool<T = unknown>(name: string, args: unkno
 
 export async function listTools(): Promise<AssistantToolDescriptor[]> {
   return invoke<AssistantToolDescriptor[]>('list_tools');
-}
-
-export async function runAgentSubagentTask(args: {
-  agentId: string;
-  contextSnapshot?: AssistantContextSnapshot | null;
-  conversationHistory?: ConversationMessage[];
-  instruction: string;
-  profiles: LlmProfile[];
-  question: string;
-  root: string;
-  runtimeSettings: AgentRuntimeSettings;
-  scope: ScopeSnapshot;
-}): Promise<RunAgentSubagentTaskResponse> {
-  return invoke<RunAgentSubagentTaskResponse>('run_agent_subagent_task', {
-    request: {
-      root: args.root,
-      agent_id: args.agentId,
-      instruction: args.instruction,
-      question: args.question,
-      runtime_settings: args.runtimeSettings,
-      profiles: args.profiles,
-      context_snapshot: args.contextSnapshot ?? null,
-      conversation_history: args.conversationHistory ?? [],
-      scope: args.scope
-    }
-  });
 }
 
 export async function loadAgentRuntimeSettings(
@@ -578,35 +544,6 @@ export async function pruneAgentRuns(
   });
 }
 
-export async function importSkillPackageArchive(
-  root: string,
-  archivePath: string
-): Promise<SkillPackage> {
-  return invoke<SkillPackage>('import_skill_package_archive', {
-    request: {
-      root,
-      archivePath
-    }
-  });
-}
-
-export async function listSkillPackages(root: string): Promise<SkillPackage[]> {
-  return invoke<SkillPackage[]>('list_skill_packages', {
-    request: {
-      root
-    }
-  });
-}
-
-export async function loadSkillPackage(root: string, skillId: string): Promise<SkillPackage> {
-  return invoke<SkillPackage>('load_skill_package', {
-    request: {
-      root,
-      skillId
-    }
-  });
-}
-
 export async function openPathInFileManager(path: string): Promise<void> {
   return invoke<void>('open_path_in_file_manager', {
     request: {
@@ -661,14 +598,12 @@ export async function analyzeEntryTags(args: {
   entryId: EntryId;
   instruction: string;
   root: string;
-  skillId?: string;
 }): Promise<AnalyzeEntryTagsResponse> {
   return invoke<AnalyzeEntryTagsResponse>('analyze_entry_tags', {
     request: {
       root: args.root,
       entry_id: args.entryId,
-      instruction: args.instruction,
-      skill_id: args.skillId ?? null
+      instruction: args.instruction
     }
   });
 }
@@ -932,4 +867,34 @@ export async function updateConversationMessage(
   });
   upsertCachedConversation(root, conversation);
   return conversation;
+}
+
+export async function listMcpTools(root: string, serverId: string, signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  const callId = crypto.randomUUID();
+  const cancel = () => { void invoke('cancel_mcp_call', { callId }).catch(() => undefined); };
+  signal?.addEventListener('abort', cancel, { once: true });
+  try {
+    const catalog = await invoke<{ tools: Array<{ name: string; description?: string; inputSchema: unknown }> }>(
+      'list_mcp_tools', { root, serverId, callId }
+    );
+    signal?.throwIfAborted();
+    return catalog;
+  } finally {
+    signal?.removeEventListener('abort', cancel);
+  }
+}
+
+export async function invokeMcpTool(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  const callId = crypto.randomUUID();
+  const cancel = () => { void invoke('cancel_mcp_call', { callId }).catch(() => undefined); };
+  signal?.addEventListener('abort', cancel, { once: true });
+  try {
+    const result = await invokeAssistantTool<{ output?: unknown; summary?: string }>(name, { ...args, call_id: callId });
+    signal?.throwIfAborted();
+    return result;
+  } finally {
+    signal?.removeEventListener('abort', cancel);
+  }
 }

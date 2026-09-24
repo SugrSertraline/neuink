@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ToastContext } from '@/shared/hooks/useToast';
@@ -36,6 +36,7 @@ describe('EntryOverview', () => {
             progress: 100
           }}
           onUpdateEntry={async () => undefined}
+          onCreatePdfVersion={vi.fn()}
           onOpenContent={onOpenContent}
           sourceBacklinksBySegmentUid={{}}
           tags={[
@@ -47,7 +48,7 @@ describe('EntryOverview', () => {
       </ToastContext.Provider>
     );
 
-    expect(getAllByText(longTitle)).toHaveLength(2);
+    expect(getAllByText(longTitle)).toHaveLength(1);
     expect(getAllByText(longTitle).some((element) => element.tagName === 'H1')).toBe(true);
     expect(
       getByText((_, element) =>
@@ -74,5 +75,24 @@ describe('EntryOverview', () => {
     expect(container.querySelectorAll('.entry-overview-fields')).toHaveLength(2);
     expect(getByText('研究/人工智能/智能体').className).toContain('entry-overview-breakable');
     expect(getByText('10.1000/example').className).toContain('entry-overview-breakable');
+    expect(getByRole('button', { name: '创建新版 PDF' })).toBeTruthy();
+  });
+
+  it('opens inline editing and returns focus to the overview action after a save', async () => {
+    const onUpdateEntry = vi.fn().mockResolvedValue(undefined);
+    const view = render(<ToastContext.Provider value={{ dismiss: vi.fn(), notify: () => 'toast' }}>
+      <EntryOverview entry={{ id: 'inline', title: '条目', fields: {}, tagIds: ['tag'], tags: ['旧标签', '新添加标签'], contents: [], pdfFileName: null,
+        status: 'No PDF', progress: 0, createdAt: '', updatedAt: '', parseMessage: null, parseEndpoint: null }}
+        onUpdateEntry={onUpdateEntry} sourceBacklinksBySegmentUid={{}} onOpenContent={vi.fn()}
+        tags={[{ id: 'tag', name: '旧标签', parent_id: null, created_at: '', updated_at: '' }]} />
+    </ToastContext.Provider>);
+    expect(view.getByText('新添加标签')).toBeTruthy();
+    fireEvent.click(view.getByRole('button', { name: '编辑条目' }));
+    expect(view.queryByRole('dialog')).toBeNull();
+    fireEvent.change(view.getByLabelText('标题'), { target: { value: '修改后' } });
+    fireEvent.click(view.getByRole('button', { name: '保存修改' }));
+    await waitFor(() => expect(view.queryByLabelText('标题')).toBeNull());
+    expect(document.activeElement).toBe(view.getByRole('button', { name: '编辑条目' }));
+    expect(onUpdateEntry).toHaveBeenCalledWith('inline', { title: '修改后', fields: {}, tagPaths: ['旧标签', '新添加标签'] });
   });
 });

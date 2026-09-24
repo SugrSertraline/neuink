@@ -19,7 +19,7 @@ export function SegmentRailLayout({
         gridTemplateRows: 'minmax(0, 1fr)'
       }}
     >
-      <div className="absolute inset-y-0 left-0 z-20" style={{ width: PDF_RAIL_WIDTH }}>
+      <div data-reader-rail className="absolute inset-y-0 left-0 z-20" style={{ width: PDF_RAIL_WIDTH }}>
         {rail}
       </div>
       {children}

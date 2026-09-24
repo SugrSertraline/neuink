@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
+import { AlertCircle, CheckCircle2, CircleHelp, Loader2 } from 'lucide-react';
 
 import type { AssistantToolTraceEvent } from '@/shared/ipc/assistantApi';
 
@@ -16,7 +16,7 @@ export function AssistantRunStatus({
   toolEvents: AssistantToolTraceEvent[];
 }) {
   const status = resolveAssistantRunStatus({ busy, error, queued, streaming, toolEvents });
-  const Icon = status.tone === 'danger'
+  const Icon = status.label === '等待你的选择' ? CircleHelp : status.tone === 'danger'
     ? AlertCircle
     : status.active
       ? Loader2
@@ -51,6 +51,9 @@ export function resolveAssistantRunStatus({
   toolEvents: AssistantToolTraceEvent[];
 }) {
   if (error && !busy) return { active: false, label: '运行失败', tone: 'danger' as const };
+  if (busy && toolEvents.some(event => event.toolName === 'ask_user' && event.status === 'running')) {
+    return { active: false, label: '等待你的选择', tone: 'normal' as const };
+  }
   if (queued) return { active: true, label: '已排队', tone: 'normal' as const };
   if (!busy) return { active: false, label: '就绪', tone: 'normal' as const };
   const running = [...toolEvents].reverse().find((event) => event.status === 'running');
@@ -58,11 +61,13 @@ export function resolveAssistantRunStatus({
   if (name.includes('verifier')) return active('正在验证');
   if (name.includes('search')) return active('正在检索');
   if (name.includes('hydrate') || name.includes('read')) return active('正在读取');
-  if (name.includes('planner') || name.includes('subagent') || name.includes('orchestrate')) {
+  if (name.includes('subagent')) return active('子任务运行中');
+  if (name === 'agent.memory') return active('正在整理记录');
+  if (name.includes('plan') || name.includes('orchestrate')) {
     return active('正在规划');
   }
   if (streaming) return active('正在回答');
-  return active('正在思考');
+  return active('正在处理');
 }
 
 function active(label: string) {

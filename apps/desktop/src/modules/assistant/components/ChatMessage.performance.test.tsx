@@ -15,6 +15,39 @@ afterEach(() => {
 });
 
 describe('ChatMessage performance boundaries', () => {
+  it('enlarges completed replies in a read-only preview and leaves plain questions as text', () => {
+    const ui = render(<ChatMessage message={{ ...createMessage(), content: '## 请问\n\n是否整理 WireWay？' }} streaming={false} onOpenSource={vi.fn()} />);
+    expect(ui.container.querySelector('.assistant-chat-message')?.className).toContain('text-sm');
+    fireEvent.click(ui.getByRole('button', { name: '展开阅读' }));
+    expect(ui.getByRole('dialog')).toBeTruthy();
+    expect(ui.getAllByText('是否整理 WireWay？')).toHaveLength(2);
+    expect(ui.queryByRole('button', { name: '确认执行' })).toBeNull();
+  });
+
+  it('stops the thinking animation while a structured question is awaiting an answer', () => {
+    const ui = render(<ChatMessage message={createMessage()} streaming toolEvents={[{ id: 'ask', toolName: 'ask_user', status: 'running' }]} onOpenSource={vi.fn()} />);
+    expect(ui.getByText('等待你的选择')).toBeTruthy();
+    expect(ui.container.querySelector('[data-thinking-animation]')).toBeNull();
+  });
+  it('distinguishes left assistant and right user bubbles with accessible speaker labels', () => {
+    const { getByRole } = render(<>
+      <ChatMessage message={{ ...createMessage(), role: 'user', content: '你好' }} streaming={false} onOpenSource={() => undefined} />
+      <ChatMessage message={createMessage()} streaming={false} onOpenSource={() => undefined} />
+    </>);
+    expect(getByRole('article', { name: '你的消息' }).className).toContain('flex-row-reverse');
+    expect(getByRole('article', { name: 'Neuink 的回复' }).className).not.toContain('flex-row-reverse');
+  });
+
+  it('animates only active execution and respects reduced-motion preferences', () => {
+    const message = { ...createMessage(), content: '' };
+    const { container, rerender } = render(<ChatMessage message={message} streaming onOpenSource={() => undefined} />);
+    const animation = container.querySelector('[data-thinking-animation]');
+    expect(animation).not.toBeNull();
+    expect(animation?.querySelectorAll('.motion-reduce\\:animate-none')).toHaveLength(3);
+    rerender(<ChatMessage message={message} streaming={false} onOpenSource={() => undefined} />);
+    expect(container.querySelector('[data-thinking-animation]')).toBeNull();
+  });
+
   it('does not attach a ResizeObserver for static message layout', () => {
     const observe = vi.fn();
     globalThis.ResizeObserver = class ResizeObserverMock {
@@ -47,11 +80,11 @@ describe('ChatMessage performance boundaries', () => {
     expect(container.textContent).not.toContain('**Markdown**');
   });
 
-  it('shows model reasoning as an expandable live stream', () => {
+  it('keeps reasoning hidden while streaming and only mounts details on request', () => {
     const message = createMessage();
     message.parts = [{ type: 'reasoning', text: '先确认当前上下文，再选择需要调用的工具。' }];
 
-    const { getByRole, getByText } = render(
+    const { getByRole, getByText, queryByText, rerender } = render(
       <ChatMessage
         message={message}
         streaming
@@ -59,14 +92,47 @@ describe('ChatMessage performance boundaries', () => {
       />,
     );
 
-    expect(getByRole('button', { name: /正在思考/ }).getAttribute('aria-expanded')).toBe('true');
+    expect(getByRole('button', { name: '展开执行详情' }).getAttribute('aria-expanded')).toBe('false');
+    expect(queryByText('先确认当前上下文，再选择需要调用的工具。')).toBeNull();
+    fireEvent.click(getByRole('button', { name: '展开执行详情' }));
     expect(getByText('先确认当前上下文，再选择需要调用的工具。')).toBeTruthy();
+    fireEvent.click(getByRole('button', { name: '收起执行详情' }));
+    rerender(<ChatMessage message={{ ...message, content: '更多回答' }} streaming onOpenSource={() => undefined} />);
+    expect(getByRole('button', { name: '展开执行详情' }).getAttribute('aria-expanded')).toBe('false');
+    expect(queryByText('先确认当前上下文，再选择需要调用的工具。')).toBeNull();
+  });
 
-    fireEvent.click(getByRole('button', { name: /正在思考/ }));
-    expect(getByRole('button', { name: /正在思考/ }).getAttribute('aria-expanded')).toBe('false');
+  it('collapses tool traces and memory together without hiding answers or errors', () => {
+    const message = createMessage();
+    message.parts = [
+      { type: 'reasoning', text: '隐藏的长思考' },
+      { type: 'error', message: '资料库无法访问' },
+      { type: 'memory', memory: { summary: '隐藏的记忆', decisions: [], entities: [], open_items: [],
+        user_preferences: [], last_user_goal: '', message_count: 2, source_count: 0, pending_proposal_count: 0, updated_at: '' } },
+    ];
+    const { getByRole, queryByText, getByText } = render(<ChatMessage message={message} streaming={false} onOpenSource={() => undefined} />);
+    expect(getByText('Markdown')).toBeTruthy();
+    expect(getByText('资料库无法访问')).toBeTruthy();
+    expect(queryByText('隐藏的记忆')).toBeNull();
+    expect(queryByText('隐藏的长思考')).toBeNull();
+    const toggle = getByRole('button', { name: '展开执行详情' });
+    expect(toggle.getAttribute('aria-controls')).toBeTruthy();
+    fireEvent.click(toggle);
+    expect(getByText('隐藏的记忆')).toBeTruthy();
+    expect(getByText('隐藏的长思考')).toBeTruthy();
+  });
+
+  it('shows one compact status for an empty streaming response and none for plain completed text', () => {
+    const message = { ...createMessage(), content: '' };
+    const { getByRole, queryByRole, rerender } = render(<ChatMessage message={message} streaming onOpenSource={() => undefined} />);
+    expect(getByRole('status').textContent).toBe('正在处理');
+    expect(getByRole('button', { name: '展开执行详情' }).getAttribute('aria-expanded')).toBe('false');
+    rerender(<ChatMessage message={createMessage()} streaming={false} onOpenSource={() => undefined} />);
+    expect(queryByRole('button', { name: '展开执行详情' })).toBeNull();
   });
 
   it('shows an Apply error and allows retrying the proposal', () => {
+    const apply = vi.fn();
     const message = createMessage();
     message.parts = [{
       proposal: {
@@ -90,11 +156,13 @@ describe('ChatMessage performance boundaries', () => {
     }];
 
     const { getByRole, getByText } = render(
-      <ChatMessage message={message} streaming={false} onOpenSource={() => undefined} />,
+      <ChatMessage message={message} streaming={false} onOpenSource={() => undefined} onApplyNoteProposal={apply} />,
     );
 
     expect(getByText('segment does not exist: v2-continuation-0')).toBeTruthy();
-    expect((getByRole('button', { name: /Apply/i }) as HTMLButtonElement).disabled).toBe(false);
+    expect((getByRole('button', { name: '确认' }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(getByRole('button', { name: '确认' }));
+    expect(apply).toHaveBeenCalledOnce();
   });
 
   it('collapses source links beyond ten until the user expands them', () => {

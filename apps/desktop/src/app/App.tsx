@@ -1,9 +1,8 @@
-import { ListFilter, MessageSquare, PanelRight, Search, Settings } from 'lucide-react';
+import { Library, ListFilter, MessageSquare, PanelRight, Search, Settings } from 'lucide-react';
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import {
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -29,6 +28,7 @@ import {
 } from '@/components/ui/tooltip';
 import {
   findSurfacePane,
+  defaultEntryContentId,
   entryContentSurface,
   entryContentId,
   initialWorkspaceSurfaceLayout,
@@ -48,8 +48,10 @@ import { sameTagEntries, startTagReadingActions, tagNoteOpenPane, tagReadingMove
 import { SameTagSidebar } from '../modules/library/components/SameTagSidebar';
 import { useSameTagContext } from './useSameTagContext';
 import { WorkspaceNotesProvider } from '../modules/notes/WorkspaceNotesContext';
+import { NoteReviewProvider } from '../modules/assistant/review/NoteReviewContext';
 import {
   resolveActiveActivityPanel,
+  resolveLibrarySidebarMode,
   type SidePanel
 } from './activityBarState';
 import { WorkspaceTabsBar } from './WorkspaceTabsBar';
@@ -71,9 +73,12 @@ import { hasUnsavedEntrySegmentEditors, saveSegmentEditorsBeforeClose } from '..
 import { ReaderPane } from '../modules/reader/components/ReaderPane';
 import { hasUnsavedSurface, saveEditsBeforeWorkspaceChange } from './editSafety';
 import { useSurfaceCloseGuard } from './useSurfaceCloseGuard';
+import { useSidebarResize } from './useSidebarResize';
 import { useUnsavedWindowCloseGuard } from './useUnsavedWindowCloseGuard';
 import type { PdfJumpRequest, SidePaneState, SidePaneTarget } from '../modules/reader/types';
 import { SearchDialog } from '../modules/search/components/SearchDialog';
+import { AppearanceIcon } from '../shared/components/AppearanceIcon';
+import { AppearanceExit } from '../shared/components/AppearanceExit';
 import { SearchPanel } from '../modules/search/components/SearchPanel';
 import { useSearchIndexBuildStatus } from '../modules/search/hooks/useSearchIndexBuildStatus';
 import { useSearchIndexStatus } from '../modules/search/hooks/useSearchIndexStatus';
@@ -155,9 +160,7 @@ import {
   SIDEBAR_WIDTH_STORAGE_KEY,
   SIDE_PANEL_STORAGE_KEY,
   WORKSPACE_SPLIT_WIDTH_STORAGE_KEY,
-  clampSidebarWidth,
   conversationToMarkdown,
-  firstContentId,
   formatVectorStatus,
   getWorkspaceSplitContainerWidth,
   noteIdFromContentId,
@@ -442,7 +445,11 @@ export function App() {
   const [sidebarOpen, setSidebarOpen] = useState(() => readStoredBoolean(SIDEBAR_OPEN_STORAGE_KEY, true));
   const [recentReadingEntryIds, setRecentReadingEntryIds] = useState<string[]>(readStoredRecentReading);
   const [sidebarWidth, setSidebarWidth] = useState(() => readStoredSidebarWidth());
-  const [sidebarResizePreviewWidth, setSidebarResizePreviewWidth] = useState<number | null>(null);
+  const { previewWidth: sidebarResizePreviewWidth, effectiveWidth: effectiveSidebarWidth, maxWidth: sidebarMaxWidth,
+    onPointerDown: startSidebarResize, onKeyDown: resizeSidebarWithKeyboard, observeContainer: observeSidebarContainer } = useSidebarResize({
+    width: sidebarWidth, min: SIDEBAR_MIN_WIDTH, max: SIDEBAR_MAX_WIDTH, enabled: sidebarOpen, containerRef: appShellRef,
+    onCommit: next => { setSidebarWidth(next); window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(next)); }
+  });
   const [themePreset, setThemePreset] = useState<AppThemePresetId>(readStoredThemePreset);
   const [uiScale, setUiScale] = useState<UiScale>(readStoredUiScale);
   const [readerPreferences, setReaderPreferences] = useState<ReaderPreferences>(
@@ -536,12 +543,12 @@ export function App() {
   const shellStyle = useMemo(
     () =>
       ({
-        '--app-sidebar-width': sidebarWidth + 'px',
+        '--app-sidebar-width': effectiveSidebarWidth + 'px',
         ...((workspaceSplitPreviewWidthRef.current ?? workspaceSplitLeftWidth) !== null
           ? { '--app-workspace-left-width': (workspaceSplitPreviewWidthRef.current ?? workspaceSplitLeftWidth) + 'px' }
           : {})
       }) as CSSProperties,
-    [sidebarWidth, workspaceSplitLeftWidth]
+    [effectiveSidebarWidth, workspaceSplitLeftWidth]
   );
 
   const previewWorkspaceSplitLeft = useCallback((width: number) => {
@@ -621,53 +628,6 @@ export function App() {
     return () => observer.disconnect();
   }, [surfaceLayout.left, surfaceLayout.right]);
 
-  const startSidebarResize = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (event.button !== 0) {
-        return;
-      }
-
-      event.preventDefault();
-      const startX = event.clientX;
-      const startWidth = sidebarWidth;
-      let nextWidth = startWidth;
-
-      const handlePointerMove = (pointerEvent: PointerEvent) => {
-        nextWidth = clampSidebarWidth(startWidth + pointerEvent.clientX - startX);
-        setSidebarResizePreviewWidth(nextWidth);
-      };
-      const handlePointerUp = () => {
-        window.removeEventListener('pointermove', handlePointerMove);
-        window.removeEventListener('pointerup', handlePointerUp);
-        window.removeEventListener('pointercancel', handlePointerUp);
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-        setSidebarResizePreviewWidth(null);
-        setSidebarWidth(nextWidth);
-        window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(nextWidth));
-      };
-
-      setSidebarResizePreviewWidth(startWidth);
-      document.body.style.cursor = 'col-resize';
-      document.body.style.userSelect = 'none';
-      window.addEventListener('pointermove', handlePointerMove);
-      window.addEventListener('pointerup', handlePointerUp, { once: true });
-      window.addEventListener('pointercancel', handlePointerUp, { once: true });
-    },
-    [sidebarWidth]
-  );
-  const resizeSidebarWithKeyboard = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
-      return;
-    }
-
-    event.preventDefault();
-    setSidebarWidth((current) => {
-      const next = clampSidebarWidth(current + (event.key === 'ArrowRight' ? 16 : -16));
-      window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(next));
-      return next;
-    });
-  }, []);
   const trashedEntries = useMemo(
     () => workspace.trashedEntries.map((entry) => toLibraryEntry(entry, tagPathById)),
     [tagPathById, workspace.trashedEntries]
@@ -701,7 +661,7 @@ export function App() {
       capturedAt: new Date().toISOString(),
       entryId: surfaceEntryId,
       kind: focusedSurface.kind,
-      noteId: focusedSurface.kind === 'note' ? focusedSurface.noteId : null,
+      noteId: focusedSurface.kind === 'note' || focusedSurface.kind === 'note-review' ? focusedSurface.noteId ?? null : null,
       pane: surfaceLayout.focusedPane,
       segmentUid: focusedSegmentUid,
       surfaceKey: surfaceKey(focusedSurface)
@@ -710,6 +670,7 @@ export function App() {
   const sidebarContext = resolveEntrySidebarContext(surfaceLayout);
   const sidebarNote = resolveTagNoteSidebarContext(surfaceLayout);
   const sidebarEntry = sidebarContext ? entries.find((entry) => entry.id === sidebarContext.entryId) ?? null : null;
+  const librarySidebarMode = resolveLibrarySidebarMode(sidePanel, Boolean(sidebarEntry), Boolean(sidebarNote));
   const readingContext = useSameTagContext(workspace.root, surfaceLayout, entries, workspace.tags, activeTag, sidebarOpen && sidePanel === 'same-tag' && workspace.status === 'ready');
   const sameTagId = readingContext.tagId;
   const activeContentId = entryContentId(focusedSurface);
@@ -753,32 +714,10 @@ export function App() {
 
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-    window.localStorage.setItem(
-      PARSER_ENDPOINT_STORAGE_KEY,
-      getEffectiveParserEndpoint(mineruEndpoint)
-    );
-  }, [mineruEndpoint]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-    if (parserApiKey.trim()) {
-      window.localStorage.setItem(PARSER_API_KEY_STORAGE_KEY, parserApiKey);
-    } else {
-      window.localStorage.removeItem(PARSER_API_KEY_STORAGE_KEY);
-    }
-  }, [parserApiKey]);
-
-  useEffect(() => {
     if (typeof document === 'undefined') {
       return;
     }
     document.documentElement.dataset.theme = themePreset;
-    window.localStorage.setItem(APP_THEME_STORAGE_KEY, themePreset);
   }, [themePreset]);
 
   useEffect(() => {
@@ -840,12 +779,9 @@ export function App() {
   }, [surfaceLayout.left, surfaceLayout.right]);
 
   const updateReaderPreferences = useCallback((nextPreferences: ReaderPreferences) => {
+    persistReaderPreferences(nextPreferences);
     setReaderPreferences(nextPreferences);
   }, []);
-
-  useEffect(() => {
-    persistReaderPreferences(readerPreferences);
-  }, [readerPreferences]);
 
   useEffect(() => {
     const message = workspace.error?.trim() ?? '';
@@ -910,6 +846,10 @@ export function App() {
     dispatchSurface({ type: 'open', surface: { kind: 'mineru-client-guide' } });
   };
 
+  const settingsNavigationNonce = useRef(0);
+  const openSetting = (id: string) => {
+    dispatchSurface({ type: 'open', surface: { kind: 'settings', target: { id, nonce: ++settingsNavigationNonce.current } } });
+  };
   const openSettingsTab = () => {
     dispatchSurface({ type: 'open', surface: { kind: 'settings' } });
   };
@@ -951,21 +891,21 @@ export function App() {
     }
   };
 
-  const openEntryTab = (entryId: string) => {
+  const openEntryTab = (entryId: string, explicitContentId?: 'overview') => {
     const target = entries.find((entry) => entry.id === entryId) ?? null;
     if (!target) {
       return;
     }
 
-    setSidePanel('library');
-    setSidebarOpen(true);
-    openEntryContentTab(entryId, 'overview', undefined, { contextTagId: activeTag ?? undefined });
+    // Opening content must not replace the user's search, conversation or library navigation.
+    const contentId = explicitContentId ?? defaultEntryContentId(target, readerPreferences.openEntryPdfByDefault);
+    openEntryContentTab(entryId, contentId, undefined, { contextTagId: activeTag ?? undefined });
   };
 
   const openEntryTabToRight = (entryId: string) => {
     const target = entries.find((entry) => entry.id === entryId) ?? null;
     const contentId = target
-      ? activeContentByEntryId[entryId] ?? firstContentId(target)
+      ? defaultEntryContentId(target, readerPreferences.openEntryPdfByDefault)
       : null;
     if (!contentId) {
       workspace.setSelectedEntryId(entryId);
@@ -1258,7 +1198,7 @@ export function App() {
         ? 'pdf'
         : hit.target.kind === 'note'
           ? 'note:' + hit.target.note_id
-          : activeContentByEntryId[entryId] ?? firstContentId(targetEntry);
+          : defaultEntryContentId(targetEntry, readerPreferences.openEntryPdfByDefault);
     if (!nextContentId) {
       return;
     }
@@ -1621,6 +1561,10 @@ export function App() {
     setAssistantContext((current) => {
       const exists = current.items.some((contextItem) => contextItem.id === itemId);
       if (exists) {
+        if (options.selectionText !== undefined) {
+          return { items: current.items.map(contextItem => contextItem.id === itemId
+            ? { ...item, id: itemId, addedAt: new Date().toISOString() } : contextItem) };
+        }
         return current;
       }
 
@@ -1725,6 +1669,9 @@ export function App() {
     if (!workspace.root || !proposal.taskId || !proposal.verifiedAt || !proposal.proposalDigest) {
       throw new Error('This note proposal is not a persisted Verified Proposal.');
     }
+    if (proposal.targetKind !== 'segment_note' && proposal.noteId && hasUnsavedMarkdownNote(proposal.entryId, proposal.noteId)) {
+      throw new Error('笔记仍有未保存的修改，请先保存或放弃草稿，再重新审阅并应用 AI 修改。');
+    }
     const result = await applyNoteProposal(workspace.root, proposal.taskId, proposal.id);
     if (result.kind === 'conflict') {
       throw new Error(
@@ -1753,14 +1700,15 @@ export function App() {
     };
   };
 
-  const applyAssistantTagProposal = async (proposal: AssistantTagProposal) => {
-    await workspace.applyWorkspaceTagProposal(proposal);
+  const applyAssistantTagProposal = async (proposal: AssistantTagProposal, confirmation: import('@/shared/ipc/assistantProposalApi').AssistantProposalConfirmation) => {
+    await workspace.applyWorkspaceTagProposal(proposal, confirmation);
   };
 
   const applyAssistantEntryMetaProposal = async (
-    proposal: AssistantEntryMetaProposal
+    proposal: AssistantEntryMetaProposal,
+    confirmation: import('@/shared/ipc/assistantProposalApi').AssistantProposalConfirmation
   ) => {
-    await workspace.applyWorkspaceEntryMetaProposal(proposal);
+    await workspace.applyWorkspaceEntryMetaProposal(proposal, confirmation);
   };
 
   const exportAssistantConversation = async (conversation: Conversation) => {
@@ -1875,7 +1823,7 @@ export function App() {
     if (workspace.status !== 'ready' || !workspace.tags.some(tag => tag.id === tagId)) return;
     const actions = startTagReadingActions(layout, sameTagEntries(entries, workspace.tags, tagId, true), tagId);
     const moved = tagReadingMoveTargets(layout, actions);
-    // Only moved editors remount; other tabs retain their drafts under the normal split.
+    // Preserve the existing transition/save guard even though pane moves now retain editors.
     const transition = () => {
       readingContext.startReading(tagId);
       setSidePanel('same-tag'); setSidebarOpen(true);
@@ -1964,6 +1912,7 @@ export function App() {
         status={workspace.status}
         onOpenChange={setSearchDialogOpen}
         onOpenResult={openSearchResult}
+        onOpenSetting={openSetting}
       />
       {closeGuard.dialog}
       <Dialog
@@ -1994,12 +1943,15 @@ export function App() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <NoteReviewProvider key={workspace.root ?? 'no-workspace'}
+        onOpen={({ proposal }) => openWorkspaceSurface({ kind: 'note-review', proposalId: proposal.id, label: proposal.title, entryId: proposal.entryId, noteId: proposal.noteId })}
+        onShowAssistant={() => { setSidePanel('assistant'); setSidebarOpen(true); }}>
       <WorkspaceNotesProvider root={workspace.root} refreshKey={JSON.stringify([
         workspace.tags, entries.map((entry) => [entry.id, entry.updatedAt, entry.tagIds]),
         trashedEntries.map((entry) => entry.id), markdownNoteRefreshById
       ])}>
       <main
-        ref={appShellRef}
+        ref={observeSidebarContainer}
         className={'app-shell ' + (sidebarResizePreviewWidth !== null ? 'is-sidebar-resizing' : '') + ' ' + (sidebarOpen ? '' : 'is-sidebar-collapsed')}
         style={shellStyle}
       >
@@ -2034,9 +1986,16 @@ export function App() {
         <nav className="activitybar" aria-label="主导航">
           <ActivityButton
             active={activeActivityPanel === 'library'}
-            label={sidebarNote ? '笔记详情' : sidebarEntry ? '条目详情' : '条目库'}
+            label="条目库"
             onClick={() => toggleSidePanel('library')}
             onContextMenu={() => openWorkspaceSurface({ kind: 'library' }, 'right')}
+          >
+            <AppearanceIcon kind="library"><Library size={18} aria-hidden="true" /></AppearanceIcon>
+          </ActivityButton>
+          <ActivityButton
+            active={activeActivityPanel === 'details'}
+            label={sidebarNote ? '笔记详情' : '条目详情'}
+            onClick={() => toggleSidePanel('details')}
           >
             <PanelRight size={18} aria-hidden="true" />
           </ActivityButton>
@@ -2045,17 +2004,17 @@ export function App() {
             label="搜索"
             onClick={() => toggleSidePanel('search')}
           >
-            <Search size={18} aria-hidden="true" />
+            <AppearanceIcon kind="search"><Search size={18} aria-hidden="true" /></AppearanceIcon>
           </ActivityButton>
           <ActivityButton
             active={activeActivityPanel === 'assistant'}
             label="助手"
             onClick={() => toggleSidePanel('assistant')}
           >
-            <MessageSquare size={18} aria-hidden="true" />
+            <AppearanceIcon kind="assistant"><MessageSquare size={18} aria-hidden="true" /></AppearanceIcon>
           </ActivityButton>
           <ActivityButton active={activeActivityPanel === 'same-tag'} label="标签阅读" onClick={() => toggleSidePanel('same-tag')}>
-            <ListFilter size={18} aria-hidden="true" />
+            <AppearanceIcon kind="tags"><ListFilter size={18} aria-hidden="true" /></AppearanceIcon>
           </ActivityButton>
           <div className="spacer" />
           <ActivityButton
@@ -2067,13 +2026,18 @@ export function App() {
             <Settings size={18} aria-hidden="true" />
           </ActivityButton>
         </nav>
-        {sidebarOpen && sidePanel === 'library' && sidebarNote ? (
+        {sidebarOpen && librarySidebarMode === 'note-details' && sidebarNote ? (
           <TagNoteDetailsSidebar key={workspace.root} target={sidebarNote.target} title={sidebarNote.label}
             entries={entries} tags={workspace.tags} status={workspace.status} error={workspace.error} layout={surfaceLayout}
             onLocateTag={id => { readingContext.locateTag(id); setSidePanel('same-tag'); }}
             onRead={(entry, split) => openWorkspaceSurface(tagReadingSurface(entry), split ? surfaceLayout.focusedPane === 'right' ? 'left' : 'right' : undefined)}
             onOpenNote={(target, title, split) => openWorkspaceSurface(noteSurface(target, title), tagNoteOpenPane(surfaceLayout, target, split))} />
-        ) : sidebarOpen && sidePanel === 'library' ? (
+        ) : sidebarOpen && librarySidebarMode === 'empty-details' ? (
+          <aside className="app-sidebar">
+            <div className="side-head">条目详情</div>
+            <div className="p-3 text-xs leading-5 text-muted-foreground">打开条目或笔记后，可在这里查看详情。</div>
+          </aside>
+        ) : sidebarOpen && (librarySidebarMode === 'library' || librarySidebarMode === 'entry-details') ? (
           <LibrarySidebar
             key={workspace.root}
             activeTag={activeTag}
@@ -2082,7 +2046,7 @@ export function App() {
             entries={entries}
             trashItemCount={workspace.trashItems.length + workspace.tagArchiveCount}
             error={workspace.error}
-            entryExplorerOpen={Boolean(sidebarEntry)}
+            entryExplorerOpen={librarySidebarMode === 'entry-details'}
             recentReadingEntryIds={recentReadingEntryIds}
             selectedEntry={sidebarEntry}
             status={workspace.status}
@@ -2093,14 +2057,10 @@ export function App() {
               activeTarget: surfaceNoteTarget(focusedSurface),
               onOpen: (target, title, split) => openWorkspaceSurface(noteSurface(target, title), tagNoteOpenPane(surfaceLayout, target, split))
             } : undefined}
-            onBackToLibraryExplorer={() => {
-              dispatchSurface({ type: 'open', surface: { kind: 'library' } });
-            }}
             onCreateMarkdownNote={createMarkdownNote}
             onDeleteMarkdownNote={deleteMarkdownNote}
             onAttachPdf={attachPdfToEntry}
-            onCreatePdfVersion={createPdfVersion}
-            onImportMineruClientResult={workspace.importMineruClientResultForEntry}
+            onUpdateEntry={workspace.updateWorkspaceEntry}
             onOpenMarkdownInPdfPane={(noteId) => {
               if (sidebarContext) {
                 openMarkdownInPdfPane(sidebarContext.entryId, noteId, sidebarContext);
@@ -2117,7 +2077,6 @@ export function App() {
             onOpenTagDetails={(tagId) => selectLibraryTag(tagId, 'papers', true)}
             onSelectView={selectLibraryView}
             onClearFilters={clearLibraryFilters}
-            onUpdateEntry={workspace.updateWorkspaceEntry}
           />
         ) : sidebarOpen && sidePanel === 'search' ? (
           <SearchPanel
@@ -2125,6 +2084,7 @@ export function App() {
             root={workspace.root}
             status={workspace.status}
             onOpenResult={openSearchResult}
+        onOpenSetting={openSetting}
           />
         ) : null}
         <div className={sidebarOpen && sidePanel === 'same-tag' ? 'contents' : 'hidden'}>
@@ -2136,11 +2096,8 @@ export function App() {
             onLocateEntry={readingContext.locateEntry}
             onOpenTagNote={(target, title, split) => openWorkspaceSurface(noteSurface(target, title), tagNoteOpenPane(surfaceLayout, target, split))}
             onRead={(entry, pane) => openWorkspaceSurface(tagReadingSurface(entry, sameTagId ?? undefined), pane)}
-            onDetails={entry => {
-              if (openWorkspaceSurface({ kind: 'entry-overview', entryId: entry.id, contextTagId: sameTagId ?? undefined }, 'left')) {
-                setSidePanel('library'); setSidebarOpen(true);
-              }
-            }} />
+            onOpenContent={(entry, contentId, pane) => openWorkspaceSurface(entryContentSurface(entry.id, contentId, sameTagId ?? undefined), pane)}
+            onDetails={entry => openWorkspaceSurface({ kind: 'entry-overview', entryId: entry.id, contextTagId: sameTagId ?? undefined })} />
         </div>
         <div className={sidebarOpen && sidePanel === 'assistant' ? 'contents' : 'hidden'}>
           <AssistantPanel
@@ -2180,14 +2137,15 @@ export function App() {
         </div>
         {sidebarOpen ? (
         <div
-          aria-label="璋冩暣渚ф爮瀹藉害"
-          aria-valuemax={SIDEBAR_MAX_WIDTH}
+          aria-label="调整侧栏宽度"
+          aria-orientation="vertical"
+          aria-valuemax={sidebarMaxWidth}
           aria-valuemin={SIDEBAR_MIN_WIDTH}
-          aria-valuenow={sidebarWidth}
+          aria-valuenow={effectiveSidebarWidth}
           className="app-sidebar-resizer"
           role="separator"
           tabIndex={0}
-          title="鎷栧姩璋冩暣渚ф爮瀹藉害"
+          title="拖动调整侧栏宽度"
           onKeyDown={resizeSidebarWithKeyboard}
           onPointerDown={startSidebarResize}
         />
@@ -2292,11 +2250,21 @@ export function App() {
           parserEndpoint={mineruEndpoint}
           parserApiKey={parserApiKey}
           readerPreferences={readerPreferences}
-          onParserEndpointChange={setMineruEndpoint}
-          onParserApiKeyChange={setParserApiKey}
+          onParserEndpointChange={value => {
+            window.localStorage.setItem(PARSER_ENDPOINT_STORAGE_KEY, getEffectiveParserEndpoint(value));
+            setMineruEndpoint(value);
+          }}
+          onParserApiKeyChange={value => {
+            if (value.trim()) window.localStorage.setItem(PARSER_API_KEY_STORAGE_KEY, value);
+            else window.localStorage.removeItem(PARSER_API_KEY_STORAGE_KEY);
+            setParserApiKey(value);
+          }}
           onReaderPreferencesChange={updateReaderPreferences}
-          onThemePresetChange={setThemePreset}
-          onUiScaleChange={setUiScale}
+          onThemePresetChange={value => {
+            window.localStorage.setItem(APP_THEME_STORAGE_KEY, value);
+            setThemePreset(value);
+          }}
+          onUiScaleChange={value => { persistUiScale(value); setUiScale(value); }}
           onReadPdfReader={workspace.readEntryPdfReader}
           onReadMarkdownNote={workspace.readMarkdownNote}
           onToggleSidePanePinned={toggleSidePanePinned}
@@ -2306,6 +2274,9 @@ export function App() {
           onActiveSegmentChange={setActiveAssistantSegment}
           onApplyEntryTagPaths={workspace.applyEntryTagPaths}
           onUpdateEntry={workspace.updateWorkspaceEntry}
+          onAttachPdf={attachPdfToEntry}
+          onCreatePdfVersion={createPdfVersion}
+          onImportMineruClientResult={workspace.importMineruClientResultForEntry}
           onExportTranslationNote={exportEntryTranslation}
           onSaveAnnotation={workspace.saveAnnotation}
           onDeleteAnnotation={workspace.removeAnnotation}
@@ -2327,7 +2298,9 @@ export function App() {
         />
       </main>
       </WorkspaceNotesProvider>
+      </NoteReviewProvider>
       <footer className="statusbar">
+        <AppearanceExit />
         <button type="button">侧栏</button>
         <span>严格来源：已开启</span>
         <span>解析器：{workspace.isParsingPdf ? '运行中' : '就绪'}</span>

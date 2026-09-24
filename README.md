@@ -157,6 +157,10 @@ npm run desktop:release:portable
 
 该命令输出 `release/Neuink-portable-<timestamp>.zip`，仅携带 `.env.example`，不会打包本机 `.env` 凭据。当前便携版流程要求本地 embedding 资源存在。
 
+解压后直接双击 `Neuink.exe`，也可以为它创建桌面快捷方式。正式版自带前端页面，不需要启动命令提示符或前端开发服务；请将旁边的 `embedding-models` 目录一起保留。
+
+`desktop:dev` 和 `target/debug/neuink-desktop.exe` 属于开发模式，需要本地页面服务，Windows 调试程序还会保留控制台。`desktop:build` 只构建前端，不会更新桌面的独立程序；需要体验最新代码时，应重新构建原生 bundle 或便携版，并确认快捷方式指向新产物。
+
 ## 项目结构
 
 ```text

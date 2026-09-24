@@ -52,9 +52,7 @@ React / TypeScript
   agent-runtime/
     settings.json
     runs/
-    subagents/
-  agent-skills/
-    registry.json
+  agent-skills/               # 旧版本遗留用户文件，当前不会读取或执行
   .neuink-cache/
 ```
 
@@ -68,6 +66,8 @@ React / TypeScript
 - 切换 Workspace 在目标完整打开后才更新安装级设置，迁移则复制、验证并保留原目录。
 
 ## 4. 桌面前端
+
+`AppearanceProvider` 拥有原有／私人书房／液态玻璃三种外观、独立书架/列表偏好及玻璃降低透明度偏好，和已有配色预设 `data-theme` 分开保存；切换只改变 `html[data-appearance]` 及资料集合的呈现，不重建 Workspace Surface 或编辑器。全局与侧栏搜索复用 `AppearanceCommand` 处理隐藏入口，命令匹配后不提交资料搜索，选择动作才切换外观。玻璃状态仅挂载限定材质及可选 `data-glass-transparency`，不引入三维渲染或窗口透明权限。`LibraryPapers` 保持原表格挂载，仅书房可展示 `LibraryPaperShelf`；两者共用过滤结果、阅读状态、`useLibraryEntryDrag` 和 `LibraryPaperContextMenu`，不引入新的工作区数据模型或 IPC。
 
 主要模块位于 `apps/desktop/src/modules`：
 
@@ -86,6 +86,12 @@ React / TypeScript
 Workspace 切换先保存片段笔记/批注和文档笔记，再复查；切换完成按 root 重建 ReaderPane，避免跨资料库残留共享草稿或定位。`useHeavyReaderRetention` 只回收连续空闲五分钟且无草稿的 PDF/Reflow，保存后重新计时。`useUnsavedWindowCloseGuard` 同时监听刷新和原生关闭请求，有未保存内容时阻止退出；Tauri 的已安装关闭监听 API 在允许关闭时调用 destroy，因此主窗口 capability 显式包含该权限。突然崩溃/断电的草稿恢复不在此保证内。
 
 片段保存只确认所提交的文本快照；保存期间其他输入或分屏共享修改不会被清掉。批注等待实际保存结果，不以旧批注列表的刷新推断成功。`buildSegmentNoteLookup` 统一真实 UID 与跨页逻辑 UID 查找，供 PDF、Reflow 和片段记录复用。片段记录的读取状态由 `useSegmentRecordsData` 持有，区分初次失败/刷新失败并支持重试；刷新失败保留数据和编辑器，旧条目/旧 Workspace 的迟到响应不更新当前页。页面正文仍是原滚动所有者，错误条和确认弹窗无新增拖动协议。
+
+### 条目概览编辑与推荐标签缓存
+
+`EntryOverview` 持有页内编辑模式，`EntryEditPage` 复用字段／标签控件并以概览 surface key 注册未保存草稿。原 `updateWorkspaceEntry` 仍是保存入口；解析状态变化不改变元数据版本，标题、标签或属性发生外部变化时阻止覆盖。返回／关闭／资料库切换复用 `useSurfaceCloseGuard` 与 dirty registry，条目删除检查也包含概览草稿。`EntryPdfActions` 接收从 App 经 ReaderPane、EntryWorkspaceView 传递的原上传、新版和解析结果导入回调，不新增文件写入协议。
+
+`useEntryTagSuggestions` 仅响应显式生成，调用现有 `analyzeEntryTags`；后端自行读取论文上下文，不重复在概览加载完整 PDF reader 数据。`entryTagSuggestionStore` 按资料库根路径和条目 ID 隔离缓存，同一窗口中去重进行中的生成／添加请求，迟到结果归属原键。推荐路径、选择和生成时间以 `neuink.entryTagRecommendations.v1:` 缓存在 localStorage，空结果亦可恢复；解析重跑、添加标签或关闭页面不使其自动失效，仅重新生成成功后替换。该数据可重建、不作为实际标签归属；应用推荐仍走现有追加标签接口，失败保留结果。概览和 PDF 工具条共用状态，缓存写入失败会明确告知仅当前会话可保留。
 
 ## 5. PDF 与 Reflow
 
@@ -163,6 +169,14 @@ DOCX/TXT 复用现有 Word、Markdown/HTML 和图片处理模块。批量支持�
 
 `inspect_note_sources`/`source_availability` 根据当前条目、回收站、Segment 及内容 hash 投影来源状态，Source Link 保存的文字快照不被改写。原论文移入回收站、永久删除、片段缺失或内容变化时显示原因并禁用定位；恢复和重新解析后重新检查。编辑器、来源预览、反向引用及导出复用这些状态，失效来源仍可阅读快照。
 
+### 关系图
+
+`relations` 是独立 WorkspaceSurface，仅从条目库页眉按钮打开，不在主导航增加工具项。统一页签状态负责创建／复用关系图页签，左侧工具保留当前选择。ReaderPane 接入当前条目、标签与 WorkspaceNotesProvider 目录。`relationGraph` 只投影标签层级、显式归属、笔记所有权和来源引用；失效来源保留节点和证据快照，不推断论文引用关系。RelationsPage 拥有查询、关系类型、聚焦和查看历史，原页面导航沿用已有条目／笔记打开路径，RelationReturnFrame 提供返回入口且不重新挂载编辑器。
+
+RelationCanvas 使用共享 PointerPreview 和 Popover 展示悬停与节点详情。`useRelationScene` 按需加载三维适配器，协调页签、视口、窗口焦点、尺寸、主题及 WebGL 失败重试；`relationScene` 使用 3d-force-graph 和既有 Three.js 管理布局、拾取、镜头及资源。模拟坐标与可变边端点在独立副本中维护，不写盘。画布无滚动条，滚轮缩放、拖动旋转或平移；气泡正文独立滚动。隐藏时暂停，返回保持镜头，销毁释放资源；WebGL 失败保留对象列表与详情访问。
+
+`relationPresentation` 拥有前后可见性、二维展开与镜头过渡。三维后半部节点保留 24% 不透明度，连线减弱，后侧文字收起并排除拾取；选中时用临时展示坐标展开直接关系，不改写力导向布局或业务数据。二维锁定旋转，关闭详情与退出二维分离；退出恢复进入前镜头。过渡可重定向、暂停和清理，减少动态效果即时提交。完整关系由详情列表提供，画布密度限制不构成数据过滤。节点变换统一由展示帧负责，悬停只改材质和不参与拾取的外圈；`useRelationHover` 协调文字指针、键盘焦点与画布命中，失焦和卸载清理。
+
 ## 6. 搜索
 
 `MemorySearchIndex` 提供关键词索引。`PersistentSemanticSearchIndex` 使用本地 Embedding 生成并保存 JSON 向量记录；Hybrid 通过 RRF 合并关键词与语义结果。
@@ -177,10 +191,10 @@ DOCX/TXT 复用现有 Word、Markdown/HTML 和图片处理模块。批量支持�
 
 ```text
 用户消息 + @ attachments + UI context
-  -> Router / Task compiler
+  -> 本地请求路由（上下文门控、独立问候快捷路径、语义候选 shadow）
   -> TaskState
   -> context hydration + Evidence Ledger
-  -> unified execution
+  -> TypeScript Agent 实例（主/子共用循环，独立上下文，共享预算/溯源）
   -> answer and/or Proposal
   -> Verifier
   -> Conversation + AgentRun persistence
@@ -196,14 +210,19 @@ DOCX/TXT 复用现有 Word、Markdown/HTML 和图片处理模块。批量支持�
 - Note Apply 只提交 `taskId + proposalId`，后端读取不可变 Verified Proposal；
 - 后端校验 digest、基础内容 hash、幂等键，并用 journal 恢复多文件提交。
 
+明确 UI 入口的固定翻译、标签和按需记忆压缩不运行 Agent 循环。自由对话不做额外 LLM 预分类／强制规划；TS requestRouter 用当前上下文、历史和保守问候白名单决定是否省去文档／工具 hydration。Rust assistant_routing 只提供本地 E5 语义信号，复用 FastEmbed、独立惰性会话和缓存，忙碌／冷启动有界回退；候选目前仅记录用于评估，不接管 Agent 决策或授予权限。路由随任务检查点冻结，恢复不重分类；没有手动模式选择器，旧只读任务仍保留权限边界。模型连接/profile 是独立资源，工具是受权限约束的业务入口，MCP 是工具连接协议；产品不再提供 Skills 功能。AI SDK 只适配单轮模型请求；旧 Rust 单次调用子助手、自动多轮 SDK 执行和证据降级旁路已经移除。外观命令调用既有 AppearanceProvider，知识数据修改继续使用 Verified Proposal。
+
 模块的就近边界说明见 `apps/desktop/src/modules/assistant/README.md`。
+
+持久化执行由 `durableHarness -> durableExecution -> shared/ipc/agentExecutionApi -> neuink-workspace::agent_execution` 承担。检查点先于工具副作用保存，包含主/子 actor 消息、待执行调用、读取快照、来源账本、待审核提案和请求预算。Rust 使用原子写、CAS 与进程间文件锁拒绝陈旧写入；对话删除后不允许继续保存其任务。恢复为用户显式操作：已完成工具不重放，未完成只读工具可重试，结果不明的写操作或 MCP 必须先核对。Conversation 完成交付后确认执行终态，交付确认失败不清空已有结果。
+
+模型调用前的上下文压缩仅改变请求投影，完整记录和特殊溯源保持不变；任务理解、主/子循环、摘要与结束记忆共用请求预算。TS 循环仍位于 WebView，Rust 不复制推理循环，重启后可从新格式检查点恢复但不会在应用关闭后继续后台执行。
 
 ## 8. 配置和安全
 
-- Parser、LLM、Agent、MCP 和 Skills 配置通过显式设置管理；
-- 主 Agent 权限限制工具、Skills、Subagent、Workspace 读取和 Proposal；
-- Skill 包只提供说明与资源，脚本不因存在于 zip 中自动执行；
-- MCP 工具必须经过 server 启用状态和 allowlist 校验；
+- Parser、LLM、Agent 和 MCP 配置通过显式设置管理；
+- 主 Agent 权限限制工具、Subagent、Workspace 读取和 Proposal；
+- MCP stdio 支持标准握手、同会话分页发现、调用、超时和取消；工具必须经过 server 启用、Agent 授权、allowlist 和已批准 Tool Package 校验；
 - 日志和导出不得泄漏 API Key。
 
 ## 9. 架构变更原则

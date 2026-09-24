@@ -1,5 +1,5 @@
 import { open } from '@tauri-apps/plugin-dialog';
-import { ArrowLeft, CopyPlus, FilePlus2, FileText, FileType, LayoutDashboard, Link2, Loader2, PanelRightOpen, Pencil, Plus, ScrollText, StickyNote, Trash2 } from 'lucide-react';
+import { FilePlus2, FileText, FileType, LayoutDashboard, Link2, Loader2, PanelRightOpen, Plus, ScrollText, StickyNote, Trash2 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -17,10 +17,10 @@ import {
 } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/shared/hooks/useToast';
 import type { TagMeta } from '@/shared/types/domain';
 
 import { StatusBadge } from '../../reader/components/EntryDisplay';
-import { EntryEditDialog } from './EntryEditDialog';
 import {
   CompactEntryDescription,
   CompactEntryFields,
@@ -36,26 +36,15 @@ type EntryContentSidebarProps = {
   entry: LibraryEntry;
   tags: TagMeta[];
   tagNotes?: EntryTagNotesContext;
-  onBack: () => void;
   onOpenTrash: () => void;
   onCreateMarkdownNote: () => Promise<void> | void;
   onDeleteMarkdownNote: (entryId: string, noteId: string) => Promise<void> | void;
   onAttachPdf: (entryId: string, pdfPath: string) => Promise<void> | void;
-  onCreatePdfVersion: (entryId: string, pdfPath: string) => Promise<void> | void;
-  onImportMineruClientResult: (entryId: string, zipPath: string) => Promise<unknown> | unknown;
   onOpenMarkdownInPdfPane: (noteId: string) => void;
   onOpenContentInRight: (contentId: string) => void;
   onRenameMarkdownNote: (entryId: string, noteId: string, title: string) => Promise<unknown> | unknown;
   onRenamePdfDisplayName: (entryId: string, fileName: string) => Promise<unknown> | unknown;
   onSelectContent: (contentId: string) => void;
-  onUpdateEntry: (
-    entryId: string,
-    request: {
-      fields: Record<string, string>;
-      tagPaths: string[];
-      title: string;
-    }
-  ) => Promise<unknown> | unknown;
 };
 
 export function EntryContentSidebar({
@@ -63,24 +52,21 @@ export function EntryContentSidebar({
   entry,
   tags,
   tagNotes,
-  onBack,
   onOpenTrash,
   onCreateMarkdownNote,
   onDeleteMarkdownNote,
   onAttachPdf,
-  onCreatePdfVersion,
-  onImportMineruClientResult,
   onOpenMarkdownInPdfPane,
   onOpenContentInRight,
   onRenameMarkdownNote,
   onRenamePdfDisplayName,
-  onSelectContent,
-  onUpdateEntry
+  onSelectContent
 }: EntryContentSidebarProps) {
   const [creating, setCreating] = useState(false);
   const [notesOpen, setNotesOpen] = useState(true);
-  const [pdfAction, setPdfAction] = useState<'attach' | 'version' | null>(null);
-  const [editOpen, setEditOpen] = useState(false);
+  const [attachingPdf, setAttachingPdf] = useState(false);
+  const pdfBusy = useRef(false);
+  const { notify } = useToast();
   const [notePendingDelete, setNotePendingDelete] = useState<{
     noteId: string;
     title: string;
@@ -136,15 +122,18 @@ export function EntryContentSidebar({
     }
   };
 
-  const choosePdf = async (action: 'attach' | 'version') => {
-    if (pdfAction) return;
-    const selected = await open({ multiple: false, directory: false, filters: [{ name: 'PDF', extensions: ['pdf'] }] });
-    if (typeof selected !== 'string') return;
-    setPdfAction(action);
+  const choosePdf = async () => {
+    if (pdfBusy.current) return;
+    pdfBusy.current = true;
+    setAttachingPdf(true);
     try {
-      await (action === 'attach' ? onAttachPdf(entry.id, selected) : onCreatePdfVersion(entry.id, selected));
+      const selected = await open({ multiple: false, directory: false, filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+      if (typeof selected === 'string') await onAttachPdf(entry.id, selected);
+    } catch (caught) {
+      notify({ tone: 'danger', title: '上传 PDF 失败', description: caught instanceof Error ? caught.message : String(caught) });
     } finally {
-      setPdfAction(null);
+      pdfBusy.current = false;
+      setAttachingPdf(false);
     }
   };
 
@@ -230,17 +219,6 @@ export function EntryContentSidebar({
     <>
       <ScrollArea className="side-body [&_[data-slot=scroll-area-viewport]>div]:!block">
         <div className="min-w-0 space-y-3 p-2">
-          <Button
-            className="w-full justify-start text-muted-foreground"
-            size="sm"
-            type="button"
-            variant="ghost"
-            onClick={onBack}
-          >
-            <ArrowLeft size={14} aria-hidden="true" />
-            返回条目库
-          </Button>
-
           <section className="min-w-0 space-y-3 rounded-md border bg-muted/25 p-2">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1 overflow-hidden">
@@ -250,15 +228,6 @@ export function EntryContentSidebar({
                 </div>
               </div>
 
-              <Button
-                size="icon-sm"
-                title="编辑条目"
-                type="button"
-                variant="outline"
-                onClick={() => setEditOpen(true)}
-              >
-                <Pencil size={14} aria-hidden="true" />
-              </Button>
             </div>
 
             <InfoBlock label="描述">
@@ -300,13 +269,6 @@ export function EntryContentSidebar({
 
             {entry.pdfFileName ? (
               <>
-                <div className="flex items-center justify-between gap-2 rounded-md bg-muted/45 px-2 py-1.5 text-xs">
-                  <span className="min-w-0 truncate text-muted-foreground">原 PDF 保持不变</span>
-                  <Button disabled={pdfAction !== null} size="xs" type="button" variant="outline" onClick={() => void choosePdf('version')}>
-                    {pdfAction === 'version' ? <Loader2 className="animate-spin" size={13} /> : <CopyPlus size={13} />}
-                    创建新版 PDF
-                  </Button>
-                </div>
                 <ContentRow
                   active={activeContentId === 'pdf'}
                   icon={<FileType size={14} />}
@@ -376,8 +338,8 @@ export function EntryContentSidebar({
             ) : (
               <div className="flex items-center justify-between gap-2 rounded-md bg-muted/45 px-2 py-1.5 text-xs text-muted-foreground">
                 <span>未附带 PDF</span>
-                <Button disabled={pdfAction !== null} size="xs" type="button" variant="outline" onClick={() => void choosePdf('attach')}>
-                  {pdfAction === 'attach' ? <Loader2 className="animate-spin" size={13} /> : <FilePlus2 size={13} />}
+                <Button disabled={attachingPdf} size="xs" type="button" variant="outline" onClick={() => void choosePdf()}>
+                  {attachingPdf ? <Loader2 className="animate-spin" size={13} /> : <FilePlus2 size={13} />}
                   补充 PDF
                 </Button>
               </div>
@@ -542,17 +504,6 @@ export function EntryContentSidebar({
           <ContextMenuButton onClick={startRenamePdf}>修改文件名</ContextMenuButton>
         </ViewportContextMenu>
       ) : null}
-
-      <EntryEditDialog
-        entry={entry}
-        open={editOpen}
-        tags={tags}
-        onOpenChange={setEditOpen}
-        onAttachPdf={onAttachPdf}
-        onCreatePdfVersion={onCreatePdfVersion}
-        onImportMineruClientResult={onImportMineruClientResult}
-        onUpdateEntry={onUpdateEntry}
-      />
 
       <Dialog
         open={Boolean(notePendingDelete)}

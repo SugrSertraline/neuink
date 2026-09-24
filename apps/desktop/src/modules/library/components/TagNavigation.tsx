@@ -2,6 +2,7 @@ import { ChevronDown, ChevronRight, FolderClosed, Pencil, Search, X } from 'luci
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { DisclosureIcon } from '@/components/ui/disclosure-icon';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { useTagPreferences } from '@/shared/components/TagPreferencesProvider';
@@ -26,10 +27,12 @@ type TagNavigationProps = {
   revealActiveTag?: boolean;
   onOpenTagDetails: (tagId: string) => void;
   collection?: { query: string; toolbar: ReactNode; onSelectAll: () => void; contextLabel?: string; panels?: boolean };
+  // Library sidebar shares a panel group with quick views and parsing filters.
+  panel?: { weight?: number };
   children?: ReactNode;
 };
 
-export function TagNavigation({ activeTag, nodes, status, error, open, onToggleOpen, onEditTags, onAssignEntryToTag, onOpenTagDetails, revealActiveTag = false, collection, children }: TagNavigationProps) {
+export function TagNavigation({ activeTag, nodes, status, error, open, onToggleOpen, onEditTags, onAssignEntryToTag, onOpenTagDetails, revealActiveTag = false, collection, panel, children }: TagNavigationProps) {
   const { preferences } = useTagPreferences();
   // Browsing the sidebar never changes the library filter or the open detail tab.
   const [directoryId, setDirectoryId] = useState<string | null>(null);
@@ -46,7 +49,9 @@ export function TagNavigation({ activeTag, nodes, status, error, open, onToggleO
   useEffect(() => {
     if (requestedFocus.current === undefined || requestedFocus.current !== directoryId) return;
     requestedFocus.current = undefined;
-    rootRef.current?.querySelector<HTMLButtonElement>('nav button[aria-current="location"]')?.focus({ preventScroll: true });
+    const pathButton = rootRef.current?.querySelector<HTMLButtonElement>('nav button[aria-current="location"]');
+    const sectionButton = rootRef.current?.closest('[data-sidebar-panel]')?.querySelector<HTMLButtonElement>('[data-material="section-heading"] button[aria-expanded]');
+    (pathButton ?? sectionButton)?.focus({ preventScroll: true });
   }, [directoryId]);
   useEffect(() => {
     if (showSearch || !restoreSearchFocus.current) return;
@@ -130,75 +135,89 @@ export function TagNavigation({ activeTag, nodes, status, error, open, onToggleO
       </div>
   </>;
 
+  const searchField = <div className="relative min-w-0 flex-1">
+    <Input
+      id={searchId}
+      aria-label="搜索标签或路径"
+      autoFocus
+      className="h-7 border-transparent bg-muted/60 pl-2 pr-7 text-xs hover:bg-muted focus-visible:border-ring focus-visible:bg-card focus-visible:ring-1 md:text-xs dark:bg-muted/60"
+      placeholder="搜索标签…"
+      title={status === 'ready' && search ? contextLabel : '搜索标签或完整路径'}
+      value={query}
+      onChange={event => setQuery(event.target.value)}
+      onKeyDown={event => {
+        if (event.key !== 'Escape' || event.nativeEvent.isComposing) return;
+        event.stopPropagation();
+        closeSearch();
+      }}
+    />
+    <Button aria-label="关闭标签搜索" className="absolute right-0.5 top-0.5 text-muted-foreground" size="icon-xs" title="关闭搜索并清空关键词" type="button" variant="ghost" onClick={closeSearch}>
+      <X className="size-3" aria-hidden="true" />
+    </Button>
+  </div>;
+  const navigationPath = <nav aria-label="标签浏览路径" className="flex min-w-0 flex-1 items-center">
+    {collection && headingTag ? <Button className="shrink-0 px-1 text-[11px] text-muted-foreground" size="sm" variant="plain" onClick={() => { browseTag(null); collection.onSelectAll(); }}>全部标签<ChevronRight size={12} aria-hidden="true" /></Button> : null}
+    {headingTag ? (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button aria-current="location" className="min-w-0 flex-1 shrink justify-start px-1 text-xs" size="sm" title={collection?.contextLabel ? `${headingTag.path}\n${collection.contextLabel}` : headingTag.path} type="button" variant="plain">
+            <span className="truncate">{headingTag.name}</span><ChevronDown className="size-3" aria-hidden="true" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent className="w-64" viewportAligned>
+          <DropdownMenuLabel>标签浏览路径</DropdownMenuLabel>
+          <DropdownMenuItem onSelect={() => { browseTag(null, true); collection?.onSelectAll(); }}>全部标签</DropdownMenuItem>
+          <DropdownMenuSeparator />
+          {crumbs.map(node => (
+            <DropdownMenuItem key={node.id} aria-current={node.id === (collection ? activeTag : directoryId) ? 'location' : undefined} className="min-w-0" onSelect={() => { browseTag(node.id, true); if (collection) onOpenTagDetails(node.id); }}>
+              <span className="min-w-0 whitespace-normal break-words" title={node.path}>{node.path}</span>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    ) : (
+      <Button aria-current="location" className="min-w-0 shrink px-1 text-[11px]" size="sm" type="button" variant="plain" onClick={() => { browseTag(null, true); collection?.onSelectAll(); }}>全部标签</Button>
+    )}
+  </nav>;
+  const tagActions = <>{onEditTags ? <Button aria-label="编辑标签" className="text-muted-foreground" disabled={status !== 'ready'} size="icon-sm" title="编辑标签" type="button" variant="ghost" onClick={onEditTags}>
+            <Pencil className="size-3" aria-hidden="true" />
+          </Button> : null}
+          <TagDisplaySettingsMenu navigation compact onCollapseAll={expansion.collapseAll} canCollapseAll={expansion.expandedIds.size > 0} /></>;
+
+  const searchAction = <Button ref={searchButtonRef} aria-label="搜索标签" aria-expanded={showSearch} aria-controls={searchId} className="text-muted-foreground" size="icon-sm" title={query ? `搜索标签 · ${query}` : '搜索标签'} type="button" variant="ghost" onClick={() => { setSearchOpen(true); if (!open) onToggleOpen(); }}><Search className="size-3" aria-hidden="true" /></Button>;
+
+  // The group owns proportions, SidebarPanel owns scrolling, this component owns tag navigation.
+  // Keep the drag root inside the panel viewport so edge scrolling never moves sibling panels.
+  if (panel) return <SidebarPanel name="全部标签" label="全部标签" weight={panel.weight} open={open} onToggle={onToggleOpen}
+    toggleLabel={open ? '收起全部标签' : '展开全部标签'} action={<>{searchAction}{tagActions}</>}>
+    <div ref={rootRef} className="min-w-0" aria-label="标签导航">
+      {showSearch ? <div className="pb-1">{searchField}</div> : headingTag ? navigationPath : null}
+      {parentNavigation}
+      {tagBody}
+    </div>
+  </SidebarPanel>;
   // Search replaces the path in the same row, without adding a scroll owner.
   // Collapsing the section preserves the query; explicitly closing search clears it.
   return (
     <div ref={rootRef} className={collection?.panels ? 'flex h-full min-h-0 min-w-0 flex-col overflow-hidden' : 'min-w-0'} aria-label="标签导航">
-      <div className={collection?.panels ? 'shrink-0 bg-card px-2' : 'sticky top-0 z-10 min-w-0 bg-card'} data-slot="tag-navigation-sticky">
+      <div className={collection?.panels ? 'shrink-0 bg-card px-2' : 'sticky top-0 z-10 min-w-0 bg-card'} data-slot="tag-navigation-sticky" data-material="sidebar-toolbar">
         <div className="flex h-8 min-w-0 items-center gap-0.5" data-slot="tag-navigation-header">
           {!collection ? <Button aria-label={open ? '收起标签' : '展开标签'} aria-expanded={open} aria-controls={bodyId} size="icon-sm" title={open ? '收起标签' : '展开标签'} type="button" variant="plain" onClick={onToggleOpen}>
-            {open ? <ChevronDown className="size-3" aria-hidden="true" /> : <ChevronRight className="size-3" aria-hidden="true" />}
+            <DisclosureIcon open={open} className="size-3" />
           </Button> : null}
           {showSearch ? (
-            <div className="relative min-w-0 flex-1">
-              <Input
-                id={searchId}
-                aria-label="搜索标签或路径"
-                autoFocus
-                className="h-7 border-transparent bg-muted/60 pl-2 pr-7 text-xs hover:bg-muted focus-visible:border-ring focus-visible:bg-card focus-visible:ring-1 md:text-xs dark:bg-muted/60"
-                placeholder="搜索标签…"
-                title={status === 'ready' && search ? contextLabel : '搜索标签或完整路径'}
-                value={query}
-                onChange={event => setQuery(event.target.value)}
-                onKeyDown={event => {
-                  if (event.key !== 'Escape' || event.nativeEvent.isComposing) return;
-                  event.stopPropagation();
-                  closeSearch();
-                }}
-              />
-              <Button aria-label="关闭标签搜索" className="absolute right-0.5 top-0.5 text-muted-foreground" size="icon-xs" title="关闭搜索并清空关键词" type="button" variant="ghost" onClick={closeSearch}>
-                <X className="size-3" aria-hidden="true" />
-              </Button>
-            </div>
+            searchField
           ) : (
             <>
-              <nav aria-label="标签浏览路径" className="flex min-w-0 flex-1 items-center">
-                {collection && headingTag ? <Button className="shrink-0 px-1 text-[11px] text-muted-foreground" size="sm" variant="plain" onClick={() => { browseTag(null); collection.onSelectAll(); }}>全部标签<ChevronRight size={12} aria-hidden="true" /></Button> : null}
-                {headingTag ? (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button aria-current="location" className="min-w-0 flex-1 shrink justify-start px-1 text-xs" size="sm" title={collection?.contextLabel ? `${headingTag.path}\n${collection.contextLabel}` : headingTag.path} type="button" variant="plain">
-                        <span className="truncate">{headingTag.name}</span><ChevronDown className="size-3" aria-hidden="true" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent className="w-64" viewportAligned>
-                      <DropdownMenuLabel>标签浏览路径</DropdownMenuLabel>
-                      <DropdownMenuItem onSelect={() => { browseTag(null, true); collection?.onSelectAll(); }}>全部标签</DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      {crumbs.map(node => (
-                        <DropdownMenuItem key={node.id} aria-current={node.id === (collection ? activeTag : directoryId) ? 'location' : undefined} className="min-w-0" onSelect={() => { browseTag(node.id, true); if (collection) onOpenTagDetails(node.id); }}>
-                          <span className="min-w-0 whitespace-normal break-words" title={node.path}>{node.path}</span>
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                ) : (
-                  <Button aria-current="location" className="min-w-0 shrink px-1 text-[11px]" size="sm" type="button" variant="plain" onClick={() => { browseTag(null, true); collection?.onSelectAll(); }}>全部标签</Button>
-                )}
-              </nav>
-              {!collection ? <Button ref={searchButtonRef} aria-label="搜索标签" aria-expanded={showSearch} aria-controls={searchId} className="text-muted-foreground" size="icon-sm" title={query ? `搜索标签 · ${query}` : '搜索标签'} type="button" variant="ghost" onClick={() => { setSearchOpen(true); if (!open) onToggleOpen(); }}>
-                <Search className="size-3" aria-hidden="true" />
-              </Button> : null}
+              {navigationPath}
+              {!collection ? searchAction : null}
             </>
           )}
-          {onEditTags ? <Button aria-label="编辑标签" className="text-muted-foreground" disabled={status !== 'ready'} size="icon-sm" title="编辑标签" type="button" variant="ghost" onClick={onEditTags}>
-            <Pencil className="size-3" aria-hidden="true" />
-          </Button> : null}
-          <TagDisplaySettingsMenu navigation compact onCollapseAll={expansion.collapseAll} canCollapseAll={expansion.expandedIds.size > 0} />
+          {tagActions}
         </div>
         {collection ? <div className="pb-2 pt-1">{collection.toolbar}</div> : null}
         {collection && !collection.panels ? <Button aria-label={open ? '收起标签选择' : '展开标签选择'} aria-expanded={open} aria-controls={bodyId} size="sm" variant="plain" className="h-7 w-full justify-start gap-1.5 px-1 text-[11px] font-normal text-muted-foreground" onClick={onToggleOpen}>
-          {open ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronRight size={13} aria-hidden="true" />}
+          <DisclosureIcon open={open} />
           <span>标签选择</span><span className="ml-auto">{open ? '收起' : '展开'}</span>
         </Button> : null}
         {!collection?.panels ? parentNavigation : null}

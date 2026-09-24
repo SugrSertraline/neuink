@@ -1,3 +1,5 @@
+import { normalizeReflowComponentContent, type ReflowComponentContent } from './reflowContentPreferences';
+
 export type PdfHoverPreviewFontSize = 'small' | 'standard' | 'large';
 export type PdfHoverPreviewSize = 'compact' | 'standard' | 'large';
 
@@ -17,6 +19,7 @@ export type ReflowVisualComponentPreference = {
   size: ReflowVisualSize;
 };
 export type ReflowComponentPreferences = {
+  content?: ReflowComponentContent;
   heading: ReflowTextComponentPreference;
   paragraph: ReflowTextComponentPreference;
   list: ReflowTextComponentPreference;
@@ -45,6 +48,7 @@ export const DEFAULT_REFLOW_COMPONENT_PREFERENCES: ReflowComponentPreferences = 
 };
 
 export type ReaderPreferences = {
+  openEntryPdfByDefault: boolean;
   autoTranslateTextSelection: boolean;
   closeSegmentOverlayOnBlankClick: boolean;
   closeSegmentOverlayOnSameSegmentClick: boolean;
@@ -65,11 +69,13 @@ export type ReaderPreferences = {
   reflowHoverSourceEnabled: boolean;
   showRegions: boolean;
   pageDisplayMode: 'single' | 'dual';
+  pageTurningMode?: 'scroll' | 'book';
 };
 
 const READER_PREFERENCES_STORAGE_KEY = 'neuink.reader.preferences';
 
 const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
+  openEntryPdfByDefault: true,
   autoTranslateTextSelection: false,
   closeSegmentOverlayOnBlankClick: true,
   closeSegmentOverlayOnSameSegmentClick: true,
@@ -90,6 +96,7 @@ const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
   reflowHoverSourceEnabled: true,
   showRegions: false,
   pageDisplayMode: 'single' as const,
+  pageTurningMode: 'scroll',
 };
 
 export function readStoredReaderPreferences(): ReaderPreferences {
@@ -122,6 +129,7 @@ export function persistReaderPreferences(preferences: ReaderPreferences) {
 
 export function equalReaderPreferences(left: ReaderPreferences, right: ReaderPreferences) {
   return (
+    left.openEntryPdfByDefault === right.openEntryPdfByDefault &&
     left.autoTranslateTextSelection === right.autoTranslateTextSelection &&
     left.closeSegmentOverlayOnBlankClick === right.closeSegmentOverlayOnBlankClick &&
     left.closeSegmentOverlayOnSameSegmentClick ===
@@ -142,7 +150,8 @@ export function equalReaderPreferences(left: ReaderPreferences, right: ReaderPre
     left.reflowTranslationMode === right.reflowTranslationMode &&
     left.reflowHoverSourceEnabled === right.reflowHoverSourceEnabled &&
     left.showRegions === right.showRegions &&
-    left.pageDisplayMode === right.pageDisplayMode
+    left.pageDisplayMode === right.pageDisplayMode &&
+    (left.pageTurningMode ?? 'scroll') === (right.pageTurningMode ?? 'scroll')
   );
 }
 
@@ -154,6 +163,10 @@ function normalizeReaderPreferences(value: unknown): ReaderPreferences {
   const candidate = value as Partial<ReaderPreferences>;
 
   return {
+    openEntryPdfByDefault:
+      typeof candidate.openEntryPdfByDefault === 'boolean'
+        ? candidate.openEntryPdfByDefault
+        : DEFAULT_READER_PREFERENCES.openEntryPdfByDefault,
     autoTranslateTextSelection:
       typeof candidate.autoTranslateTextSelection === 'boolean'
         ? candidate.autoTranslateTextSelection
@@ -233,6 +246,7 @@ function normalizeReaderPreferences(value: unknown): ReaderPreferences {
       candidate.pageDisplayMode === 'single' || candidate.pageDisplayMode === 'dual'
         ? candidate.pageDisplayMode
         : DEFAULT_READER_PREFERENCES.pageDisplayMode,
+    pageTurningMode: candidate.pageTurningMode === 'book' ? 'book' : 'scroll',
   };
 }
 
@@ -266,6 +280,7 @@ function normalizeReflowComponentPreferences(value: unknown): ReflowComponentPre
 
   return {
     heading: normalizeTextComponent(candidate.heading, DEFAULT_REFLOW_COMPONENT_PREFERENCES.heading),
+    ...(candidate.content ? { content: normalizeReflowComponentContent(candidate.content) } : {}),
     paragraph: normalizeTextComponent(candidate.paragraph, DEFAULT_REFLOW_COMPONENT_PREFERENCES.paragraph),
     list: normalizeTextComponent(candidate.list, DEFAULT_REFLOW_COMPONENT_PREFERENCES.list),
     table: normalizeTextComponent(candidate.table, DEFAULT_REFLOW_COMPONENT_PREFERENCES.table),

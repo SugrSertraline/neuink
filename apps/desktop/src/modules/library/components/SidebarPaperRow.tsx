@@ -9,9 +9,10 @@ import { formatReadingDuration, getReadingProgress } from '@/modules/reader/comp
 import type { LibraryEntry } from './LibrarySidebar';
 import { SidebarContentRow } from './SidebarContentRow';
 
-export function SidebarPaperRow({ entry, layout, paths, state, loading, error, active, onOpen, onSplit, onDetails, previewFooter, splitPane = 'right' }: {
+export function SidebarPaperRow({ entry, layout, paths, state, loading, error, active, onOpen, onSplit, onDetails, previewFooter, leading, summary, hideIcon, splitPane = 'right' }: {
   entry: LibraryEntry; layout: WorkspaceSurfaceLayout; paths: Map<string, string>; state?: EntryReadingState;
-  loading: boolean; error: boolean; active?: boolean; previewFooter?: ReactNode;
+  loading: boolean; error: boolean; active?: boolean; previewFooter?: ReactNode; leading?: ReactNode;
+  summary?: ReactNode; hideIcon?: boolean;
   splitPane?: 'left' | 'right';
   onOpen: () => void; onSplit: () => void; onDetails?: () => void;
 }) {
@@ -31,9 +32,9 @@ export function SidebarPaperRow({ entry, layout, paths, state, loading, error, a
   const tagLabel = entry.tagIds.map(id => paths.get(id)).filter(Boolean).join('；') || '未分类';
   const knownProgress = !loading && !(error && !state);
   const shortProgress = !knownProgress ? readLabel : readLabel === '未开始' ? '未开始' : progress >= 100 ? '已读完' : `${progress}%`;
-  return <SidebarContentRow active={active ?? (left || right)} icon={<FileText size={14} aria-hidden="true" />} label={entry.title}
+  return <SidebarContentRow active={active ?? (left || right)} leading={leading} icon={hideIcon ? undefined : <FileText size={14} aria-hidden="true" />} label={entry.title}
     meta={`${fileLabel}\n${readLabel} · ${noteLabel}\n标签：${tagLabel}`}
-    metaContent={<span className="flex h-4 items-center gap-2 tabular-nums">
+    metaContent={summary ?? <span className="flex h-4 items-center gap-2 tabular-nums">
       <Progress aria-label={`${entry.title} 阅读进度`} value={knownProgress ? progress : null} aria-valuetext={readLabel} className="h-1 min-w-3 max-w-20 flex-1" />
       <span className="truncate">{shortProgress}</span>
     </span>}

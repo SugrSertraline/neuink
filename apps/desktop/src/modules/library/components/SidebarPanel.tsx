@@ -26,7 +26,7 @@ export function SidebarPanel({ name, label, open, onToggle, toggleLabel, action,
     style={{ flex: open ? `${group?.weights[name] ?? weight} 1 0%` : '0 0 auto' }}>
     <SidebarSectionHeader className="shrink-0 rounded-none bg-muted/40" label={label} open={open} onToggle={onToggle}
       toggleLabel={toggleLabel} controlsId={bodyId} action={action} />
-    <div ref={bodyRef} id={bodyId} hidden={!open} className="min-h-0 flex-1" onScrollCapture={event => {
+    <div ref={bodyRef} id={bodyId} hidden={!open} data-material="panel-body" className="min-h-0 flex-1" onScrollCapture={event => {
       if (open && event.target instanceof HTMLElement && event.target.dataset.slot === 'scroll-area-viewport') scrollTop.current = event.target.scrollTop;
     }}>
       <ScrollArea className="h-full min-h-0 [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]]:overscroll-contain">

@@ -93,9 +93,11 @@ export function MarkdownFormattingToolbar({ disabled, editor }: MarkdownInlineTo
     <div
       className="markdown-formatting-toolbar flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden"
       data-note-formatting-toolbar="true"
+      data-material="editor-toolbar"
     >
       {tools.map((tool, index) => (
         <Button
+          aria-pressed={Boolean(tool.active)}
           className={cn(
             index >= 2 && 'markdown-formatting-wide-only',
             tool.active && 'bg-accent text-primary'

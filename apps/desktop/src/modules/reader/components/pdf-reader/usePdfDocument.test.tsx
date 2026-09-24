@@ -43,3 +43,26 @@ it('turns synchronous worker failures into a recoverable reader error and releas
   expect(result.current.error).toBe('worker unavailable');
   await waitFor(() => expect(mocks.ports[0].terminate).toHaveBeenCalledOnce());
 });
+
+it('releases every worker and loading task across fifty reader open/close cycles', async () => {
+  const workers: { destroy: ReturnType<typeof vi.fn> }[] = [];
+  const tasks: { destroy: ReturnType<typeof vi.fn> }[] = [];
+  mocks.createWorker.mockImplementation(() => {
+    const worker = { destroy: vi.fn() }; workers.push(worker); return worker;
+  });
+  mocks.getDocument.mockImplementation(() => {
+    const task = { promise: Promise.resolve({ numPages: 1 }), destroy: vi.fn().mockResolvedValue(undefined) };
+    tasks.push(task); return task;
+  });
+  const bytes = new Uint8Array([1, 2, 3]);
+  for (let i = 0; i < 50; i++) {
+    const view = renderHook(() => usePdfDocument(bytes));
+    await act(async () => {});
+    view.unmount();
+    await act(async () => {});
+  }
+  expect(workers).toHaveLength(50);
+  for (const worker of workers) expect(worker.destroy).toHaveBeenCalledOnce();
+  for (const task of tasks) expect(task.destroy).toHaveBeenCalledOnce();
+  for (const port of mocks.ports) expect(port.terminate).toHaveBeenCalledOnce();
+});

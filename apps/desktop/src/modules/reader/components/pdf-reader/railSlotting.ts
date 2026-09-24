@@ -1,51 +1,43 @@
 import type { SourceSegment } from '@/shared/types/domain';
 
-import { normalizeBbox } from './readerUtils';
-
-export type RailSegmentBucket = {
-  index: number;
-  segments: SourceSegment[];
-};
-
-export function bucketSegmentsByDocumentPosition({
+export function groupAdjacentSegments({
   bucketCount,
-  pageCount,
   segments
 }: {
   bucketCount: number;
-  pageCount: number;
   segments: SourceSegment[];
-}): RailSegmentBucket[] {
-  const buckets = new Map<number, SourceSegment[]>();
-
+}): SourceSegment[][] {
+  const count = Math.min(segments.length, Math.max(1, bucketCount));
+  if (!count) return [];
+  // Keep headings separate when there is room, and never group across them.
+  const runs: SourceSegment[][] = [];
   for (const segment of segments) {
-    const position = getSegmentDocumentPosition(segment, pageCount);
-    const index = Math.min(
-      bucketCount - 1,
-      Math.floor(position * bucketCount)
-    );
-    const bucket = buckets.get(index) ?? [];
-    bucket.push(segment);
-    buckets.set(index, bucket);
+    const last = runs[runs.length - 1];
+    if (!last || segment.segment_type === 'heading' || last[0].segment_type === 'heading') {
+      runs.push([segment]);
+    } else {
+      last.push(segment);
+    }
   }
+  if (runs.length > count) return splitEvenly(segments, count);
 
-  return [...buckets.entries()]
-    .sort(([left], [right]) => left - right)
-    .map(([index, bucketSegments]) => ({
-      index,
-      segments: bucketSegments
-    }));
+  const slots = runs.map(() => 1);
+  for (let allocated = runs.length; allocated < count; allocated++) {
+    let largest = -1;
+    for (let index = 0; index < runs.length; index++) {
+      if (slots[index] >= runs[index].length) continue;
+      if (largest === -1 || runs[index].length / slots[index] > runs[largest].length / slots[largest]) {
+        largest = index;
+      }
+    }
+    slots[largest]++;
+  }
+  return runs.flatMap((run, index) => splitEvenly(run, slots[index]));
 }
 
-export function getSegmentDocumentPosition(
-  segment: SourceSegment,
-  pageCount: number
-) {
-  const bbox = normalizeBbox(segment.bbox);
-  const pagePosition = bbox ? bbox[1] / 1000 : 0;
-
-  return Math.min(
-    1,
-    Math.max(0, (segment.page_idx + pagePosition) / Math.max(1, pageCount))
-  );
+function splitEvenly(segments: SourceSegment[], count: number) {
+  return Array.from({ length: count }, (_, index) => segments.slice(
+    Math.floor(index * segments.length / count),
+    Math.floor((index + 1) * segments.length / count)
+  ));
 }

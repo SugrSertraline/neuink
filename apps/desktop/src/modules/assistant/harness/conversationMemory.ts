@@ -1,5 +1,5 @@
-import { generateText, Output } from 'ai';
 import { z } from 'zod';
+import { AgentStoppedError, type RunBudget } from '../agent-core';
 
 import type {
   AssistantConversationMemory,
@@ -7,7 +7,7 @@ import type {
   LlmProfile
 } from '@/shared/ipc/assistantApi';
 
-import { createNeuinkModel, generationSettings } from '../sdk/provider';
+import { runJsonModelTask } from '../sdk/modelTasks';
 
 const memorySchema = z.object({
   decisions: z.array(z.string()).default([]),
@@ -35,6 +35,18 @@ export function latestConversationMemory(history: ConversationMessage[]) {
   return null;
 }
 
+/** Keep small conversations in their original form. Summarize before the 16k
+ * transcript tail would drop older turns; never pay for a checkpoint per greeting. */
+export function shouldUpdateConversationMemory(history: ConversationMessage[], question: string, answer: string) {
+  let checkpointIndex = -1;
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    if (history[index].parts?.some(part => part.type === 'memory')) { checkpointIndex = index; break; }
+  }
+  const unsummarized = history.slice(checkpointIndex + 1);
+  const chars = unsummarized.reduce((total, message) => total + message.content.length + 16, question.length + answer.length);
+  return chars >= 8_000;
+}
+
 export function buildConversationTail(
   history: ConversationMessage[],
   maxChars = 16_000
@@ -56,6 +68,8 @@ export function buildConversationTail(
 }
 
 export async function updateConversationMemory({
+  budget,
+  abortSignal,
   answer,
   history,
   pendingProposalCount,
@@ -64,6 +78,8 @@ export async function updateConversationMemory({
   sourceCount,
   systemPrompt
 }: {
+  budget?: RunBudget;
+  abortSignal?: AbortSignal;
   answer: string;
   history: ConversationMessage[];
   pendingProposalCount: number;
@@ -84,7 +100,7 @@ export async function updateConversationMemory({
       `Newest assistant outcome:\n${answer.slice(0, 8_000) || '(no textual answer)'}`,
       'Return one JSON object with: summary, lastUserGoal, decisions, openItems, entities, and userPreferences.'
     ].join('\n\n');
-  const checkpoint = await generateMemoryCheckpoint({ prompt, settings, systemPrompt });
+  const checkpoint = await generateMemoryCheckpoint({ prompt, settings, systemPrompt, abortSignal, budget });
   const materialMessageCount = history.filter((message) => !message.message_id.startsWith('client-')).length;
   return {
     decisions: uniqueText(checkpoint.decisions, 12),
@@ -101,10 +117,14 @@ export async function updateConversationMemory({
 }
 
 async function generateMemoryCheckpoint({
+  budget,
+  abortSignal,
   prompt,
   settings,
   systemPrompt
 }: {
+  budget?: RunBudget;
+  abortSignal?: AbortSignal;
   prompt: string;
   settings: LlmProfile;
   systemPrompt: string;
@@ -113,19 +133,18 @@ async function generateMemoryCheckpoint({
   let lastError = 'unknown validation error';
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const result = await generateText({
-        ...generationSettings(settings),
-        model: createNeuinkModel(settings),
-        output: Output.json({
-          name: 'conversation_memory_checkpoint',
-          description: 'A compact, factual semantic checkpoint for the next agent turn.'
-        }),
+      const outputValue = await runJsonModelTask({
+        budget,
+        abortSignal,
+        settings,
+        name: 'conversation_memory_checkpoint',
+        description: 'A compact, factual semantic checkpoint for the next agent turn.',
         system: systemPrompt,
         prompt: feedback
           ? `${prompt}\n\nThe previous checkpoint was invalid: ${feedback}\nReturn corrected JSON only.`
           : prompt
       });
-      const parsed = memorySchema.safeParse(result.output);
+      const parsed = memorySchema.safeParse(outputValue);
       if (!parsed.success) {
         throw new Error(parsed.error.issues
           .map((issue) => `${issue.path.join('.') || 'checkpoint'}: ${issue.message}`)
@@ -133,11 +152,13 @@ async function generateMemoryCheckpoint({
       }
       return parsed.data;
     } catch (error) {
+      if (error instanceof AgentStoppedError) throw error;
+      abortSignal?.throwIfAborted();
       lastError = error instanceof Error ? error.message : String(error);
       feedback = lastError.slice(0, 1_000);
     }
   }
-  throw new Error(`MemoryAgent could not produce a valid checkpoint: ${lastError}`);
+  throw new Error(`Memory task could not produce a valid checkpoint: ${lastError}`);
 }
 
 export function formatConversationMemory(memory: AssistantConversationMemory | null) {

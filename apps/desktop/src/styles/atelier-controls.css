@@ -1,0 +1,132 @@
+/* Opt-in control finishes. State stays with Radix/business components; geometry stays with the base UI. */
+:root[data-appearance="atelier"] :where([data-ui="button"], [data-slot="select-trigger"], [data-slot="input"], [data-slot="textarea"], [data-slot="input-group"], [data-slot="switch"], [data-slot="checkbox"], [data-slot="tabs-trigger"], [data-ui="toggle-group-item"], [data-ui="toggle"]) {
+  --atelier-control-elevation: 0 0 #0000;
+  border-radius: var(--atelier-control-radius);
+  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--atelier-control-elevation);
+  transition-property: background-color, border-color, color, box-shadow, translate;
+  transition-duration: var(--atelier-motion-hover);
+  transition-timing-function: var(--atelier-motion-ease);
+}
+
+/* Thin machined edges, never a rounded gradient across the face. */
+:root[data-appearance="atelier"] :is([data-ui="button"][data-variant="outline"], [data-ui="button"][data-variant="secondary"], [data-slot="select-trigger"], [data-ui="toggle-group-item"][data-variant="outline"], [data-ui="toggle"][data-variant="outline"]) {
+  background: var(--atelier-control-background, var(--atelier-button)); border-color: var(--atelier-control-edge);
+  --atelier-control-elevation: var(--atelier-control-face);
+}
+:root[data-appearance="atelier"] :is([data-ui="button"][data-variant="plain"], [data-ui="button"][data-variant="ghost"]) {
+  background: var(--atelier-control-background, transparent);
+}
+:root[data-appearance="atelier"] :is([data-ui="button"]:not([data-variant="default"], [data-variant="destructive"], [data-variant="link"]), [data-slot="select-trigger"], [data-ui="toggle-group-item"], [data-ui="toggle"], [data-slot="tabs-trigger"]):is(:hover, :focus-visible):not(:disabled, [aria-disabled="true"]) {
+  background: var(--atelier-control-background, var(--atelier-button-hover)); border-color: var(--atelier-control-edge);
+  --atelier-control-elevation: var(--atelier-control-hover);
+}
+:root[data-appearance="atelier"] :is([data-ui="button"]:not([data-variant="default"], [data-variant="destructive"], [data-variant="link"]), [data-slot="select-trigger"], [data-ui="toggle-group-item"], [data-ui="toggle"], [data-slot="tabs-trigger"]):is(:active, [aria-pressed="true"], [aria-checked="true"], [aria-selected="true"], [aria-expanded="true"], [data-state="on"]):not(:disabled, [aria-disabled="true"]) {
+  background: var(--atelier-control-background, var(--atelier-pressed)); border-color: var(--atelier-control-edge); color: var(--atelier-control-ink, var(--primary));
+  --atelier-control-elevation: var(--atelier-control-selected);
+}
+:root[data-appearance="atelier"] [data-ui="button"][data-variant="default"] {
+  color: var(--primary-foreground); background: var(--atelier-action); border-color: var(--atelier-leather-edge);
+  --atelier-control-elevation: inset 0 1px var(--atelier-action-bevel), inset 1px 0 var(--atelier-action-bevel), inset 0 -1px var(--atelier-shadow);
+}
+:root[data-appearance="atelier"] [data-ui="button"][data-variant="default"]:is(:hover, :focus-visible):not(:disabled, [aria-disabled="true"]) {
+  background: var(--atelier-action-hover);
+  --atelier-control-elevation: inset 0 2px var(--atelier-action-bevel), inset 1px 0 var(--atelier-highlight), inset 0 -1px var(--atelier-shadow);
+}
+:root[data-appearance="atelier"] [data-ui="button"][data-variant="default"]:is(:active, [aria-pressed="true"], [aria-expanded="true"]):not(:disabled, [aria-disabled="true"]) {
+  background: var(--atelier-action-pressed);
+  --atelier-control-elevation: inset 0 1px var(--atelier-shadow), inset 0 -1px var(--atelier-action-bevel);
+}
+:root[data-appearance="atelier"] [data-ui="button"][data-variant="destructive"] {
+  --atelier-control-elevation: var(--atelier-control-face);
+  border-color: color-mix(in srgb, var(--destructive) 25%, var(--border));
+}
+:root[data-appearance="atelier"] [data-ui="button"][data-variant="destructive"]:is(:hover, :focus-visible):not(:disabled) { --atelier-control-elevation: var(--atelier-control-hover); }
+:root[data-appearance="atelier"] [data-ui="button"][data-variant="destructive"]:active:not(:disabled) { --atelier-control-elevation: var(--atelier-control-selected); }
+:root[data-appearance="atelier"] :is([data-ui="button"], [data-slot="select-trigger"], [data-ui="toggle"], [data-ui="toggle-group-item"]):active:not(:disabled, [aria-disabled="true"]) {
+  transition-duration: var(--atelier-motion-press);
+}
+/* Button already supplies its 1px travel. Menus, rows and tabs stay fixed under the pointer. */
+:root[data-appearance="atelier"] [data-ui="button"]:is([aria-haspopup], [aria-expanded], [data-variant="link"]):active { translate: none; }
+
+:root[data-appearance="atelier"] :is([data-slot="input"], [data-slot="textarea"], [data-slot="input-group"]) {
+  background: var(--atelier-search); border-color: var(--input);
+  --atelier-control-elevation: inset 0 1px var(--atelier-highlight), inset 0 -1px var(--atelier-control-highlight);
+}
+:root[data-appearance="atelier"] :is([data-slot="input"], [data-slot="textarea"]):is(:hover, :focus-visible):not(:disabled, [readonly], [aria-invalid="true"]),
+:root[data-appearance="atelier"] [data-slot="input-group"]:has([data-slot="input-group-control"]:is(:hover, :focus-visible):not(:disabled, [readonly], [aria-invalid="true"])) {
+  --atelier-control-elevation: inset 0 0 0 1px var(--atelier-control-highlight);
+  border-color: var(--atelier-control-edge);
+}
+:root[data-appearance="atelier"] [data-slot="tabs-list"][data-variant="default"],
+:root[data-appearance="atelier"] [data-slot="toggle-group"][data-spacing="0"] {
+  border-radius: var(--atelier-control-radius); background: var(--atelier-metal);
+  box-shadow: var(--atelier-control-selected);
+}
+:root[data-appearance="atelier"] [data-ui="toggle-group-item"][data-spacing="0"] { border-radius: 0; }
+:root[data-appearance="atelier"] [data-slot="toggle-group"][data-orientation="horizontal"] > [data-ui="toggle-group-item"][data-spacing="0"]:first-child { border-top-left-radius: var(--atelier-control-inner-radius); border-bottom-left-radius: var(--atelier-control-inner-radius); }
+:root[data-appearance="atelier"] [data-slot="toggle-group"][data-orientation="horizontal"] > [data-ui="toggle-group-item"][data-spacing="0"]:last-child { border-top-right-radius: var(--atelier-control-inner-radius); border-bottom-right-radius: var(--atelier-control-inner-radius); }
+:root[data-appearance="atelier"] [data-slot="toggle-group"][data-orientation="vertical"] > [data-ui="toggle-group-item"][data-spacing="0"]:first-child { border-top-left-radius: var(--atelier-control-inner-radius); border-top-right-radius: var(--atelier-control-inner-radius); }
+:root[data-appearance="atelier"] [data-slot="toggle-group"][data-orientation="vertical"] > [data-ui="toggle-group-item"][data-spacing="0"]:last-child { border-bottom-left-radius: var(--atelier-control-inner-radius); border-bottom-right-radius: var(--atelier-control-inner-radius); }
+
+/* Radix owns checked state, thumb travel, focus and disabled behavior. */
+:root[data-appearance="atelier"] [data-slot="switch"] {
+  border-color: var(--atelier-control-edge); background: var(--atelier-switch-off);
+  --atelier-control-elevation: var(--atelier-control-selected);
+}
+:root[data-appearance="atelier"] [data-slot="switch"][data-state="checked"] { background: var(--atelier-switch-on); border-color: var(--atelier-leather-edge); }
+:root[data-appearance="atelier"] [data-slot="switch-thumb"] {
+  position: relative; border-radius: var(--atelier-control-inner-radius); border: 1px solid var(--atelier-control-edge);
+  background: var(--atelier-button); box-shadow: var(--atelier-control-face);
+  transition: translate var(--atelier-motion-disclosure) var(--atelier-motion-ease), box-shadow var(--atelier-motion-hover), background-color var(--atelier-motion-hover);
+}
+:root[data-appearance="atelier"] [data-slot="switch-thumb"]::after {
+  content: ''; position: absolute; inset: 4px 5px; border-inline: 1px solid var(--atelier-control-edge);
+  box-shadow: 1px 0 var(--atelier-control-highlight);
+}
+:root[data-appearance="atelier"] [data-slot="switch"]:is(:hover, :focus-visible):not(:disabled) [data-slot="switch-thumb"] { background: var(--atelier-button-hover); box-shadow: var(--atelier-control-hover); }
+:root[data-appearance="atelier"] [data-slot="switch"]:active:not(:disabled) [data-slot="switch-thumb"] { box-shadow: var(--atelier-control-selected); }
+:root[data-appearance="atelier"] [data-slot="checkbox"] {
+  border-radius: var(--atelier-control-inner-radius); background: var(--atelier-search);
+  --atelier-control-elevation: var(--atelier-control-selected);
+}
+:root[data-appearance="atelier"] [data-slot="checkbox"]:is(:hover, :focus-visible):not(:disabled) { --atelier-control-elevation: inset 0 0 0 1px var(--atelier-control-highlight); }
+:root[data-appearance="atelier"] [data-slot="checkbox"]:is([data-state="checked"], [data-state="indeterminate"]) {
+  background: var(--atelier-action); --atelier-control-elevation: inset 0 0 0 1px var(--atelier-action-bevel);
+}
+/* Material must compose with focus rings and never hide validation. */
+:root[data-appearance="atelier"] :is([data-ui="button"]:not([data-variant="destructive"]), [data-slot="select-trigger"], [data-slot="input"], [data-slot="textarea"], [data-slot="switch"], [data-slot="checkbox"], [data-slot="tabs-trigger"], [data-ui="toggle"], [data-ui="toggle-group-item"]):focus-visible:not([aria-invalid="true"]) { border-color: var(--ring); }
+:root[data-appearance="atelier"] [data-slot="input-group"]:has([data-slot="input-group-control"]:focus-visible):not(:has([aria-invalid="true"])) { border-color: var(--ring); }
+:root[data-appearance="atelier"] :is([data-ui="button"], [data-slot="select-trigger"], [data-slot="input"], [data-slot="textarea"])[aria-invalid="true"],
+:root[data-appearance="atelier"] [data-slot="input-group"]:has([aria-invalid="true"]) {
+  --atelier-control-edge: var(--destructive); --atelier-leather-edge: var(--destructive);
+  border-color: var(--destructive);
+}
+
+:root[data-appearance="atelier"] :is([data-slot="dialog-content"], [data-slot="popover-content"], [data-slot="hover-card-content"], [data-slot="dropdown-menu-content"], [data-slot="context-menu-content"], [data-slot="select-content"]) {
+  background-color: var(--popover); border-color: var(--border); border-radius: var(--atelier-control-radius);
+  box-shadow: inset 0 0 0 1px var(--atelier-control-highlight), 0 4px 12px var(--atelier-shadow);
+  animation-duration: var(--atelier-motion-disclosure);
+  animation-timing-function: var(--atelier-motion-ease);
+}
+:root[data-appearance="atelier"] [data-slot="dialog-content"] { background: var(--atelier-dialog); }
+:root[data-appearance="atelier"] [data-slot="dialog-footer"] { border-radius: 0 0 var(--atelier-control-radius) var(--atelier-control-radius); }
+:root[data-appearance="atelier"] [data-slot="tooltip-content"] { border-radius: var(--atelier-control-radius); animation-duration: var(--atelier-motion-hover); }
+:root[data-appearance="atelier"] :is([data-slot^="dropdown-menu-"][role^="menuitem"], [data-slot^="context-menu-"][role^="menuitem"], [data-slot="select-item"], [cmdk-item]) {
+  border-radius: var(--atelier-control-inner-radius);
+  transition: background-color var(--atelier-motion-hover), box-shadow var(--atelier-motion-hover);
+}
+:root[data-appearance="atelier"] :is([data-slot^="dropdown-menu-"][role^="menuitem"], [data-slot^="context-menu-"][role^="menuitem"], [data-slot="select-item"], [cmdk-item]):is([data-highlighted], [aria-selected="true"]):not([data-disabled], [aria-disabled="true"]) {
+  background-color: var(--accent); box-shadow: var(--atelier-control-face);
+}
+:root[data-appearance="atelier"] [data-slot="badge"] { border-radius: var(--atelier-control-radius); }
+:root[data-appearance="atelier"] [data-material="editor-toolbar"] { background: var(--atelier-metal); box-shadow: inset 0 1px var(--atelier-control-highlight), inset 0 -1px var(--atelier-control-edge); }
+:root[data-appearance="atelier"] [data-material="editor-toolbar"] > div { background-color: transparent; }
+:root[data-appearance="atelier"] .entry-tag-badges [data-slot="badge"] { background: var(--atelier-paper-label); border-color: var(--border); box-shadow: inset 0 1px var(--atelier-control-highlight); }
+:root[data-appearance="atelier"] [data-slot="progress"] { background: var(--muted); box-shadow: var(--atelier-control-selected); }
+:root[data-appearance="atelier"] [data-slot="progress-indicator"],
+:root[data-appearance="atelier"] .entry-library-table-shell .h-1 > .bg-primary { background: var(--atelier-brass); }
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-appearance="atelier"] { --atelier-motion-hover: 0ms; --atelier-motion-press: 0ms; --atelier-motion-disclosure: 0ms; }
+  :root[data-appearance="atelier"] [data-ui="button"]:active { translate: none; }
+}

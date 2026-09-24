@@ -2,11 +2,36 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { persistReaderPreferences, readStoredReaderPreferences } from './readerPreferences';
+import { equalReaderPreferences, persistReaderPreferences, readStoredReaderPreferences } from './readerPreferences';
 
 beforeEach(() => window.localStorage.clear());
 
 describe('reader preferences', () => {
+  it('defaults to PDF opening with missing or invalid stored preferences', () => {
+    expect(readStoredReaderPreferences().openEntryPdfByDefault).toBe(true);
+    for (const stored of [{ hoverPreviewEnabled: false }, { openEntryPdfByDefault: 'false' }]) {
+      window.localStorage.setItem('neuink.reader.preferences', JSON.stringify(stored));
+      expect(readStoredReaderPreferences().openEntryPdfByDefault).toBe(true);
+    }
+  });
+  it('persists either PDF opening choice and detects preference changes', () => {
+    const original = readStoredReaderPreferences();
+    const disabled = { ...original, openEntryPdfByDefault: false };
+    expect(equalReaderPreferences(original, disabled)).toBe(false);
+    persistReaderPreferences(disabled);
+    expect(readStoredReaderPreferences()).toEqual(disabled);
+    persistReaderPreferences(original);
+    expect(readStoredReaderPreferences()).toEqual(original);
+  });
+  it('keeps existing readers in continuous mode and persists an explicit book choice', () => {
+    window.localStorage.setItem('neuink.reader.preferences', JSON.stringify({pageDisplayMode:'dual'}));
+    expect(readStoredReaderPreferences().pageTurningMode).toBe('scroll');
+    persistReaderPreferences({...readStoredReaderPreferences(),pageTurningMode:'book'});
+    expect(readStoredReaderPreferences().pageTurningMode).toBe('book');
+    expect(readStoredReaderPreferences().pageDisplayMode).toBe('dual');
+    window.localStorage.setItem('neuink.reader.preferences', JSON.stringify({pageTurningMode:'unknown'}));
+    expect(readStoredReaderPreferences().pageTurningMode).toBe('scroll');
+  });
   it('keeps automatic selection translation disabled for existing users', () => {
     window.localStorage.setItem(
       'neuink.reader.preferences',

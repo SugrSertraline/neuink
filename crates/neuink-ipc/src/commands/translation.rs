@@ -23,6 +23,18 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Runtime};
 use tokio::time::timeout;
 
+pub mod paragraph;
+mod rate_limit;
+mod scheduler;
+mod transport;
+use rate_limit::{RateLimitGate, RequestError};
+
+type TranslationTextSink = Arc<dyn Fn(&str) + Send + Sync>;
+type TranslationActivitySink = Arc<dyn Fn(RequestActivity) + Send + Sync>;
+
+#[derive(Clone, Copy)]
+enum RequestActivity { Queued, RateLimited(u64), Generating }
+
 use super::{
     job::{emit_job_event, job_manager},
     settings::read_translation_profile,
@@ -1046,14 +1058,24 @@ struct LlmClient {
     client: Client,
     profile: LlmProfile,
     progress: Option<TranslationProgressSink>,
+    rate_limit: Arc<RateLimitGate>,
+    scheduler: Arc<scheduler::RequestScheduler>,
+    interactive: bool,
+    output: Option<TranslationTextSink>,
+    activity: Option<TranslationActivitySink>,
 }
 
 impl LlmClient {
     fn new(profile: LlmProfile) -> Self {
         Self {
             client: Client::new(),
+            rate_limit: RateLimitGate::for_profile(&profile),
             profile,
             progress: None,
+            scheduler: scheduler::request_scheduler(),
+            interactive: false,
+            output: None,
+            activity: None,
         }
     }
 
@@ -1156,199 +1178,7 @@ impl LlmClient {
         Ok(translations)
     }
 
-    async fn generate_text(&self, system: &str, prompt: &str) -> Result<String, String> {
-        // 流式优先：能在生成过程中收到增量，向 job 推送实时进度；
-        // 失败（服务端不支持流式、网络异常等）则回退到带超时递增重试的非流式调用。
-        match self.generate_text_streaming(system, prompt).await {
-            Ok(text) => Ok(text),
-            Err(stream_error) => self
-                .generate_text_once(system, prompt)
-                .await
-                .map_err(|error| format!("{error}（流式回退前错误：{stream_error}）")),
-        }
-    }
 
-    async fn generate_text_once(&self, system: &str, prompt: &str) -> Result<String, String> {
-        let (url, headers, body) = crate::commands::llm_http::build_chat_request(
-            &self.profile,
-            system,
-            prompt,
-            crate::commands::llm_http::ChatFallbacks {
-                max_tokens: Some(8_192),
-                temperature: Some(0.2),
-                top_p: Some(1.0),
-            },
-        )?;
-        // 超时专属重试：每次超时后放宽 60 秒再试，最多 3 次；其余错误（HTTP/解析）
-        // 不重试，交给批次级的失败处理（标记 failed 并继续后续批次）。
-        let mut last_timeout_error = String::new();
-        for attempt in 0..LLM_REQUEST_MAX_ATTEMPTS {
-            let timeout_duration = request_timeout_for_attempt(attempt);
-            let response = match timeout(
-                timeout_duration,
-                self.client
-                    .post(url.clone())
-                    .headers(headers.clone())
-                    .json(&body)
-                    .send(),
-            )
-            .await
-            {
-                Ok(response) => response,
-                Err(_) => {
-                    last_timeout_error =
-                        format!("LLM request timed out after {} seconds.", timeout_duration.as_secs());
-                    continue;
-                }
-            }
-            .map_err(|error| error.to_string())?;
-            let status = response.status();
-            let body = response.text().await.map_err(|error| error.to_string())?;
-            if !status.is_success() {
-                return Err(format!("LLM request failed ({status}): {body}"));
-            }
-            return crate::commands::llm_http::parse_chat_response(
-                self.profile.api_protocol,
-                &body,
-            );
-        }
-        Err(format!(
-            "LLM request timed out {LLM_REQUEST_MAX_ATTEMPTS} times (last limit {} seconds): {last_timeout_error}",
-            request_timeout_for_attempt(LLM_REQUEST_MAX_ATTEMPTS - 1).as_secs(),
-        ))
-    }
-
-    /// SSE 流式接收一次 LLM 调用。空闲超时（连续 {timeout} 秒收不到任何字节）
-    /// 与整体超时同样触发递增重试；已收到部分内容后中断则直接报错，
-    /// 由上层回退到非流式重试。
-    async fn generate_text_streaming(&self, system: &str, prompt: &str) -> Result<String, String> {
-        let (url, headers, body) = crate::commands::llm_http::build_chat_stream_request(
-            &self.profile,
-            system,
-            prompt,
-            crate::commands::llm_http::ChatFallbacks {
-                max_tokens: Some(8_192),
-                temperature: Some(0.2),
-                top_p: Some(1.0),
-            },
-        )?;
-
-        let mut last_timeout_error = String::new();
-        for attempt in 0..LLM_REQUEST_MAX_ATTEMPTS {
-            let idle_timeout = request_timeout_for_attempt(attempt);
-            let response = match timeout(
-                idle_timeout,
-                self.client
-                    .post(url.clone())
-                    .headers(headers.clone())
-                    .json(&body)
-                    .send(),
-            )
-            .await
-            {
-                Ok(response) => response.map_err(|error| error.to_string())?,
-                Err(_) => {
-                    last_timeout_error = format!(
-                        "LLM request timed out after {} seconds.",
-                        idle_timeout.as_secs()
-                    );
-                    continue;
-                }
-            };
-            let status = response.status();
-            if !status.is_success() {
-                let body = response.text().await.unwrap_or_default();
-                return Err(format!("LLM request failed ({status}): {body}"));
-            }
-
-            let mut stream = response.bytes_stream();
-            let mut accumulated = String::new();
-            let mut line_buffer = String::new();
-            let mut raw_body = String::new();
-            let mut saw_sse_data = false;
-            let mut received_chars = 0usize;
-            loop {
-                let chunk = match timeout(
-                    idle_timeout,
-                    tokio_stream::StreamExt::next(&mut stream),
-                )
-                .await
-                {
-                    Ok(chunk) => chunk,
-                    Err(_) => {
-                        // 空闲超时：还没收到任何内容就升级超时重试；已有内容则报错，
-                        // 让上层用非流式路径重新完整请求。
-                        if received_chars == 0 {
-                            last_timeout_error = format!(
-                                "LLM stream idle after {} seconds.",
-                                idle_timeout.as_secs()
-                            );
-                            break;
-                        }
-                        return Err(format!(
-                            "LLM stream stalled after {received_timeout} seconds of silence.",
-                            received_timeout = idle_timeout.as_secs()
-                        ));
-                    }
-                };
-                let Some(chunk) = chunk else {
-                    break;
-                };
-                let chunk = chunk.map_err(|error| error.to_string())?;
-                received_chars += chunk.len();
-                let lossy = String::from_utf8_lossy(&chunk);
-                raw_body.push_str(&lossy);
-                line_buffer.push_str(&lossy);
-                // SSE 事件以空行分隔，逐行解析已完整的 data: 行。
-                while let Some(newline) = line_buffer.find('\n') {
-                    let line = line_buffer[..newline].trim_end_matches('\r').to_string();
-                    line_buffer.drain(..newline + 1);
-                    if let Some(data) = line.strip_prefix("data:") {
-                        saw_sse_data = true;
-                        crate::commands::llm_http::append_chat_stream_delta(
-                            self.profile.api_protocol,
-                            data,
-                            &mut accumulated,
-                        )?;
-                    }
-                }
-                if let Some(progress) = &self.progress {
-                    progress(received_chars);
-                }
-                // 流自然结束：部分服务端最后一行 data: 不带换行符，冲刷残余缓冲。
-                if let Some(data) = line_buffer.trim().strip_prefix("data:") {
-                    saw_sse_data = true;
-                    crate::commands::llm_http::append_chat_stream_delta(
-                        self.profile.api_protocol,
-                        data,
-                        &mut accumulated,
-                    )?;
-                }
-            }
-            if !last_timeout_error.is_empty() && received_chars == 0 && accumulated.is_empty() {
-                continue;
-            }
-            let trimmed = accumulated.trim().to_string();
-            if !trimmed.is_empty() {
-                return Ok(trimmed);
-            }
-            // 服务端忽略了 stream 参数、直接返回了完整的普通 JSON 响应：
-            // 就地解析，避免非流式路径再完整请求一遍（否则每次调用耗时翻倍）。
-            if !saw_sse_data && !raw_body.trim().is_empty() {
-                return crate::commands::llm_http::parse_chat_response(
-                    self.profile.api_protocol,
-                    raw_body.trim(),
-                );
-            }
-            if !last_timeout_error.is_empty() {
-                continue;
-            }
-            return Err("LLM stream ended without content.".to_string());
-        }
-        Err(format!(
-            "LLM streaming timed out {LLM_REQUEST_MAX_ATTEMPTS} times: {last_timeout_error}"
-        ))
-    }
 }
 
 #[derive(Debug, Deserialize)]

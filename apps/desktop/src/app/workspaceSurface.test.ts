@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  defaultEntryContentId,
+  entryContentSurface,
+  entryContentId,
+  surfaceNoteTarget,
+  workspaceSurfaceLabel,
   surfaceKey,
   sourceLinkSurfaceActions,
   workspaceSurfaceOpenActions,
@@ -15,6 +20,18 @@ const reflowA: WorkspaceSurface = { kind: 'reflow', entryId: 'a' };
 const noteA: WorkspaceSurface = { kind: 'note', entryId: 'a', noteId: 'n1' };
 const pdfB: WorkspaceSurface = { kind: 'pdf', entryId: 'b' };
 
+it('opens review separately from the editable note while retaining its context and stable tab identity', () => {
+  const review: WorkspaceSurface = { kind: 'note-review', entryId: 'a', noteId: 'n1', proposalId: 'p', label: 'Reading note' };
+  const opened = workspaceSurfaceReducer(layout(), { type: 'open', surface: review });
+  expect(opened.rightTabs).toContain(noteA);
+  expect(opened.left.kind).toBe('note-review');
+  expect(surfaceKey(review)).toBe('note-review:p');
+  expect(entryContentId(review)).toBe('note:n1');
+  expect(surfaceNoteTarget(review)).toBeNull(); // A review must never claim a second editing lease.
+  expect(workspaceSurfaceLabel(review, [])).toBe('Reading note · 修改审阅');
+  expect(workspaceSurfaceReducer(opened, { type: 'open', surface: review }).leftTabs).toHaveLength(opened.leftTabs.length);
+});
+
 function layout(overrides: Partial<WorkspaceSurfaceLayout> = {}): WorkspaceSurfaceLayout {
   return {
     focusedPane: 'left',
@@ -27,6 +44,44 @@ function layout(overrides: Partial<WorkspaceSurfaceLayout> = {}): WorkspaceSurfa
 }
 
 describe('workspaceSurfaceReducer', () => {
+  it('applies the PDF preference only to default entry opening, with an overview fallback', () => {
+    const withPdf = { pdfFileName: 'paper.pdf' };
+    expect(defaultEntryContentId(withPdf, true)).toBe('pdf');
+    expect(defaultEntryContentId(withPdf, false)).toBe('overview');
+    expect(defaultEntryContentId({ pdfFileName: null }, true)).toBe('overview');
+    expect(defaultEntryContentId({ pdfFileName: null }, false)).toBe('overview');
+    const initial = layout();
+    const surface = entryContentSurface('a', defaultEntryContentId(withPdf, true), 'research');
+    const opened = workspaceSurfaceOpenActions(initial, surface, 'right').reduce(workspaceSurfaceReducer, initial);
+    expect(opened.right).toEqual({ kind: 'pdf', entryId: 'a', contextTagId: 'research' });
+    expect([...opened.leftTabs, ...opened.rightTabs].filter(tab => surfaceKey(tab) === 'pdf:a')).toHaveLength(1);
+    for (const content of ['overview', 'note:n1', 'reflow']) {
+      const explicit = entryContentSurface('a', content);
+      const result = workspaceSurfaceOpenActions(opened, explicit).reduce(workspaceSurfaceReducer, opened);
+      expect(result[result.focusedPane]).toEqual(explicit);
+    }
+  });
+  it('reuses settings across panes and delivers repeated navigation requests to the existing tab', () => {
+    const settings: WorkspaceSurface = { kind: 'settings', target: { id: 'reader-preview-size', nonce: 1 } };
+    const initial = layout({ right: settings, rightTabs: [noteA, settings] });
+    const nextTarget: WorkspaceSurface = { kind: 'settings', target: { id: 'reader-preview-size', nonce: 2 } };
+    const next = workspaceSurfaceOpenActions(initial, nextTarget).reduce(workspaceSurfaceReducer, initial);
+    expect(next.focusedPane).toBe('right');
+    expect(next.right).toEqual(nextTarget);
+    expect(next.leftTabs).toEqual(initial.leftTabs);
+    expect([...next.leftTabs, ...next.rightTabs].filter(tab => tab.kind === 'settings')).toEqual([nextTarget]);
+  });
+  it('opens one relations page and returns to it across panes without moving or duplicating it', () => {
+    const initial = layout({ right: null, rightTabs: [] });
+    const relations: WorkspaceSurface = { kind: 'relations' };
+    const opened = workspaceSurfaceOpenActions(initial, relations).reduce(workspaceSurfaceReducer, initial);
+    expect(opened.right).toBeNull();
+    const reading = workspaceSurfaceOpenActions(opened, pdfB, 'right').reduce(workspaceSurfaceReducer, opened);
+    const returned = workspaceSurfaceOpenActions(reading, relations).reduce(workspaceSurfaceReducer, reading);
+    expect(returned.focusedPane).toBe('left'); expect(returned.left).toEqual(relations);
+    expect([...returned.leftTabs, ...returned.rightTabs].filter(tab => tab.kind === 'relations')).toHaveLength(1);
+    expect(workspaceSurfaceReducer(returned, { type: 'removeEntry', entryId: 'b' }).leftTabs).toContainEqual(relations);
+  });
   it('opens a tag detail tab without splitting and reuses its stable id after renaming', () => {
     const initial = layout({ right: null, rightTabs: [] });
     const detail: WorkspaceSurface = { kind: 'tag-details', tagId: 'research', label: '研究' };

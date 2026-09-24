@@ -17,6 +17,7 @@ import { EmbeddingStatusLine } from './EmbeddingStatusLine';
 import { SearchIndexStatusLine } from './SearchIndexStatusLine';
 import { SearchModeControl } from './SearchModeControl';
 import { SearchResultList } from './SearchResultList';
+import { AppearanceCommand, isAppearanceCommand } from './AppearanceCommand';
 
 type SearchDialogProps = {
   open: boolean;
@@ -24,6 +25,7 @@ type SearchDialogProps = {
   status: 'loading' | 'ready' | 'error';
   onOpenChange: (open: boolean) => void;
   onOpenResult: (hit: SearchHit) => void;
+  onOpenSetting?: (id: string) => void;
 };
 
 export function SearchDialog({
@@ -31,15 +33,17 @@ export function SearchDialog({
   root,
   status,
   onOpenChange,
-  onOpenResult
+  onOpenResult,
+  onOpenSetting
 }: SearchDialogProps) {
   const [query, setQuery] = useState('');
+  const appearanceCommand = isAppearanceCommand(query);
   const [mode, setMode] = useState<SearchMode>('hybrid');
   const [hoverPreviewEnabled, setHoverPreviewEnabled] = useState(true);
   const { busy, error, results } = useGlobalSearch({
     root,
     status,
-    query,
+    query: appearanceCommand ? '' : query,
     mode,
     limit: 80
   });
@@ -71,32 +75,36 @@ export function SearchDialog({
   return (
     <CommandDialog
       className="top-[18vh] h-[min(720px,76vh)] max-h-[calc(100vh-2rem)] max-w-3xl translate-y-0 grid-rows-[minmax(0,1fr)] gap-0 rounded-lg shadow-2xl sm:max-w-3xl"
-      description="搜索条目、标签、笔记和已解析原文片段"
+      description="搜索条目、标签、笔记、原文片段和设置"
       open={open}
       title="全局搜索"
       onOpenChange={onOpenChange}
     >
       <Command
+        label="全局搜索"
         className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] rounded-none p-0"
         filter={() => 1}
         shouldFilter={false}
+        onKeyDownCapture={event => {
+          if (event.key === 'Enter' && event.nativeEvent.isComposing) event.stopPropagation();
+        }}
       >
         <div className="border-b bg-popover p-3">
           <CommandInput
             autoFocus
             className="pr-8"
-            disabled={!root || status !== 'ready'}
-            placeholder="搜索条目、标签、笔记、原文片段"
+            aria-label="全局搜索"
+            placeholder="搜索资料或设置，如：翻译、缩放"
             value={query}
             onValueChange={setQuery}
           />
-          {busy ? (
+          {!appearanceCommand && busy ? (
             <Loader2
               className="absolute right-6 top-6 size-4 animate-spin text-muted-foreground"
               aria-hidden="true"
             />
           ) : null}
-          <div className="mt-2 flex items-center justify-between gap-2">
+          {!appearanceCommand ? <div className="mt-2 flex items-center justify-between gap-2">
             <Button
               aria-pressed={hoverPreviewEnabled}
               size="xs"
@@ -120,7 +128,8 @@ export function SearchDialog({
               />
             </div>
           </div>
-          <EmbeddingStatusLine
+          : null}
+          {!appearanceCommand ? <><EmbeddingStatusLine
             className="mt-1.5 justify-end"
             error={embeddingError}
             mode={mode}
@@ -137,17 +146,19 @@ export function SearchDialog({
             <div className="mt-2 rounded-md border border-destructive/25 bg-destructive/5 px-2.5 py-2 text-xs leading-5 text-destructive">
               {error}
             </div>
-          ) : null}
+          ) : null}</> : null}
         </div>
 
         <div className="min-h-0 overflow-hidden">
-          <SearchResultList
+          {appearanceCommand ? <AppearanceCommand onExecuted={() => { setQuery(''); onOpenChange(false); }} /> : <SearchResultList
+            settingsQuery={query}
+            onOpenSetting={onOpenSetting ? id => { onOpenSetting(id); onOpenChange(false); } : undefined}
             className="h-full min-h-0"
             hoverPreviewEnabled={hoverPreviewEnabled}
             results={results}
             root={root}
             onOpenResult={openResult}
-          />
+          />}
         </div>
       </Command>
     </CommandDialog>

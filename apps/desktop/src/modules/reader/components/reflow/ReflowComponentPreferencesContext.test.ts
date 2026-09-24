@@ -18,7 +18,7 @@ describe('reflow component preferences', () => {
     expect(reflowComponentKeyForGroup(group(segment('figure', { raw_type: 'image' })))).toBe('figure');
   });
 
-  it('filters disabled components and Mermaid-only segments', () => {
+  it('filters disabled types but keeps Mermaid segments available for independent image/parsed display', () => {
     const chart = group(segment('figure', { raw_type: 'chart' }));
     const mermaid = group(segment('code', { markdown: '```mermaid\ngraph TD\nA-->B\n```' }));
     const preferences = {
@@ -28,7 +28,7 @@ describe('reflow component preferences', () => {
     };
 
     expect(isReflowGroupVisible(chart, preferences)).toBe(false);
-    expect(isReflowGroupVisible(mermaid, preferences)).toBe(false);
+    expect(isReflowGroupVisible(mermaid, preferences)).toBe(true);
   });
 
   it('uses independent text and visual size scales for virtualization', () => {

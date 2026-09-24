@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { SegmentBookmarkButton } from '../SegmentBookmarks';
 import {
   Dialog,
   DialogContent,
@@ -263,6 +264,7 @@ export function SegmentNoteEditor({
                   </p>
                 </div>
                 <div className="ml-auto flex shrink-0 items-center gap-1">
+                  <SegmentBookmarkButton segment={segment} disabled={busy} />
                   {translationPreviewText ? (
                     <Button
                       size="sm"

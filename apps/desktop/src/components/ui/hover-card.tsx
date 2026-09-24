@@ -6,7 +6,7 @@ import { HOVER_SURFACE_CLASS, HOVER_TIMING, useHoverOpenState } from './hover-in
 import { useOverlayLayer } from './overlay-layer'
 import { ViewportOverlay } from './viewport-overlay'
 
-const HoverGateContext = React.createContext({ rearm: () => {}, show: () => {} })
+const HoverOpenContext = React.createContext(() => {})
 
 function HoverCard({
   open: controlledOpen,
@@ -17,25 +17,23 @@ function HoverCard({
   ...props
 }: React.ComponentProps<typeof HoverCardPrimitive.Root>) {
   const state = useHoverOpenState({ open: controlledOpen, defaultOpen, onOpenChange })
-  return <HoverGateContext.Provider value={state}>
+  return <HoverOpenContext.Provider value={state.show}>
     <HoverCardPrimitive.Root data-slot="hover-card" {...props} open={state.open}
       openDelay={openDelay} closeDelay={closeDelay}
       onOpenChange={state.onOpenChange} />
-  </HoverGateContext.Provider>
+  </HoverOpenContext.Provider>
 }
 
 function HoverCardTrigger({
-  onPointerEnter,
-  onFocus,
+  onPointerMove,
   onClick,
   openOnClick = false,
   ...props
 }: React.ComponentProps<typeof HoverCardPrimitive.Trigger> & { openOnClick?: boolean }) {
-  const { rearm, show } = React.useContext(HoverGateContext)
+  const show = React.useContext(HoverOpenContext)
   return (
     <HoverCardPrimitive.Trigger data-slot="hover-card-trigger" {...props}
-      onPointerEnter={(event) => { rearm(); onPointerEnter?.(event) }}
-      onFocus={(event) => { rearm(); onFocus?.(event) }}
+      onPointerMove={(event) => { onPointerMove?.(event); if (!event.defaultPrevented && event.pointerType !== 'touch') show() }}
       onClick={(event) => { onClick?.(event); if (openOnClick && !event.defaultPrevented) show() }} />
   )
 }
@@ -63,7 +61,7 @@ function HoverCardContent({
         hideWhenDetached
         className={cn(
           HOVER_SURFACE_CLASS,
-          "w-64 min-w-0 max-w-[var(--radix-hover-card-content-available-width)] max-h-[min(28rem,var(--radix-hover-card-content-available-height))] overflow-y-auto overscroll-contain break-words p-3 text-sm leading-5 outline-hidden data-[state=open]:animate-in data-[state=open]:fade-in-0 duration-100 motion-reduce:animate-none",
+          "w-64 min-w-0 max-w-[var(--radix-hover-card-content-available-width)] max-h-[min(28rem,var(--radix-hover-card-content-available-height))] overflow-y-auto overscroll-contain break-words p-3 text-sm leading-5 outline-hidden",
           className
         )}
         {...props}

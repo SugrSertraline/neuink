@@ -19,6 +19,18 @@ describe('ReaderSurfacePrimitives', () => {
     expect(getByText('示例论文').className).toContain('text-muted-foreground');
   });
 
+  it('lets detail actions use their natural width before wrapping', () => {
+    const { container } = render(
+      <EntryContentHeader contentTitle="PDF 内容" entryTitle="示例论文">
+        <button type="button">导出</button>
+        <button type="button">翻译任务</button>
+      </EntryContentHeader>
+    );
+
+    expect(container.querySelector('.entry-content-header-title')?.className).toContain('flex-1');
+    expect(container.querySelector('.entry-content-header-actions')?.className).toContain('flex-initial');
+  });
+
   it('uses one accessible mode switch for notes and annotations', () => {
     const onValueChange = vi.fn();
     const { getByRole } = render(

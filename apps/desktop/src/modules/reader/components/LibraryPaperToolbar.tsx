@@ -9,6 +9,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils';
 import { ENTRY_LIBRARY_COLUMNS } from './LibraryPaperTable';
 import type { EntryLibraryColumnId } from './useEntryLibraryColumnWidths';
+import { LibraryDisplayControl } from './LibraryDisplayControl';
+import { libraryToolbarControl, libraryToolbarGroup, libraryToolbarGroupItem } from './libraryToolbarStyles';
+import { useAppearance } from '@/shared/components/AppearanceProvider';
 
 type PaperScope = 'all' | 'unclassified' | 'direct' | 'descendants';
 const rootScopes = [
@@ -37,11 +40,12 @@ export function LibraryPaperToolbar({ query, sortBy, scope, unclassifiedCount, v
   onPinChange: (edge: 'left' | 'right', pinned: boolean) => void;
 }) {
   const scopes = scope === 'direct' || scope === 'descendants' ? tagScopes : rootScopes;
-  return <div className="@container/library-toolbar min-w-0 shrink-0 border-b px-3 py-2">
+  const { appearance, libraryDisplay } = useAppearance();
+  return <div data-material="workspace-toolbar" className="@container/library-toolbar min-w-0 shrink-0 border-b px-3 py-2">
     <div aria-label="条目库筛选与操作" className="flex min-w-0 flex-wrap items-center gap-1.5">
       <SearchInput label="搜索条目" placeholder="搜索标题、PDF、字段、标签或解析状态" value={query} onValueChange={onQueryChange} className="min-w-28 @max-[700px]/library-toolbar:min-w-24" />
       <Select value={sortBy} onValueChange={onSortChange}>
-        <SelectTrigger aria-label="条目排序" className="w-32 shrink-0 text-xs @max-[700px]/library-toolbar:w-28" size="default"><SelectValue placeholder="排序" /></SelectTrigger>
+        <SelectTrigger aria-label="条目排序" className={cn(libraryToolbarControl, 'w-32 @max-[700px]/library-toolbar:w-28')} size="default"><SelectValue placeholder="排序" /></SelectTrigger>
         <SelectContent viewportAligned>
           <SelectItem value="recent">最近更新</SelectItem>
           <SelectItem value="title">标题</SelectItem>
@@ -51,17 +55,18 @@ export function LibraryPaperToolbar({ query, sortBy, scope, unclassifiedCount, v
           <SelectItem value="reading-time">阅读时长</SelectItem>
         </SelectContent>
       </Select>
+      <LibraryDisplayControl />
       <Tooltip>
         <TooltipTrigger asChild>
           <Toggle aria-label="标签导航" variant="outline" size="default" pressed={tagNavigation.shown}
             disabled={tagNavigation.disabled} onPressedChange={tagNavigation.onShownChange}
-            className="shrink-0 gap-1.5 text-xs aria-pressed:border-primary/30 aria-pressed:bg-accent aria-pressed:text-accent-foreground data-[state=on]:bg-accent @max-[700px]/library-toolbar:w-8 @max-[700px]/library-toolbar:px-0">
+            className={cn(libraryToolbarControl, 'gap-1.5 aria-pressed:border-primary/30 aria-pressed:bg-accent aria-pressed:text-accent-foreground data-[state=on]:bg-accent @max-[700px]/library-toolbar:w-8 @max-[700px]/library-toolbar:px-0')}>
             <FolderTree className="size-3.5" aria-hidden="true" /><span className="@max-[700px]/library-toolbar:hidden">标签导航</span>
           </Toggle>
         </TooltipTrigger>
         <TooltipContent>{tagNavigation.shown ? '隐藏标签导航' : '显示标签导航'}</TooltipContent>
       </Tooltip>
-      <DropdownMenu>
+      {appearance !== 'atelier' || libraryDisplay === 'list' ? <DropdownMenu>
         <DropdownMenuTrigger asChild><Button aria-label="表头" title="表头" className="text-xs @max-[700px]/library-toolbar:w-8 @max-[700px]/library-toolbar:px-0" size="default" variant="outline"><Columns3 size={14} aria-hidden="true" /><span className="@max-[700px]/library-toolbar:hidden">表头</span></Button></DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-44" viewportAligned>
           <DropdownMenuLabel>显示的列</DropdownMenuLabel><DropdownMenuSeparator />
@@ -71,11 +76,11 @@ export function LibraryPaperToolbar({ query, sortBy, scope, unclassifiedCount, v
           {(['left', 'right'] as const).map(edge => <DropdownMenuCheckboxItem key={edge} checked={pinnedEdges.has(edge)}
             onCheckedChange={checked => onPinChange(edge, checked === true)} onSelect={event => event.preventDefault()}>{edge === 'left' ? '固定最左列' : '固定最右列'}</DropdownMenuCheckboxItem>)}
         </DropdownMenuContent>
-      </DropdownMenu>
-      {scope ? <ToggleGroup aria-label="论文范围" className="h-8 shrink-0 rounded-md border bg-muted p-0.5" size="sm" spacing={0} type="single" value={scope}
+      </DropdownMenu> : null}
+      {scope ? <ToggleGroup aria-label="论文范围" className={libraryToolbarGroup} size="sm" spacing={0} type="single" value={scope}
         onValueChange={value => { if (scopes.some(option => option.value === value)) onScopeChange(value as PaperScope); }}>
         {scopes.map(option => <ToggleGroupItem key={option.value} aria-label={option.label} value={option.value} title={option.title}
-          className={cn('h-full gap-1.5 px-2 text-xs', scope === option.value ? 'bg-background shadow-sm hover:bg-background' : 'text-muted-foreground')}>
+          className={cn(libraryToolbarGroupItem, scope !== option.value && 'text-muted-foreground')}>
           {option.value === 'direct' ? '仅当前' : option.label}
           {option.value === 'unclassified' && unclassifiedCount !== null ? <span className="tabular-nums text-muted-foreground">{unclassifiedCount}</span> : null}
         </ToggleGroupItem>)}

@@ -139,9 +139,9 @@ pub fn save_agent_run(request: SaveAgentRunRequest) -> Result<(), String> {
     fs::create_dir_all(&run_dir).map_err(|error| error.to_string())?;
     let record = build_record(request.run)?;
     let bytes = serde_json::to_vec_pretty(&record).map_err(|error| error.to_string())?;
-    fs::write(
+    neuink_workspace::atomic_write(
         run_dir.join(format!("{}.json", safe_run_id(&record.run_id))),
-        bytes,
+        &bytes,
     )
     .map_err(|error| error.to_string())
 }

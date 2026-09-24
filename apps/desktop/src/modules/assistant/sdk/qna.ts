@@ -1,4 +1,9 @@
-import { generateText, stepCountIs, streamText } from 'ai';
+import type { ApplicationActions } from '../runtime/applicationActions';
+import type { RequestToolApproval } from '../runtime/toolApproval';
+import type { RequestUserInput } from '../runtime/userInput';
+import { createUserInputTool, USER_INPUT_INSTRUCTIONS } from './userInputTool';
+import { bindExecutionIdentity, canReplayAssistantTool, type DurableExecution } from '../runtime/durableExecution';
+import type { ModelMessage } from 'ai';
 
 import type {
   AssistantContextSnapshot,
@@ -11,10 +16,7 @@ import type {
 } from '@/shared/ipc/assistantApi';
 import {
   conversationSourceKey,
-  isSciverseConversationSource,
-  loadPrompt,
-  readEntryAssistantContext,
-  searchSegmentsTool
+  loadPrompt
 } from '@/shared/ipc/assistantApi';
 import { readNote } from '@/shared/ipc/workspaceApi';
 import type {
@@ -33,12 +35,16 @@ import type {
 import type { AgentExecutionSelection, AgentRuntimeSettings } from '@/shared/types/agentRuntime';
 import { buildAgentSystemPrompt } from '@/shared/lib/agentRuntimeSettings';
 
-import { createNeuinkModel, generationSettings } from './provider';
+import { createAgentDriver, agentExecutors } from './agentDriver';
+import { SourceLedger } from '../runtime/sourceLedger';
 import { assistantContextCharBudget } from './contextBudget';
-import { createAssistantTools, modelToolName } from './tools';
-import { AgentLoopGuard, createAgentLoopState } from '../agent-core';
+import { createAssistantTools, modelToolName, type ToolRuntimeState } from './tools';
+import { Agent, RunBudget, AgentLoopGuard, AgentLoopGuardError, createAgentLoopState } from '../agent-core';
+import { executionModeInstructions } from '../runtime/executionPolicy';
+import { answerLightweightChat } from './lightweightChat';
 
 export type GroundedAnswer = {
+  executionId?: string;
   agentLoopState?: import('@/shared/types/agentRuntime').AgentLoopState;
   agentRun?: AssistantAgentRun;
   answer: string;
@@ -52,165 +58,12 @@ export type GroundedAnswer = {
   toolEvents?: AssistantToolTraceEvent[];
 };
 
-type EvidenceSections = {
-  documentContext: string;
-  pinnedContext: string;
-  retrievedEvidence: string;
-};
-
-type EvidenceBundle = {
-  sections: EvidenceSections;
-  sourceByMarker: Map<number, ConversationSourceLink>;
-};
-
 export async function answerWithGroundedAgent({
-  abortSignal,
-  assistantContext,
-  availableEntries,
-  contextSnapshot,
-  conversationHistory,
-  currentEntry,
-  currentNote,
-  harnessBrief,
-  onAnswerReset,
-  onDelta,
-  onNoteProposal,
-  onCreateEntry,
-  onToolEvent,
-  onReasoningDelta,
-  plan,
-  invocationPlan,
-  question,
-  root,
-  activeExecution,
-  profiles,
-  runtimeSettings,
-  scope,
-  settings
-}: {
-  abortSignal?: AbortSignal;
-  assistantContext?: AssistantContext | null;
-  availableEntries?: AssistantEntryMetaTarget[];
-  contextSnapshot?: AssistantContextSnapshot | null;
-  conversationHistory?: ConversationMessage[];
-  currentEntry?: { id: string; title: string } | null;
-  currentNote?: AssistantActiveNote | null;
-  harnessBrief?: string;
-  onAnswerReset?: () => void;
-  onDelta?: (delta: string) => void;
-  onNoteProposal?: (proposal: AssistantNoteProposal) => void;
-  onCreateEntry?: (title: string) => Promise<AssistantEntryMetaTarget>;
-  onToolEvent?: (event: AssistantToolTraceEvent) => void;
-  onReasoningDelta?: (delta: string) => void;
-  invocationPlan?: AgentInvocationPlan | null;
-  plan?: AssistantTaskPlan;
-  question: string;
-  root: string;
-  activeExecution?: AgentExecutionSelection | null;
-  profiles?: LlmProfile[];
-  runtimeSettings?: AgentRuntimeSettings | null;
-  scope: ScopeSnapshot;
-  settings: LlmProfile;
-}): Promise<GroundedAnswer> {
-  let streamedWithTools = false;
-  let toolActivity = false;
-
-  try {
-    const toolAnswer = await generateGroundedAnswerWithTools({
-      abortSignal,
-      assistantContext,
-      availableEntries,
-      contextSnapshot,
-      conversationHistory,
-      currentEntry,
-      currentNote,
-      harnessBrief,
-      onAnswerReset,
-      onDelta: (delta) => {
-        streamedWithTools = true;
-        onDelta?.(delta);
-      },
-      onNoteProposal,
-      onCreateEntry,
-      onToolEvent: (event) => {
-        toolActivity = true;
-        onToolEvent?.(event);
-      },
-      onReasoningDelta: (delta) => {
-        streamedWithTools = true;
-        onReasoningDelta?.(delta);
-      },
-      plan,
-      invocationPlan,
-      question,
-      root,
-      activeExecution,
-      profiles,
-      runtimeSettings,
-      scope,
-      settings
-    });
-
-    if (
-      (toolAnswer.answer.trim() ||
-        (toolAnswer.entryMetaProposals?.length ?? 0) > 0 ||
-        (toolAnswer.noteProposals?.length ?? 0) > 0 ||
-        (toolAnswer.tagProposals?.length ?? 0) > 0 ||
-        (toolAnswer.agentLoopState?.createdEntryIds.length ?? 0) > 0) &&
-      (!requiresGroundedSources(plan) || toolAnswer.sources.length > 0)
-    ) {
-      return toolAnswer;
-    }
-  } catch (error) {
-    if (
-      invocationPlan?.writePolicy === 'proposal_only' ||
-      invocationPlan?.failurePolicy === 'stop'
-    ) {
-      throw error;
-    }
-    if (streamedWithTools || toolActivity) {
-      throw error;
-    }
-
-    onToolEvent?.({
-      error: `Tool calling unavailable; using structured evidence fallback. ${errorMessage(error)}`,
-      id: `tool-fallback-${Date.now()}`,
-      status: 'error',
-      toolName: 'assistant_tools'
-    });
-  }
-
-  const evidence = await buildEvidence({
-    assistantContext,
-    plan,
-    question,
-    root,
-    scope,
-    settings
-  });
-
-  if (!hasEvidence(evidence.sections)) {
-    return {
-      answer:
-        'The current scope does not have parsed PDF context available for this question. Open a parsed Entry or add a Segment to the chat context first.',
-      sources: []
-    };
-  }
-
-  return generateGroundedAnswer({
-    abortSignal,
-    harnessBrief,
-    onDelta: streamedWithTools ? undefined : onDelta,
-    onReasoningDelta: streamedWithTools ? undefined : onReasoningDelta,
-    question,
-    scope,
-    sections: evidence.sections,
-    settings,
-    sourceByMarker: evidence.sourceByMarker
-  });
-}
-
-async function generateGroundedAnswerWithTools({
+  budget = new RunBudget(),
+  execution,
+  applicationActions,
+  requestToolApproval,
+  requestUserInput,
   abortSignal,
   assistantContext,
   availableEntries = [],
@@ -235,6 +88,11 @@ async function generateGroundedAnswerWithTools({
   scope,
   settings
 }: {
+  budget?: RunBudget;
+  execution?: DurableExecution;
+  applicationActions?: ApplicationActions;
+  requestToolApproval?: RequestToolApproval;
+  requestUserInput?: RequestUserInput;
   abortSignal?: AbortSignal;
   assistantContext?: AssistantContext | null;
   availableEntries?: AssistantEntryMetaTarget[];
@@ -259,10 +117,16 @@ async function generateGroundedAnswerWithTools({
   scope: ScopeSnapshot;
   settings: LlmProfile;
 }): Promise<GroundedAnswer> {
-  const noteProposals: AssistantNoteProposal[] = [];
-  const entryMetaProposals: AssistantEntryMetaProposal[] = [];
-  const tagProposals: AssistantTagProposal[] = [];
-  const agentLoopState = createAgentLoopState(question);
+  if (invocationPlan?.responseStyle === 'lightweight_chat') {
+    return answerLightweightChat({ budget, execution, settings, abortSignal, question, activeExecution,
+      root, scope, onAnswerReset, onDelta, onReasoningDelta });
+  }
+  const noteProposals = execution?.get<AssistantNoteProposal[]>('noteProposals') ?? [];
+  const entryMetaProposals = execution?.get<AssistantEntryMetaProposal[]>('entryMetaProposals') ?? [];
+  const tagProposals = execution?.get<AssistantTagProposal[]>('tagProposals') ?? [];
+  const agentLoopState = execution?.get<ReturnType<typeof createAgentLoopState>>('loop:main') ?? createAgentLoopState(question);
+  agentLoopState.status = 'running';
+  agentLoopState.stopReason = undefined;
   const loopGuard = new AgentLoopGuard(agentLoopState);
   const pinned = buildPinnedContext(assistantContext?.items ?? [], 1);
   const selectedNotes = await buildSelectedMarkdownContext({
@@ -272,7 +136,15 @@ async function generateGroundedAnswerWithTools({
   });
   const selectedContextEntries = buildSelectedContextEntryNote(assistantContext);
   const hasExplicitContext = (assistantContext?.items ?? []).length > 0;
+  const ledger = new SourceLedger(new Map(execution?.get<Array<[number, ConversationSourceLink]>>('sources') ?? [...pinned.sourceByMarker, ...selectedNotes.sourceByMarker]));
   const runtime = await createAssistantTools({
+    execution,
+    restoredState: execution?.get<ToolRuntimeState>('tools:main'),
+    applicationActions,
+    abortSignal,
+    budget,
+    sourceLedger: ledger,
+    defaultProfile: settings,
     activeExecution,
     assistantContext,
     availableEntries,
@@ -307,6 +179,19 @@ async function generateGroundedAnswerWithTools({
     runtimeSettings,
     scope
   });
+  // A host-provided UI capability, not a workspace tool or a subagent grant.
+  if (requestUserInput) {
+    runtime.tools.ask_user = createUserInputTool(requestUserInput, () => {
+      const result: ConversationSourceLink[] = [];
+      for (const [marker, source] of runtime.sourceByMarker) result[marker - 1] = source;
+      return result;
+    }, event => {
+      const index = runtime.events.findIndex(value => value.id === event.id);
+      if (index < 0) runtime.events.push(event); else runtime.events[index] = event;
+      onToolEvent?.(event);
+    });
+    runtime.toolNames.push('ask_user');
+  }
   const unavailableRequiredTools = (invocationPlan?.requiredToolIds ?? []).filter(
     (toolId) => !runtime.toolNames.includes(modelToolName(toolId))
   );
@@ -321,17 +206,16 @@ async function generateGroundedAnswerWithTools({
     loadPrompt('qna_system'),
     loadPrompt('qna_user')
   ]);
-  const model = createNeuinkModel(settings);
   const agentSystemPrompt = activeExecution
-    ? buildAgentSystemPrompt(
-        activeExecution.agent,
-        activeExecution.skillPackages,
-        invocationPlan?.skillIdsToLoad ?? []
-      )
+    ? buildAgentSystemPrompt(activeExecution.agent)
     : '';
-  const invocationSystemPrompt = invocationPlan
-    ? `ThinkerAgent Invocation Plan:\n${JSON.stringify(invocationPlan)}`
-    : '';
+  const invocationSystemPrompt = (invocationPlan
+    ? [
+        invocationPlan.executionMode ? executionModeInstructions(invocationPlan.executionMode) : '',
+        `Application capability boundary (not a mandatory task plan):\n${JSON.stringify(invocationPlan)}`,
+        `Frozen active Entry: ${JSON.stringify(currentEntry ?? null)}. This is context, not authorization to edit it. Explicit user references take priority.`
+      ].filter(Boolean).join('\n\n')
+    : '') + (requestUserInput ? `\n\n${USER_INPUT_INSTRUCTIONS}` : '');
   const prompt = renderQnaUserPrompt(userPromptTemplate, {
     currentNote: buildCurrentNoteContext(contextSnapshot),
     documentContext:
@@ -346,92 +230,71 @@ async function generateGroundedAnswerWithTools({
     sources: [pinned.text, selectedNotes.text].filter(Boolean).join('\n\n'),
     toolNotes: buildToolNotes(runtime.toolNames, plan, activeExecution, invocationPlan)
   });
-  const consumeStream = async (stream: AsyncIterable<any>) => {
-    for await (const part of stream) {
-      if (part.type === 'start-step') {
-        loopGuard.startTurn();
-        continue;
-      }
-      if (part.type === 'text-delta') {
-        answer += part.text;
-        onDelta?.(part.text);
-        continue;
-      }
-      if (part.type === 'reasoning-delta') {
-        onReasoningDelta?.(part.text);
-        continue;
-      }
-      if (part.type === 'tool-error') {
-        onToolEvent?.({
-          error: errorMessage(part.error),
-          id: part.toolCallId,
-          status: 'error',
-          toolName: String(part.toolName)
-        });
-        continue;
-      }
-      if (part.type === 'error') throw new Error(errorMessage(part.error));
-    }
-  };
-  let answer = '';
-  const result = streamText({
-    abortSignal,
-    ...generationSettings(settings),
-    model,
-    prompt,
-    stopWhen: stepCountIs(agentLoopState.maxTurns),
-    system: [baseSystemPrompt, agentSystemPrompt, invocationSystemPrompt].filter(Boolean).join('\n\n'),
-    tools: runtime.tools
-  });
-  await consumeStream(result.fullStream);
-
-  const hasMaterialResult = () => Boolean(
-    answer.trim() || noteProposals.length || entryMetaProposals.length ||
-    tagProposals.length || agentLoopState.createdEntryIds.length
-  );
-  if (!hasMaterialResult() && runtime.observations.length > 0) {
-    const observationText = JSON.stringify(runtime.observations).slice(0, 24_000);
-    const continuation = streamText({
-      abortSignal,
-      ...generationSettings(settings),
-      model,
-      prompt: `${prompt}\n\nThe previous tool round ended without a final response. Continue the same task from these actual tool observations:\n${observationText}\n\nDo not repeat a failed search unchanged. For an exhaustive TagScope request, read each resolved Entry directly with read_entry_assistant_context. Complete the requested proposal or explain a concrete remaining blocker.`,
-      stopWhen: stepCountIs(Math.max(1, agentLoopState.maxTurns - agentLoopState.turnCount)),
-      system: [baseSystemPrompt, agentSystemPrompt, invocationSystemPrompt].filter(Boolean).join('\n\n'),
-      tools: runtime.tools
-    });
-    await consumeStream(continuation.fullStream);
-  }
   const missingRequiredToolIds = () => {
-    const completed = new Set(
-      runtime.events
-        .filter((event) => event.status === 'done')
-        .map((event) => event.toolName)
-    );
-    return (invocationPlan?.requiredToolIds ?? []).filter((toolId) => !completed.has(toolId));
+    const completed = new Set(runtime.events.filter((event) => event.status === 'done').map((event) => event.toolName));
+    return (invocationPlan?.requiredToolIds ?? []).filter((id) => !completed.has(id));
   };
-  const firstMissingRequiredTools = missingRequiredToolIds();
-  if (firstMissingRequiredTools.length > 0) {
-    const prematureDraft = answer.trim();
-    answer = '';
-    onAnswerReset?.();
-    const correction = streamText({
-      abortSignal,
-      ...generationSettings(settings),
-      model,
-      prompt: [
-        prompt,
-        `The previous attempt did not satisfy the execution contract. Missing required tools: ${firstMissingRequiredTools.join(', ')}.`,
-        prematureDraft ? `Discard this unverified draft and do not reuse unsupported claims:\n${prematureDraft}` : '',
-        `Actual observations so far:\n${JSON.stringify(runtime.observations).slice(0, 24_000)}`,
-        'Call the missing tools in contract order, use their actual observations, and only then return the final answer or proposal. If a tool fails, report that blocker without substituting another source.'
-      ].filter(Boolean).join('\n\n'),
-      stopWhen: stepCountIs(Math.max(2, agentLoopState.maxTurns - agentLoopState.turnCount)),
+  const hasProposals = () => Boolean(noteProposals.length || entryMetaProposals.length || tagProposals.length || agentLoopState.createdEntryIds.length);
+  let correctionCount = 0;
+  await bindExecutionIdentity(execution, 'main', {
+    model: settings.model, endpoint: settings.base_url, protocol: settings.api_protocol,
+    agent: activeExecution?.agent, tools: runtime.toolNames, system: [baseSystemPrompt, agentSystemPrompt, invocationSystemPrompt]
+  });
+  const agent = new Agent<ModelMessage>({
+    driver: createAgentDriver({
+      budget,
+      settings,
       system: [baseSystemPrompt, agentSystemPrompt, invocationSystemPrompt].filter(Boolean).join('\n\n'),
-      tools: runtime.tools
-    });
-    await consumeStream(correction.fullStream);
+      tools: runtime.tools,
+      onTurn: onAnswerReset,
+      onDelta,
+      onReasoningDelta
+    }),
+    tools: agentExecutors(runtime.tools, requestToolApproval),
+    checkpoint: execution?.actor<ModelMessage>('main'),
+    canReplayTool: canReplayAssistantTool,
+    saveCheckpoint: execution ? async (checkpoint) => {
+      execution.set('noteProposals', noteProposals);
+      execution.set('entryMetaProposals', entryMetaProposals);
+      execution.set('tagProposals', tagProposals);
+      execution.set('loop:main', agentLoopState);
+      execution.set('tools:main', runtime.snapshot());
+      execution.set('sources', [...ledger.sources]);
+      await execution.saveActor('main', checkpoint);
+    } : undefined,
+    messages: [{ role: 'user', content: prompt }],
+    budget,
+    signal: abortSignal,
+    maxTurns: agentLoopState.maxTurns,
+    beforeTurn: () => loopGuard.startTurn(),
+    isFatal: (error) => error instanceof AgentLoopGuardError,
+    onToolError: (call, error) => onToolEvent?.({
+      id: call.id, toolName: call.name, status: 'error', error: errorMessage(error)
+    }),
+    verify: (text) => {
+      const missing = missingRequiredToolIds();
+      const invalidCitation = [...text.matchAll(/\[S(\d+)]/g)].some((match) => !ledger.sources.has(Number(match[1])));
+      const evidenceRead = runtime.events.some(event => event.status === 'done' && (event.sources?.length ?? 0) > 0);
+      const uncited = (requiresGroundedSources(plan) || (plan?.executionMode !== undefined && evidenceRead)) && !hasProposals() &&
+        ![...text.matchAll(/\[S(\d+)]/g)].some((match) => ledger.sources.has(Number(match[1])));
+      if (!missing.length && !invalidCitation && !uncited && (text.trim() || hasProposals())) return;
+      if (correctionCount++ >= 2) throw new Error('Agent 未满足工具、溯源或输出合同，任务已停止。');
+      return [
+        missing.length ? `Call these required tools before answering: ${missing.join(', ')}.` : '',
+        invalidCitation || uncited ? 'Use only evidence obtained in this run and cite valid [Sx] markers. Read evidence with the available tools if needed. Do not invent sources.' : '',
+        !text.trim() && !hasProposals() ? 'Complete the requested answer or proposal using the actual observations above.' : ''
+      ].filter(Boolean).join('\n');
+    }
+  });
+  let answer: string;
+  try {
+    answer = await agent.run();
+  } catch (error) {
+    agentLoopState.status = abortSignal?.aborted ? 'cancelled' : 'failed';
+    agentLoopState.stopReason = errorMessage(error);
+    throw error;
   }
+  const hasMaterialResult = () => Boolean(answer.trim() || hasProposals());
   if (!hasMaterialResult()) {
     agentLoopState.status = 'failed';
     agentLoopState.stopReason = 'Agent tool loop ended without a final response or proposal.';
@@ -468,118 +331,7 @@ async function generateGroundedAnswerWithTools({
     ]),
     toolEvents: runtime.events
   };
-  return requiresGroundedSources(plan)
-    ? ensureGroundedCitations({
-        abortSignal,
-        grounded,
-        settings,
-        sourceByMarker: runtime.sourceByMarker
-      })
-    : grounded;
-}
-
-async function buildEvidence({
-  assistantContext,
-  plan,
-  question,
-  root,
-  scope,
-  settings
-}: {
-  assistantContext?: AssistantContext | null;
-  plan?: AssistantTaskPlan;
-  question: string;
-  root: string;
-  scope: ScopeSnapshot;
-  settings: LlmProfile;
-}): Promise<EvidenceBundle> {
-  let nextMarker = 1;
-  const sourceByMarker = new Map<number, ConversationSourceLink>();
-  const sections: EvidenceSections = {
-    documentContext: '',
-    pinnedContext: '',
-    retrievedEvidence: ''
-  };
-  const contextItems = assistantContext?.items ?? [];
-  const hydratedDocumentEntries = new Set<string>();
-  for (const item of contextItems) {
-    if (item.kind === 'segment') {
-      const pinned = buildPinnedContext([item], nextMarker);
-      sections.pinnedContext = [sections.pinnedContext, pinned.text]
-        .filter(Boolean)
-        .join('\n\n');
-      nextMarker = pinned.nextMarker;
-      mergeSourceMaps(sourceByMarker, pinned.sourceByMarker);
-      continue;
-    }
-    if (item.contentKind === 'note') {
-      const noteContext = await buildSelectedMarkdownContext({
-        assistantContext: { items: [item] },
-        markerStart: nextMarker,
-        root
-      });
-      sections.documentContext = [sections.documentContext, noteContext.text]
-        .filter(Boolean)
-        .join('\n\n');
-      nextMarker = noteContext.nextMarker;
-      mergeSourceMaps(sourceByMarker, noteContext.sourceByMarker);
-      continue;
-    }
-    if (hydratedDocumentEntries.has(item.entryId)) continue;
-    hydratedDocumentEntries.add(item.entryId);
-    const selectedEntry = await buildSelectedEntryDocumentContext({
-      entries: [item],
-      markerStart: nextMarker,
-      root,
-      settings
-    });
-    sections.documentContext = [sections.documentContext, selectedEntry.text]
-      .filter(Boolean)
-      .join('\n\n');
-    nextMarker = selectedEntry.nextMarker;
-    mergeSourceMaps(sourceByMarker, selectedEntry.sourceByMarker);
-  }
-
-  const shouldRetrieve = Boolean(
-    plan?.needsSegmentSearch || plan?.requiredToolIds?.includes('search_segments')
-  );
-
-  if (!shouldRetrieve) {
-    if (!sections.documentContext && scope.entry_ids.length === 1) {
-      const document = await buildEntryDocumentContext({
-        entryId: scope.entry_ids[0],
-        markerStart: nextMarker,
-        root,
-        settings
-      });
-      sections.documentContext = document.text;
-      mergeSourceMaps(sourceByMarker, document.sourceByMarker);
-    }
-    return { sections, sourceByMarker };
-  }
-
-  const retrieved = await buildRetrievedEvidence({
-    markerStart: nextMarker,
-    question,
-    root,
-    scope
-  });
-  sections.retrievedEvidence = retrieved.text;
-  nextMarker = retrieved.nextMarker;
-  mergeSourceMaps(sourceByMarker, retrieved.sourceByMarker);
-
-  if (!sections.retrievedEvidence && scope.entry_ids.length === 1 && !sections.documentContext) {
-    const document = await buildEntryDocumentContext({
-      entryId: scope.entry_ids[0],
-      markerStart: nextMarker,
-      root,
-      settings
-    });
-    sections.documentContext = document.text;
-    mergeSourceMaps(sourceByMarker, document.sourceByMarker);
-  }
-
-  return { sections, sourceByMarker };
+  return grounded;
 }
 
 function buildPinnedContext(items: AssistantContextItem[], markerStart: number) {
@@ -667,223 +419,6 @@ export async function buildSelectedMarkdownContext({
   return { nextMarker: marker, sourceByMarker, text: sections.join('\n\n---\n\n') };
 }
 
-async function buildSelectedEntryDocumentContext({
-  entries,
-  markerStart,
-  root,
-  settings
-}: {
-  entries: AssistantContextItem[];
-  markerStart: number;
-  root: string;
-  settings: LlmProfile;
-}) {
-  const sourceByMarker = new Map<number, ConversationSourceLink>();
-  const sections: string[] = [];
-  let marker = markerStart;
-
-  for (const entry of entries) {
-    if (entry.kind !== 'entry') {
-      continue;
-    }
-    const document = await buildEntryDocumentContext({
-      entryId: entry.entryId,
-      markerStart: marker,
-      root,
-      settings
-    });
-    if (document.text) {
-      sections.push(
-        `Context entry: ${entry.entryTitle}${entry.contentKind && entry.contentKind !== 'entry' ? ` / ${entry.contentTitle ?? entry.contentKind}` : ''}\n${document.text}`
-      );
-      mergeSourceMaps(sourceByMarker, document.sourceByMarker);
-      marker = document.nextMarker;
-    } else {
-      sections.push(`Context entry: ${entry.entryTitle}\nNo parsed PDF context available.`);
-    }
-  }
-
-  return {
-    nextMarker: marker,
-    sourceByMarker,
-    text: sections.join('\n\n')
-  };
-}
-
-async function buildEntryDocumentContext({
-  entryId,
-  markerStart,
-  root,
-  settings
-}: {
-  entryId: string;
-  markerStart: number;
-  root: string;
-  settings: LlmProfile;
-}) {
-  const entryContext = await readEntryAssistantContext({ root, entryId });
-  const sourceByMarker = new Map<number, ConversationSourceLink>();
-
-  if (!entryContext.markdown.trim()) {
-    return {
-      nextMarker: markerStart,
-      sourceByMarker,
-      text: ''
-    };
-  }
-
-  const budget = assistantContextCharBudget(settings.max_context_length);
-  const trimmed = trimToBudget(entryContext.markdown, budget);
-  const text = trimmed.replace(/\[S(\d+)]/g, (_, markerText: string) => {
-    const originalMarker = Number(markerText);
-    return `[S${markerStart + originalMarker - 1}]`;
-  });
-
-  for (let index = 0; index < entryContext.sources.length; index += 1) {
-    const originalMarker = index + 1;
-    if (!trimmed.includes(`[S${originalMarker}]`)) {
-      continue;
-    }
-    sourceByMarker.set(markerStart + index, entryContext.sources[index]);
-  }
-
-  return {
-    nextMarker: markerStart + entryContext.sources.length,
-    sourceByMarker,
-    text
-  };
-}
-
-async function buildRetrievedEvidence({
-  markerStart,
-  question,
-  root,
-  scope
-}: {
-  markerStart: number;
-  question: string;
-  root: string;
-  scope: ScopeSnapshot;
-}) {
-  const sourceByMarker = new Map<number, ConversationSourceLink>();
-  const searchResults = await searchSegmentsTool({
-    root,
-    query: question,
-    scopeEntryIds: scope.entry_ids,
-    topK: 8
-  });
-  const hits = searchResults.entries.flatMap((group) => group.hits).slice(0, 24);
-  const lines: string[] = [];
-  let marker = markerStart;
-
-  for (const hit of hits) {
-    if (hit.target.kind !== 'segment') {
-      continue;
-    }
-    if (marker >= markerStart + 8) {
-      break;
-    }
-    const source: ConversationSourceLink = {
-      entry_id: hit.target.entry_id,
-      entry_title: hit.entry_title,
-      segment_uid: hit.target.segment_uid,
-      page_idx: hit.target.page_idx,
-      quote: hit.snippet
-    };
-    sourceByMarker.set(marker, source);
-    lines.push(`[S${marker}] ${hit.entry_title}, p.${hit.target.page_idx + 1}\n${hit.snippet}`);
-    marker += 1;
-  }
-
-  return {
-    nextMarker: marker,
-    sourceByMarker,
-    text: lines.join('\n\n')
-  };
-}
-
-async function generateGroundedAnswer({
-  abortSignal,
-  harnessBrief,
-  onDelta,
-  onReasoningDelta,
-  question,
-  scope,
-  sections,
-  settings,
-  sourceByMarker
-}: {
-  abortSignal?: AbortSignal;
-  harnessBrief?: string;
-  onDelta?: (delta: string) => void;
-  onReasoningDelta?: (delta: string) => void;
-  question: string;
-  scope: ScopeSnapshot;
-  sections: EvidenceSections;
-  settings: LlmProfile;
-  sourceByMarker: Map<number, ConversationSourceLink>;
-}): Promise<GroundedAnswer> {
-  const [systemPrompt, userPromptTemplate] = await Promise.all([
-    loadPrompt('qna_system'),
-    loadPrompt('qna_user')
-  ]);
-  const model = createNeuinkModel(settings);
-  const prompt = renderQnaUserPrompt(userPromptTemplate, {
-    currentNote: 'Note changes are handled by the Proposal runtime after synthesis.',
-    documentContext: sections.documentContext || 'None',
-    harnessBrief: harnessBrief || 'No harness brief was prepared.',
-    pinnedContext: sections.pinnedContext || 'None',
-    question,
-    retrievedEvidence: sections.retrievedEvidence || 'None',
-    scope: buildScopeContext(scope),
-    sources: combinedSources(sections),
-    toolNotes: 'Use only the supplied grounded context. Do not make capability claims.'
-  });
-
-  if (onDelta || onReasoningDelta) {
-    const result = streamText({
-      abortSignal,
-      ...generationSettings(settings),
-      model,
-      system: systemPrompt,
-      prompt
-    });
-    let answer = '';
-
-    for await (const part of result.fullStream) {
-      if (part.type === 'text-delta') {
-        answer += part.text;
-        onDelta?.(part.text);
-      } else if (part.type === 'reasoning-delta') {
-        onReasoningDelta?.(part.text);
-      } else if (part.type === 'error') {
-        throw new Error(errorMessage(part.error));
-      }
-    }
-
-    return ensureGroundedCitations({
-      abortSignal,
-      grounded: normalizeCitedSources(answer.trim(), sourceByMarker),
-      settings,
-      sourceByMarker
-    });
-  }
-
-  const result = await generateText({
-    ...generationSettings(settings),
-    model,
-    system: systemPrompt,
-    prompt
-  });
-
-  return ensureGroundedCitations({
-    abortSignal,
-    grounded: normalizeCitedSources(result.text.trim(), sourceByMarker),
-    settings,
-    sourceByMarker
-  });
-}
-
 export function uniqueContextDocumentItems(items: AssistantContextItem[]) {
   const seen = new Set<string>();
   return items.filter((item) => {
@@ -893,39 +428,6 @@ export function uniqueContextDocumentItems(items: AssistantContextItem[]) {
     seen.add(key);
     return true;
   });
-}
-
-async function ensureGroundedCitations({
-  abortSignal,
-  grounded,
-  settings,
-  sourceByMarker
-}: {
-  abortSignal?: AbortSignal;
-  grounded: GroundedAnswer;
-  settings: LlmProfile;
-  sourceByMarker: Map<number, ConversationSourceLink>;
-}) {
-  if (grounded.sources.length > 0 || sourceByMarker.size === 0 || !grounded.answer.trim()) {
-    return grounded;
-  }
-  const evidence = [...sourceByMarker.entries()]
-    .slice(0, 24)
-    .map(([marker, source]) =>
-      `[S${marker}] ${evidenceSourceLabel(source)}\n${source.quote}`
-    )
-    .join('\n\n');
-  const revised = await generateText({
-    abortSignal,
-    ...generationSettings(settings),
-    model: createNeuinkModel(settings),
-    system: 'Revise the answer using only the supplied evidence. Preserve useful Markdown and cite every paper-grounded claim with valid [Sx] markers. Return only the revised answer.',
-    prompt: `Draft answer:\n${grounded.answer}\n\nEvidence:\n${evidence}`
-  });
-  return {
-    ...grounded,
-    ...normalizeCitedSources(revised.text.trim(), sourceByMarker)
-  };
 }
 
 function requiresGroundedSources(plan?: AssistantTaskPlan | null) {
@@ -967,24 +469,6 @@ function normalizeCitedSources(
       .map((marker) => sourceByMarker.get(marker))
       .filter((source): source is ConversationSourceLink => Boolean(source))
   };
-}
-
-function hasEvidence(sections: EvidenceSections) {
-  return Boolean(
-    sections.documentContext.trim() ||
-      sections.pinnedContext.trim() ||
-      sections.retrievedEvidence.trim()
-  );
-}
-
-function combinedSources(sections: EvidenceSections) {
-  return [
-    sections.documentContext ? `Document Context:\n${sections.documentContext}` : '',
-    sections.pinnedContext ? `Pinned Context:\n${sections.pinnedContext}` : '',
-    sections.retrievedEvidence ? `Retrieved Evidence:\n${sections.retrievedEvidence}` : ''
-  ]
-    .filter(Boolean)
-    .join('\n\n');
 }
 
 function renderQnaUserPrompt(
@@ -1073,7 +557,7 @@ function buildToolNotes(
   return [
     `Available tools: ${toolNames.join(', ')}.`,
     invocationPlan
-      ? `Runtime selected mode=${invocationPlan.mode}, writePolicy=${invocationPlan.writePolicy}, skillsToLoad=${invocationPlan.skillIdsToLoad.join(', ') || 'none'}.`
+      ? `Runtime selected mode=${invocationPlan.mode}, writePolicy=${invocationPlan.writePolicy}.`
       : '',
     invocationPlan?.requiredToolIds?.length
       ? `Execution contract requires these tools before a final answer, in task order: ${invocationPlan.requiredToolIds.join(', ')}.`
@@ -1082,27 +566,18 @@ function buildToolNotes(
       ? `Source policy: ${invocationPlan.sourcePolicy}. Do not substitute a different source when the policy is not mixed.`
       : '',
     activeExecution
-      ? `Current agent: ${activeExecution.agent.name}. Available skill metadata: ${activeExecution.skillPackages.map((skillPackage) => skillPackage.name).join(', ') || 'none'}. Use skill_load before relying on a full SKILL.md.`
+      ? `Current agent: ${activeExecution.agent.name}.`
       : '',
     'Tool calls are scoped to the frozen Neuink task context. Explicit @ selections and pinned Segments take priority over the active Entry.',
     'Tools return evidence markers like [S1]. Cite only markers that appear in pinned context or tool output.',
+    'In Markdown note proposals, place [S#] inline beside the specific claim or list item it supports. Do not put markers on separate lines or collect them in an end-of-note sources list. source_markers only declares metadata; it does not place citations. For patches, cite in the actual inserted/replacement text.',
     'At every step, check the frozen target, available tools, previous observations, and the remaining execution contract. If a required action cannot be completed, report the concrete blocker instead of claiming success.',
     plan?.editCoordinatePolicy === 'line_and_hash'
       ? 'For Markdown changes, read the current note first and use replace_lines, delete_lines, or insert_lines with exact 1-based logical Markdown line coordinates and expected_text. Do not regenerate or replace unrelated note content.'
       : '',
-    'Skill scripts are auxiliary resources. Do not execute scripts unless an MCP tool or approved Tool Package exposes that execution with permissions.',
     plan?.needsSegmentSearch ? 'Planner requires search_segments before answering if evidence is not already pinned.' : '',
     plan?.needsDocumentContext ? 'Router requires document context. Use explicit @ selections first, otherwise use the frozen active Entry from the Harness.' : ''
   ].join('\n');
-}
-
-function mergeSourceMaps(
-  target: Map<number, ConversationSourceLink>,
-  source: Map<number, ConversationSourceLink>
-) {
-  for (const [marker, sourceLink] of source) {
-    target.set(marker, sourceLink);
-  }
 }
 
 function uniqueConversationSources(sources: ConversationSourceLink[]) {
@@ -1117,26 +592,6 @@ function uniqueConversationSources(sources: ConversationSourceLink[]) {
 
 function compactQuote(text: string) {
   return text.replace(/\s+/g, ' ').trim().slice(0, 240);
-}
-
-function evidenceSourceLabel(source: ConversationSourceLink) {
-  if (isSciverseConversationSource(source)) {
-    const location = source.page_no != null
-      ? `p.${source.page_no}`
-      : source.offset != null
-        ? `offset ${source.offset}`
-        : `doc ${source.doc_id}`;
-    return `${source.title}, Sciverse, ${location}`;
-  }
-  return `${source.entry_title}, p.${source.page_idx + 1}`;
-}
-
-function trimToBudget(text: string, budget: number) {
-  if (text.length <= budget) {
-    return text;
-  }
-
-  return `${text.slice(0, budget)}\n\n[Context truncated because it exceeds the configured model context length.]`;
 }
 
 function errorMessage(error: unknown) {

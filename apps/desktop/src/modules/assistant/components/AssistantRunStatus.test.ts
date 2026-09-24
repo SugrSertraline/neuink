@@ -3,6 +3,17 @@ import { describe, expect, it } from 'vitest';
 import { resolveAssistantRunStatus } from './AssistantRunStatus';
 
 describe('resolveAssistantRunStatus', () => {
+  it('does not spin while waiting for a user choice even with a queued follow-up', () => {
+    expect(resolveAssistantRunStatus({ busy: true, error: null, queued: true, streaming: false,
+      toolEvents: [{ id: 'ask', toolName: 'ask_user', status: 'running' }] })).toMatchObject({ active: false, label: '等待你的选择' });
+  });
+  it.each([
+    ['', '正在处理'], ['agent.plan', '正在规划'],
+    ['task.run_subagent', '子任务运行中'], ['agent.memory', '正在整理记录']
+  ])('labels %s without pretending it is model reasoning', (toolName, label) => {
+    expect(resolveAssistantRunStatus({ busy: true, error: null, queued: false, streaming: false,
+      toolEvents: toolName ? [{ id: '1', status: 'running', toolName }] : [] }).label).toBe(label);
+  });
   it('shows the active tool phase', () => {
     expect(resolveAssistantRunStatus({
       busy: true,
