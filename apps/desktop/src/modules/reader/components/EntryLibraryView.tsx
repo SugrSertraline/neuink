@@ -1,7 +1,7 @@
 import {
   AlertTriangle,
   FilePlus2,
-  MoreHorizontal,
+  Network,
   Trash2
 } from 'lucide-react';
 import {
@@ -19,12 +19,6 @@ import {
   DialogHeader,
   DialogTitle
 } from '@/components/ui/dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from '@/components/ui/dropdown-menu';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import type { NoteTarget, TagMeta, TrashItem } from '@/shared/types/domain';
@@ -46,7 +40,8 @@ import { TagNotesList } from '@/modules/notes/components/TagNotesList';
 import { CreateTagNoteButton } from '@/modules/notes/components/CreateTagNoteButton';
 import { useWorkspaceNotes } from '@/modules/notes/WorkspaceNotesContext';
 import type { EntryLibraryColumnId } from './useEntryLibraryColumnWidths';
-import { LibraryPaperTable, ENTRY_LIBRARY_COLUMNS } from './LibraryPaperTable';
+import { ENTRY_LIBRARY_COLUMNS } from './LibraryPaperTable';
+import { LibraryPapers } from './LibraryPapers';
 import { LibraryTagNavigation } from './LibraryTagNavigation';
 import { LibraryPaperToolbar } from './LibraryPaperToolbar';
 import { PointerPreview } from '@/components/ui/pointer-preview';
@@ -54,16 +49,16 @@ import { useLibraryEntryDrag } from './useLibraryEntryDrag';
 import { buildReadingOverview } from './libraryReading';
 import { ReadingOverviewPopover } from './ReadingOverviewPopover';
 import { buildTagBreadcrumb, filterEntries } from './libraryEntryFilters';
+import { useAppearance } from '@/shared/components/AppearanceProvider';
 
 type EntryLibraryViewProps = {
   section?: 'papers' | 'notes';
   onSectionChange?: (section: 'papers' | 'notes') => void;
   onUpdateTagDescription?: (id: string, value: string, expected: string) => Promise<TagMeta>;
   onOpenTagNote?: (target: NoteTarget, label: string) => void;
-  onManageTags?: () => void;
   onOpenTrash?: () => void;
   onRestoreTagArchive?: (id: string) => Promise<number>;
-  onOpenTagReading?: (tagId: string) => void;
+  onOpenRelations?: () => void;
   activeTag: string | null;
   entries: LibraryEntry[];
   trashedEntries: LibraryEntry[];
@@ -78,7 +73,7 @@ type EntryLibraryViewProps = {
   workspaceRoot: string | null;
   onDeleteEntry: (entryId: string) => Promise<void> | void;
   onOpenCreateEntryTab: () => void;
-  onOpenEntryExplorer: (entryId: string) => void;
+  onOpenEntryExplorer: (entryId: string, explicitContentId?: 'overview') => void;
   onOpenEntryInSidePane: (entryId: string) => void;
   onPurgeEntry: (entryId: string) => Promise<void> | void;
   onPurgeTrashItem: (entryId: string, trashId: string) => Promise<void> | void;
@@ -102,8 +97,8 @@ const ENTRY_LIBRARY_TAG_SCOPE_STORAGE_KEY = 'neuink.entryLibraryTagScope';
 const ENTRY_LIBRARY_COLUMNS_STORAGE_KEY = 'neuink.entryLibraryColumns.v1';
 export const ENTRY_LIBRARY_PINNED_EDGES_STORAGE_KEY = 'neuink.entryLibraryPinnedEdges.v1';
 export function EntryLibraryView({
-  onOpenTagReading,
-  section: controlledSection, onSectionChange, onUpdateTagDescription, onOpenTagNote, onManageTags, onOpenTrash,
+  onOpenRelations,
+  section: controlledSection, onSectionChange, onUpdateTagDescription, onOpenTagNote, onOpenTrash,
   onRestoreTagArchive,
   activeTag,
   entries,
@@ -132,6 +127,7 @@ export function EntryLibraryView({
   onUpdateEntry,
   standalone = false
 }: EntryLibraryViewProps) {
+  const { appearance, libraryDisplay } = useAppearance();
   const [localSection, setLocalSection] = useState<'papers' | 'notes'>('papers');
   const notesModel = useWorkspaceNotes();
   const section = activeTag && tags.some(tag => tag.id === activeTag) && libraryView !== 'trash' ? controlledSection ?? localSection : 'papers';
@@ -150,7 +146,7 @@ export function EntryLibraryView({
   const [dialog, setDialog] = useState<{ action: 'move-to-trash' | 'purge'; entry: LibraryEntry } | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const { draggingEntryId, entryDragPreview, entryDragHandlers, consumeDragClick } = useLibraryEntryDrag(
-    `${workspaceRoot}:${activeTag}:${libraryView}:${section}:${status}`
+    `${workspaceRoot}:${activeTag}:${libraryView}:${section}:${status}:${appearance}:${libraryDisplay}`
   );
   const [emptyTrashConfirmOpen, setEmptyTrashConfirmOpen] = useState(false);
   const [emptyTrashBusy, setEmptyTrashBusy] = useState(false);
@@ -256,7 +252,7 @@ export function EntryLibraryView({
     }
   };
 
-  const openEntryDetails = (entryId: string) => {
+  const openEntry = (entryId: string) => {
     onSelectEntry(entryId);
     onOpenEntryExplorer(entryId);
   };
@@ -312,7 +308,7 @@ export function EntryLibraryView({
 
   const content = (
     <>
-      <Tabs value={section} onValueChange={changeSection} className="h-full min-h-0 min-w-0 gap-0 overflow-hidden bg-card">
+      <Tabs value={section} onValueChange={changeSection} data-material="library-workspace" className="h-full min-h-0 min-w-0 gap-0 overflow-hidden bg-card">
           <LibraryHeading title={pageTitle} summary={pageSummary} tag={activeTagMeta} ancestors={folderBreadcrumb.slice(0, -1)} workspaceRoot={workspaceRoot}
             disabled={status !== 'ready'} onNavigate={onSelectTag} onDescription={onUpdateTagDescription}
             actions={isTrashView ? <Button disabled={!trashItems.length || emptyTrashBusy} size="default" variant="destructive" onClick={() => setEmptyTrashConfirmOpen(true)}>清空条目与记录</Button> : <>
@@ -320,6 +316,7 @@ export function EntryLibraryView({
                 <TabsTrigger value="papers" className="px-2 text-xs">论文</TabsTrigger>
                 <TabsTrigger value="notes" className="px-2 text-xs" disabled={!onOpenTagNote}>标签笔记{noteCount === null ? '' : ` ${noteCount}`}</TabsTrigger>
               </TabsList> : null}
+              {onOpenRelations ? <Button size="default" variant="outline" aria-label="关系图" title="关系图" className="@max-[700px]/library-heading:w-8 @max-[700px]/library-heading:px-0" onClick={onOpenRelations}><Network size={14} aria-hidden="true" /><span className="@max-[700px]/library-heading:hidden">关系图</span></Button> : null}
               <ReadingOverviewPopover overview={readingOverview} />
               <div hidden={section !== 'papers'}>
                 <Button size="default" aria-label="创建条目" title="创建条目" className="@max-[700px]/library-heading:w-8 @max-[700px]/library-heading:px-0" onClick={onOpenCreateEntryTab}><FilePlus2 size={14} aria-hidden="true" /><span className="@max-[700px]/library-heading:hidden">创建条目</span></Button>
@@ -327,13 +324,7 @@ export function EntryLibraryView({
               {activeTagMeta && onOpenTagNote ? <div hidden={section !== 'notes'}>
                 <CreateTagNoteButton key={`${workspaceRoot}:${activeTagMeta.id}`} tagId={activeTagMeta.id} tagLabel={folderBreadcrumb.map(tag => tag.name).join(' / ')} scope={`library/tag:${activeTagMeta.id}`} disabled={status !== 'ready'} onOpen={onOpenTagNote} className="@max-[700px]/library-heading:w-8 @max-[700px]/library-heading:px-0" />
               </div> : null}
-            </>}
-            contextActions={activeTagMeta ? <>
-              {onOpenTagReading ? <Button size="sm" variant="ghost" disabled={status !== 'ready'} onClick={() => onOpenTagReading(activeTagMeta.id)}>平行阅读</Button> : null}
-              {onManageTags ? <DropdownMenu><DropdownMenuTrigger asChild>
-                <Button size="icon-sm" variant="ghost" aria-label="标签操作" title="标签操作"><MoreHorizontal size={14} aria-hidden="true" /></Button>
-              </DropdownMenuTrigger><DropdownMenuContent align="end" viewportAligned><DropdownMenuItem onSelect={onManageTags}>管理标签</DropdownMenuItem></DropdownMenuContent></DropdownMenu> : null}
-            </> : null} />
+            </>} />
           <TabsContent forceMount value="papers" aria-hidden={section !== 'papers' || undefined} className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden">
             {!isTrashView && showTagNavigation && status === 'ready' ? <LibraryTagNavigation
               key={activeTag ?? 'root'} nested={Boolean(activeTag)} nodes={visibleFolderNodes}
@@ -364,7 +355,7 @@ export function EntryLibraryView({
               />
             </div>
           ) : <>
-            <LibraryPaperTable active={section === 'papers'} entries={filteredEntries} status={status}
+            <LibraryPapers active={section === 'papers'} entries={filteredEntries} status={status}
               emptyMessage={activeTag && !activeTagMeta
                 ? '当前标签已移入回收站或不可用。返回全部条目或打开回收站继续。'
                 : query.trim() ? '没有符合当前筛选条件的条目。'
@@ -376,15 +367,15 @@ export function EntryLibraryView({
               visibleColumns={visibleColumns} pinnedEdges={pinnedEdges} reparseDisabled={activeJobs > 0}
               getRowProps={item => ({
                 ...entryDragHandlers(item),
-                onClick: () => { if (!consumeDragClick()) openEntryDetails(item.id); },
+                onClick: () => { if (!consumeDragClick()) openEntry(item.id); },
                 onContextMenu: () => onSelectEntry(item.id),
                 onKeyDown: event => {
                   if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
-                    event.preventDefault(); openEntryDetails(item.id);
+                    event.preventDefault(); openEntry(item.id);
                   }
                 }
               })}
-              onOpen={openEntryDetails} onOpenInSidePane={onOpenEntryInSidePane}
+              onOpen={entryId => { onSelectEntry(entryId); onOpenEntryExplorer(entryId, 'overview'); }} onOpenInSidePane={onOpenEntryInSidePane}
               onDelete={item => setDialog({ action: 'move-to-trash', entry: item })}
               onReparse={item => {
                 void Promise.resolve(onReparseEntry(item.id)).then(() => notify({

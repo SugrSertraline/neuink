@@ -1,54 +1,3 @@
-@container settings-panel (max-width: 840px) {
-  .settings-panel-tabs {
-    grid-template-columns: 44px minmax(0, 1fr);
-  }
-
-  .settings-panel-nav-body {
-    gap: 4px;
-    justify-items: center;
-    padding-right: 6px;
-    padding-left: 6px;
-  }
-
-  .settings-panel-nav-heading {
-    display: none;
-  }
-
-  .settings-panel-nav-item {
-    position: relative;
-    display: flex;
-    width: 32px;
-    min-height: 32px;
-    align-items: center;
-    justify-content: center;
-    gap: 0;
-    margin-right: auto;
-    margin-left: auto;
-    padding: 0;
-  }
-
-  .settings-panel-nav-icon {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    display: grid;
-    width: 16px;
-    height: 16px;
-    place-items: center;
-    transform: translate(-50%, -50%);
-  }
-
-  .settings-panel-nav-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-  }
-}
-
 .assistant-message-content {
   min-height: 20px;
 }
@@ -808,7 +757,7 @@
   min-width: 0;
 }
 
-.workspace-surface-tab > button:last-child {
+.workspace-surface-tab > button[data-tab-close="true"] {
   display: inline-flex;
   flex: 0 0 28px;
   align-items: center;
@@ -816,7 +765,7 @@
   color: var(--muted-foreground);
 }
 
-.workspace-surface-tab > button:last-child:hover {
+.workspace-surface-tab > button[data-tab-close="true"]:hover {
   color: var(--foreground);
   background: color-mix(in srgb, var(--foreground) 7%, transparent);
 }
@@ -892,6 +841,66 @@
   overflow: hidden;
 }
 
+.reflow-toolbar {
+  container: reflow-toolbar / inline-size;
+}
+
+/* Size to the pane, not the application viewport. At 220px an avatar column
+   consumes the space needed by proposal controls; role labels stay visible. */
+.assistant-message-layout {
+  container: assistant-messages / inline-size;
+  min-width: 0;
+}
+
+@container assistant-messages (max-width: 280px) {
+  .assistant-message-row { padding-inline: 0; gap: 0; }
+  .assistant-message-avatar { display: none; }
+  .assistant-chat-message { max-width: 100%; padding-inline: 8px; }
+  .assistant-message-row:has([data-message-role="user"]) { padding-left: 12px; }
+}
+
+.note-proposal-list { container: note-proposal / inline-size; }
+.note-proposal-actions > button { max-width: 100%; white-space: normal; height: auto; min-height: 24px; }
+@container note-proposal (max-width: 230px) {
+  .note-proposal-header { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; }
+  .note-proposal-status { grid-column: 2; }
+  .note-proposal-actions > button { flex: 1 1 4rem; }
+}
+
+.reflow-toolbar .entry-content-header-title {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.reflow-toolbar .entry-content-header-actions {
+  flex: 0 1 auto;
+}
+
+@container reflow-toolbar (max-width: 719px) {
+  .reflow-toolbar .entry-content-header {
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .reflow-toolbar .entry-content-header-title,
+  .reflow-toolbar .entry-content-header-actions {
+    flex: 0 0 100%;
+    min-width: 0;
+  }
+
+  .reflow-toolbar .entry-content-header-entry-title { display: none; }
+  .reflow-toolbar .entry-content-header-actions {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+  }
+  .reflow-toolbar-menu { margin-left: auto; }
+}
+
+@container reflow-toolbar (max-width: 380px) {
+  .reflow-toolbar-menu-label { display: none; }
+  .reflow-toolbar-menu { width: 28px; padding-inline: 0; }
+}
+
 .pdf-reader-toolbar {
   container-name: pdf-reader-toolbar;
   container-type: inline-size;
@@ -940,18 +949,21 @@
 }
 
 .entry-overview-stats {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 0 4px 12px;
+  border-bottom: 1px solid var(--border);
 }
+
+.entry-overview-summary { display: flex; align-items: center; gap: 24px; }
+.entry-overview-cover { flex: 0 0 142px; min-width: 0; }
+.entry-overview-section { border-width: 0 0 1px; border-radius: 0; }
+.entry-overview-section > :first-child { border-bottom: 0; padding: 10px 4px 0; }
+.entry-overview-section > :last-child { padding: 12px 4px 16px; }
 
 .entry-overview-fields {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 @container entry-overview (max-width: 760px) {
-  .entry-overview-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .entry-overview-body {
     padding: 16px;
   }
@@ -986,10 +998,10 @@
     padding: 12px;
   }
 
-  .entry-overview-stats,
   .entry-overview-fields {
     grid-template-columns: minmax(0, 1fr);
   }
+  .entry-overview-cover { display: none; }
 }
 
 @container pdf-reader-toolbar (max-width: 680px) {

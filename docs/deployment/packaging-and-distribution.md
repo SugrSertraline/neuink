@@ -28,6 +28,16 @@ apps/desktop/src-tauri/tauri.conf.json
 - 包含 `resources/embedding-models/default/**/*`；
 - 使用仓库内 Windows/macOS 图标资源。
 
+Windows x64 免安装 ZIP 使用：
+
+```powershell
+npm run desktop:release:portable
+```
+
+脚本先执行前端类型检查与构建，再生成 Tauri release 程序，输出到 `release/Neuink-portable-时间戳.zip`。压缩包包含 `Neuink.exe`、本地 embedding 模型、空值配置模板和中文使用说明；不包含模型下载缓存、个人资料库或本机密钥。已有同名发行目录不会被覆盖。完整解压后双击 `Neuink.exe`，不需要 Node.js、Rust 或开发服务；系统需有 Microsoft Edge WebView2 Runtime。
+
+免安装版沿用应用资料库及设置位置，并非所有用户数据都随 EXE 存放。模型与 MinerU 服务仍由使用者配置；同机启动会使用已有设置。`--skip-build` 只适合重新组装已核验的 release 产物，不应代替新版本构建。
+
 ## 2. Embedding 资源
 
 默认模型目录：

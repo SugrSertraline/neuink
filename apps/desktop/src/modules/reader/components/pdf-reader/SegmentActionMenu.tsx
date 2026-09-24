@@ -1,6 +1,8 @@
 import { createPortal } from "react-dom";
-import { useEffect, useRef } from "react";
-import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
+import type { ReactNode } from "react";
+import { SegmentBookmarkButton } from '../SegmentBookmarks';
+import { SegmentMenuButton as MenuButton } from '../SegmentMenuButton';
 import {
   ClipboardCopy,
   EyeOff,
@@ -17,6 +19,7 @@ import type { SourceSegment } from "@/shared/types/domain";
 
 import type { SourceBacklink } from "../../types";
 import { segmentTypeLabel } from "./readerUtils";
+import { ViewportOverlay } from '@/components/ui/viewport-overlay';
 
 export function SegmentActionMenu({
   canAddSourceLink,
@@ -31,6 +34,8 @@ export function SegmentActionMenu({
   onCopySourceLink,
   onInsertSegmentImage,
   onTranslateSegment,
+  translationActions,
+  displayActions,
   onOpenSegmentAnnotation,
   onOpenSegmentNote,
   onOpenSegmentWorkspace,
@@ -52,6 +57,8 @@ export function SegmentActionMenu({
   onCopySourceLink?: (segment: SourceSegment) => void;
   onInsertSegmentImage?: (segment: SourceSegment) => void;
   onTranslateSegment?: (segment: SourceSegment) => void;
+  translationActions?: ReactNode;
+  displayActions?: ReactNode;
   onOpenSegmentAnnotation: (segment: SourceSegment) => void;
   onOpenSegmentNote: (segment: SourceSegment) => void;
   onOpenSegmentWorkspace?: (segment: SourceSegment) => void;
@@ -60,6 +67,30 @@ export function SegmentActionMenu({
   onClose: () => void;
 }) {
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    const viewport = viewportRef.current;
+    if (!menu || !viewport) return;
+    const place = () => {
+      const bounds = viewport.getBoundingClientRect();
+      const scale = bounds.width / viewport.clientWidth || 1;
+      menu.style.maxHeight = `${Math.max(0, viewport.clientHeight - 16)}px`;
+      menu.style.maxWidth = `${Math.max(0, viewport.clientWidth - 16)}px`;
+      menu.style.left = `${Math.max(8, Math.min((position.x - bounds.left) / scale, viewport.clientWidth - menu.offsetWidth - 8))}px`;
+      menu.style.top = `${Math.max(8, Math.min((position.y - bounds.top) / scale, viewport.clientHeight - menu.offsetHeight - 8))}px`;
+    };
+    place();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    observer?.observe(menu);
+    observer?.observe(viewport);
+    const previous = document.activeElement;
+    menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({ preventScroll: true });
+    return () => {
+      observer?.disconnect();
+      if (previous instanceof HTMLElement && previous.isConnected && menu.contains(document.activeElement)) previous.focus({ preventScroll: true });
+    };
+  }, [position.x, position.y]);
 
   useEffect(() => {
     const closeOnOutsidePointerDown = (event: PointerEvent) => {
@@ -71,7 +102,10 @@ export function SegmentActionMenu({
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
     };
-    const close = () => onClose();
+    const close = (event: Event) => {
+      if (event.type === 'scroll' && event.target instanceof Node && menuRef.current?.contains(event.target)) return;
+      onClose();
+    };
     document.addEventListener("pointerdown", closeOnOutsidePointerDown);
     window.addEventListener("blur", close);
     window.addEventListener("keydown", closeOnEscape);
@@ -90,9 +124,12 @@ export function SegmentActionMenu({
   }
 
   return createPortal(
+    <ViewportOverlay enabled ref={viewportRef}>
     <div
       ref={menuRef}
-      className="fixed z-[var(--z-menu)] min-w-56 overflow-hidden rounded-md border bg-popover p-1 text-xs text-popover-foreground shadow-xl"
+      role="menu"
+      aria-label="段落操作"
+      className="absolute z-[var(--z-menu)] w-60 overflow-y-auto overscroll-contain rounded-md border bg-popover p-1 text-sm text-popover-foreground shadow-md"
       data-allow-context-menu="true"
       style={{
         left: `clamp(0.5rem, ${position.x}px, calc(100vw - 15rem))`,
@@ -104,6 +141,16 @@ export function SegmentActionMenu({
         event.stopPropagation();
       }}
       onPointerDown={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === 'Escape' || event.key === 'Tab') { event.preventDefault(); onClose(); return; }
+        if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        const buttons = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []);
+        const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (current + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+        buttons[next]?.focus();
+      }}
     >
       <div className="border-b px-2 py-1.5 text-[11px] text-muted-foreground">
         {segmentTypeLabel(segment.segment_type)} · 第 {segment.page_idx + 1} 页
@@ -148,6 +195,7 @@ export function SegmentActionMenu({
           onClose();
         }}
       />
+      <SegmentBookmarkButton segment={segment} menu onDone={onClose} />
       <MenuButton
         disabled={false}
         icon={<Pencil size={13} aria-hidden="true" />}
@@ -192,7 +240,7 @@ export function SegmentActionMenu({
           onClose();
         }}
       />
-      {onTranslateSegment ? (
+      {translationActions ?? (onTranslateSegment ? (
         <MenuButton
           disabled={false}
           icon={<Languages size={13} aria-hidden="true" />}
@@ -202,7 +250,8 @@ export function SegmentActionMenu({
             onClose();
           }}
         />
-      ) : null}
+      ) : null)}
+      {displayActions}
       <MenuButton
         disabled={!canCopyContent || !onCopyContent}
         icon={<ClipboardCopy size={13} aria-hidden="true" />}
@@ -243,38 +292,8 @@ export function SegmentActionMenu({
           }}
         />
       ) : null}
-    </div>,
+    </div>
+    </ViewportOverlay>,
     document.body,
-  );
-}
-
-function MenuButton({
-  disabled,
-  icon,
-  label,
-  onClick,
-}: {
-  disabled: boolean;
-  icon: ReactNode;
-  label: string;
-  onClick: () => void;
-}) {
-  const runAction = (event: ReactMouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    onClick();
-  };
-
-  return (
-    <button
-      className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left hover:bg-muted disabled:cursor-not-allowed disabled:opacity-45"
-      disabled={disabled}
-      type="button"
-      onClick={runAction}
-      onPointerDown={(event) => event.stopPropagation()}
-    >
-      {icon}
-      <span>{label}</span>
-    </button>
   );
 }

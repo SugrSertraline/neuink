@@ -1,38 +1,18 @@
-import {
-  Archive,
-  ArrowLeft,
-  Bot,
-  BookOpen,
-  Database,
-  Palette,
-  PlugZap,
-  Server,
-  Workflow
-} from 'lucide-react';
-import type { ReactNode } from 'react';
-
+import { ArrowLeft } from 'lucide-react';
+import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger
-} from '@/components/ui/tooltip';
 import { Tabs } from '@/components/ui/tabs';
-import { cn } from '@/lib/utils';
 import type { LlmApiProtocol } from '@/shared/ipc/assistantApi';
 import type { ReaderPreferences } from '@/shared/lib/readerPreferences';
 import type { AppThemePreset, AppThemePresetId } from '@/shared/lib/themePresets';
 import type { UiScale } from '@/shared/lib/uiScale';
-import type {
-  AgentProfile,
-  AgentRuntimeSettings,
-  SkillPackage
-} from '@/shared/types/agentRuntime';
-
+import type { AgentProfile, AgentRuntimeSettings } from '@/shared/types/agentRuntime';
+import { settingsCategory, type SettingsTab, type SettingsNavigationTarget } from '../settingsCatalog';
 import { DataSettingsSection } from './DataSettingsSection';
 import { ExternalToolsSettingsSection } from './ExternalToolsSettingsSection';
 import { GeneralSettingsSections } from './GeneralSettingsSections';
 import { ModelSettingsSection } from './ModelSettingsSection';
+import { SettingsCategoryNavigation, SettingsSearch, SettingsSearchResults, SETTINGS_TAB_LABELS, useSettingsNavigation } from './SettingsNavigation';
 import type { ModelPreset, ProviderPreset } from './providerPresets';
 
 type LlmProfileLike = {
@@ -66,19 +46,15 @@ type TranslationAutomationSettingsLike = {
   segment_types: string[];
 };
 
-type SettingsTab =
-  | 'models'
-  | 'tasks'
-  | 'data'
-  | 'appearance'
-  | 'reader'
-  | 'external-tools'
-  | 'main-agent'
-  | 'subagents'
-  | 'skills';
-
 export type SettingsPanelLayoutProps = {
   activeSettingsTab: SettingsTab;
+  navigationTarget?: SettingsNavigationTarget;
+  modelsUnavailable?: boolean;
+  modelMutationBusy?: boolean;
+  workspaceSettingsUnavailable?: boolean;
+  runtimeUnavailable?: boolean;
+  feedback?: Array<{ key: string; message: string; error?: boolean; retry?: () => void }>;
+
   apiProtocol: LlmApiProtocol;
   baseUrl: string;
   busy: boolean;
@@ -107,7 +83,7 @@ export type SettingsPanelLayoutProps = {
   onOpenRecentWorkspace: (root: string) => void;
   onForgetRecentWorkspace: (root: string) => void;
   onClearAll: () => void;
-  onCreateProfile: () => Promise<void> | void;
+  onCreateProfile: () => Promise<boolean>;
   onModelChange: (value: string) => void;
   onModelPresetSelect: (value: string) => void;
   onNameChange: (value: string) => void;
@@ -119,17 +95,12 @@ export type SettingsPanelLayoutProps = {
   onRefreshModels: () => void;
   onRemoveCurrent: () => void;
   onDeleteProfile: (profileId: string) => Promise<void> | void;
-  onSaveProfile: () => Promise<void> | void;
+  onSaveProfile: () => Promise<boolean>;
   onResetWorkspaceRoot: () => void;
   onSetActiveSettingsTab: (value: SettingsTab) => void;
   onAddAgent: () => void;
-  onAddSkillPackage: () => void;
-  onImportSkillPackage: () => void;
   onRemoveAgent: (agentId: string) => void;
-  onRemoveSkillPackage: (skillPackageId: string) => void;
-  onOpenSkillPackageFolder: (skillPackage: SkillPackage) => void;
   onSelectAgent: (agentId: string) => void;
-  onSelectSkillPackage: (skillPackageId: string) => void;
   onSetTaskProfile: (task: 'assistant' | 'translation', profileId: string) => void;
   onThemePresetChange: (value: AppThemePresetId) => void;
   onUiScaleChange: (value: UiScale) => void;
@@ -161,7 +132,6 @@ export type SettingsPanelLayoutProps = {
   onMaxOutputTokensChange: (value: string) => void;
   onUpdateAgent: (nextAgent: AgentProfile) => void;
   onUpdateRuntimeSettings: (nextSettings: AgentRuntimeSettings) => void;
-  onUpdateSkillPackage: (nextSkillPackage: SkillPackage) => void;
   formatCacheTime: (value: string) => string;
   formatContextLength: (value?: number) => string;
   providerLogo: (preset: ProviderPreset) => ReactNode;
@@ -169,132 +139,45 @@ export type SettingsPanelLayoutProps = {
   onToggleProvidersExpanded: () => void;
   runtimeSettings: AgentRuntimeSettings;
   selectedAgentId: string | null;
-  selectedSkillPackageId: string | null;
 };
 
-const SETTINGS_GROUPS = [
-  {
-    title: '应用设置',
-    items: [
-      { value: 'models' as const, icon: Bot, title: '大模型' },
-      { value: 'tasks' as const, icon: Server, title: '任务模型' },
-      { value: 'data' as const, icon: Database, title: '数据与解析' },
-      { value: 'appearance' as const, icon: Palette, title: '外观主题' },
-      { value: 'reader' as const, icon: BookOpen, title: '阅读' },
-      { value: 'external-tools' as const, icon: PlugZap, title: '外部工具与 MCP' }
-    ]
-  },
-  {
-    title: 'Agent 系统',
-    items: [
-      { value: 'main-agent' as const, icon: Bot, title: '主 Agent' },
-      { value: 'subagents' as const, icon: Workflow, title: '子 Agent' },
-      { value: 'skills' as const, icon: Archive, title: 'Skills 技能库' }
-    ]
-  }
-];
-
 export function SettingsPanelLayout(props: SettingsPanelLayoutProps) {
-  const { activeSettingsTab, onBack, onSetActiveSettingsTab, sidebarMode } = props;
-  const settingsTabsClassName = cn(
-    'settings-panel-tabs grid min-h-0 flex-1 gap-0 overflow-hidden border border-border bg-card',
-    sidebarMode
-      ? 'rounded-none border-0 border-t'
-      : 'rounded-lg'
-  );
-  return (
-    <section
-      className={cn(
-        sidebarMode ? 'app-sidebar' : 'settings-page',
-        'settings-panel-shell',
-        sidebarMode && 'settings-panel-shell-sidebar'
-      )}
-    >
-      <div className={sidebarMode ? 'side-head' : 'settings-page-head'}>
-        <div className="flex min-w-0 items-center gap-2">
-          {onBack ? (
-            <Button size="icon-sm" title="返回" type="button" variant="ghost" onClick={onBack}>
-              <ArrowLeft />
-            </Button>
-          ) : null}
-          <span>设置</span>
-        </div>
-      </div>
-
-      <Tabs
-        value={activeSettingsTab}
-        onValueChange={(value) => onSetActiveSettingsTab(value as SettingsTab)}
-        orientation="vertical"
-        className={settingsTabsClassName}
-      >
-        <div className="settings-panel-nav border-r border-border/70 bg-card">
-          <div className="side-body overflow-auto">
-            <div className="settings-panel-nav-body p-2">
-              {SETTINGS_GROUPS.map((group) => (
-              <SettingsSidebarSection key={group.title} open title={group.title}>
-                <div className="grid gap-1">
-                  {group.items.map((section) => {
-                    const Icon = section.icon;
-                    const active = activeSettingsTab === section.value;
-
-                    return (
-                      <Tooltip key={section.value}>
-                        <TooltipTrigger asChild>
-                          <Button
-                            aria-label={section.title}
-                            className={cn(
-                              'settings-panel-nav-item min-h-9 w-full justify-start gap-2 px-2 text-left text-xs',
-                              active
-                                ? 'bg-accent font-semibold text-primary'
-                                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                            )}
-                            size="sm"
-                            type="button"
-                            variant="ghost"
-                            onClick={() => onSetActiveSettingsTab(section.value)}
-                          >
-                            <span className="settings-panel-nav-icon grid size-4 shrink-0 place-items-center">
-                              <Icon size={14} />
-                            </span>
-                            <span className="settings-panel-nav-label min-w-0 flex-1 truncate">
-                              {section.title}
-                            </span>
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="right">{section.title}</TooltipContent>
-                      </Tooltip>
-                    );
-                  })}
-                </div>
-              </SettingsSidebarSection>
-              ))}
-            </div>
+  const { activeSettingsTab, onSetActiveSettingsTab, onBack } = props;
+  const navigation = useSettingsNavigation(activeSettingsTab, onSetActiveSettingsTab, props.navigationTarget);
+  const category = settingsCategory(activeSettingsTab);
+  const scrollPositions = useRef(new Map<string, number>());
+  useLayoutEffect(() => {
+    const viewport = navigation.rootRef.current?.querySelector<HTMLElement>('.settings-viewport');
+    if (!viewport || navigation.query.trim()) return;
+    viewport.scrollTop = scrollPositions.current.get(activeSettingsTab) ?? 0;
+  }, [activeSettingsTab, Boolean(navigation.query.trim())]);
+  const changeTab = (tab: SettingsTab) => { navigation.setQuery(''); onSetActiveSettingsTab(tab); };
+  return <section ref={navigation.rootRef} className="settings-page settings-panel-shell">
+    <div className="settings-page-head" data-material="sidebar-toolbar">
+      <div className="flex items-center gap-2">{onBack && <Button size="icon-sm" aria-label="返回" variant="ghost" onClick={onBack}><ArrowLeft /></Button>}<span>设置</span></div>
+      <SettingsSearch query={navigation.query} onChange={navigation.setQuery} />
+    </div>
+    <Tabs value={activeSettingsTab} orientation="vertical" className="settings-panel-tabs grid min-h-0 gap-0 overflow-hidden">
+      <SettingsCategoryNavigation activeTab={activeSettingsTab} onChange={changeTab} />
+      <div className="settings-main">
+        {!navigation.query.trim() && category.tabs.length > 1 && <nav aria-label={`${category.title}分组`} className="settings-subnav">
+          {category.tabs.map(tab => <Button key={tab} size="sm" variant={activeSettingsTab === tab ? 'secondary' : 'ghost'} aria-pressed={activeSettingsTab === tab} onClick={() => changeTab(tab)}>{SETTINGS_TAB_LABELS[tab]}</Button>)}
+        </nav>}
+        <div className="settings-viewport" onScroll={event => {
+          if (!navigation.query.trim()) scrollPositions.current.set(activeSettingsTab, event.currentTarget.scrollTop);
+        }}>
+          {navigation.query.trim() && <SettingsSearchResults results={navigation.results} onSelect={navigation.navigate} />}
+          <div hidden={Boolean(navigation.query.trim())}>
+            <ModelSettingsSection props={props} />
+            <GeneralSettingsSections props={props} />
+            <DataSettingsSection props={props} />
+            <ExternalToolsSettingsSection props={props} />
           </div>
         </div>
-
-        <ModelSettingsSection props={props} />
-        <GeneralSettingsSections props={props} />
-        <DataSettingsSection props={props} />
-        <ExternalToolsSettingsSection props={props} />
-      </Tabs>
-    </section>
-  );
-}
-function SettingsSidebarSection({
-  children,
-  open,
-  title
-}: {
-  children: ReactNode;
-  open: boolean;
-  title: string;
-}) {
-  return (
-    <section>
-      <div className="settings-panel-nav-heading flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 text-left text-[10px] font-extrabold uppercase tracking-wide text-muted-foreground">
-        <span className="min-w-0 flex-1 truncate">{title}</span>
+        {props.feedback?.length ? <div className="settings-feedback" aria-live="polite">{props.feedback.map(item => <div key={item.key} className={item.error ? 'text-destructive' : 'text-muted-foreground'}>
+          <span>{item.message}</span>{item.retry && <Button size="xs" variant="outline" onClick={item.retry}>重试</Button>}
+        </div>)}</div> : null}
       </div>
-      {open ? <div className="space-y-0.5">{children}</div> : null}
-    </section>
-  );
+    </Tabs>
+  </section>;
 }

@@ -38,7 +38,7 @@ describe('EntryMetaProposalCard', () => {
       />
     );
 
-    fireEvent.click(getByRole('button', { name: '应用' }));
+    fireEvent.click(getByRole('button', { name: '确认应用' }));
 
     expect(onApply).toHaveBeenCalledOnce();
     expect(onApply).toHaveBeenCalledWith(value);

@@ -1,6 +1,7 @@
-import { ChevronDown, ChevronRight, FileText, Folder, FolderTree, Hash } from 'lucide-react';
+import { ChevronRight, FileText, Folder, FolderTree, Hash } from 'lucide-react';
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { Button } from '@/components/ui/button';
+import { DisclosureIcon } from '@/components/ui/disclosure-icon';
 import { cn } from '@/lib/utils';
 import { getEntryTagDragState, isEntryTagDropTargetActive, registerEntryTagDropTarget, subscribeEntryTagDrag } from '@/shared/lib/entryDragData';
 import type { TagDensity, TagNavigationMode } from '@/shared/lib/tagPreferences';
@@ -34,13 +35,13 @@ export function SidebarTagRow({ active, node, presentation, density, showCounts,
   }, [node.path, onAssignEntryToTag]);
 
   return (
-    <div ref={targetRef} data-tag-id={node.id} className={cn(
+    <div ref={targetRef} data-tag-id={node.id} data-material="content-row" data-active={active} data-interactive="true" data-drag-over={dragOver} className={cn(
       'group/tag flex w-full min-w-0 items-center rounded-md border border-transparent text-xs transition-colors', rowHeight,
       dragOver ? 'border-primary bg-primary/10 text-foreground' : active ? 'border-primary/20 bg-accent font-semibold text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
     )}>
       {presentation === 'tree' && hasChildren ? (
         <Button aria-expanded={open} aria-label={`${open ? '收起' : '展开'} ${node.name}`} className="shrink-0 rounded-r-none text-inherit hover:text-inherit aria-expanded:text-inherit" size="icon-sm" title={open ? '收起' : '展开'} type="button" variant="plain" onClick={onToggle}>
-          {open ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronRight size={13} aria-hidden="true" />}
+          <DisclosureIcon open={open} />
         </Button>
       ) : <span className="grid size-7 shrink-0 place-items-center">{hasChildren ? <Folder size={13} aria-hidden="true" /> : <Hash size={13} aria-hidden="true" />}</span>}
       <button aria-current={active ? 'page' : undefined} aria-label={`打开标签 ${node.path}`} className={cn('flex min-w-0 flex-1 items-center gap-2 rounded-r-md bg-transparent py-1 pr-2 text-left text-inherit outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50', rowHeight)} title={`进入标签：${node.path}${hasChildren && presentation !== 'paths' ? ' · 双击展开下级标签' : ''}`} type="button"

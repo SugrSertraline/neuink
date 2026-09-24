@@ -215,6 +215,19 @@ describe('scrollToSegment', () => {
 });
 
 describe('scrollToPage', () => {
+  it.each([1, 1.25])('positions the page below a floating toolbar at %sx UI scale', (scale) => {
+    const container=document.createElement('div'), page=document.createElement('section');
+    page.dataset.pdfPageIndex='1'; container.append(page); document.body.append(container);
+    container.style.scrollPaddingTop='104px';
+    Object.defineProperty(container,'clientHeight',{value:484});
+    Object.defineProperty(container,'offsetHeight',{value:500});
+    const scrollTo=vi.fn(); Object.defineProperty(container,'scrollTo',{value:scrollTo});
+    vi.spyOn(container,'getBoundingClientRect').mockReturnValue(new DOMRect(0,20,500*scale,500*scale));
+    vi.spyOn(page,'getBoundingClientRect').mockReturnValue(new DOMRect(0,20+800*scale,480*scale,600*scale));
+    expect(scrollToPage(1,container)).toBe(true);
+    expect(scrollTo).toHaveBeenCalledWith({behavior:'auto',top:696});
+    container.remove();
+  });
   it('uses the page inside the active reader instead of an identically named hidden page', () => {
     const container = document.createElement('div');
     const activePage = document.createElement('section');
@@ -273,6 +286,10 @@ describe('scrollToPdfRect', () => {
       left: 50,
       top: 794,
     });
+    // A source citation targets the visible area below the floating toolbar.
+    container.style.scrollPaddingTop = '80px';
+    scrollToPdfRect(2, [250, 400, 450, 500], container);
+    expect(scrollTo).toHaveBeenLastCalledWith({behavior:'smooth',left:50,top:744.4});
     container.remove();
   });
 

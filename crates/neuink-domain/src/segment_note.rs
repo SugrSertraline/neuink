@@ -127,6 +127,8 @@ fn strip_markdown_links(text: &str) -> String {
 pub struct SegmentBlockNote {
     pub segment_uid: SegmentUid,
     pub text: String,
+    #[serde(default)]
+    pub bookmarked: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -137,6 +139,7 @@ impl SegmentBlockNote {
         Self {
             segment_uid,
             text: text.into(),
+            bookmarked: false,
             created_at: now,
             updated_at: now,
         }

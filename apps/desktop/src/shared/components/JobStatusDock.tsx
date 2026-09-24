@@ -172,6 +172,7 @@ function jobTitle(job: Job) {
     parser: 'PDF 解析',
     pdf_import: 'PDF 导入',
     translation: '全文翻译',
+    paragraph_translation: '段落翻译',
     vectorize: '向量构建'
   };
   return labelByKind[job.kind] ?? '后台任务';

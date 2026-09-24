@@ -5,11 +5,15 @@ import type { ConversationSourceLink } from '@/shared/ipc/assistantApi';
 import type { AssistantEntryMetaProposal } from '@/shared/types/assistant';
 
 export function EntryMetaProposalCard({
+  disabled = false,
+  deciding = false,
   onApply,
   onOpenSource,
   onReject,
   proposal
 }: {
+  disabled?: boolean;
+  deciding?: boolean;
   onApply?: (proposal: AssistantEntryMetaProposal) => void;
   onOpenSource: (source: ConversationSourceLink) => void;
   onReject?: (proposal: AssistantEntryMetaProposal) => void;
@@ -22,7 +26,7 @@ export function EntryMetaProposalCard({
         <span className="min-w-0 flex-1 truncate font-medium">
           编辑条目元数据：{proposal.entryTitle}
         </span>
-        <ProposalStatus proposal={proposal} />
+        <ProposalStatus proposal={proposal} deciding={deciding} />
       </div>
 
       {proposal.rationale ? (
@@ -72,30 +76,31 @@ export function EntryMetaProposalCard({
         <p className="mt-1 break-words text-[11px] text-destructive">{proposal.error}</p>
       ) : null}
 
-      {proposal.status === 'pending' || proposal.status === 'applying' ? (
+      {proposal.status === 'applying' && !deciding ? <p className="mt-1 text-[11px] text-warning">上次提交结果待核对，不会自动重试。请检查条目后再生成新提案。</p> : null}
+      {proposal.status === 'pending' ? (
         <div className="mt-2 flex justify-end gap-1">
           <Button
-            disabled={proposal.status !== 'pending'}
+            disabled={disabled || !onReject || proposal.status !== 'pending'}
             size="xs"
             type="button"
             variant="ghost"
             onClick={() => onReject?.(proposal)}
           >
             <X size={12} aria-hidden="true" />
-            忽略
+            拒绝
           </Button>
           <Button
-            disabled={proposal.status !== 'pending'}
+            disabled={disabled || !onApply || proposal.status !== 'pending'}
             size="xs"
             type="button"
             onClick={() => onApply?.(proposal)}
           >
-            {proposal.status === 'applying' ? (
+            {deciding ? (
               <Loader2 className="animate-spin" size={12} aria-hidden="true" />
             ) : (
               <Check size={12} aria-hidden="true" />
             )}
-            应用
+            确认应用
           </Button>
         </div>
       ) : null}
@@ -112,8 +117,8 @@ function MetadataDiff({ after, before, label }: {
     <div className="grid gap-1 rounded-sm border bg-background p-1.5">
       <div className="text-[10px] font-medium text-muted-foreground">{label}</div>
       <div className="grid gap-1 sm:grid-cols-2">
-        <DiffValue label="修改前" text={before} />
-        <DiffValue after label="修改后" text={after} />
+        <DiffValue label="− 修改前" text={before} />
+        <DiffValue after label="+ 修改后" text={after} />
       </div>
     </div>
   );
@@ -134,9 +139,9 @@ function DiffValue({ after = false, label, text }: {
   );
 }
 
-function ProposalStatus({ proposal }: { proposal: AssistantEntryMetaProposal }) {
-  if (proposal.status === 'applying') {
-    return <Loader2 className="animate-spin text-muted-foreground" size={13} />;
+function ProposalStatus({ proposal, deciding }: { proposal: AssistantEntryMetaProposal; deciding: boolean }) {
+  if (deciding) {
+    return <span className="flex items-center gap-1 text-[10px] text-muted-foreground"><Loader2 className="animate-spin" size={13} aria-hidden="true" />正在提交</span>;
   }
-  return <span className="text-[10px] text-muted-foreground">{proposal.status}</span>;
+  return <span className="text-[10px] text-muted-foreground">{{ pending: '待确认', applying: '待核对结果', applied: '已应用', rejected: '已拒绝', error: '未完成，请核对' }[proposal.status]}</span>;
 }

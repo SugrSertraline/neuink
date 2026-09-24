@@ -3,6 +3,7 @@ import type { CSSProperties, KeyboardEvent, MouseEvent } from 'react';
 import { Link2, MessageCircle, StickyNote } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
+import { annotationPaperProps } from '@/modules/annotations/annotationPaper';
 import { PointerPreview, placePointerPreview } from '@/components/ui/pointer-preview';
 import { useReaderPreviewVisible } from '@/components/ui/hover-interactions';
 import { cn } from '@/lib/utils';
@@ -12,7 +13,8 @@ import type { PdfHoverPreviewFontSize, PdfHoverPreviewSize } from '@/shared/lib/
 import type { Annotation, SourceSegment } from '@/shared/types/domain';
 
 import { segmentColor, segmentDisplayLabel } from './readerUtils';
-import { ListHoverPreview, listItemTextAtIndex } from './ListHoverPreview';
+import { ListHoverPreview } from './ListHoverPreview';
+import { translatedListItemText } from './listItemTranslation';
 import { parseListItemRegions, type ListItemRegion } from './listItemRegions';
 
 const PREVIEW_MARGIN = 12;
@@ -116,8 +118,8 @@ function SegmentRegionImpl({
     ) {
       return fullTranslation;
     }
-    return listItemTextAtIndex(fullTranslation, listItemIndex);
-  }, [listItemIndex, segment.segment_type, translatedSegment?.translated_text]);
+    return translatedListItemText(segment.markdown ?? segment.text, translatedSegment?.source_text ?? '', fullTranslation);
+  }, [listItemIndex, segment.segment_type, segment.markdown, segment.text, translatedSegment?.source_text, translatedSegment?.translated_text]);
   const showTranslationMask =
     translationVisible && translationMode === 'replace' && shouldMaskInTranslationMode(segment);
   const showTranslationReplacement = showTranslationMask && Boolean(translatedText);
@@ -656,7 +658,7 @@ function SegmentPreview({
               <div className="mb-1 text-[11px] font-semibold text-muted-foreground">批注</div>
               <div className="grid gap-1.5">
                 {annotations.map((annotation) => (
-                  <div className="rounded-sm border bg-background/70 px-2 py-1.5 text-[inherit] leading-[inherit]" key={annotation.annotation_id}>
+                  <div {...annotationPaperProps(annotation)} className="rounded-sm border bg-background/70 px-2 py-1.5 text-[inherit] leading-[inherit]" key={annotation.annotation_id}>
                     <div className="mb-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                       <Badge variant="outline">{annotation.kind}</Badge>
                       <span>重要性 {annotation.importance}</span>

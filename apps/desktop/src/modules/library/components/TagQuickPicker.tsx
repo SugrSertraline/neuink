@@ -1,4 +1,5 @@
-import { Check, ChevronDown, ChevronRight, Hash } from 'lucide-react';
+import { Check, Hash } from 'lucide-react';
+import { DisclosureIcon } from '@/components/ui/disclosure-icon';
 import { useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -93,7 +94,7 @@ function QuickTagNode({
             variant="ghost"
             onClick={() => setOpen((current) => !current)}
           >
-            {open ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronRight size={13} aria-hidden="true" />}
+            <DisclosureIcon open={open} />
           </Button>
         ) : (
           <span className="grid size-7 place-items-center text-muted-foreground">

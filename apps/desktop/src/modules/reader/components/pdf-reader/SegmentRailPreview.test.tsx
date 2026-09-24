@@ -15,6 +15,7 @@ describe('SegmentRailPreview', () => {
     render(
       <HoverCard open>
         <SegmentRailPreview
+        bookmarkSegmentUids={new Set()}
         annotationSegmentUids={new Set()}
         noteSegmentUids={new Set(['heading-1'])}
         segment={segment('heading-1', 'heading', 'Overview')}
@@ -32,6 +33,20 @@ describe('SegmentRailPreview', () => {
 
     expect(onJumpToSegment).toHaveBeenNthCalledWith(1, 'heading-1');
     expect(onJumpToSegment).toHaveBeenNthCalledWith(2, 'paragraph-1');
+  });
+
+  it('labels bookmarks separately and keeps mixed marked positions independently reachable', () => {
+    const onJumpToSegment = vi.fn();
+    const saved = segment('saved', 'paragraph', 'A saved location');
+    const annotated = segment('annotated', 'paragraph', 'An annotated location');
+    render(<HoverCard open><SegmentRailPreview segment={saved} segments={[saved, annotated]}
+      bookmarkSegmentUids={new Set(['saved'])} noteSegmentUids={new Set(['saved'])} annotationSegmentUids={new Set(['annotated'])}
+      onJumpToSegment={onJumpToSegment} /></HoverCard>);
+    expect(screen.getAllByText('收藏 1 处')).toHaveLength(2);
+    expect(screen.getAllByText('笔记 1 处')).toHaveLength(2);
+    expect(screen.getAllByText('批注 1 处')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: /批注 1 处 An annotated location/ }));
+    expect(onJumpToSegment).toHaveBeenCalledExactlyOnceWith('annotated');
   });
 });
 

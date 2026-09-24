@@ -68,7 +68,7 @@ export function hasAnyUnsavedSegmentEditors() {
 
 export function hasUnsavedEntrySegmentEditors(entryId: string) {
   return [...dirtyOwnersByScope.keys()].some((scope) =>
-    ['pdf', 'reflow', 'segment-records'].some((kind) => scope === `${kind}:${entryId}` || scope.endsWith(`/${kind}:${entryId}`)));
+    ['entry-overview', 'pdf', 'reflow', 'segment-records'].some((kind) => scope === `${kind}:${entryId}` || scope.endsWith(`/${kind}:${entryId}`)));
 }
 
 export async function saveSegmentEditorsBeforeClose(scopeKey: string) {

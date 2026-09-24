@@ -1,3 +1,4 @@
+import { SegmentBookmarksProvider, usePublishSegmentNotes, type SetSegmentBookmark } from './SegmentBookmarks';
 import {
   FileText,
   ListTodo,
@@ -56,6 +57,7 @@ import type {
 import { MineruPdfReader } from './MineruPdfReader';
 import { EntryContentHeader } from './EntryContentHeader';
 import { EntryOverview } from './EntryOverview';
+import type { EntryPdfHandlers } from '@/modules/library/components/EntryPdfActions';
 import { TrashItemsView } from './TrashItemsView';
 import {
   ReaderEmptyState,
@@ -80,7 +82,7 @@ import {
   setSegmentEditorDirty
 } from './segmentEditorDirtyRegistry';
 
-type EntryWorkspaceViewProps = {
+type EntryWorkspaceViewProps = EntryPdfHandlers & {
   activeContentId: string | null;
   entry: LibraryEntry;
   standalone?: boolean;
@@ -184,6 +186,7 @@ type EntryWorkspaceViewProps = {
     expectedRevision?: string | null
   ) => Promise<NoteDocument>;
   onSaveSegmentNote: (entryId: string, segmentUid: string, text: string) => Promise<SegmentBlockNote[]>;
+  onSetSegmentBookmark?: SetSegmentBookmark;
   onDeleteSegmentNote: (entryId: string, segmentUid: string) => Promise<SegmentBlockNote[]>;
   onSaveAnnotation: (entryId: string, annotation: {
     annotationId?: AnnotationId | null;
@@ -232,6 +235,9 @@ export function EntryWorkspaceView({
   onOpenContent,
   onApplyEntryTagPaths,
   onUpdateEntry,
+  onAttachPdf,
+  onCreatePdfVersion,
+  onImportMineruClientResult,
   onCreateMarkdownSourceLink,
   onImportMarkdownNoteSegmentAsset,
   onReadMarkdownNote,
@@ -259,6 +265,7 @@ export function EntryWorkspaceView({
   onToggleSidePanePinned,
   onSaveMarkdownNote,
   onSaveSegmentNote,
+  onSetSegmentBookmark,
   onDeleteSegmentNote,
   onSaveAnnotation,
   onDeleteAnnotation,
@@ -296,6 +303,7 @@ export function EntryWorkspaceView({
   );
 
   const content = (
+    <SegmentBookmarksProvider key={`${workspaceRoot}:${entry.id}`} save={onSetSegmentBookmark}>
       <div className="grid h-full min-h-0 min-w-0 gap-3">
         <Card className={cn('grid h-full min-h-0 min-w-0 grid-rows-[minmax(0,1fr)] rounded-none py-0', activeContentId === 'overview' && 'border-0 shadow-none ring-0')}>
           <CardContent className="min-h-0 min-w-0 overflow-hidden p-0">
@@ -350,6 +358,7 @@ export function EntryWorkspaceView({
             {activeContentId === 'reflow' ? (
               <div className="size-full min-h-0 min-w-0">
                 <ReflowEntryReader
+                  recordReloadKey={segmentRecordReloadKey}
                   entry={entry}
                   editorScopeKey={editorScopeKey}
                   pairedMarkdownNoteTarget={pairedMarkdownNoteTarget}
@@ -412,11 +421,15 @@ export function EntryWorkspaceView({
             ) : null}
             {activeContentId === 'overview' ? (
               <EntryOverview
+                key={`${workspaceRoot}:${entry.id}`}
+                editorScopeKey={editorScopeKey}
                 entry={entry}
                 sourceBacklinksBySegmentUid={sourceBacklinksBySegmentUid}
                 tags={tags}
                 workspaceRoot={workspaceRoot}
-                onReadPdfReader={onReadPdfReader}
+                onAttachPdf={onAttachPdf}
+                onCreatePdfVersion={onCreatePdfVersion}
+                onImportMineruClientResult={onImportMineruClientResult}
                 onApplyEntryTagPaths={onApplyEntryTagPaths}
                 onOpenContent={onOpenContent}
                 onUpdateEntry={onUpdateEntry}
@@ -471,6 +484,7 @@ export function EntryWorkspaceView({
           </CardContent>
         </Card>
       </div>
+    </SegmentBookmarksProvider>
   );
 
   if (standalone) {
@@ -547,6 +561,7 @@ function SegmentNotesOverview({
   const { notify } = useToast();
   const noteDraftOwnerId = `segment-record-note:${useId()}`;
   const [notes, setNotes] = useState<SegmentBlockNote[]>(() => readerData?.segment_notes ?? []);
+  usePublishSegmentNotes(notes);
   useEffect(() => {
     setNotes(readerData?.segment_notes ?? []);
   }, [readerData?.segment_notes]);
@@ -554,7 +569,7 @@ function SegmentNotesOverview({
   const sourceAnnotations = useMemo(() => readerData?.annotations ?? [], [readerData?.annotations]);
   const [followPdf, setFollowPdf] = useState(true);
   const [recordListCollapsed, setRecordListCollapsed] = useState(false);
-  const [recordFilter, setRecordFilter] = useState<'all' | 'note' | 'annotation' | 'highlight'>(
+  const [recordFilter, setRecordFilter] = useState<'all' | 'note' | 'annotation' | 'highlight' | 'bookmark'>(
     initialMode === 'annotation' ? 'annotation' : 'all'
   );
   const [detailMode, setDetailMode] = useState<'note' | 'annotation'>(
@@ -587,7 +602,7 @@ function SegmentNotesOverview({
     return next;
   }, [sourceSegments]);
   const visibleNotes = useMemo(
-    () => notes.filter((note) => hasNoteText(note.text)),
+    () => notes.filter((note) => hasNoteText(note.text) || note.bookmarked),
     [notes]
   );
   const noteBySegmentUid = useMemo(
@@ -619,6 +634,7 @@ function SegmentNotesOverview({
     return Array.from(records.values())
       .filter((record) => {
         if (recordFilter === 'note') return Boolean(record.note);
+        if (recordFilter === 'bookmark') return Boolean(record.note?.bookmarked);
         if (recordFilter === 'annotation') return record.annotations.length > 0;
         if (recordFilter === 'highlight') {
           return record.annotations.some((annotation) => annotation.kind === 'highlight');
@@ -761,7 +777,7 @@ function SegmentNotesOverview({
   const save = async () => {
     if (!selectedLogicalUid || busy || savingNoteRef.current) return false;
     if (!dirty) return true;
-    if (!hasNoteText(draft)) {
+    if (!hasNoteText(draft) && !noteBySegmentUid.get(selectedLogicalUid)?.bookmarked) {
       setClearNoteConfirmOpen(true);
       return false;
     }
@@ -936,6 +952,7 @@ function SegmentNotesOverview({
         loading={!readerData} busy={busy || annotationBusy} onFollowChange={setFollowPdf}
         onToggleList={() => setRecordListCollapsed((current) => !current)} onFilterChange={setRecordFilter} onLocate={locateSelectedSegment}
         exportScope={recordFilter === 'highlight' ? { kinds: ['annotation'], item_ids: annotations.filter((item) => item.kind === 'highlight').map((item) => `annotation:${item.annotation_id}`) }
+          : recordFilter === 'bookmark' ? { kinds: ['segment_note'], segment_uids: visibleNotes.filter(note => note.bookmarked).map(note => note.segment_uid) }
           : { kinds: recordFilter === 'note' ? ['segment_note'] : recordFilter === 'annotation' ? ['annotation'] : ['segment_note', 'annotation'] }} />
 
       <Dialog open={clearNoteConfirmOpen} onOpenChange={setClearNoteConfirmOpen}>
@@ -1025,7 +1042,9 @@ function SegmentNotesOverview({
                           {sourceText}
                         </div>
                       ) : null}
+                      {note?.text ? <div className="mt-1 line-clamp-2 text-xs text-foreground">{getSegmentNoteVisibleText(note.text)}</div> : null}
                       <div className="mt-2 flex flex-wrap gap-1 border-t pt-2">
+                        {note?.bookmarked ? <Badge variant="secondary">收藏位置</Badge> : null}
                         {note ? <Badge variant="secondary">笔记</Badge> : null}
                         {itemAnnotations.length > 0 ? (
                           <Badge variant="outline">批注 {itemAnnotations.length}</Badge>

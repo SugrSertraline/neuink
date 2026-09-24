@@ -91,6 +91,9 @@ pub struct ApplyReceipt {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub(super) enum ApplyJournal {
+    /// Written only after the workspace mutation returned successfully. Recovery
+    /// may replay the receipt, never the mutation or an old content snapshot.
+    Completed { receipt: ApplyReceipt },
     MarkdownCreate {
         created_note_id: Option<String>,
         entry_id: String,

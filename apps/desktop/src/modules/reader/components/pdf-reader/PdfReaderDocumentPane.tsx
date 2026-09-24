@@ -5,6 +5,7 @@ import type {
   WheelEvent as ReactWheelEvent
 } from 'react';
 import { useEffect } from 'react';
+import type { AssistantContextAddOptions } from '@/shared/types/assistant';
 
 import type {
   Annotation,
@@ -28,6 +29,10 @@ import type { PageSegments } from './types';
 import { useVisiblePdfPages } from './useVisiblePdfPages';
 import { PDF_SPREAD_GAP } from './readerConstants';
 import { centeredPdfScrollLeft } from './pdfViewportLayout';
+import { usePdfBookNavigation } from './usePdfBookNavigation';
+import { PdfBookControls } from './PdfBookControls';
+import { scrollToPage } from './readerUtils';
+import { PdfLayoutAnchor } from './PdfLayoutAnchor';
 
 export function PdfReaderDocumentPane({
   activeAnnotationId,
@@ -39,6 +44,9 @@ export function PdfReaderDocumentPane({
   annotationsBySegmentUid,
   notesBySegmentUid,
   pageWidth,
+  bookMode = false,
+  zoom = 1,
+  resumePageIdx,
   leftInset = 0,
   hoverPreviewEnabled,
   hoverPreviewFontSize,
@@ -94,6 +102,9 @@ export function PdfReaderDocumentPane({
   annotationsBySegmentUid: Map<string, Annotation[]>;
   notesBySegmentUid: Map<string, SegmentBlockNote>;
   pageWidth: number;
+  bookMode?: boolean;
+  zoom?: number;
+  resumePageIdx?: number | null;
   leftInset?: number;
   hoverPreviewEnabled: boolean;
   hoverPreviewFontSize: PdfHoverPreviewFontSize;
@@ -133,11 +144,11 @@ export function PdfReaderDocumentPane({
   onCopySourceLink?: (segment: SourceSegment) => void;
   onInsertSegmentImage?: (segment: SourceSegment) => void;
   onTranslateSegment?: (segment: SourceSegment) => void;
-  onOpenSegmentAnnotation: (segment: SourceSegment) => void;
+  onOpenSegmentAnnotation: (segment: SourceSegment, annotationId?: string) => void;
   onOpenSegmentNote: (segment: SourceSegment) => void;
   onOpenSegmentWorkspace?: (segment: SourceSegment) => void;
   onOpenSourceBacklink: (backlink: SourceBacklink) => void;
-  onAddAssistantContext?: (segment: SourceSegment) => void;
+  onAddAssistantContext?: (segment: SourceSegment, options?: AssistantContextAddOptions) => void;
   onCloseSegmentOverlay: () => void;
   onCreateTextSelectionAnnotation: (input: {
     content: string;
@@ -151,10 +162,18 @@ export function PdfReaderDocumentPane({
   altClickOpensNote?: boolean;
 }) {
   const pageCount = rows.reduce((sum, row) => sum + row.length, 0);
-  const { renderPageIndexes, visiblePageIndexes } = useVisiblePdfPages({
+  const continuous = useVisiblePdfPages({
     pageCount,
+    enabled: !bookMode && pdfState.status === 'ready',
     scrollRef: pdfScrollRef
   });
+  const book = usePdfBookNavigation({ enabled: bookMode, entryId: entry.id, rows,
+    scrollRef: pdfScrollRef, document: pdfState.status === 'ready' ? pdfState.document : null,
+    continuousPages: continuous.visiblePageIndexes, pageWidth, zoom, leftInset });
+  const spreadLength = rows[book.rowIndex]?.length ?? 1;
+  const bookWidth = (book.pageWidth + 2) * spreadLength + (spreadLength - 1) * 2;
+  const renderPageIndexes = bookMode ? book.render : continuous.renderPageIndexes;
+  const visiblePageIndexes = bookMode ? book.visible : continuous.visiblePageIndexes;
   useEffect(() => {
     onVisiblePageIndexesChange?.([...visiblePageIndexes].sort((left, right) => left - right));
   }, [onVisiblePageIndexesChange, visiblePageIndexes]);
@@ -200,24 +219,36 @@ export function PdfReaderDocumentPane({
   };
 
   return (
+    <PdfLayoutAnchor scrollRef={pdfScrollRef} pageWidth={pageWidth} zoom={zoom} bookMode={bookMode}>
     <div
       ref={bindPdfScrollElement}
+      data-reader-scroll
+      data-book-mode={bookMode || undefined}
+      tabIndex={bookMode ? 0 : -1}
+      aria-label={bookMode ? '书页阅读区，PageUp 和 PageDown 翻页' : undefined}
       className="pdf-document-scroll h-full w-full min-h-0 min-w-0 max-w-full overflow-auto px-3 py-2"
+      onKeyDown={event => {
+        if (!bookMode || event.target !== event.currentTarget || hasActiveTextSelection() || event.ctrlKey || event.metaKey || event.altKey) return;
+        const page = event.key === 'PageDown' ? book.nextPage : event.key === 'PageUp' ? book.previousPage : undefined;
+        if (page !== undefined) { event.preventDefault(); scrollToPage(page, pdfScrollRef.current); }
+      }}
       onClick={handleClick}
       onWheel={handleWheel}
     >
       {pdfState.status === 'ready' ? (
         <div
+          className={bookMode ? 'pdf-book-stage' : undefined}
           style={{
             marginLeft: leftInset,
-            width: `calc(100% - ${leftInset}px)`
+            width: bookMode ? `max(calc(100% - ${leftInset}px), ${bookWidth + 88}px)` : `calc(100% - ${leftInset}px)`
           }}
         >
-          {rows.map((row) => (
+          {rows.map((row, rowIndex) => (
             <div
               key={row[0].pageIdx}
+              data-book-spread={bookMode && rowIndex === book.rowIndex ? true : undefined}
               className="flex w-max min-w-full justify-center"
-              style={{ gap: PDF_SPREAD_GAP }}
+              style={{ gap: bookMode ? 2 : PDF_SPREAD_GAP, display: bookMode && rowIndex !== book.rowIndex ? 'none' : undefined }}
             >
               {row.map((page) => {
                 const renderEnabled = renderPageIndexes.has(page.pageIdx);
@@ -243,7 +274,7 @@ export function PdfReaderDocumentPane({
                     key={page.pageIdx}
                     notesBySegmentUid={notesBySegmentUid}
                     page={page}
-                    pageWidth={pageWidth}
+                    pageWidth={book.pageWidth}
                     pdfDocument={pdfState.document}
                     renderPriority={visible ? 'visible' : 'preload'}
                     renderEnabled={renderEnabled}
@@ -279,6 +310,9 @@ export function PdfReaderDocumentPane({
               })}
             </div>
           ))}
+          {bookMode ? <PdfBookControls previousPage={book.previousPage} nextPage={book.nextPage} scrollRef={pdfScrollRef}
+            width={bookWidth}
+            currentPage={(rows[book.rowIndex]?.[0]?.pageIdx ?? 0) + 1} pageCount={pageCount} resumePageIdx={resumePageIdx} /> : null}
         </div>
       ) : pdfBytesState.status === 'loading' || pdfState.status === 'loading' ? (
         <ReaderMessage
@@ -325,6 +359,7 @@ export function PdfReaderDocumentPane({
         />
       )}
     </div>
+    </PdfLayoutAnchor>
   );
 }
 

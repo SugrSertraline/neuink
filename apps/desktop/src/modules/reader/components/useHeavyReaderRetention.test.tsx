@@ -29,3 +29,15 @@ it('does not expire an active reader even after a long period', () => {
   act(() => vi.advanceTimersByTime(IDLE * 3));
   expect(result.current.size).toBe(0);
 });
+
+it('releases sweep timers during repeated mount, layout change and unmount', () => {
+  vi.useFakeTimers();
+  for (let i = 0; i < 100; i++) {
+    const view = renderHook(({ value }) => useHeavyReaderRetention(value), { initialProps: { value: layout } });
+    expect(vi.getTimerCount()).toBe(1);
+    view.rerender({ value: { ...layout, leftTabs: [{ kind: 'library' }] } });
+    expect(vi.getTimerCount()).toBe(1);
+    view.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  }
+});

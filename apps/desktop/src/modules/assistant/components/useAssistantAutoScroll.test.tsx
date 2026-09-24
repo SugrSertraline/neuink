@@ -19,6 +19,22 @@ afterEach(() => {
 });
 
 describe('useAssistantAutoScroll', () => {
+  it('does not let queued scroll frames override explicit proposal navigation', () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.mocked(window.requestAnimationFrame).mockImplementation(callback => { frames.push(callback); return frames.length; });
+    const view = render(<Harness contentVersion="1" />);
+    const container = view.getByTestId('scroll-container');
+    fireEvent.click(view.getByRole('button', { name: 'pause' }));
+    container.scrollTop = 72;
+    act(() => { while (frames.length) frames.shift()!(0); });
+    expect(container.scrollTop).toBe(72);
+    view.rerender(<Harness contentVersion="streaming-update" />);
+    act(() => { while (frames.length) frames.shift()!(0); });
+    expect(container.scrollTop).toBe(72);
+    fireEvent.click(view.getByRole('button', { name: 'latest' }));
+    act(() => { while (frames.length) frames.shift()!(0); });
+    expect(container.scrollTop).toBe(480);
+  });
   it('scrolls to the newest content on open and updates', () => {
     const view = render(<Harness contentVersion="1" />);
     const container = view.getByTestId('scroll-container');
@@ -64,7 +80,7 @@ describe('useAssistantAutoScroll', () => {
 });
 
 function Harness({ contentVersion }: { contentVersion: string }) {
-  const { containerRef, contentRef, endRef, forceNextScroll, handleScroll, isAtBottom } = useAssistantAutoScroll({
+  const { containerRef, contentRef, endRef, forceNextScroll, pauseAutoScroll, handleScroll, isAtBottom } = useAssistantAutoScroll({
     contentVersion,
     conversationId: 'conversation-1'
   });
@@ -86,6 +102,7 @@ function Harness({ contentVersion }: { contentVersion: string }) {
         </div>
       </div>
       <button aria-label="latest" type="button" onClick={forceNextScroll}>latest</button>
+      <button type="button" onClick={pauseAutoScroll}>pause</button>
       <span data-testid="at-bottom">{String(isAtBottom)}</span>
     </>
   );

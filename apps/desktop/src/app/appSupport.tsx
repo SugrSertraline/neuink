@@ -158,7 +158,7 @@ export function readStoredBoolean(key: string, fallback: boolean) {
 export function readStoredSidePanel(): SidePanel {
   if (typeof window === 'undefined') return 'library';
   const value = window.localStorage.getItem(SIDE_PANEL_STORAGE_KEY);
-  return value === 'assistant' || value === 'search' || value === 'library' || value === 'same-tag' ? value : 'library';
+  return value === 'assistant' || value === 'search' || value === 'library' || value === 'details' || value === 'same-tag' ? value : 'library';
 }
 
 export function readStoredLibraryView(): LibraryView {
@@ -311,14 +311,6 @@ export function ActivityButton({
       <TooltipContent side="right">{label}</TooltipContent>
     </Tooltip>
   );
-}
-
-export function firstContentId(entry: LibraryEntry) {
-  if (entry.pdfFileName) {
-    return 'pdf';
-  }
-  const note = entry.contents.find((content) => content.kind === 'note');
-  return note ? 'note:' + note.note_id : 'overview';
 }
 
 export function noteIdFromContentId(contentId: string | null) {

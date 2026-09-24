@@ -1,10 +1,14 @@
+import type { SettingsNavigationTarget } from '@/modules/settings/settingsCatalog';
+import type { LibraryEntry } from '@/modules/library/components/LibrarySidebar';
 import type { NoteTarget } from '@/shared/types/domain';
 import { noteTargetKey } from '@/shared/lib/noteOwner';
 export type WorkspacePaneId = 'left' | 'right';
 
 export type WorkspaceSurface =
+  | { kind: 'note-review'; proposalId: string; label: string; entryId: string; noteId?: string | null }
   | { kind: 'library' }
-  | { kind: 'settings' }
+  | { kind: 'relations' }
+  | { kind: 'settings'; target?: SettingsNavigationTarget }
   | { kind: 'create-entry' }
   | { kind: 'mineru-client-guide' }
   | { kind: 'tag-editor' }
@@ -263,14 +267,19 @@ function insertSurface(tabs: WorkspaceSurface[], surface: WorkspaceSurface, inde
 
 export function surfaceKey(surface: WorkspaceSurface) {
   switch (surface.kind) {
+    case 'note-review': return `note-review:${surface.proposalId}`;
     case 'tag-reading': return `tag-reading:${surface.tagId}`;
     case 'tag-details': return `tag-details:${surface.tagId}`;
     case 'owned-note': return `note:${noteTargetKey(surface.target)}`;
     case 'note': return `note:${surface.entryId}:${surface.noteId}`;
     case 'segment-notes': return `segment-records:${surface.entryId}`;
-    case 'library': case 'settings': case 'create-entry': case 'mineru-client-guide': case 'tag-editor': return surface.kind;
+    case 'library': case 'relations': case 'settings': case 'create-entry': case 'mineru-client-guide': case 'tag-editor': return surface.kind;
     default: return `${surface.kind}:${surface.entryId}`;
   }
+}
+
+export function defaultEntryContentId(entry: Pick<LibraryEntry, 'pdfFileName'>, openPdfByDefault = true) {
+  return openPdfByDefault && entry.pdfFileName ? 'pdf' : 'overview';
 }
 
 export function entryContentSurface(entryId: string, contentId: string, contextTagId?: string): WorkspaceSurface {
@@ -287,6 +296,7 @@ export function entryContentSurface(entryId: string, contentId: string, contextT
 
 export function entryContentId(surface: WorkspaceSurface) {
   switch (surface.kind) {
+    case 'note-review': return surface.noteId ? `note:${surface.noteId}` : null;
     case 'pdf': return 'pdf';
     case 'reflow': return 'reflow';
     case 'entry-overview': return 'overview';
@@ -307,6 +317,8 @@ export function workspaceSurfaceLabel(
     : '';
   switch (surface.kind) {
     case 'library': return '条目库';
+    case 'note-review': return `${surface.label} · 修改审阅`;
+    case 'relations': return '关系图';
     case 'settings': return '设置';
     case 'create-entry': return '新建条目';
     case 'mineru-client-guide': return 'MinerU 客户端教程';

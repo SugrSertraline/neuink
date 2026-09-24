@@ -1,12 +1,11 @@
 import type { SourceSegment, SegmentType } from '@/shared/types/domain';
 
 import type { RailLayoutItem } from './types';
-import { bucketSegmentsByDocumentPosition } from './railSlotting';
-import { compareDocumentSegments } from './readerUtils';
+import { groupAdjacentSegments } from './railSlotting';
 import { headingLevel } from './segmentOutline';
 
 export const RAIL_FALLBACK_HEIGHT = 520;
-export const RAIL_MIN_ITEM_GAP = 7;
+export const RAIL_MIN_ITEM_GAP = 8;
 export const RAIL_MAX_VISIBLE_ITEMS = 160;
 const RAIL_VERTICAL_PADDING = 8;
 
@@ -27,24 +26,24 @@ const SEGMENT_TYPE_PRIORITY: Record<SegmentType, number> = {
 
 export function buildAdaptiveRailLayout({
   segments,
-  pageCount,
   railHeight,
   pinnedSegmentUids,
+  bookmarkSegmentUids = new Set<string>(),
   noteSegmentUids,
   annotationSegmentUids
 }: {
   segments: SourceSegment[];
-  pageCount: number;
   railHeight: number;
-  pinnedSegmentUids: Set<string>;
-  noteSegmentUids: Set<string>;
-  annotationSegmentUids: Set<string>;
+  pinnedSegmentUids: ReadonlySet<string>;
+  bookmarkSegmentUids?: ReadonlySet<string>;
+  noteSegmentUids: ReadonlySet<string>;
+  annotationSegmentUids: ReadonlySet<string>;
 }): RailLayoutItem[] {
   if (segments.length === 0) {
     return [];
   }
 
-  const safeRailHeight = Math.max(80, railHeight);
+  const safeRailHeight = Math.max(16, railHeight);
   const usableHeight = Math.max(
     1,
     safeRailHeight - RAIL_VERTICAL_PADDING * 2
@@ -56,31 +55,13 @@ export function buildAdaptiveRailLayout({
       Math.floor(usableHeight / RAIL_MIN_ITEM_GAP)
     )
   );
-  const headings = segments.filter(
-    (segment) => segment.segment_type === 'heading'
-  );
-  const bodySegments = segments.filter(
-    (segment) => segment.segment_type !== 'heading'
-  );
-  const bodyBucketCount = Math.max(0, bucketCount - headings.length);
-  const bodyBuckets = bodyBucketCount > 0
-    ? bucketSegmentsByDocumentPosition({
-        bucketCount: bodyBucketCount,
-        pageCount,
-        segments: bodySegments
-      })
-    : [];
-  const groups = [
-    ...headings.map((segment) => ({ segments: [segment] })),
-    ...bodyBuckets
-  ].sort((left, right) =>
-    compareDocumentSegments(left.segments[0], right.segments[0])
-  );
+  const groups = groupAdjacentSegments({ bucketCount, segments });
 
   return groups.map((group, index) => {
     const segment = pickPrimarySegment({
-      segments: group.segments,
+      segments: group,
       pinnedSegmentUids,
+      bookmarkSegmentUids,
       noteSegmentUids,
       annotationSegmentUids
     });
@@ -92,7 +73,7 @@ export function buildAdaptiveRailLayout({
 
     return {
       segment,
-      segments: group.segments,
+      segments: group,
       top: (topPx / safeRailHeight) * 100,
       isHeading: segment.segment_type === 'heading',
       headingLevel:
@@ -104,22 +85,26 @@ export function buildAdaptiveRailLayout({
 function pickPrimarySegment({
   segments,
   pinnedSegmentUids,
+  bookmarkSegmentUids,
   noteSegmentUids,
   annotationSegmentUids
 }: {
   segments: SourceSegment[];
-  pinnedSegmentUids: Set<string>;
-  noteSegmentUids: Set<string>;
-  annotationSegmentUids: Set<string>;
+  pinnedSegmentUids: ReadonlySet<string>;
+  bookmarkSegmentUids: ReadonlySet<string>;
+  noteSegmentUids: ReadonlySet<string>;
+  annotationSegmentUids: ReadonlySet<string>;
 }) {
   return segments.reduce((best, candidate) =>
     segmentPriority(candidate, {
       pinnedSegmentUids,
+      bookmarkSegmentUids,
       noteSegmentUids,
       annotationSegmentUids
     }) >
     segmentPriority(best, {
       pinnedSegmentUids,
+      bookmarkSegmentUids,
       noteSegmentUids,
       annotationSegmentUids
     })
@@ -131,13 +116,15 @@ function pickPrimarySegment({
 function segmentPriority(
   segment: SourceSegment,
   uidSets: {
-    pinnedSegmentUids: Set<string>;
-    noteSegmentUids: Set<string>;
-    annotationSegmentUids: Set<string>;
+    pinnedSegmentUids: ReadonlySet<string>;
+    bookmarkSegmentUids: ReadonlySet<string>;
+    noteSegmentUids: ReadonlySet<string>;
+    annotationSegmentUids: ReadonlySet<string>;
   }
 ) {
   let priority = SEGMENT_TYPE_PRIORITY[segment.segment_type];
 
+  if (matchesSegmentUid(segment, uidSets.bookmarkSegmentUids)) priority += 6_000;
   if (matchesSegmentUid(segment, uidSets.annotationSegmentUids)) {
     priority += 2_000;
   }

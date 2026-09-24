@@ -168,8 +168,8 @@ type AssistantPanelProps = {
   onComposerDraftChange: (draft: AssistantComposerDraft | null) => void;
   onCreateAssistantEntry: (title: string) => Promise<LibraryEntry>;
   onApplyNoteProposal: (proposal: AssistantNoteProposal) => Promise<AssistantNoteProposal>;
-  onApplyEntryMetaProposal: (proposal: AssistantEntryMetaProposal) => Promise<void>;
-  onApplyTagProposal: (proposal: AssistantTagProposal) => Promise<void>;
+  onApplyEntryMetaProposal: (proposal: AssistantEntryMetaProposal, confirmation: import('@/shared/ipc/assistantProposalApi').AssistantProposalConfirmation) => Promise<void>;
+  onApplyTagProposal: (proposal: AssistantTagProposal, confirmation: import('@/shared/ipc/assistantProposalApi').AssistantProposalConfirmation) => Promise<void>;
   onAddAssistantContext: (context: AssistantContextInput) => void;
   onDraftQuestionConsumed: () => void;
   onExportConversation: (conversation: Conversation) => Promise<void>;
@@ -689,7 +689,7 @@ export function patchConversationNoteProposal(
   conversation: Conversation,
   proposalId: string,
   patch: Partial<AssistantNoteProposal>
-) {
+): { conversation: Conversation; message: ConversationMessage } | null {
   let patchedMessage: ConversationMessage | null = null;
   const messages = conversation.messages.map((message) => {
     const proposals = noteProposalsFromMessage(message);

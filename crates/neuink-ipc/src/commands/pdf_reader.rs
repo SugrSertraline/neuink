@@ -34,6 +34,25 @@ pub struct DeleteSegmentNoteRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct SetSegmentNoteBookmarkRequest {
+    pub root: PathBuf,
+    pub entry_id: EntryId,
+    pub segment_uid: SegmentUid,
+    pub bookmarked: bool,
+}
+
+#[tauri::command]
+pub fn set_segment_note_bookmark(
+    request: SetSegmentNoteBookmarkRequest,
+) -> Result<Vec<SegmentBlockNote>, String> {
+    let workspace =
+        neuink_workspace::Workspace::open(request.root).map_err(|error| error.to_string())?;
+    workspace
+        .set_segment_note_bookmark(&request.entry_id, request.segment_uid, request.bookmarked)
+        .map_err(|error| error.to_string())
+}
+
+#[derive(Debug, Deserialize)]
 pub struct ListReadingStatesRequest {
     pub root: PathBuf,
 }
@@ -98,7 +117,13 @@ pub fn read_pdf_reader(request: ReadPdfReaderRequest) -> Result<PdfReaderRespons
         .map_err(|error| error.to_string())?;
     // Parsed-only imports are readable in Reflow even without an original PDF.
     let pdf_path = workspace.layout().entry_pdf_file(&request.entry_id);
-    if entry.pdf.is_none() && !pdf_path.is_file() && !workspace.layout().entry_segments_file(&request.entry_id).is_file() {
+    if entry.pdf.is_none()
+        && !pdf_path.is_file()
+        && !workspace
+            .layout()
+            .entry_segments_file(&request.entry_id)
+            .is_file()
+    {
         return Err("该条目没有可读的 PDF 或解析内容".to_string());
     }
 
@@ -251,10 +276,22 @@ mod tests {
         let workspace = neuink_workspace::Workspace::create(&root).unwrap();
         let entry = workspace.create_entry("Parsed-only import").unwrap();
         assert!(entry.pdf.is_none());
-        workspace.write_segments(&entry.id, &[SourceSegment::new(
-            neuink_domain::SegmentType::Paragraph, 0, None, "Parsed content".into(),
-        )]).unwrap();
-        let response = read_pdf_reader(ReadPdfReaderRequest { root: root.clone(), entry_id: entry.id }).unwrap();
+        workspace
+            .write_segments(
+                &entry.id,
+                &[SourceSegment::new(
+                    neuink_domain::SegmentType::Paragraph,
+                    0,
+                    None,
+                    "Parsed content".into(),
+                )],
+            )
+            .unwrap();
+        let response = read_pdf_reader(ReadPdfReaderRequest {
+            root: root.clone(),
+            entry_id: entry.id,
+        })
+        .unwrap();
         assert!(!response.pdf_path.exists());
         assert_eq!(response.segments.len(), 1);
         assert_eq!(response.segments[0].text, "Parsed content");

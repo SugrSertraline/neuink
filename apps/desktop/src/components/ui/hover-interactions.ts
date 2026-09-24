@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
-export const HOVER_TIMING = { open: 350, close: 150, reader: 180, tooltip: 500, skip: 200 } as const;
+export const HOVER_TIMING = { open: 0, close: 150, reader: 0, tooltip: 0, skip: 0 } as const;
 export const HOVER_SURFACE_CLASS = 'rounded-lg border border-border bg-popover text-popover-foreground shadow-md';
 
 type DismissEvent = { type: string; target?: EventTarget | null };
@@ -8,9 +8,36 @@ type Listener = (event: DismissEvent) => boolean | void;
 const listeners = new Set<Listener>();
 let pointerDown = false;
 let dragging = false;
+const selectionOwners = new Set<symbol>();
+
+function hasReaderSelection() {
+  if (typeof window === 'undefined') return false;
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed) return false;
+  return [selection.anchorNode, selection.focusNode].some(node => {
+    const element = node instanceof Element ? node : node?.parentElement;
+    // Selecting text inside an existing preview must not dismiss that preview.
+    return element && !element.closest('[data-hover-surface]') &&
+      Boolean(element.closest('.pdf-text-layer, [data-reading-selection-source]'));
+  });
+}
+
+/** The selection toolbar owns priority even when focus moves into its comment input.
+ * Each mounted owner releases only its own lease (hidden PDF pages retain drafts).
+ */
+export function useReaderSelectionPriority(active: boolean) {
+  useLayoutEffect(() => {
+    if (!active) return;
+    const owner = Symbol('reader-selection');
+    selectionOwners.add(owner);
+    emit({ type: 'reader-selection' });
+    return () => { selectionOwners.delete(owner); };
+  }, [active]);
+}
 
 export function hoverInteractionBlocked() {
-  return pointerDown || dragging || (typeof document !== 'undefined' && document.visibilityState === 'hidden');
+  return pointerDown || dragging || selectionOwners.size > 0 || hasReaderSelection() ||
+    (typeof document !== 'undefined' && document.visibilityState === 'hidden');
 }
 
 function emit(event: DismissEvent) {
@@ -48,6 +75,7 @@ function handleKey(event: KeyboardEvent) {
   }
 }
 function handleVisibility(event: Event) { if (document.visibilityState === 'hidden') handleBlur(event); }
+function handleSelectionChange(event: Event) { if (hasReaderSelection()) emit(event); }
 
 function attach() {
   document.addEventListener('pointerdown', handlePointerDown, true);
@@ -61,6 +89,7 @@ function attach() {
   document.addEventListener('keydown', handleKey, true);
   document.addEventListener('scroll', emit, true);
   document.addEventListener('visibilitychange', handleVisibility);
+  document.addEventListener('selectionchange', handleSelectionChange);
   window.addEventListener('blur', handleBlur);
   window.addEventListener('resize', emit);
   window.addEventListener('neuink:reader-surface-change', emit);
@@ -78,6 +107,7 @@ function detach() {
   document.removeEventListener('keydown', handleKey, true);
   document.removeEventListener('scroll', emit, true);
   document.removeEventListener('visibilitychange', handleVisibility);
+  document.removeEventListener('selectionchange', handleSelectionChange);
   window.removeEventListener('blur', handleBlur);
   window.removeEventListener('resize', emit);
   window.removeEventListener('neuink:reader-surface-change', emit);
@@ -99,15 +129,6 @@ export function useHoverDismiss(onDismiss: () => boolean | void, enabled = true)
   }, [enabled]);
 }
 
-/** Shared gate for Radix roots: dismissal also cancels delayed opens until a new entry/focus. */
-function useHoverGate(onDismiss: () => boolean) {
-  const dismissed = useRef(false);
-  useHoverDismiss(() => { dismissed.current = true; return onDismiss(); });
-  const rearm = useCallback(() => { if (!hoverInteractionBlocked()) dismissed.current = false; }, []);
-  const canOpen = useCallback(() => !dismissed.current && !hoverInteractionBlocked(), []);
-  return { rearm, canOpen };
-}
-
 export function useHoverOpenState({ open: controlledOpen, defaultOpen = false, onOpenChange }: {
   open?: boolean; defaultOpen?: boolean; onOpenChange?: (open: boolean) => void;
 }) {
@@ -123,28 +144,19 @@ export function useHoverOpenState({ open: controlledOpen, defaultOpen = false, o
     onOpenChange?.(next);
     return true;
   };
-  const gate = useHoverGate(() => change(false));
+  useHoverDismiss(() => change(false));
   return {
     open,
-    rearm: gate.rearm,
-    show: () => { gate.rearm(); if (gate.canOpen()) change(true); },
-    onOpenChange: (next: boolean) => { if (!next || gate.canOpen()) change(next); },
+    show: () => { if (!hoverInteractionBlocked()) change(true); },
+    onOpenChange: (next: boolean) => { if (!next || !hoverInteractionBlocked()) change(next); },
   };
 }
 
-/** Pointer-driven readers keep their own hit testing; only preview timing/lifecycle is shared. */
+/** Reader hit testing owns entry/movement; this hook only dismisses an active preview. */
 export function useReaderPreviewVisible(key: string) {
-  const [visibleKey, setVisibleKey] = useState<string | null>(null);
+  const [visibleKey, setVisibleKey] = useState<string | null>(() => hoverInteractionBlocked() ? null : key);
   const visible = visibleKey === key;
-  const timer = useRef<ReturnType<typeof setTimeout>>();
-  const cancel = () => { clearTimeout(timer.current); setVisibleKey(null); return visible; };
-  useHoverDismiss(cancel);
-  useEffect(() => {
-    setVisibleKey(null);
-    timer.current = setTimeout(() => {
-      if (!hoverInteractionBlocked()) setVisibleKey(key);
-    }, HOVER_TIMING.reader);
-    return () => clearTimeout(timer.current);
-  }, [key]);
+  useHoverDismiss(() => { setVisibleKey(null); return visible; });
+  useEffect(() => { setVisibleKey(hoverInteractionBlocked() ? null : key); }, [key]);
   return visible;
 }

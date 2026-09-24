@@ -1,4 +1,4 @@
-import { ListTree } from 'lucide-react';
+import { Bookmark, ListTree } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   MouseEvent as ReactMouseEvent,
@@ -6,6 +6,8 @@ import type {
 } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { Toggle } from '@/components/ui/toggle';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Annotation, SegmentBlockNote } from '@/shared/types/domain';
 
 import type { PageSegments } from './types';
@@ -13,13 +15,13 @@ import { buildAdaptiveRailLayout, RAIL_FALLBACK_HEIGHT } from './railLayout';
 import { SegmentRailMarker } from './SegmentRailMarker';
 import { SegmentOutlinePanel } from './SegmentOutlinePanel';
 import { clamp, compareDocumentSegments, normalizeBbox } from './readerUtils';
+import { buildSegmentRailMarks, hasSegmentRailMark, segmentRailJumpTarget, summarizeSegmentRailMarks } from './segmentRailMarks';
 
 export function SegmentRail({
   flashSegmentUid,
   activeSegmentUid,
   annotationsBySegmentUid,
   notesBySegmentUid,
-  pageCount,
   pages,
   selectedSegmentUid,
   onJumpToSegment
@@ -28,7 +30,6 @@ export function SegmentRail({
   activeSegmentUid: string | null;
   annotationsBySegmentUid: Map<string, Annotation[]>;
   notesBySegmentUid: Map<string, SegmentBlockNote>;
-  pageCount: number;
   pages: PageSegments[];
   selectedSegmentUid: string | null;
   onJumpToSegment: (segmentUid: string) => void;
@@ -46,6 +47,7 @@ export function SegmentRail({
   const [hoveredMarkerKey, setHoveredMarkerKey] = useState<string | null>(null);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [outlineFocusUid, setOutlineFocusUid] = useState<string | null>(null);
+  const [markedOnly, setMarkedOnly] = useState(false);
 
   useEffect(() => {
     if (!outlineOpen) return undefined;
@@ -113,29 +115,20 @@ export function SegmentRail({
       ),
     [activeSegmentUid, flashSegmentUid, selectedSegmentUid]
   );
-  const noteSegmentUids = useMemo(
-    () => new Set(notesBySegmentUid.keys()),
-    [notesBySegmentUid]
-  );
-  const annotationSegmentUids = useMemo(
-    () => new Set(annotationsBySegmentUid.keys()),
-    [annotationsBySegmentUid]
-  );
+  const marks = useMemo(() => buildSegmentRailMarks(notesBySegmentUid, annotationsBySegmentUid), [notesBySegmentUid, annotationsBySegmentUid]);
+  const markedCount = useMemo(() => summarizeSegmentRailMarks(allSegments, marks).total, [allSegments, marks]);
+  const visibleSegments = useMemo(() => markedOnly ? allSegments.filter(segment => hasSegmentRailMark(segment, marks)) : allSegments, [allSegments, markedOnly, marks]);
   const layoutItems = useMemo(
     () =>
       buildAdaptiveRailLayout({
-        segments: allSegments,
-        pageCount,
+        segments: visibleSegments,
         railHeight,
         pinnedSegmentUids,
-        noteSegmentUids,
-        annotationSegmentUids
+        ...marks
       }),
     [
-      allSegments,
-      annotationSegmentUids,
-      noteSegmentUids,
-      pageCount,
+      visibleSegments,
+      marks,
       pinnedSegmentUids,
       railHeight
     ]
@@ -150,12 +143,15 @@ export function SegmentRail({
     });
   };
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.contains(event.target as Node)) return;
     pointerInsideRailRef.current = true;
     const bounds = event.currentTarget.getBoundingClientRect();
     updatePointerY(clamp(event.clientY - bounds.top, 0, bounds.height));
   };
   const handleRailClick = (event: ReactMouseEvent<HTMLDivElement>) => {
-    if ((event.target as HTMLElement).closest('[data-rail-marker]')) {
+    // Preview portals bubble through React, but are not clicks on the rail.
+    if (!event.currentTarget.contains(event.target as Node)
+      || (event.target as HTMLElement).closest('[data-rail-marker]')) {
       return;
     }
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -170,7 +166,7 @@ export function SegmentRail({
       null
     );
     if (nearest) {
-      onJumpToSegment(nearest.segment.uid);
+      onJumpToSegment(segmentRailJumpTarget(nearest, marks).uid);
     }
   };
 
@@ -214,8 +210,19 @@ export function SegmentRail({
       >
         <ListTree size={15} />
       </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Toggle size="sm" className="relative w-full shrink-0 px-0" aria-label={`只看标记（${markedCount} 处）`}
+            pressed={markedOnly} disabled={!markedCount && !markedOnly} onPressedChange={setMarkedOnly}>
+            <Bookmark aria-hidden="true" />
+            {markedCount > 0 ? <span aria-hidden="true" className="absolute -right-0.5 -top-1 rounded-sm bg-card px-0.5 text-[10px] font-semibold leading-3 text-foreground ring-1 ring-border">{markedCount > 99 ? '99+' : markedCount}</span> : null}
+          </Toggle>
+        </TooltipTrigger>
+        <TooltipContent side="right">{markedOnly ? '显示全部片段' : `只看收藏、笔记和批注 · ${markedCount} 处`}</TooltipContent>
+      </Tooltip>
       <div
         ref={railRef}
+        aria-label={markedOnly ? '有标记的阅读位置' : '全文阅读导航'}
         className="relative min-h-0 w-full flex-1 overflow-visible rounded-md bg-muted/55"
         onClick={handleRailClick}
         onPointerLeave={() => {
@@ -227,14 +234,13 @@ export function SegmentRail({
         onPointerMove={handlePointerMove}
       >
         {layoutItems.map((item) => {
-          const markerKey = `${item.segment.uid}:${item.top}`;
+          const markerKey = `${item.segments[0].uid}:${item.segments[item.segments.length - 1].uid}`;
           return <SegmentRailMarker
             activeSegmentUid={activeSegmentUid}
-            annotationSegmentUids={annotationSegmentUids}
+            {...marks}
             flashSegmentUid={flashSegmentUid}
             item={item}
             key={markerKey}
-            noteSegmentUids={noteSegmentUids}
             pointerY={pointerY}
             railHeight={railHeight}
             railWidth={railWidth}
@@ -245,6 +251,7 @@ export function SegmentRail({
             onPointerFocus={updatePointerY}
           />;
         })}
+        {markedOnly && !markedCount ? <p role="status" className="px-0.5 py-3 text-center text-[10px] leading-4 text-muted-foreground">暂无标记</p> : null}
       </div>
       <SegmentOutlinePanel
         activeSegmentUid={activeSegmentUid}

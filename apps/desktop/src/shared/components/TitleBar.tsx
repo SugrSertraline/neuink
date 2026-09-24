@@ -3,10 +3,13 @@ import { Copy, Minus, Search, Square, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
 import { Kbd } from '@/components/ui/kbd';
+import { appearanceLogos } from '../assets/appearance';
+import { useAppearance } from './AppearanceProvider';
 
 type WindowAction = 'minimize' | 'toggleMaximize' | 'close';
 
 export function TitleBar({ onOpenSearch }: { onOpenSearch: () => void }) {
+  const { appearance } = useAppearance();
   const [isMaximized, setIsMaximized] = useState(false);
 
   const syncMaximized = useCallback(async () => {
@@ -55,7 +58,7 @@ export function TitleBar({ onOpenSearch }: { onOpenSearch: () => void }) {
   return (
     <header className="titlebar">
       <div className="brand" data-tauri-drag-region>
-        <img className="logo" src="/neuink-logo.svg" alt="Neuink" />
+        <img className="logo" src={appearanceLogos[appearance]} alt="Neuink" draggable={false} data-tauri-drag-region />
         <div className="app-identity" data-tauri-drag-region>
           <div className="app-title">Neuink</div>
           <div className="app-subtitle">文献阅读 · 知识工作台</div>

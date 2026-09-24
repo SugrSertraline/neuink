@@ -109,6 +109,21 @@ describe('sourceLinkAnchorIdFromMathLatex', () => {
 });
 
 describe('source link Markdown integration', () => {
+  it('keeps repeated source elements beside their claims through export and reload', () => {
+    const markdown = '第一项结论 [^sl-test]。\n\n- 第二项结论 [^sl-test]。\n\n最后的思考。';
+    const editor = markdownEditor(markdown);
+    const links = [sourceLink('Evidence')];
+    const exported = materializeMarkdownSourceLinks(getMarkdownWithSourceLinks(editor), links);
+    const restored = dematerializeMarkdownSourceLinks(exported, links);
+    editor.commands.setContent(restored, { contentType: 'markdown' });
+    const parents: string[] = [];
+    editor.state.doc.descendants((node, _position, parent) => {
+      if (node.type.name === 'sourceLink') parents.push(parent?.textContent ?? '');
+    });
+    expect(parents).toEqual(['第一项结论 。', '第二项结论 。']);
+    expect(getMarkdownWithSourceLinks(editor).trimEnd()).toBe(markdown);
+    editor.destroy();
+  });
   it('parses a persisted reference beside formulas into a sourceLink atom', () => {
     const editor = markdownEditor();
     editor.commands.setContent('公式 $E = mc^2$ 后的引用 [^sl-test]\n\n$$\nx^2 + y^2\n$$', {

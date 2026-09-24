@@ -526,16 +526,18 @@ export function useWorkspaceResourceActions({
   );
 
   const applyWorkspaceTagProposal = useCallback(
-    async (proposal: AssistantTagProposal) => {
+    async (proposal: AssistantTagProposal, confirmation: import('../ipc/assistantProposalApi').AssistantProposalConfirmation) => {
       if (!root) {
         throw new Error('workspace is not open');
       }
       try {
-        const response = await applyTagProposal(root, proposal);
-        setEntries(response.entries);
-        setTags(response.tags);
-        selectFirstEntry(response.entries);
-        setError(null);
+        const response = await applyTagProposal(root, proposal, confirmation);
+        if (currentRoot.current === root) {
+          setEntries(response.entries);
+          setTags(response.tags);
+          selectFirstEntry(response.entries);
+          setError(null);
+        }
         return response;
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : String(caught));
@@ -547,14 +549,14 @@ export function useWorkspaceResourceActions({
   );
 
   const applyWorkspaceEntryMetaProposal = useCallback(
-    async (proposal: AssistantEntryMetaProposal) => {
+    async (proposal: AssistantEntryMetaProposal, confirmation: import('../ipc/assistantProposalApi').AssistantProposalConfirmation) => {
       if (!root) throw new Error('workspace is not open');
       try {
-        const updated = await applyEntryMetaProposal(root, proposal);
-        setEntries((current) =>
-          current.map((entry) => (entry.id === updated.id ? updated : entry))
-        );
-        setError(null);
+        const updated = await applyEntryMetaProposal(root, proposal, confirmation);
+        if (currentRoot.current === root) {
+          setEntries((current) => current.map((entry) => (entry.id === updated.id ? updated : entry)));
+          setError(null);
+        }
         return updated;
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : String(caught));

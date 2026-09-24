@@ -273,7 +273,7 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
       : '';
 
   return (
-    <section className="overflow-hidden rounded-lg border bg-card">
+    <section className="sciverse-settings min-w-0 overflow-hidden rounded-lg border bg-card">
       <div className="flex flex-wrap items-start justify-between gap-4 p-4">
         <div className="flex min-w-0 items-start gap-3">
           <div className="grid size-9 shrink-0 place-items-center rounded-md border bg-muted/35 text-primary">
@@ -346,7 +346,7 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
               <label className="text-xs font-medium" htmlFor="sciverse-api-token">
                 API Token
               </label>
-              <div className="flex min-w-0 flex-col gap-2 lg:flex-row lg:items-center">
+              <div className="sciverse-token-controls">
                 <div className="relative min-w-0 flex-1">
                   <KeyRound
                     aria-hidden="true"
@@ -401,7 +401,7 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
                   </button>
                 </div>
 
-                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
                   {hasToken && !environmentManaged && !editingToken ? (
                     <Button
                       disabled={pending}

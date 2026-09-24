@@ -10,7 +10,7 @@ import type { WorkspaceSurfaceLayout } from '@/app/workspaceSurface';
 
 const entry: LibraryEntry = { id: 'one', title: '跨论文需求对齐', tagIds: ['tag'], tags: ['软件工程'], contents: [], fields: {}, createdAt: '', updatedAt: '', pdfFileName: 'one.pdf', status: 'Parsed', progress: 100, parseMessage: null, parseEndpoint: null };
 const props = { entries: [entry], tags: [{ id: 'tag', name: '软件工程', parent_id: null, created_at: '', updated_at: '' }], tagId: 'tag', descendants: true, status: 'ready' as const, error: null, layout: initialWorkspaceSurfaceLayout,
-  onTagChange: vi.fn(), onDescendantsChange: vi.fn(), onRead: vi.fn(), onDetails: vi.fn() };
+  onTagChange: vi.fn(), onDescendantsChange: vi.fn(), onRead: vi.fn(), onDetails: vi.fn(), onOpenContent: vi.fn() };
 beforeEach(() => { vi.clearAllMocks(); vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 

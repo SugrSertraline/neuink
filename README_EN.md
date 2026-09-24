@@ -157,6 +157,10 @@ npm run desktop:release:portable
 
 The command outputs `release/Neuink-portable-<timestamp>.zip` and includes only `.env.example`, never your local `.env` credentials. The current portable flow requires local embedding resources.
 
+Extract the archive and double-click `Neuink.exe`, or create a desktop shortcut to it. The release executable embeds the frontend and needs neither a command prompt nor a frontend development server. Keep the adjacent `embedding-models` directory with the executable.
+
+`desktop:dev` and `target/debug/neuink-desktop.exe` run in development mode and need the local page server; the Windows debug executable also keeps its console. `desktop:build` builds only the frontend and does not update a standalone desktop executable. To use the latest code, rebuild the native bundle or portable release and point your shortcut to the new output.
+
 ## Project layout
 
 ```text

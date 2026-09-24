@@ -1,3 +1,9 @@
+import { PaperReferencesProvider } from './navigation/PaperReferences';
+import type { ComponentProps } from 'react';
+import { ReadingNavigationScope, useReadingNavigation } from './navigation/ReadingNavigation';
+import { ReadingNavigationControls } from './navigation/ReadingNavigationControls';
+import { usePdfReadingNavigation } from './navigation/usePdfReadingNavigation';
+import { readingAssistantContext } from './readingAssistantContext';
 import { buildSegmentNoteLookup } from './pdf-reader/segmentNoteLookup';
 import { useReadingSession } from '../parallel-reading/ReadingSessionContext';
 import { AlertTriangle, Loader2 } from "lucide-react";
@@ -56,6 +62,7 @@ import {
 } from "./pdf-reader/pdfReaderSupport";
 import { mergePdfAnnotationAnchorSegments } from "./pdf-reader/pdfPageAnnotations";
 import { ReaderToolbar } from "./pdf-reader/ReaderToolbar";
+import { ReaderSurfaceFrame } from "./ReaderSurfaceFrame";
 import { SegmentNoteEditor } from "./pdf-reader/SegmentNoteEditor";
 import { SegmentRail } from "./pdf-reader/SegmentRail";
 import { SegmentRailLayout } from "./pdf-reader/SegmentRailLayout";
@@ -220,7 +227,7 @@ type MineruPdfReaderProps = {
   ) => Promise<NoteDocument>;
 };
 
-export function MineruPdfReader({
+function MineruPdfReaderBody({
   entry,
   editorScopeKey,
   workspaceRoot,
@@ -332,6 +339,7 @@ export function MineruPdfReader({
   const {
     apply: applyRecommendedTags,
     busy: tagSuggestionBusy,
+    error: tagSuggestionError,
     dismiss: dismissTagSuggestions,
     open: tagSuggestionsOpen,
     recommendations: recommendedTags,
@@ -339,10 +347,8 @@ export function MineruPdfReader({
     setOpen: setTagSuggestionsOpen,
     toggleRecommendation: toggleRecommendedTag,
   } = useEntryTagSuggestions({
-    autoRun: false,
     entry,
     onApplyEntryTagPaths,
-    segments,
     workspaceRoot,
   });
   const notesBySegmentUid = useMemo(() => buildSegmentNoteLookup(segmentNotes, segments), [segmentNotes, segments]);
@@ -469,6 +475,8 @@ export function MineruPdfReader({
       notePaneOpen: globalNotePaneOpen,
       segments,
     });
+  const effectivePageDisplayMode = readerPreferences.pageTurningMode === 'book' && pdfViewportWidth < 860
+    ? 'single' : readerPreferences.pageDisplayMode;
   const {
     handleCtrlWheelZoom,
     pageWidth,
@@ -479,7 +487,7 @@ export function MineruPdfReader({
     entryId: entry.id,
     onInteractionStart: () => setHoveredSegmentUid(null),
     viewportWidth: pdfViewportWidth,
-    pageDisplayMode: readerPreferences.pageDisplayMode,
+    pageDisplayMode: effectivePageDisplayMode,
   });
   const {
     flashSegment,
@@ -494,6 +502,13 @@ export function MineruPdfReader({
     pdfScrollRef,
   });
 
+  const readingNavigation = useReadingNavigation();
+  const rememberReadingPosition = readingNavigation?.remember;
+  const hasRetainedPosition = readingNavigation?.hasRetainedPosition;
+  const isJumpHandled = readingNavigation?.isJumpHandled;
+  const markJumpHandled = readingNavigation?.markJumpHandled;
+  usePdfReadingNavigation(pdfScrollRef, segments, pdfState.status === 'ready', restartSegmentHighlight,
+    { value: zoom, restore: value => updateZoom(() => value) });
   const pageCount =
     pdfState.status === "ready"
       ? pdfState.document.numPages
@@ -505,7 +520,7 @@ export function MineruPdfReader({
   );
 
   const rows = useMemo(() => {
-    if (readerPreferences.pageDisplayMode === 'dual') {
+    if (effectivePageDisplayMode === 'dual') {
       const result: PageSegments[][] = [];
       for (let i = 0; i < pages.length; i += 2) {
         result.push(pages.slice(i, i + 2));
@@ -513,7 +528,7 @@ export function MineruPdfReader({
       return result;
     }
     return pages.map((p) => [p]);
-  }, [pages, readerPreferences.pageDisplayMode]);
+  }, [pages, effectivePageDisplayMode]);
 
   const currentPageIdx = Math.min(
     Math.max(0, pageCount - 1),
@@ -527,18 +542,20 @@ export function MineruPdfReader({
   const goToPageNumber = useCallback(
     (pageNumber: number) => {
       const requestedPageIdx = Math.min(pageCount - 1, Math.max(0, pageNumber - 1));
-      const pageIdx = readerPreferences.pageDisplayMode === 'dual'
+      const pageIdx = effectivePageDisplayMode === 'dual'
         ? Math.floor(requestedPageIdx / 2) * 2
         : requestedPageIdx;
+      rememberReadingPosition?.();
       scrollToPage(pageIdx, pdfScrollRef.current);
     },
-    [pageCount, pdfScrollRef, readerPreferences.pageDisplayMode],
+    [pageCount, pdfScrollRef, effectivePageDisplayMode, rememberReadingPosition],
   );
 
   useEffect(() => {
     if (!pdfTextSearch.activeMatch) return;
+    rememberReadingPosition?.();
     scrollToPage(pdfTextSearch.activeMatch.pageIdx, pdfScrollRef.current);
-  }, [pdfScrollRef, pdfTextSearch.activeMatch]);
+  }, [pdfScrollRef, pdfTextSearch.activeMatch, rememberReadingPosition]);
 
   const openOriginalPdf = useCallback(async () => {
     if (!pdfPath) return;
@@ -575,10 +592,17 @@ export function MineruPdfReader({
     visiblePageIndexes,
     workspaceRoot,
   });
+  const resumeBookmarkRef = useRef<{ key: string; page: number | null } | null>(null);
+  const bookmarkKey = `${workspaceRoot}:${entry.id}`;
+  if (resumeBookmarkRef.current?.key !== bookmarkKey) resumeBookmarkRef.current = null;
+  if (!resumeBookmarkRef.current && savedReadingState?.entry_id === entry.id) {
+    resumeBookmarkRef.current = { key: bookmarkKey, page: savedReadingState.current_page_idx };
+  }
 
   useEffect(() => {
     if (
       pdfState.status !== "ready" ||
+      hasRetainedPosition ||
       !savedReadingState ||
       savedReadingState.current_page_idx === null ||
       jumpRequest
@@ -589,13 +613,14 @@ export function MineruPdfReader({
     if (resumedReadingStateKeyRef.current === resumeKey) {
       return;
     }
-    resumedReadingStateKeyRef.current = resumeKey;
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
+    let frame = window.requestAnimationFrame(() => {
+      frame = window.requestAnimationFrame(() => {
+        resumedReadingStateKeyRef.current = resumeKey;
         scrollToPage(savedReadingState.current_page_idx ?? 0, pdfScrollRef.current);
       });
     });
-  }, [entry.id, jumpRequest, pdfScrollRef, pdfState.status, savedReadingState]);
+    return () => window.cancelAnimationFrame(frame);
+  }, [entry.id, hasRetainedPosition, jumpRequest, pdfScrollRef, pdfState.status, savedReadingState]);
 
   const parseStatus = entry.status;
   const parseMessage = entry.parseMessage;
@@ -736,8 +761,9 @@ export function MineruPdfReader({
     setSegmentOverlayOpen(true);
   };
 
-  const openSegmentAnnotationPane = (segment: SourceSegment) => {
+  const openSegmentAnnotationPane = (segment: SourceSegment, annotationId?: string) => {
     if (!activateSegment(segment, { mode: "annotation" })) return;
+    if (annotationId) setAnnotationFocusId(annotationId);
     setSegmentOverlayOpen(true);
   };
 
@@ -779,6 +805,7 @@ export function MineruPdfReader({
         annotation.segment_snapshot?.bbox ??
         segment.bbox;
 
+      rememberReadingPosition?.();
       setAnnotationFocusId(annotation.annotation_id);
       restartSegmentHighlight(segment.uid);
       window.requestAnimationFrame(() => {
@@ -787,7 +814,7 @@ export function MineruPdfReader({
         }
       });
     },
-    [pdfScrollRef, restartSegmentHighlight, scrollToMountedOrPendingSegment],
+    [pdfScrollRef, restartSegmentHighlight, scrollToMountedOrPendingSegment, rememberReadingPosition],
   );
   const translateSelectedText = useCallback(
     ({ segment, text }: { segment: SourceSegment; text: string }) =>
@@ -915,20 +942,22 @@ export function MineruPdfReader({
         : "要添加到笔记，请先在左侧新建笔记，并用分屏按钮打开。";
 
   useEffect(() => {
-    if (!jumpRequest || loadState.status !== "ready") {
+    if (!jumpRequest || loadState.status !== "ready" || pdfState.status !== 'ready') {
       return;
     }
     const jumpKey = `${entry.id}:${jumpRequest.requestKey}`;
-    if (handledJumpRequestKeyRef.current === jumpKey) {
+    if (handledJumpRequestKeyRef.current === jumpKey || isJumpHandled?.(jumpKey)) {
       return;
     }
 
     if (jumpRequest.kind === "page") {
-      handledJumpRequestKeyRef.current = jumpKey;
-      window.requestAnimationFrame(() => {
+      const frame = window.requestAnimationFrame(() => {
+        handledJumpRequestKeyRef.current = jumpKey;
+        markJumpHandled?.(jumpKey);
+        rememberReadingPosition?.();
         scrollToPage(jumpRequest.pageIdx, pdfScrollRef.current);
       });
-      return;
+      return () => window.cancelAnimationFrame(frame);
     }
 
     const segment = findSegmentByLogicalOrRealUid(
@@ -936,15 +965,18 @@ export function MineruPdfReader({
       jumpRequest.segmentUid,
     );
     if (!segment) {
-      handledJumpRequestKeyRef.current = jumpKey;
-      window.requestAnimationFrame(() => {
+      const frame = window.requestAnimationFrame(() => {
+        handledJumpRequestKeyRef.current = jumpKey;
+        markJumpHandled?.(jumpKey);
+        rememberReadingPosition?.();
         scrollToPage(jumpRequest.pageIdx, pdfScrollRef.current);
       });
-      return;
+      return () => window.cancelAnimationFrame(frame);
     }
 
     if (!activateSegment(segment)) return;
     handledJumpRequestKeyRef.current = jumpKey;
+    markJumpHandled?.(jumpKey);
     if (jumpRequest.kind === "annotation") {
       const annotation = annotations.find(
         (candidate) => candidate.annotation_id === jumpRequest.annotationId,
@@ -957,14 +989,19 @@ export function MineruPdfReader({
         return;
       }
     }
-    window.requestAnimationFrame(() => {
+    const frame = window.requestAnimationFrame(() => {
       scrollToMountedOrPendingSegment(segment);
     });
+    return () => window.cancelAnimationFrame(frame);
   }, [
     jumpRequest?.requestKey,
+    rememberReadingPosition,
     annotations,
     focusPdfAnnotation,
     loadState.status,
+    pdfState.status,
+    isJumpHandled,
+    markJumpHandled,
     scrollToMountedOrPendingSegment,
     navigableSegments,
   ]);
@@ -993,15 +1030,7 @@ export function MineruPdfReader({
     options?: AssistantContextAddOptions,
   ) => {
     onAddAssistantContext?.(
-      {
-        kind: "segment",
-        entryId: entry.id,
-        entryTitle: entry.title,
-        // The assistant backend resolves this value against persisted segment_uid.
-        segmentUid: segment.uid,
-        pageIdx: segment.page_idx,
-        text: segment.markdown ?? segment.text,
-      },
+      readingAssistantContext(entry, segment, options),
       options,
     );
     restartSegmentHighlight(segment.uid);
@@ -1079,15 +1108,19 @@ export function MineruPdfReader({
   }
 
   return (
-    <div className="relative grid size-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-muted/30">
+    <PaperReferencesProvider segments={segments} entryId={entry.id} workspaceRoot={workspaceRoot} pdfDocument={pdfState.status === "ready" ? pdfState.document : null}>
+    <ReaderSurfaceFrame className="pdf-reader-surface bg-muted/30" toolbar={
       <ReaderToolbar
+        navigation={<ReadingNavigationControls segments={segments} entryId={entry.id} workspaceRoot={workspaceRoot} />}
         currentPage={currentPageIdx + 1}
+        effectivePageDisplayMode={effectivePageDisplayMode}
         entry={entry}
         pageCount={pageCount}
         segmentCount={segments.length}
         recommendedTags={recommendedTags}
         selectedRecommendedTagPaths={[...selectedSuggestedTagPaths]}
         tagSuggestionBusy={tagSuggestionBusy}
+        tagSuggestionError={tagSuggestionError}
         tagSuggestionsOpen={tagSuggestionsOpen}
         translation={translation}
         translationBusy={translationBusy}
@@ -1124,7 +1157,7 @@ export function MineruPdfReader({
           updateZoom((currentZoom) => currentZoom - PDF_ZOOM_STEP)
         }
       />
-
+    }>
       <PaperExportDialog
         entryId={entry.id}
         entryTitle={entry.title}
@@ -1193,6 +1226,7 @@ export function MineruPdfReader({
       />
 
       <div
+        data-reader-body
         className={`relative grid h-full min-h-0 min-w-0 overflow-hidden ${notePaneResizePreviewWidth !== null ? "is-note-pane-resizing" : ""}`}
         style={{
           gridTemplateColumns: globalNotePaneOpen
@@ -1267,7 +1301,6 @@ export function MineruPdfReader({
               annotationsBySegmentUid={annotationsBySegmentUid}
               notesBySegmentUid={notesBySegmentUid}
               pages={pages}
-              pageCount={pageCount}
               selectedSegmentUid={
                 selectedSegment ? logicalSegmentUid(selectedSegment) : null
               }
@@ -1282,6 +1315,7 @@ export function MineruPdfReader({
                   return;
                 }
 
+                rememberReadingPosition?.();
                 scrollToSegment(segmentUid, pdfScrollRef.current);
               }}
             />
@@ -1301,6 +1335,9 @@ export function MineruPdfReader({
             searchMatchCountsByPage={pdfTextSearch.matchCountsByPage}
             searchQuery={pdfTextSearch.query}
             pageWidth={pageWidth}
+            bookMode={readerPreferences.pageTurningMode === 'book'}
+            zoom={zoom}
+            resumePageIdx={resumeBookmarkRef.current?.page}
             leftInset={PDF_RAIL_WIDTH}
             hoverPreviewEnabled={readerPreferences.hoverPreviewEnabled && !readingSession?.resizing}
             hoverPreviewFontSize={readerPreferences.pdfHoverPreviewFontSize}
@@ -1448,7 +1485,8 @@ export function MineruPdfReader({
         ) : null}
       </div>
 
-    </div>
+    </ReaderSurfaceFrame>
+    </PaperReferencesProvider>
   );
 }
 
@@ -1532,4 +1570,9 @@ async function capturePdfSegmentScreenshot(
 
 function clampCanvasCoordinate(value: number, max: number) {
   return Math.min(Math.max(0, Math.round(value)), max);
+}
+
+export function MineruPdfReader(props: ComponentProps<typeof MineruPdfReaderBody>) {
+  const key = JSON.stringify(['pdf', props.workspaceRoot, props.entry.id, props.entry.pdfFileName]);
+  return <ReadingNavigationScope key={key} retentionKey={key}><MineruPdfReaderBody {...props} /></ReadingNavigationScope>;
 }

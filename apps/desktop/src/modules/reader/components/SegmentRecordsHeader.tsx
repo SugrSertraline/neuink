@@ -8,7 +8,7 @@ import { ReadingExportButton } from '../export/ReadingExportButton';
 import { EntryContentHeader } from './EntryContentHeader';
 import { LocateSourceButton } from './LocateSourceButton';
 
-export type SegmentRecordFilter = 'all' | 'note' | 'annotation' | 'highlight';
+export type SegmentRecordFilter = 'all' | 'note' | 'annotation' | 'highlight' | 'bookmark';
 
 export function SegmentRecordsHeader({ entryId, entryTitle, workspaceRoot, noteCount, annotationCount, linkedReaderKind, follow, collapsed, filter, pageIndex, loading, busy, exportScope,
   onFollowChange, onToggleList, onFilterChange, onLocate }: {
@@ -31,7 +31,7 @@ export function SegmentRecordsHeader({ entryId, entryTitle, workspaceRoot, noteC
   onLocate: () => void;
 }) {
   const readerLabel = linkedReaderKind === 'reflow' ? '重排视图' : 'PDF';
-  const exportLabel = { all: '导出片段记录', note: '导出片段笔记', annotation: '导出批注', highlight: '导出高亮' }[filter];
+  const exportLabel = { all: '导出片段记录', note: '导出片段笔记', annotation: '导出批注', highlight: '导出高亮', bookmark: '导出收藏笔记' }[filter];
   return <>
     <EntryContentHeader contentTitle="片段记录" entryTitle={entryTitle}>
       <ReadingExportButton entryId={entryId} entryTitle={entryTitle} workspaceRoot={workspaceRoot} scope={exportScope}
@@ -45,7 +45,7 @@ export function SegmentRecordsHeader({ entryId, entryTitle, workspaceRoot, noteC
         <Button aria-label={collapsed ? '展开片段列表' : '折叠片段列表'} title={collapsed ? '展开片段列表' : '折叠片段列表'} size="icon-xs" variant="ghost" onClick={onToggleList}>
           {collapsed ? <PanelLeftOpen aria-hidden="true" size={14} /> : <PanelLeftClose aria-hidden="true" size={14} />}
         </Button>
-        {([['all', '全部'], ['note', '有笔记'], ['annotation', '有批注'], ['highlight', '仅高亮']] as const).map(([value, label]) =>
+        {([['all', '全部'], ['bookmark', '收藏'], ['note', '有笔记'], ['annotation', '有批注'], ['highlight', '仅高亮']] as const).map(([value, label]) =>
           <Button key={value} aria-pressed={filter === value} size="xs" variant={filter === value ? 'secondary' : 'ghost'} onClick={() => onFilterChange(value)}>
             {value === 'highlight' ? <Highlighter aria-hidden="true" size={13} /> : null}{label}
           </Button>)}

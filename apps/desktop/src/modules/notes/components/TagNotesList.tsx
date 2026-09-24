@@ -8,6 +8,7 @@ import type { NoteTarget } from '@/shared/types/domain';
 import { useWorkspaceNotes } from '../WorkspaceNotesContext';
 import { useTagNoteActions } from '../useTagNoteActions';
 import { CreateTagNoteButton } from './CreateTagNoteButton';
+import { AppearanceIcon } from '@/shared/components/AppearanceIcon';
 
 export function tagNotesForScope(notes: CatalogNote[], tagId?: string | null, entryId?: string, citedOnly = false) {
   return notes.filter((note) => note.target.owner.kind === 'tag_reading' && (!tagId || note.target.owner.tag_id === tagId)
@@ -23,7 +24,7 @@ export function TagNotesList({ tagId, entryId, citedOnly, scope, onOpen, deleted
   const action = useTagNoteActions(scope);
   const notes = tagNotesForScope(model?.catalog.notes ?? [], tagId, entryId, citedOnly)
     .filter(note => Boolean(note.deleted_at) === deletedOnly && `${note.title} ${note.owner_title}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
-  return <section aria-label={deletedOnly ? '已删除标签笔记' : '标签笔记'} className={cn('flex min-h-0 min-w-0 flex-col', !embedded && 'flex-1')}>
+  return <section data-material="notebook-list" aria-label={deletedOnly ? '已删除标签笔记' : '标签笔记'} className={cn('flex min-h-0 min-w-0 flex-col', !embedded && 'flex-1')}>
     <div aria-label="标签笔记筛选与操作" className="flex min-w-0 shrink-0 flex-wrap items-center gap-1.5 border-b px-3 py-2">
       <SearchInput label={deletedOnly ? '搜索已删除标签笔记' : '搜索标签笔记'} value={query} onValueChange={setQuery} placeholder={deletedOnly ? '搜索已删除标签笔记' : '搜索笔记标题、所属标签'} />
       {tagId && !deletedOnly && !hideCreateAction ? <CreateTagNoteButton tagId={tagId} scope={scope} onOpen={onOpen} /> : null}
@@ -34,6 +35,7 @@ export function TagNotesList({ tagId, entryId, citedOnly, scope, onOpen, deleted
     <div className={embedded ? 'min-w-0' : 'min-h-0 flex-1 overflow-y-auto'}>
       {!model?.loading && !model?.error && !notes.length ? <p className="p-3 text-sm text-muted-foreground">{query.trim() ? '没有匹配的标签笔记。' : deletedOnly ? '暂无已删除的标签笔记。' : '暂无标签笔记。'}</p> : null}
       <ul className="divide-y">{notes.map(note => <li key={noteTargetKey(note.target)} className="flex min-w-0 items-center gap-1 px-3 py-2 text-xs">
+        <AppearanceIcon kind="notes">{null}</AppearanceIcon>
         <button type="button" disabled={deletedOnly || Boolean(note.error) || action.busy} className="min-w-0 flex-1 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-60" onClick={() => onOpen?.(note.target, note.title)}>
           {!tagId ? <p className="truncate text-muted-foreground">{note.owner_title}</p> : null}
           <p className="truncate font-medium" title={note.title}>{note.title}</p>

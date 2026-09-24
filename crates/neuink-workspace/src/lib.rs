@@ -1,5 +1,6 @@
 pub mod annotation_index;
 pub mod atomic_write;
+pub mod agent_execution;
 pub mod entry_meta;
 pub mod export;
 pub mod error;
@@ -12,6 +13,7 @@ mod note_catalog_tests;
 pub mod source_availability;
 pub mod tag_details;
 pub mod reading_state;
+pub mod paragraph_translation;
 pub mod tag_reading;
 pub mod tag_archive;
 mod tag_transaction;

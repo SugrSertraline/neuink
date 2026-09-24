@@ -27,22 +27,25 @@ import { EmbeddingStatusLine } from './EmbeddingStatusLine';
 import { SearchIndexStatusLine } from './SearchIndexStatusLine';
 import { SearchModeControl } from './SearchModeControl';
 import { SearchResultList } from './SearchResultList';
+import { AppearanceCommand, isAppearanceCommand } from './AppearanceCommand';
 
 type SearchPanelProps = {
   buildStatus?: SearchIndexBuildStatus | null;
   root: string | null;
   status: 'loading' | 'ready' | 'error';
   onOpenResult: (hit: SearchHit) => void;
+  onOpenSetting?: (id: string) => void;
 };
 
-export function SearchPanel({ buildStatus = null, root, status, onOpenResult }: SearchPanelProps) {
+export function SearchPanel({ buildStatus = null, root, status, onOpenResult, onOpenSetting }: SearchPanelProps) {
   const [query, setQuery] = useState('');
+  const appearanceCommand = isAppearanceCommand(query);
   const [mode, setMode] = useState<SearchMode>('hybrid');
   const [hoverPreviewEnabled, setHoverPreviewEnabled] = useState(true);
   const [rebuildRequested, setRebuildRequested] = useState(false);
   const [buildConfirmOpen, setBuildConfirmOpen] = useState(false);
   const { notify } = useToast();
-  const { busy, error, results } = useGlobalSearch({ root, status, query, mode });
+  const { busy, error, results } = useGlobalSearch({ root, status, query: appearanceCommand ? '' : query, mode });
   const semanticMode = mode === 'hybrid' || mode === 'semantic';
   const { embeddingError, embeddingStatus } = useEmbeddingStatus(
     semanticMode && Boolean(root) && status === 'ready'
@@ -106,19 +109,24 @@ export function SearchPanel({ buildStatus = null, root, status, onOpenResult }: 
       </div>
 
       <Command
+        label="搜索资料"
+        data-material="sidebar-canvas"
         className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] rounded-none p-0"
         filter={() => 1}
         shouldFilter={false}
+        onKeyDownCapture={event => {
+          if (event.key === 'Enter' && event.nativeEvent.isComposing) event.stopPropagation();
+        }}
       >
-        <div className="min-w-0 border-b p-2">
+        <div className="min-w-0 border-b p-2" data-material="sidebar-toolbar">
           <CommandInput
             autoFocus
-            disabled={!root || status !== 'ready'}
+            aria-label="搜索资料"
             placeholder="搜索标题、Tag、Note、PDF Segment"
             value={query}
             onValueChange={setQuery}
           />
-          <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
+          {!appearanceCommand ? <><div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
             <span className="shrink-0 text-[11px] font-semibold text-muted-foreground">模式</span>
             <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-1.5">
               <Button
@@ -190,16 +198,18 @@ export function SearchPanel({ buildStatus = null, root, status, onOpenResult }: 
             <div className="mt-2 min-w-0 max-w-full overflow-hidden break-words rounded-md border border-destructive/25 bg-destructive/5 px-2.5 py-2 text-xs leading-5 text-destructive">
               {error}
             </div>
-          ) : null}
+          ) : null}</> : null}
         </div>
 
-        <SearchResultList
+        {appearanceCommand ? <AppearanceCommand onExecuted={() => setQuery('')} /> : <SearchResultList
+          settingsQuery={query}
+          onOpenSetting={onOpenSetting}
           className="h-full min-h-0"
           hoverPreviewEnabled={hoverPreviewEnabled}
           results={results}
           root={root}
           onOpenResult={onOpenResult}
-        />
+        />}
       </Command>
 
       <Dialog open={buildConfirmOpen} onOpenChange={setBuildConfirmOpen}>

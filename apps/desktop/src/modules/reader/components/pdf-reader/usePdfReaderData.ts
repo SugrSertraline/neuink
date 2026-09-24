@@ -4,6 +4,7 @@ import type { PdfReaderResponse } from '@/shared/ipc/workspaceApi';
 import type { Annotation, SegmentBlockNote } from '@/shared/types/domain';
 
 import type { LibraryEntry } from '../../../library/components/LibrarySidebar';
+import { usePublishSegmentNotes } from '../SegmentBookmarks';
 
 export type PdfReaderLoadState =
   | { status: 'idle' | 'loading'; data: null; error: null }
@@ -27,6 +28,7 @@ export function usePdfReaderData({
     error: null
   });
   const [segmentNotes, setSegmentNotes] = useState<SegmentBlockNote[]>([]);
+  usePublishSegmentNotes(segmentNotes);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [manualReloadKey, setManualReloadKey] = useState(0);
   const previousRecordReloadKeyRef = useRef(recordReloadKey);

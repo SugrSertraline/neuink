@@ -1,4 +1,5 @@
 export type AgentToolId =
+  | 'app.set_appearance'
   | 'create_entry'
   | 'search_segments'
   | 'read_segment_content'
@@ -12,8 +13,6 @@ export type AgentToolId =
   | 'segment_note.propose_patch'
   | 'entry.propose_meta_patch'
   | 'tag.propose_change'
-  | 'skill.search'
-  | 'skill.load'
   | 'task.run_subagent'
   | `mcp.${string}`;
 
@@ -61,62 +60,16 @@ export type AgentToolPackage = {
   permissionMode: 'ask' | 'allow';
 };
 
-export type SkillPackageKind = 'builtin' | 'installed';
-
-export type SkillPackageCategory =
-  | 'reading'
-  | 'research'
-  | 'writing'
-  | 'report'
-  | 'slides'
-  | 'automation'
-  | 'custom';
-
-export type SkillPackageFile = {
-  path: string;
-  sizeBytes: number;
-};
-
-export type SkillPackageResourceKind = 'asset' | 'reference' | 'script' | 'skill';
-
-export type SkillPackage = {
-  category: SkillPackageCategory;
-  description: string;
-  enabled: boolean;
-  id: string;
-  installedAt: string | null;
-  kind: SkillPackageKind;
-  metadataOnly?: boolean;
-  name: string;
-  packagePath: string | null;
-  readme: string;
-  resourcePaths?: {
-    assets: string[];
-    references: string[];
-    scripts: string[];
-  };
-  scriptExecution?: 'disabled' | 'mcp_or_tool_package_required';
-  skillMarkdownPath: string | null;
-  skillSpecVersion?: string;
-  sourceArchivePath: string | null;
-  suggestedToolIds: AgentToolId[];
-  triggers: string[];
-  version: string;
-  files: SkillPackageFile[];
-};
-
 export type AgentPermissions = {
   canInvokeSubagents: boolean;
   canInvokeTools: boolean;
   canReadWorkspaceWide: boolean;
-  canUseSkills: boolean;
   canWriteProposals: boolean;
 };
 
 export type AgentSandbox = 'read-only' | 'workspace-write-proposals' | 'workspace-write';
 
 export type AgentBaseProfile = {
-  allowedSkillPackageIds: string[];
   allowedSubagentIds: string[];
   allowedMcpServerIds?: string[];
   description: string;
@@ -134,17 +87,12 @@ export type MainAssistantProfile = AgentBaseProfile & {
   kind: 'main_assistant';
 };
 
-export type SubagentOutputKind =
-  | 'evidence'
-  | 'memory'
-  | 'patch_plan'
-  | 'task_contract';
+export type SubagentOutputKind = 'evidence';
 
 export type SubagentProfile = AgentBaseProfile & {
   enabled: boolean;
   kind: 'subagent';
   outputKind: SubagentOutputKind;
-  subagentManifestPath?: string | null;
 };
 
 export type AgentProfile = MainAssistantProfile | SubagentProfile;
@@ -153,12 +101,10 @@ export type AgentRuntimeSettings = {
   mainAssistant: MainAssistantProfile;
   mcpServers: AgentMcpServer[];
   subagents: SubagentProfile[];
-  skillPackages: SkillPackage[];
   toolPackages: AgentToolPackage[];
-  version: 3;
+  version: 4;
 };
 
 export type AgentExecutionSelection = {
   agent: AgentProfile;
-  skillPackages: SkillPackage[];
 };

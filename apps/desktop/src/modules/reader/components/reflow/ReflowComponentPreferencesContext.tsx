@@ -8,19 +8,7 @@ import {
 } from '@/shared/lib/readerPreferences';
 
 import type { ReflowSegmentGroup } from './buildReflowBlocks';
-
-type ReflowComponentKey = keyof Pick<
-  ReflowComponentPreferences,
-  | 'heading'
-  | 'paragraph'
-  | 'list'
-  | 'table'
-  | 'math'
-  | 'code'
-  | 'supportingText'
-  | 'figure'
-  | 'chart'
->;
+import { type ReflowComponentKey } from '@/shared/lib/reflowContentPreferences';
 
 const ReflowComponentPreferencesContext = createContext(
   DEFAULT_REFLOW_COMPONENT_PREFERENCES
@@ -52,7 +40,7 @@ export function isReflowGroupVisible(
     return false;
   }
 
-  return preferences.diagramVisible || !isMermaidOnlySegment(group);
+  return true;
 }
 
 export function reflowGroupTextScale(
@@ -114,9 +102,4 @@ export function reflowComponentKeyForGroup(group: ReflowSegmentGroup): ReflowCom
     default:
       return 'paragraph';
   }
-}
-
-function isMermaidOnlySegment(group: ReflowSegmentGroup) {
-  const markdown = (group.body.markdown ?? group.body.text).trim();
-  return /^```mermaid\s+[\s\S]*```$/i.test(markdown);
 }

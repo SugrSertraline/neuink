@@ -16,6 +16,6 @@ export function hasAnyUnsavedEdits() {
 export async function saveEditsBeforeWorkspaceChange() {
   if (!await saveAllSegmentEditorsBeforeWorkspaceChange() ||
       !await saveAllMarkdownNotesBeforeWorkspaceChange() || hasAnyUnsavedEdits()) {
-    throw new Error('有文档笔记、片段笔记或批注未能保存，或保存期间又有修改。已取消切换资料库，请回到阅读页处理。');
+    throw new Error('有设置、条目信息、文档笔记、片段笔记或批注未能保存，或保存期间又有修改。已取消切换资料库，请回到对应页面处理。');
   }
 }

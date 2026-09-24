@@ -77,7 +77,7 @@ export function useSurfaceCloseGuard({ root, onClose }: { root: string | null; o
       if (target?.root === context.current.root && target.element.isConnected) target.element.focus();
     }}>
       <DialogHeader><DialogTitle>{pending?.transition ? '保存修改后再继续？' : '保存修改后再关闭？'}</DialogTitle>
-        <DialogDescription>待操作的 {pending?.targets.length ?? 0} 个页面中有未保存的标签描述、阅读进度、文档笔记、片段笔记或批注。保存失败时保留当前页面。</DialogDescription></DialogHeader>
+        <DialogDescription>待操作的 {pending?.targets.length ?? 0} 个页面中有未保存的设置、条目信息、标签描述、阅读进度、文档笔记、片段笔记或批注。保存失败时保留当前页面。</DialogDescription></DialogHeader>
       {error ? <p role="alert" className="break-words text-sm text-destructive">{error}</p> : null}
       <DialogFooter className="flex-wrap">
         <Button disabled={busy} variant="outline" onClick={() => setPending(null)}>取消</Button>

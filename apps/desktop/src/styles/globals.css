@@ -7,3 +7,11 @@
 @import "./base.css";
 @import "./shell.css";
 @import "./features.css";
+@import "./atelier.css";
+@import "./atelier-controls.css";
+@import "./liquid-glass-controls.css";
+@import "./liquid-glass.css";
+@import "./reader-paper.css";
+@import "./sidebar-content-tree.css";
+
+@import "./settings.css";

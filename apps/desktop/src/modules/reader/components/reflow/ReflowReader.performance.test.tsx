@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { SourceSegment } from '@/shared/types/domain';
 import { DEFAULT_REFLOW_COMPONENT_PREFERENCES } from '@/shared/lib/readerPreferences';
+import { ToastContext } from '@/shared/hooks/useToast';
+import { TooltipProvider } from '@/components/ui/tooltip';
 
 import { ReflowReader } from './ReflowReader';
 
@@ -27,7 +29,7 @@ describe('ReflowReader virtualization', () => {
   it('mounts only the viewport window for a long reflow document', async () => {
     const segments = Array.from({ length: 240 }, (_, index) => segment(index));
     const { container } = render(
-      <div style={{ height: 800 }}>
+      <TooltipProvider><ToastContext.Provider value={{ notify: () => 'test', dismiss: vi.fn() }}><div style={{ height: 800 }}>
         <ReflowReader
           activeSegmentUid={null}
           annotationsBySegmentUid={new Map()}
@@ -59,7 +61,7 @@ describe('ReflowReader virtualization', () => {
           onOpenSourceBacklink={vi.fn()}
           onRequirePdfDocument={vi.fn()}
         />
-      </div>
+      </div></ToastContext.Provider></TooltipProvider>
     );
 
     await waitFor(() => {

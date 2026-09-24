@@ -1,7 +1,7 @@
 import { resolveSourceSnapshotAssetUrl } from './sourceSnapshotAssets';
 export { resolveSourceSnapshotAssetUrl, resolveMineruAssetUrl } from './sourceSnapshotAssets';
 import 'katex/dist/katex.min.css';
-import { Children, Component, isValidElement, memo, type ReactNode } from 'react';
+import { Children, Component, isValidElement, memo, useMemo, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
@@ -26,6 +26,7 @@ export { isMineruImagePath } from './sourceSnapshotMath';
 export type SourceSnapshotImageSize = 'compact' | 'standard' | 'large' | 'full';
 
 type SourceSnapshotPreviewProps = {
+  renderInlineText?: (children: ReactNode) => ReactNode;
   allowScroll?: boolean;
   /** When provided, resolve images only from these verified assets, never from the document's URLs. */
   assetUrls?: Readonly<Record<string, string>>;
@@ -159,6 +160,7 @@ function deriveSnapshotValues(
 }
 
 function SourceSnapshotPreviewImpl({
+  renderInlineText,
   allowScroll = true,
   assetUrls,
   compact = false,
@@ -177,6 +179,10 @@ function SourceSnapshotPreviewImpl({
   mermaidAsCode = false,
   workspaceRoot
 }: SourceSnapshotPreviewProps) {
+  const inlineComponents = useMemo(() => renderInlineText ? {
+    p: ({ children }: { children?: ReactNode }) => <p>{renderInlineText(children)}</p>,
+    li: ({ children }: { children?: ReactNode }) => <li>{renderInlineText(children)}</li>
+  } : {}, [renderInlineText]);
   const {
     directImageUrl: derivedDirectImageUrl,
     displayMarkdown,
@@ -229,7 +235,7 @@ function SourceSnapshotPreviewImpl({
             src={relatedImageUrl}
           />
         ) : null}
-        <p className="whitespace-pre-wrap break-words">{normalized}</p>
+        <p className="whitespace-pre-wrap break-words">{renderInlineText ? renderInlineText(normalized) : normalized}</p>
       </div>
     );
   }
@@ -241,6 +247,7 @@ function SourceSnapshotPreviewImpl({
         compact && 'text-[0.95em] leading-normal',
         flush && 'source-snapshot-preview--flush'
       )}
+      data-material="source-paper"
     >
       {relatedImageUrl && previewMode !== 'original' && (segmentType !== 'table' || !displayMarkdown) ? (
         <PreviewImage
@@ -254,6 +261,7 @@ function SourceSnapshotPreviewImpl({
       <MarkdownPreviewErrorBoundary fallback={raw}>
         <ReactMarkdown
         components={{
+          ...inlineComponents,
           a: ({ children, href }) => (
             <a href={href} rel="noreferrer" target="_blank">
               {children}

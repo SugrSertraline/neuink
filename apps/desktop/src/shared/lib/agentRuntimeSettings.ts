@@ -2,26 +2,24 @@ import type {
   AgentExecutionSelection,
   AgentMcpServer,
   AgentProfile,
+  AgentPermissions,
   AgentRuntimeSettings,
   AgentToolId,
   AgentToolPackage,
   MainAssistantProfile,
-  SkillPackage,
-  SkillPackageCategory,
   SubagentOutputKind,
   SubagentProfile
 } from '@/shared/types/agentRuntime';
 import type { AgentInvocationPlan, AssistantTaskPlan } from '@/shared/types/assistant';
-import { DEFAULT_FEATURE_SKILL_IDS } from './featureSkills';
 
-const STORAGE_KEY = 'neuink.agentRuntime.v3';
-const SYSTEM_MANAGED_SUBAGENT_IDS = new Set([
-  'task-orchestrator-agent',
-  'memory-agent',
-  'skill-selector-agent'
-]);
+const STORAGE_KEY = 'neuink.agentRuntime.v4';
+const LEGACY_MAIN_DESCRIPTION = 'Neuink 全局主助手，负责直接响应用户、选择技能和委派子 agent。';
+const LEGACY_MAIN_PROMPT = 'You are Neuink Main Assistant. Stay grounded in workspace evidence, use skills only after loading them, and create user-confirmable proposals for note or Entry metadata writes.';
+const DEFAULT_MAIN_DESCRIPTION = 'Neuink 全局主助手，负责直接响应用户、调用工具和委派子 agent。';
+const DEFAULT_MAIN_PROMPT = 'You are Neuink Main Assistant. Stay grounded in workspace evidence and create user-confirmable proposals for note or Entry metadata writes.';
 
 const DEFAULT_MAIN_TOOL_IDS: AgentToolId[] = [
+  'app.set_appearance',
   'create_entry',
   'search_segments',
   'read_segment_content',
@@ -35,8 +33,6 @@ const DEFAULT_MAIN_TOOL_IDS: AgentToolId[] = [
   'segment_note.propose_patch',
   'entry.propose_meta_patch',
   'tag.propose_change',
-  'skill.search',
-  'skill.load',
   'task.run_subagent'
 ];
 
@@ -45,47 +41,29 @@ const EVIDENCE_TOOL_IDS: AgentToolId[] = [
   'read_segment_content',
   'read_entry_assistant_context',
   'search_sciverse_evidence',
-  'read_sciverse_content',
-  'skill.search',
-  'skill.load'
-];
-
-const PATCH_TOOL_IDS: AgentToolId[] = [
-  'read_current_note',
-  'note.propose_patch',
-  'segment_note.propose_patch',
-  'skill.search',
-  'skill.load'
+  'read_sciverse_content'
 ];
 
 function createMainAssistant(partial: Partial<MainAssistantProfile>): MainAssistantProfile {
   return {
-    allowedSkillPackageIds: partial.allowedSkillPackageIds ?? [...DEFAULT_FEATURE_SKILL_IDS],
-    allowedSubagentIds:
-      partial.allowedSubagentIds ??
-      [
-        'evidence-agent',
-        'patch-planner-agent'
-      ],
+    allowedSubagentIds: partial.allowedSubagentIds ?? ['evidence-agent'],
     allowedMcpServerIds: partial.allowedMcpServerIds ?? [],
-    description:
-      partial.description ?? 'Neuink 全局主助手，负责直接响应用户、选择技能和委派子 agent。',
-    enabledToolIds: partial.enabledToolIds ?? DEFAULT_MAIN_TOOL_IDS,
+    description: partial.description && partial.description !== LEGACY_MAIN_DESCRIPTION
+      ? partial.description : DEFAULT_MAIN_DESCRIPTION,
+    enabledToolIds: (partial.enabledToolIds ?? DEFAULT_MAIN_TOOL_IDS).filter(isActiveTool),
     id: 'main-assistant',
     kind: 'main_assistant',
     llmProfileId: partial.llmProfileId ?? null,
     name: partial.name ?? 'Neuink 主助手',
-    permissions: partial.permissions ?? {
+    permissions: activePermissions(partial.permissions ?? {
       canInvokeSubagents: true,
       canInvokeTools: true,
       canReadWorkspaceWide: true,
-      canUseSkills: true,
       canWriteProposals: true
-    },
+    }),
     sandbox: partial.sandbox ?? 'workspace-write-proposals',
-    systemPrompt:
-      partial.systemPrompt ??
-      'You are Neuink Main Assistant. Stay grounded in workspace evidence, use skills only after loading them, and create user-confirmable proposals for note or Entry metadata writes.',
+    systemPrompt: partial.systemPrompt && partial.systemPrompt !== LEGACY_MAIN_PROMPT
+      ? partial.systemPrompt : DEFAULT_MAIN_PROMPT,
     visibleInUi: false
   };
 }
@@ -95,62 +73,25 @@ function createSubagent(
     Pick<SubagentProfile, 'id' | 'name' | 'outputKind' | 'systemPrompt'>
 ): SubagentProfile {
   return {
-    allowedSkillPackageIds: partial.allowedSkillPackageIds ?? [...DEFAULT_FEATURE_SKILL_IDS],
     allowedSubagentIds: [],
     allowedMcpServerIds: partial.allowedMcpServerIds ?? [],
     description: partial.description ?? '',
     enabled: partial.enabled ?? true,
-    enabledToolIds:
-      partial.enabledToolIds ??
-      (partial.outputKind === 'patch_plan' ? PATCH_TOOL_IDS : EVIDENCE_TOOL_IDS),
+    enabledToolIds: (partial.enabledToolIds ?? EVIDENCE_TOOL_IDS).filter(isActiveTool),
     id: partial.id,
     kind: 'subagent',
     llmProfileId: partial.llmProfileId ?? null,
     name: partial.name,
     outputKind: partial.outputKind,
-    permissions: partial.permissions ?? {
+    permissions: activePermissions(partial.permissions ?? {
       canInvokeSubagents: false,
       canInvokeTools: true,
       canReadWorkspaceWide: partial.outputKind === 'evidence',
-      canUseSkills: true,
-      canWriteProposals: partial.outputKind === 'patch_plan'
-    },
+      canWriteProposals: false
+    }),
     sandbox: partial.sandbox ?? 'read-only',
-    subagentManifestPath:
-      partial.subagentManifestPath ??
-      `agent-runtime/subagents/${partial.id}/SUBAGENT.toml`,
     systemPrompt: partial.systemPrompt,
     visibleInUi: false
-  };
-}
-
-function createSkillPackage(
-  partial: Partial<SkillPackage> & Pick<SkillPackage, 'id' | 'name' | 'readme' | 'category'>
-): SkillPackage {
-  return {
-    category: partial.category,
-    description: partial.description ?? '',
-    enabled: partial.enabled ?? true,
-    files: partial.files ?? [],
-    id: partial.id,
-    installedAt: partial.installedAt ?? null,
-    kind: partial.kind ?? 'builtin',
-    metadataOnly: partial.metadataOnly ?? false,
-    name: partial.name,
-    packagePath: partial.packagePath ?? null,
-    readme: partial.readme,
-    resourcePaths: partial.resourcePaths ?? {
-      assets: [],
-      references: [],
-      scripts: []
-    },
-    scriptExecution: partial.scriptExecution ?? 'disabled',
-    skillMarkdownPath: partial.skillMarkdownPath ?? null,
-    skillSpecVersion: partial.skillSpecVersion ?? 'agent-skills',
-    sourceArchivePath: partial.sourceArchivePath ?? null,
-    suggestedToolIds: partial.suggestedToolIds ?? [],
-    triggers: partial.triggers ?? [],
-    version: partial.version ?? '1.0.0'
   };
 }
 
@@ -159,65 +100,17 @@ export const DEFAULT_AGENT_RUNTIME_SETTINGS: AgentRuntimeSettings = {
   mcpServers: [],
   subagents: [
     createSubagent({
-      id: 'task-orchestrator-agent',
-      name: 'TaskOrchestratorAgent',
-      outputKind: 'task_contract',
-      description: '在隔离上下文中理解用户任务、解析延续关系并生成可验证的执行合同。',
-      enabledToolIds: [],
-      permissions: {
-        canInvokeSubagents: false,
-        canInvokeTools: false,
-        canReadWorkspaceWide: false,
-        canUseSkills: false,
-        canWriteProposals: false
-      },
-      systemPrompt:
-        'You are Neuink TaskOrchestratorAgent. Understand the user request semantically from conversation memory, recent turns, typed UI context, and the supplied capability catalog. Produce only the requested structured task contract. Never execute tools, never route by keywords, never invent ids, and distinguish creating a new note from editing an existing note.'
-    }),
-    createSubagent({
-      id: 'memory-agent',
-      name: 'MemoryAgent',
-      outputKind: 'memory',
-      description: '把已完成回合压缩为可延续的语义记忆检查点。',
-      enabledToolIds: [],
-      permissions: {
-        canInvokeSubagents: false,
-        canInvokeTools: false,
-        canReadWorkspaceWide: false,
-        canUseSkills: false,
-        canWriteProposals: false
-      },
-      systemPrompt:
-        'You are Neuink MemoryAgent. Update a durable semantic checkpoint from the prior checkpoint and the newest conversation tail. Preserve goals, decisions, unresolved work, referenced entities, and stable user preferences. Do not invent facts.'
-    }),
-    createSubagent({
       id: 'evidence-agent',
       name: 'EvidenceAgent',
       outputKind: 'evidence',
+      enabled: false,
       description: '检索、阅读并整理当前任务需要的证据。',
       systemPrompt:
         'You are Neuink EvidenceAgent. Search and read workspace evidence, then return concise evidence findings with source grounding. Do not write notes.'
-    }),
-    createSubagent({
-      id: 'patch-planner-agent',
-      name: 'PatchPlannerAgent',
-      outputKind: 'patch_plan',
-      description: '把 Markdown 笔记修改需求规划成局部 patch。',
-      enabledToolIds: PATCH_TOOL_IDS,
-      permissions: {
-        canInvokeSubagents: false,
-        canInvokeTools: true,
-        canReadWorkspaceWide: false,
-        canUseSkills: true,
-        canWriteProposals: true
-      },
-      systemPrompt:
-        'You are Neuink PatchPlannerAgent. For existing Markdown notes, prefer exact local patch operations with anchors. Use full replacement only when explicitly requested.'
     })
   ],
-  skillPackages: [],
   toolPackages: [],
-  version: 3
+  version: 4
 };
 
 export function readAgentRuntimeSettings() {
@@ -245,63 +138,15 @@ export function saveAgentRuntimeSettings(settings: AgentRuntimeSettings) {
 export function normalizeAgentRuntimeSettings(
   settings: Partial<AgentRuntimeSettings> | null | undefined
 ): AgentRuntimeSettings {
-  if (!settings || settings.version !== 3) {
+  if (!settings || settings.version !== 4) {
     return DEFAULT_AGENT_RUNTIME_SETTINGS;
   }
   return {
     mainAssistant: normalizeMainAssistant(settings.mainAssistant),
     mcpServers: normalizeMcpServers(settings.mcpServers),
     subagents: normalizeSubagents(settings.subagents),
-    skillPackages: Array.isArray(settings.skillPackages)
-      ? settings.skillPackages
-      : DEFAULT_AGENT_RUNTIME_SETTINGS.skillPackages,
     toolPackages: normalizeToolPackages(settings.toolPackages),
-    version: 3
-  };
-}
-
-export function mergeRegistrySkillPackages(
-  settings: AgentRuntimeSettings,
-  registrySkills: SkillPackage[]
-) {
-  const registryById = new Map(registrySkills.map((skillPackage) => [skillPackage.id, skillPackage]));
-  const hasRegistrySkills = registrySkills.length > 0;
-  const mergedSkillPackages = [
-    ...settings.skillPackages
-      .filter((skillPackage) => !hasRegistrySkills || skillPackage.packagePath)
-      .map((skillPackage) => {
-        const registrySkill = registryById.get(skillPackage.id);
-        if (!registrySkill) {
-          return skillPackage;
-        }
-        registryById.delete(skillPackage.id);
-        return {
-          ...registrySkill,
-          enabled: skillPackage.enabled,
-          suggestedToolIds: skillPackage.suggestedToolIds.length
-            ? skillPackage.suggestedToolIds
-            : registrySkill.suggestedToolIds,
-          triggers: skillPackage.triggers.length ? skillPackage.triggers : registrySkill.triggers
-        };
-      }),
-    ...registryById.values()
-  ];
-
-  const normalized = normalizeAgentRuntimeSettings({
-    ...settings,
-    skillPackages: mergedSkillPackages
-  });
-  const registrySkillIds = mergedSkillPackages
-    .filter((skillPackage) => skillPackage.enabled)
-    .map((skillPackage) => skillPackage.id);
-  return {
-    ...normalized,
-    mainAssistant: {
-      ...normalized.mainAssistant,
-      allowedSkillPackageIds: [
-        ...new Set([...normalized.mainAssistant.allowedSkillPackageIds, ...registrySkillIds])
-      ]
-    }
+    version: 4
   };
 }
 
@@ -312,24 +157,20 @@ function normalizeMainAssistant(value: unknown) {
   const normalized = createMainAssistant(value as Partial<MainAssistantProfile>);
   return {
     ...normalized,
-    allowedSubagentIds: normalized.allowedSubagentIds.filter(
-      (id) => !SYSTEM_MANAGED_SUBAGENT_IDS.has(id)
-    ),
-    enabledToolIds: [...new Set([...normalized.enabledToolIds, ...DEFAULT_MAIN_TOOL_IDS])]
+    allowedSubagentIds: normalized.allowedSubagentIds.filter((id) => id !== 'patch-planner-agent'),
+    enabledToolIds: [...new Set(normalized.enabledToolIds)]
   };
 }
 
 function normalizeSubagents(value: unknown) {
   const rawSubagents = Array.isArray(value) ? value : DEFAULT_AGENT_RUNTIME_SETTINGS.subagents;
+  const hadLegacyPlanner = rawSubagents.some((agent) => agent.id === 'patch-planner-agent');
   const byId = new Map(rawSubagents.map((subagent) => [subagent.id, subagent]));
   return DEFAULT_AGENT_RUNTIME_SETTINGS.subagents.map((defaultSubagent) =>
     createSubagent({
       ...defaultSubagent,
       ...(byId.get(defaultSubagent.id) ?? {}),
-      enabled:
-        defaultSubagent.id === 'task-orchestrator-agent'
-          ? true
-          : byId.get(defaultSubagent.id)?.enabled ?? defaultSubagent.enabled,
+      enabled: hadLegacyPlanner ? false : byId.get(defaultSubagent.id)?.enabled ?? defaultSubagent.enabled,
       id: defaultSubagent.id,
       outputKind: defaultSubagent.outputKind,
       systemPrompt: byId.get(defaultSubagent.id)?.systemPrompt ?? defaultSubagent.systemPrompt
@@ -396,55 +237,11 @@ export function equalAgentRuntimeSettings(
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-export function listSkillPackageCategories(): SkillPackageCategory[] {
-  return ['reading', 'research', 'writing', 'report', 'slides', 'automation', 'custom'];
-}
-
-export function createBlankSkillPackage(index: number): SkillPackage {
-  return createSkillPackage({
-    id: `custom-skill-package-${index}`,
-    name: '新技能包',
-    category: 'custom',
-    kind: 'installed',
-    description: '请上传标准 Skills 压缩包，或填写 SKILL.md 内容。',
-    readme: '# New Skill\n\nDescribe when and how the model should use this skill.',
-    installedAt: new Date().toISOString()
-  });
-}
-
-export function createSkillPackageFromArchivePath(path: string, index: number): SkillPackage {
-  const fileName = path.split(/[\\/]/).pop() ?? `skill-package-${index}.zip`;
-  const id =
-    fileName
-      .replace(/\.[^.]+$/, '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '') || `skill-package-${index}`;
-  return createSkillPackage({
-    id,
-    name: fileName.replace(/\.[^.]+$/, ''),
-    category: 'custom',
-    kind: 'installed',
-    description: '已登记的标准 Skills 压缩包，后续由 Rust Skill Registry 解包和校验 SKILL.md。',
-    readme:
-      '# Installed Skill\n\nThis package is registered from a zip archive. Neuink will load SKILL.md when the Rust skill registry is enabled.',
-    sourceArchivePath: path,
-    installedAt: new Date().toISOString()
-  });
-}
-
 export function resolveAgentProfile(settings: AgentRuntimeSettings, agentId?: string | null) {
   if (!agentId || agentId === settings.mainAssistant.id) {
     return settings.mainAssistant;
   }
   return settings.subagents.find((agent) => agent.id === agentId) ?? settings.mainAssistant;
-}
-
-export function resolveSkillPackages(settings: AgentRuntimeSettings, agent: AgentProfile) {
-  return settings.skillPackages.filter(
-    (skillPackage) =>
-      skillPackage.enabled && agent.allowedSkillPackageIds.includes(skillPackage.id)
-  );
 }
 
 export function resolveAllowedSubagents(settings: AgentRuntimeSettings, agent: AgentProfile) {
@@ -454,6 +251,16 @@ export function resolveAllowedSubagents(settings: AgentRuntimeSettings, agent: A
       candidate.id !== agent.id &&
       agent.allowedSubagentIds.includes(candidate.id)
   );
+}
+
+export function configuredAgentToolIds(settings: AgentRuntimeSettings, agent: AgentProfile): AgentToolId[] {
+  const external = settings.mcpServers
+    .filter(server => server.enabled && agent.allowedMcpServerIds?.includes(server.id))
+    .flatMap(server => server.allowedToolNames.map(name => `mcp.${server.id}.${name}` as AgentToolId));
+  const hasAvailableWorker = resolveAllowedSubagents(settings, agent).length > 0;
+  const configured = [...agent.enabledToolIds, ...external]
+    .filter(id => id !== 'task.run_subagent' || hasAvailableWorker);
+  return auditAgentToolPermissions(configured, agent, settings).allowedToolIds;
 }
 
 export function auditAgentToolPermissions(
@@ -491,8 +298,12 @@ function deniedToolReason(
   if (!agent.permissions.canInvokeTools) {
     return 'tool invocation disabled';
   }
+  if (toolId === 'skill.search' || toolId === 'skill.load') {
+    return 'unsupported tool';
+  }
   if (toolId.startsWith('mcp.')) {
-    const [, serverId, toolName] = toolId.split('.');
+    const [, serverId, ...toolParts] = toolId.split('.');
+    const toolName = toolParts.join('.');
     if (!serverId || !agent.allowedMcpServerIds?.includes(serverId)) {
       return 'mcp server not allowed';
     }
@@ -507,10 +318,11 @@ function deniedToolReason(
     ) {
       return 'mcp tool not allowed';
     }
+    if (!settings?.toolPackages.some((pkg) => pkg.enabled && pkg.kind === 'mcp' &&
+        pkg.mcpServerId === serverId && pkg.permissionMode === 'allow' && pkg.allowedToolIds.includes(toolId as AgentToolId))) {
+      return 'mcp tool package not approved';
+    }
     return null;
-  }
-  if ((toolId === 'skill.search' || toolId === 'skill.load') && !agent.permissions.canUseSkills) {
-    return 'skills disabled';
   }
   if (toolId.includes('.propose_') && !agent.permissions.canWriteProposals) {
     return 'write proposals disabled';
@@ -539,26 +351,11 @@ export function selectAgentExecution(
   void preferredAgentId;
   void plan;
   const agent = settings.mainAssistant;
-  const packageIds = new Set([
-    ...agent.allowedSkillPackageIds,
-    ...(invocationPlan?.skillIdsToLoad ?? [])
-  ]);
-  const skillPackages = settings.skillPackages.filter(
-    (skillPackage) => skillPackage.enabled && packageIds.has(skillPackage.id)
-  );
-  return {
-    agent,
-    skillPackages
-  };
+  void invocationPlan;
+  return { agent };
 }
 
-export function buildAgentSystemPrompt(
-  agent: AgentProfile,
-  skillPackages: SkillPackage[],
-  preloadedSkillIds: string[] = []
-) {
-  const preloadedIds = new Set(preloadedSkillIds);
-  const preloadedSkills = skillPackages.filter((skillPackage) => preloadedIds.has(skillPackage.id));
+export function buildAgentSystemPrompt(agent: AgentProfile) {
   const lines = [
     agent.systemPrompt.trim(),
     '',
@@ -568,49 +365,30 @@ export function buildAgentSystemPrompt(
     agent.kind === 'subagent' ? `Subagent Output Kind: ${agent.outputKind}` : '',
     `Agent Sandbox: ${agent.sandbox ?? 'read-only'}`,
     agent.kind === 'subagent'
-      ? 'Subagent contract: execute the delegated task only, return structured findings, and do not behave like a reusable Skill.'
-      : 'Main assistant contract: answer the user directly, use skills/tools deliberately, and delegate narrow work to subagents when useful.',
-    skillPackages.length > 0
-      ? `Available Skill Metadata:\n${skillPackages.map(skillPackageMetadataLine).join('\n')}`
-      : 'Available Skill Metadata: none',
-    preloadedSkills.length > 0
-      ? `Preloaded Skill Instructions (selected by TaskOrchestratorAgent for this task):\n${preloadedSkills
-          .map((skillPackage) => formatPreloadedSkill(skillPackage))
-          .join('\n\n')}`
-      : '',
-    'Skill loading rule: follow preloaded Skill instructions for this task. Use skill_load only when you need a non-preloaded Skill.',
-    'Skill script rule: scripts inside Skills are auxiliary resources and must not be executed directly. Executable tools must be exposed through MCP or an approved Tool Package.'
+      ? 'Subagent contract: execute the delegated task only and return structured findings.'
+      : 'Main assistant contract: answer the user directly, use tools deliberately, and delegate narrow work to subagents when useful.'
   ].filter(Boolean);
 
   return lines.join('\n');
 }
 
-function formatPreloadedSkill(skillPackage: SkillPackage) {
-  // A malformed or excessively large package must not consume the whole model context.
-  const maxChars = 12_000;
-  const readme = skillPackage.readme.trim();
-  const content = readme.length > maxChars ? `${readme.slice(0, maxChars)}\n\n[SKILL.md truncated]` : readme;
-  return `--- SKILL: ${skillPackage.name} (${skillPackage.id}) ---\n${content}\n--- END SKILL ---`;
-}
-
-export function subagentOutputLabel(outputKind: SubagentOutputKind) {
-  if (outputKind === 'patch_plan') return 'Markdown patch plan';
-  if (outputKind === 'task_contract') return 'Task contract';
-  if (outputKind === 'memory') return 'Conversation memory';
+export function subagentOutputLabel(_outputKind: SubagentOutputKind) {
   return 'Evidence';
-}
-
-function skillPackageMetadataLine(skillPackage: SkillPackage) {
-  const triggers = skillPackage.triggers.length ? skillPackage.triggers.join(', ') : 'none';
-  const tools = skillPackage.suggestedToolIds.length
-    ? skillPackage.suggestedToolIds.join(', ')
-    : 'none';
-  const resources = skillPackage.resourcePaths
-    ? `refs=${skillPackage.resourcePaths.references.length}, scripts=${skillPackage.resourcePaths.scripts.length}, assets=${skillPackage.resourcePaths.assets.length}`
-    : 'refs=0, scripts=0, assets=0';
-  return `- ${skillPackage.name} (${skillPackage.id}): ${skillPackage.description || 'No description.'} Triggers: ${triggers}. Suggested tools: ${tools}. Resources: ${resources}.`;
 }
 
 function unique<T>(value: T, index: number, array: T[]) {
   return array.indexOf(value) === index;
+}
+
+function isActiveTool(id: string) {
+  return id !== 'skill.search' && id !== 'skill.load';
+}
+
+function activePermissions(permissions: AgentPermissions): AgentPermissions {
+  return {
+    canInvokeSubagents: permissions.canInvokeSubagents,
+    canInvokeTools: permissions.canInvokeTools,
+    canReadWorkspaceWide: permissions.canReadWorkspaceWide,
+    canWriteProposals: permissions.canWriteProposals
+  };
 }

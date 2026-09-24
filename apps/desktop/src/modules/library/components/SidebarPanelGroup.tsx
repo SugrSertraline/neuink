@@ -15,6 +15,7 @@ export const useSidebarPanelGroup = () => useContext(Context);
 export function SidebarPanelGroup({ children }: { children: ReactNode }) {
   const [panels, setPanels] = useState<Panel[]>([]);
   const [weights, setWeights] = useState<Record<string, number>>({});
+  const groupRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<(() => void) | null>(null);
   const register = useCallback((panel: Panel) => {
     cancelRef.current?.();
@@ -64,6 +65,9 @@ export function SidebarPanelGroup({ children }: { children: ReactNode }) {
     let moved = false;
     document.body.style.cursor = 'row-resize';
     document.body.style.userSelect = 'none';
+    // Gesture owner disables decorative motion without changing panel geometry.
+    const groupElement = groupRef.current;
+    if (groupElement) groupElement.dataset.resizing = 'true';
     const finish = (cancel: boolean) => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
@@ -73,6 +77,7 @@ export function SidebarPanelGroup({ children }: { children: ReactNode }) {
       window.removeEventListener('resize', cancelled);
       document.body.style.cursor = cursor;
       document.body.style.userSelect = userSelect;
+      if (groupElement) delete groupElement.dataset.resizing;
       cancelRef.current = null;
       if (cancel && moved) setWeights(original);
     };
@@ -99,7 +104,7 @@ export function SidebarPanelGroup({ children }: { children: ReactNode }) {
     window.addEventListener('resize', cancelled);
   };
   return <Context.Provider value={{ panels, weights, register, resize, start }}>
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden" data-sidebar-panel-group>{children}</div>
+    <div ref={groupRef} className="flex min-h-0 flex-1 flex-col overflow-hidden" data-sidebar-panel-group>{children}</div>
   </Context.Provider>;
 }
 

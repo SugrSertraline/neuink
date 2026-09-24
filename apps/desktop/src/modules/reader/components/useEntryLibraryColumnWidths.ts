@@ -6,6 +6,7 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent
 } from 'react';
+import { fitColumnWidth, readElementLayoutWidth, readTableViewportWidth, unfitColumnWidth } from './entryLibraryColumnSizing';
 
 export type EntryLibraryColumnId =
   | 'title'
@@ -102,7 +103,7 @@ export function useEntryLibraryColumnWidths({
     if (!shell) return undefined;
 
     const measure = () => {
-      const nextWidth = readElementLayoutWidth(shell);
+      const nextWidth = readTableViewportWidth(shell);
       setViewportWidth((current) => current === nextWidth ? current : nextWidth);
       if (nextWidth <= 0) return;
       setSavedWidths((current) => {
@@ -121,6 +122,8 @@ export function useEntryLibraryColumnWidths({
     measure();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
     observer?.observe(shell);
+    const scroller = shell.querySelector('[data-slot="table-container"]');
+    if (scroller) observer?.observe(scroller);
     window.addEventListener('resize', measure);
     return () => {
       observer?.disconnect();
@@ -144,7 +147,7 @@ export function useEntryLibraryColumnWidths({
     };
   }, [cancelResize]);
 
-  const getColumnWidth = useCallback((columnId: EntryLibraryColumnId) => {
+  const getBaseColumnWidth = useCallback((columnId: EntryLibraryColumnId) => {
     if (resizePreview?.columnId === columnId) return resizePreview.width;
     const saved = savedWidths[columnId];
     if (saved !== undefined) return clampColumnWidth(columnId, saved, columnMaxWidth(columnId));
@@ -152,12 +155,19 @@ export function useEntryLibraryColumnWidths({
     return clampColumnWidth(columnId, config.defaultWidth, columnMaxWidth(columnId));
   }, [columnMaxWidth, resizePreview, savedWidths]);
 
+  const baseTableWidth = [...visibleColumns].reduce((total, id) => total + getBaseColumnWidth(id), 0);
+  const hasHorizontalOverflow = !viewportWidth || baseTableWidth > viewportWidth;
+  const getColumnWidth = useCallback((columnId: EntryLibraryColumnId) => {
+    const baseWidth = getBaseColumnWidth(columnId);
+    return fitColumnWidth(baseWidth, baseTableWidth - baseWidth, viewportWidth);
+  }, [baseTableWidth, getBaseColumnWidth, viewportWidth]);
+
   const getResizeHandleProps = useCallback((columnId: EntryLibraryColumnId, label: string) => {
     const config = ENTRY_LIBRARY_COLUMN_WIDTH_CONFIG[columnId];
     const maximumWidth = columnMaxWidth(columnId);
-    const displayedWidth = resizePreview?.columnId === columnId
-      ? resizePreview.width
-      : clampColumnWidth(columnId, savedWidths[columnId] ?? config.defaultWidth, maximumWidth);
+    const baseWidth = getBaseColumnWidth(columnId);
+    const otherWidths = baseTableWidth - baseWidth;
+    const displayedWidth = getColumnWidth(columnId);
 
     const startResize = (event: ReactPointerEvent<HTMLSpanElement>) => {
       if (event.button !== 0 || dragRef.current) return;
@@ -172,13 +182,13 @@ export function useEntryLibraryColumnWidths({
       const coordinateScale = headerLayoutWidth > 0 && headerBounds.width > 0
         ? headerBounds.width / headerLayoutWidth
         : 1;
-      const currentViewportWidth = readElementLayoutWidth(tableShellRef.current) || viewportWidth;
+      const currentViewportWidth = readTableViewportWidth(tableShellRef.current) || viewportWidth;
       const currentMaximumWidth = columnMaxWidth(columnId, currentViewportWidth);
-      const startWidth = clampColumnWidth(columnId, headerLayoutWidth, currentMaximumWidth);
+      const startWidth = headerLayoutWidth;
       const startX = event.clientX;
       const previousCursor = document.body.style.cursor;
       const previousUserSelect = document.body.style.userSelect;
-      let currentWidth = startWidth;
+      let currentWidth = baseWidth;
       let started = false;
       let finished = false;
 
@@ -207,7 +217,7 @@ export function useEntryLibraryColumnWidths({
         const delta = (pointerEvent.clientX - startX) / Math.max(coordinateScale, 0.01);
         if (!started && Math.abs(delta) < 4) return;
         started = true;
-        currentWidth = clampColumnWidth(columnId, startWidth + delta, currentMaximumWidth);
+        currentWidth = clampColumnWidth(columnId, unfitColumnWidth(startWidth + delta, otherWidths, currentViewportWidth), currentMaximumWidth);
         setResizePreview({ columnId, width: currentWidth });
         pointerEvent.preventDefault();
       };
@@ -229,9 +239,9 @@ export function useEntryLibraryColumnWidths({
     return {
       'aria-label': `调整“${label}”列宽`,
       'aria-orientation': 'vertical' as const,
-      'aria-valuemax': maximumWidth,
-      'aria-valuemin': config.minWidth,
-      'aria-valuenow': displayedWidth,
+      'aria-valuemax': Math.round(fitColumnWidth(maximumWidth, otherWidths, viewportWidth)),
+      'aria-valuemin': Math.round(fitColumnWidth(config.minWidth, otherWidths, viewportWidth)),
+      'aria-valuenow': Math.round(displayedWidth),
       className: 'absolute -right-1 top-0 z-30 h-full w-2 touch-none cursor-col-resize select-none outline-none after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-transparent hover:after:bg-primary focus-visible:after:bg-primary',
       onDoubleClick: (event: React.MouseEvent<HTMLSpanElement>) => {
         event.preventDefault();
@@ -242,14 +252,14 @@ export function useEntryLibraryColumnWidths({
         if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
         event.preventDefault();
         event.stopPropagation();
-        const currentViewportWidth = readElementLayoutWidth(tableShellRef.current) || viewportWidth;
+        const currentViewportWidth = readTableViewportWidth(tableShellRef.current) || viewportWidth;
         const currentMaximumWidth = columnMaxWidth(columnId, currentViewportWidth);
         const header = event.currentTarget.closest('th');
         const currentWidth = readElementLayoutWidth(header) || displayedWidth;
         const direction = event.key === 'ArrowLeft' ? -1 : 1;
         persistWidth(
           columnId,
-          currentWidth + direction * (event.shiftKey ? 24 : 8),
+          unfitColumnWidth(currentWidth + direction * (event.shiftKey ? 24 : 8), otherWidths, currentViewportWidth),
           currentMaximumWidth
         );
       },
@@ -258,9 +268,9 @@ export function useEntryLibraryColumnWidths({
       tabIndex: 0,
       title: `拖动调整“${label}”列宽；双击恢复默认宽度`
     };
-  }, [columnMaxWidth, persistWidth, resizePreview, savedWidths, viewportWidth]);
+  }, [baseTableWidth, columnMaxWidth, getBaseColumnWidth, getColumnWidth, persistWidth, viewportWidth]);
 
-  return { getColumnWidth, getResizeHandleProps, tableShellRef };
+  return { getColumnWidth, getResizeHandleProps, hasHorizontalOverflow, tableShellRef };
 }
 
 function readSavedWidths(): Partial<Record<EntryLibraryColumnId, number>> {
@@ -373,9 +383,4 @@ function writeSavedWidths(widths: Partial<Record<EntryLibraryColumnId, number>>)
   } catch {
     // The corrected in-memory widths still keep the current table usable.
   }
-}
-
-function readElementLayoutWidth(element: Element | null) {
-  if (!(element instanceof HTMLElement)) return 0;
-  return Math.max(0, Math.round(element.clientWidth || element.offsetWidth || element.getBoundingClientRect().width));
 }

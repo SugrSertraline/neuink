@@ -8,6 +8,12 @@ import { WorkspaceNotesProvider } from '@/modules/notes/WorkspaceNotesContext';
 import { buildTagPathById } from '@/modules/library/utils/tagTree';
 import { ToastContext } from '@/shared/hooks/useToast';
 import type { TagMeta } from '@/shared/types/domain';
+import { AppearanceProvider, useAppearance } from '@/shared/components/AppearanceProvider';
+import { TitleBar } from '@/shared/components/TitleBar';
+import { AppearanceExit } from '@/shared/components/AppearanceExit';
+import { SearchDialog } from '@/modules/search/components/SearchDialog';
+import { AppearanceControlsPreview } from './AppearanceControlsPreview';
+import { LibraryDesktopPreview } from './LibraryDesktopPreview';
 import '../styles/globals.css';
 
 const initialTags: TagMeta[] = [
@@ -36,35 +42,46 @@ const initialEntries: LibraryEntry[] = Array.from({ length: 24 }, (_, i) => ({
 const noop = () => undefined;
 
 function LibraryShowcase() {
+  const desktop = new URLSearchParams(window.location.search).has('desktop');
+  const { setAppearance, glassReducedTransparency, setGlassReducedTransparency } = useAppearance();
+  const [searchOpen, setSearchOpen] = useState(false);
   const [tags, setTags] = useState(initialTags);
   const [entries, setEntries] = useState(initialEntries);
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [status, setStatus] = useState<'ready' | 'loading' | 'error'>('ready');
   const [empty, setEmpty] = useState(false);
+  const [longList, setLongList] = useState(false);
   const [narrow, setNarrow] = useState(false);
   const [manyTags, setManyTags] = useState(false);
   const [scale, setScale] = useState(1);
   const [message, setMessage] = useState('示例数据；只在此页演示，不读取工作区。');
   const displayTags = manyTags ? tags : tags.filter(tag => !tag.id.startsWith('more-'));
+  const displayEntries = longList ? Array.from({ length: 600 }, (_, index) => ({ ...entries[index % entries.length], id: `volume-${index}`, title: `${entries[index % entries.length].title} / ${index + 1}` })) : entries;
   return <TooltipProvider><ToastContext.Provider value={{ dismiss: noop, notify: toast => { setMessage(toast.title); return 'preview'; } }}>
     <WorkspaceNotesProvider root={null} refreshKey="preview">
-      <main className="flex flex-col overflow-hidden bg-background" style={{ width: `calc(100dvw / ${scale})`, height: `calc(100dvh / ${scale})` }}>
-        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b p-2">
+      <main data-material="app-background" className={desktop ? 'app' : 'flex flex-col overflow-hidden bg-background'} style={{ width: `calc(100dvw / ${scale})`, height: `calc(100dvh / ${scale})` }}>
+        {desktop && <TitleBar onOpenSearch={() => setSearchOpen(true)} />}
+        <div className={desktop ? 'hidden' : 'flex shrink-0 flex-wrap items-center gap-2 border-b p-2'}>
+          <Button size="sm" variant="outline" onClick={() => setSearchOpen(true)}>搜索</Button><AppearanceExit />
+          <AppearanceControlsPreview />
           {([['全部条目场景', null], ['标签场景', 'software'], ['长描述', 'alignment'], ['深层标签', 'long']] as const).map(([label, tag]) => <Button key={label} size="sm" variant={activeTag === tag ? 'secondary' : 'ghost'} onClick={() => setActiveTag(tag)}>{label}</Button>)}
           <Button size="sm" variant="outline" onClick={() => setEmpty(value => !value)}>{empty ? '显示条目' : '空列表'}</Button>
+          <Button size="sm" variant="outline" onClick={() => setLongList(value => !value)}>{longList ? '常规列表' : '600 篇论文'}</Button>
           <Button size="sm" variant="outline" onClick={() => setManyTags(value => !value)}>{manyTags ? '常规标签' : '多标签'}</Button>
           <Button size="sm" variant="outline" onClick={() => setStatus(value => value === 'ready' ? 'loading' : value === 'loading' ? 'error' : 'ready')}>{status === 'ready' ? '模拟加载' : status === 'loading' ? '模拟失败' : '恢复正常'}</Button>
           <Button size="sm" variant="outline" onClick={() => setNarrow(value => !value)}>{narrow ? '完整宽度' : '分屏宽度'}</Button>
           {[1, 1.25, 1.5].map(value => <Button key={value} size="sm" variant={scale === value ? 'secondary' : 'ghost'} onClick={() => { document.documentElement.style.zoom = String(value); setScale(value); window.dispatchEvent(new Event('resize')); }}>{value * 100}%</Button>)}
         </div>
-        <div className="min-h-0 flex-1 p-3">
-          <div className="h-full min-h-0 overflow-hidden border bg-card" style={{ width: narrow ? 'min(100%, 560px)' : '100%' }}>
-            <EntryLibraryView standalone activeTag={activeTag} entries={empty ? [] : entries} tags={displayTags} status={status} libraryView="all"
+        <LibraryDesktopPreview enabled={desktop} entries={displayEntries} tags={displayTags} onOpenSearch={() => setSearchOpen(true)}>
+        <div className={desktop ? 'h-full min-h-0' : 'min-h-0 flex-1 p-3'}>
+          <div className={`h-full min-h-0 overflow-hidden bg-card ${desktop ? '' : 'border'}`} style={{ width: narrow ? 'min(100%, 560px)' : '100%' }}>
+            <EntryLibraryView standalone activeTag={activeTag} entries={empty ? [] : displayEntries} tags={displayTags} status={status} libraryView="all"
               workspaceRoot={null} filterResetKey={0} isRefreshingParseStatus={false} recentReadingEntryIds={[]} selectedEntryId="sample-1"
               trashItems={[]} trashedEntries={[]} onSelectTag={setActiveTag} onSelectEntry={noop} onOpenEntryExplorer={id => setMessage(`打开详情：${id}`)}
               onOpenEntryInSidePane={id => setMessage(`在右侧打开：${id}`)} onDeleteEntry={noop} onOpenCreateEntryTab={() => setMessage('创建条目入口')}
+              onOpenRelations={() => setMessage('关系图入口')}
               onPurgeEntry={noop} onPurgeTrashItem={noop} onRefreshParseStatus={noop} onReparseEntry={noop} onRestoreEntry={noop} onRestoreTrashItem={noop}
-              onOpenTagNote={noop} onManageTags={() => setMessage('管理标签入口')} onOpenTagReading={id => setMessage(`平行阅读：${id}`)}
+              onOpenTagNote={noop}
               onUpdateEntry={(id, request) => {
                 const tagIds = [...buildTagPathById(displayTags)].filter(([, path]) => request.tagPaths.includes(path)).map(([tagId]) => tagId);
                 setEntries(current => current.map(entry => entry.id === id ? { ...entry, title: request.title, fields: request.fields, tags: request.tagPaths, tagIds } : entry));
@@ -75,14 +92,20 @@ function LibraryShowcase() {
               }} />
           </div>
         </div>
-        <p role="status" className="shrink-0 border-t px-3 py-1 text-xs text-muted-foreground">{message}</p>
+        </LibraryDesktopPreview>
+        <footer className={desktop ? 'statusbar' : 'shrink-0 border-t px-3 py-1 text-xs text-muted-foreground'}>
+          {desktop && <><button onClick={() => setAppearance('standard')}>原有</button><button onClick={() => setAppearance('atelier')}>拟物</button><button onClick={() => setAppearance('liquid-glass')}>玻璃</button>
+            <button onClick={() => setGlassReducedTransparency(!glassReducedTransparency)}>{glassReducedTransparency ? '恢复通透效果' : '降低透明度'}</button></>}
+          <span role="status">{message}</span>
+        </footer>
       </main>
+      <SearchDialog open={searchOpen} onOpenChange={setSearchOpen} root={null} status="ready" onOpenResult={noop} />
     </WorkspaceNotesProvider>
   </ToastContext.Provider></TooltipProvider>;
 }
 
 if (import.meta.env.DEV) {
   const root = createRoot(document.getElementById('root')!);
-  root.render(<LibraryShowcase />);
+  root.render(<AppearanceProvider><LibraryShowcase /></AppearanceProvider>);
   import.meta.hot?.dispose(() => root.unmount());
 }

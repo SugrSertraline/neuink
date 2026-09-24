@@ -37,6 +37,7 @@ it('resizes adjacent panels at UI zoom without moving the third panel or replaci
   const view = setup();
   const scroll = view.panels[1].querySelector('[data-slot="scroll-area-viewport"]');
   fireEvent.pointerDown(view.handle, { button: 0, pointerId: 1, clientY: 100 });
+  expect(view.container.querySelector('[data-sidebar-panel-group]')?.getAttribute('data-resizing')).toBe('true');
   fireEvent.pointerMove(window, { pointerId: 2, clientY: 180 });
   expect(view.panels[0].style.flexGrow).toBe('1');
   fireEvent.pointerMove(window, { pointerId: 1, clientY: 102 });
@@ -46,6 +47,7 @@ it('resizes adjacent panels at UI zoom without moving the third panel or replaci
   expect(Number(view.panels[1].style.flexGrow)).toBeCloseTo(1.6);
   expect(view.panels[2].style.flexGrow).toBe('1');
   fireEvent.pointerUp(window, { pointerId: 1 });
+  expect(view.container.querySelector('[data-resizing]')).toBeNull();
   expect(document.body.style.cursor).toBe('');
   expect(view.panels[1].querySelector('[data-slot="scroll-area-viewport"]')).toBe(scroll);
 });
@@ -58,6 +60,7 @@ it.each(['Escape', 'pointercancel', 'blur', 'resize'])('rolls back and cleans up
   else fireEvent(window, new Event(reason));
   expect(view.panels[0].style.flexGrow).toBe('1');
   expect(document.body.style.userSelect).toBe('');
+  expect(view.container.querySelector('[data-resizing]')).toBeNull();
   fireEvent.pointerMove(window, { clientY: 300 });
   expect(view.panels[0].style.flexGrow).toBe('1');
 });

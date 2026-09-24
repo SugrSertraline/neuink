@@ -1,0 +1,110 @@
+/* Opt-in book presentation. PDF bitmap, text layer and hit bounds stay identical. */
+.pdf-document-scroll[data-book-mode] { position: relative; isolation: isolate; background: var(--reader-desk); }
+.pdf-document-scroll[data-book-mode]:focus-visible { outline: 2px solid var(--ring); outline-offset: -3px; }
+[data-book-spread] { padding: 8px 0 12px; align-items: start; }
+[data-book-spread] > [data-pdf-page-index] { position: relative; }
+[data-book-spread] [data-pdf-page-surface] {
+  border-radius: 1px; border-color: var(--reader-paper-edge);
+  box-shadow: 1px 2px 0 var(--reader-paper), 2px 3px 0 var(--reader-paper-edge),
+    3px 5px 0 var(--reader-paper), 4px 6px 0 var(--reader-paper-edge), 0 10px 22px var(--reader-paper-shadow);
+}
+[data-book-spread] .pdf-page-caption { min-height: 26px; }
+[data-book-spread] .pdf-page-caption > span:last-child:not(:first-child) { display: none; }
+.pdf-book-stage { position: relative; padding-bottom: 40px; }
+.pdf-book-controls { position: absolute; z-index: 26; top: 8px; bottom: 40px; left: 50%; transform: translateX(-50%); display: grid; grid-template-columns: 32px 1fr 32px; align-items: center; max-width: 100%; padding: 0 4px; pointer-events: none; }
+.pdf-book-corner[data-side="previous"] { grid-column: 1; grid-row: 1; }
+.pdf-book-corner[data-side="next"] { grid-column: 3; grid-row: 1; }
+.pdf-book-folio { position: absolute; bottom: -26px; left: 0; width: 100%; text-align: center; font-size: 11px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.pdf-book-corner { touch-action: none; pointer-events: auto; width: 32px; height: 48px; }
+.pdf-turn-layer { position: absolute; pointer-events: none; z-index: 25; perspective-origin: center center; }
+.pdf-turn-viewport { position: absolute; pointer-events: none; z-index: 25; overflow: clip; contain: strict; }
+.pdf-turn-strip { position: absolute; height: 100%; top: 0; left: 0; transform-style: preserve-3d; will-change: transform; }
+.pdf-turn-strip canvas, .pdf-turn-back { position: absolute; inset: 0; height: 100%; width: 100%; backface-visibility: hidden; }
+.pdf-turn-back { transform: rotateY(180deg); background: linear-gradient(90deg, var(--reader-paper-shadow), transparent 8% 94%, var(--reader-paper-edge)), var(--reader-paper); }
+.pdf-turn-underlay { position: absolute; overflow: hidden; background: var(--reader-paper); border: 1px solid var(--reader-paper-edge); box-shadow: 2px 3px 0 var(--reader-paper-edge), 0 8px 18px var(--reader-paper-shadow); }
+.pdf-turn-underlay > canvas { display: block; width: 100%; height: 100%; }
+.pdf-turn-shadow { position: absolute; top: 0; bottom: 0; pointer-events: none; background: linear-gradient(90deg, var(--reader-binding-shadow), transparent); }
+.pdf-turn-shadow[data-direction="-1"] { background: linear-gradient(270deg, var(--reader-binding-shadow), transparent); }
+.pdf-reading-ribbon { position: absolute; right: 44px; top: auto; bottom: -38px; pointer-events: auto; }
+
+html[data-appearance="atelier"] .pdf-document-scroll[data-book-mode] {
+  background-color: var(--reader-desk);
+  background-image: repeating-linear-gradient(0deg, transparent 0 2px, var(--reader-desk-weave) 2px 3px),
+    repeating-linear-gradient(90deg, transparent 0 2px, var(--reader-desk-weave) 2px 3px);
+}
+html[data-appearance="atelier"] [data-book-spread] [data-pdf-page-surface]::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 3;
+  box-shadow: inset 9px 0 9px -11px var(--reader-binding-shadow), inset -1px 0 var(--reader-paper-edge);
+}
+html[data-appearance="atelier"] [data-book-spread] > :has(+ [data-pdf-page-index]) [data-pdf-page-surface]::after {
+  box-shadow: inset -9px 0 9px -11px var(--reader-binding-shadow), inset 1px 0 var(--reader-paper-edge);
+}
+
+/* A common paper material across saved annotations, hover previews and drafts. */
+html[data-appearance="atelier"] [data-material="annotation-paper"],
+html[data-appearance="atelier"] .pdf-annotation-tab {
+  --atelier-control-background: var(--note-paper);
+  --atelier-control-ink: var(--annotation-ink);
+  --note-paper: var(--annotation-paper-yellow); --note-fold: var(--annotation-fold-yellow);
+}
+html[data-appearance="atelier"] [data-paper-color="green"] { --note-paper: var(--annotation-paper-green); --note-fold: var(--annotation-fold-green); }
+html[data-appearance="atelier"] [data-paper-color="blue"] { --note-paper: var(--annotation-paper-blue); --note-fold: var(--annotation-fold-blue); }
+html[data-appearance="atelier"] [data-paper-color="pink"] { --note-paper: var(--annotation-paper-pink); --note-fold: var(--annotation-fold-pink); }
+html[data-appearance="atelier"] [data-material="annotation-paper"] {
+  position: relative; isolation: isolate; border-radius: 1px;
+  padding: 16px 12px 18px; color: var(--annotation-ink);
+  background: linear-gradient(180deg, var(--annotation-glue) 0 13px, transparent 13px), var(--note-paper);
+  border: 1px solid var(--annotation-edge);
+  box-shadow: 0 2px 3px var(--reader-paper-shadow), 2px 6px 9px -5px var(--reader-binding-shadow);
+  transition: box-shadow 160ms ease, border-color 160ms ease;
+}
+html[data-appearance="atelier"] [data-material="annotation-paper"]::after {
+  content: ''; position: absolute; right: -1px; bottom: -1px; width: 15px; height: 15px;
+  background: linear-gradient(135deg, var(--note-fold) 0 48%, var(--annotation-edge) 49% 51%, var(--popover) 52%);
+  pointer-events: none; filter: drop-shadow(-1px -1px 1px var(--reader-paper-shadow));
+}
+html[data-appearance="atelier"] [data-material="annotation-paper"]::before {
+  content: ''; position: absolute; width: 40px; height: 11px; left: calc(50% - 20px); top: -5px;
+  border-inline: 1px dashed var(--annotation-edge); border-block: 1px solid var(--annotation-tape-edge);
+  background: var(--annotation-tape); transform: rotate(-3deg); pointer-events: none;
+}
+html[data-appearance="atelier"] [data-material="annotation-paper"][aria-pressed="true"],
+html[data-appearance="atelier"] button[data-material="annotation-paper"]:hover,
+html[data-appearance="atelier"] [data-material="annotation-paper"][role="button"]:hover {
+  border-color: var(--primary); box-shadow: 0 3px 5px var(--reader-paper-shadow), 2px 9px 12px -6px var(--reader-binding-shadow);
+}
+html[data-appearance="atelier"] [data-material="annotation-paper"] :is(.text-foreground, textarea) { color: var(--annotation-ink); }
+html[data-appearance="atelier"] [data-material="annotation-paper"] .text-muted-foreground { color: var(--annotation-secondary-ink); }
+:root[data-appearance="atelier"] [data-material="annotation-paper"] textarea {
+  background-color: transparent; background-image: repeating-linear-gradient(transparent 0 23px, var(--annotation-rule) 23px 24px);
+  line-height: 24px; border-color: var(--annotation-edge);
+}
+html[data-appearance="atelier"] .pdf-annotation-tab {
+  background: var(--note-paper); color: var(--annotation-ink); border: 1px solid var(--annotation-edge);
+  border-radius: 1px; box-shadow: 1px 2px 2px var(--reader-paper-shadow); transform-origin: bottom left;
+  transition: transform 140ms ease, box-shadow 140ms ease;
+}
+html[data-appearance="atelier"] .pdf-annotation-tab:hover { transform: rotate(-2deg); box-shadow: 1px 3px 4px var(--reader-paper-shadow); }
+html[data-appearance="atelier"] .pdf-book-corner {
+  --atelier-control-background: linear-gradient(135deg, var(--reader-paper) 65%, var(--reader-paper-edge) 66%, var(--reader-paper) 78%);
+  border-radius: 1px; background: linear-gradient(135deg, var(--reader-paper) 65%, var(--reader-paper-edge) 66%, var(--reader-paper) 78%);
+  border: 1px solid var(--reader-paper-edge); box-shadow: 1px 2px 3px var(--reader-paper-shadow);
+}
+html[data-appearance="atelier"] .pdf-book-corner:hover:not(:disabled) { transform: perspective(140px) rotateX(18deg); }
+html[data-appearance="atelier"] .pdf-reading-ribbon {
+  --atelier-control-background: var(--reader-ribbon);
+  --atelier-control-ink: var(--reader-ribbon-ink);
+  height: 37px; padding: 4px 7px 11px; border: none; border-radius: 0;
+  color: var(--reader-ribbon-ink); background: var(--reader-ribbon);
+  clip-path: polygon(0 0,100% 0,100% 100%,50% 82%,0 100%);
+  box-shadow: inset 2px 0 var(--reader-ribbon-edge), inset -2px 0 var(--reader-ribbon-edge);
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-appearance="atelier"] :is(.pdf-annotation-tab, .pdf-book-corner, [data-material="annotation-paper"]) { transition: none; transform: none; }
+}
+@media (forced-colors: active) {
+  .pdf-turn-layer { display: none; }
+  html[data-appearance="atelier"] [data-material="annotation-paper"] { background: Canvas; color: CanvasText; box-shadow: none; }
+  html[data-appearance="atelier"] [data-material="annotation-paper"]::before,
+  html[data-appearance="atelier"] [data-material="annotation-paper"]::after { display: none; }
+}

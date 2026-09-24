@@ -52,10 +52,11 @@ export function TipTapToolbar({
   ];
 
   return (
-    <div className="mb-1 flex min-w-0 items-center gap-1 overflow-x-auto bg-white">
+    <div data-material="editor-toolbar" className="mb-1 flex min-w-0 items-center gap-1 overflow-x-auto bg-white">
       <div className="flex shrink-0 items-center gap-0.5 rounded-md border bg-white p-1">
         {blockTools.map((tool) => (
           <Button
+            aria-pressed={Boolean(tool.active)}
             className={cn(tool.active && 'bg-accent text-primary')}
             disabled={disabled || !editor}
             key={tool.label}

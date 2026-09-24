@@ -1,0 +1,248 @@
+/* Opt-in material layer. All selectors are gated; existing presets keep their CSS. */
+:root[data-appearance="atelier"] .titlebar {
+  background: var(--atelier-metal);
+  box-shadow: inset 0 1px var(--atelier-control-highlight), inset 0 -1px var(--atelier-shadow-soft);
+}
+:root[data-appearance="atelier"] .title-search {
+  border-radius: var(--atelier-control-radius);
+  background: var(--atelier-search); box-shadow: var(--atelier-control-face);
+}
+:root[data-appearance="atelier"] .title-search:focus-visible {
+  outline: 2px solid var(--ring); outline-offset: 2px;
+}
+:root[data-appearance="atelier"] :is(.app-title, .side-head) { text-shadow: 0 1px var(--atelier-highlight); }
+:root[data-appearance="atelier"] :is(.activitybar, .app-sidebar) {
+  background: var(--atelier-weave), var(--sidebar);
+  box-shadow: inset -1px 0 var(--atelier-highlight);
+}
+:root[data-appearance="atelier"] .activitybar button { border-radius: var(--atelier-control-radius); }
+:root[data-appearance="atelier"] .activitybar button.active {
+  background: var(--atelier-pressed); box-shadow: var(--atelier-control-selected);
+}
+:root[data-appearance="atelier"] .appearance-object-icon { width: 30px; height: 30px; object-fit: contain; pointer-events: none; }
+:root[data-appearance="atelier"] .side-head { background: var(--atelier-metal); }
+/* Sidebar chrome shares one metal tone; content reveals the same linen backing.
+   Mark only the intended surfaces so nested warnings, drop targets and popovers keep their intent. */
+:root[data-appearance="atelier"] [data-material="sidebar-toolbar"] {
+  background: var(--atelier-metal); color: var(--sidebar-foreground);
+  border-color: var(--sidebar-border); box-shadow: inset 0 1px var(--atelier-control-highlight);
+}
+:root[data-appearance="atelier"] [data-material="sidebar-canvas"] {
+  background: transparent; color: var(--sidebar-foreground);
+}
+:root[data-appearance="atelier"] [data-material="sidebar-canvas"] [data-slot="command-item"][data-selected="true"] {
+  background: var(--accent); color: var(--accent-foreground); border-color: var(--border);
+  box-shadow: inset 2px 0 var(--atelier-brass-edge), inset 0 1px var(--atelier-control-highlight);
+}
+:root[data-appearance="atelier"] [data-material="sidebar-empty"] { background: transparent; border-color: var(--border); }
+:root[data-appearance="atelier"] .assistant-chat-message {
+  background: var(--card); border-color: var(--border);
+  box-shadow: inset 0 1px var(--atelier-control-highlight), inset 1px 0 var(--atelier-highlight);
+}
+:root[data-appearance="atelier"] .assistant-chat-message[data-message-role="user"] { background: var(--atelier-paper-label); }
+/* Integral metal edges, not floating bars. Primary hit area and sibling actions stay separate. */
+:root[data-appearance="atelier"] [data-material="section-heading"] {
+  border-radius: 0; background: var(--atelier-metal);
+  box-shadow: inset 0 1px var(--atelier-control-highlight), inset 0 -1px var(--atelier-control-shade);
+}
+:root[data-appearance="atelier"] :is(.tabsbar, .statusbar) {
+  background: var(--atelier-metal); box-shadow: inset 0 1px var(--atelier-highlight);
+}
+:root[data-appearance="atelier"] .workspace-surface-tab { background: var(--muted); border-radius: var(--atelier-control-radius); }
+:root[data-appearance="atelier"] .workspace-surface-tab.is-active {
+  color: var(--foreground); border-color: var(--border); background: var(--atelier-button);
+  box-shadow: var(--atelier-control-face);
+}
+:root[data-appearance="atelier"] .workspace-pane { background: var(--card); }
+:root[data-appearance="atelier"] .appearance-exit { color: var(--primary); flex-shrink: 0; }
+
+/* Chrome controls use the same timing and edge language, without moving tab drag targets. */
+:root[data-appearance="atelier"] :is(.title-search, .win-btn, .activitybar button, .workspace-surface-tab, .workspace-tabs-overflow, [data-tab-close], [data-material="content-row"]) {
+  transition: background-color var(--atelier-motion-hover), border-color var(--atelier-motion-hover), color var(--atelier-motion-hover), box-shadow var(--atelier-motion-hover);
+}
+:root[data-appearance="atelier"] :is(.title-search, .activitybar button, .workspace-tabs-overflow, [data-tab-close]):is(:hover, :focus-visible):not(:disabled) {
+  background: var(--atelier-button-hover); box-shadow: var(--atelier-control-hover); border-color: var(--atelier-control-edge);
+}
+:root[data-appearance="atelier"] :is(.title-search, .activitybar button, .workspace-tabs-overflow, [data-tab-close]):active:not(:disabled),
+:root[data-appearance="atelier"] .activitybar button.active:is(:hover, :focus-visible) {
+  background: var(--atelier-pressed); box-shadow: var(--atelier-control-selected); transition-duration: var(--atelier-motion-press);
+}
+:root[data-appearance="atelier"] .win-btn:hover { box-shadow: var(--atelier-control-hover); }
+:root[data-appearance="atelier"] .win-btn:active { box-shadow: var(--atelier-control-selected); }
+:root[data-appearance="atelier"] .workspace-surface-tab:hover { background: var(--atelier-button-hover); box-shadow: var(--atelier-control-hover); }
+:root[data-appearance="atelier"] .workspace-surface-tab.is-active {
+  box-shadow: inset 0 -2px var(--atelier-brass-edge), var(--atelier-control-face);
+}
+:root[data-appearance="atelier"] .workspace-surface-tab.is-active:hover { box-shadow: inset 0 -2px var(--atelier-brass-edge), var(--atelier-control-hover); }
+:root[data-appearance="atelier"] [data-material="disclosure-control"] {
+  border-radius: var(--atelier-control-inner-radius); background: var(--atelier-button);
+  box-shadow: inset 0 0 0 1px var(--atelier-control-edge), var(--atelier-control-face);
+  transition: background-color var(--atelier-motion-hover), box-shadow var(--atelier-motion-hover);
+}
+:root[data-appearance="atelier"] [data-material="disclosure-icon"] {
+  /* Only the glyph rotates; its stationary frame keeps the same light direction. */
+  transition: rotate var(--atelier-motion-disclosure) var(--atelier-motion-ease);
+}
+:root[data-appearance="atelier"] button:hover [data-material="disclosure-control"] { background: var(--atelier-button-hover); box-shadow: inset 0 0 0 1px var(--atelier-control-edge), var(--atelier-control-hover); }
+:root[data-appearance="atelier"] button:active [data-material="disclosure-control"] { box-shadow: inset 0 0 0 1px var(--atelier-control-edge), var(--atelier-control-selected); }
+/* Opening content fades into its final bounds. Flex proportions, retained scroll and editor state never animate. */
+:root[data-appearance="atelier"] [data-material="panel-body"]:not([hidden]) { animation: atelier-panel-open var(--atelier-motion-disclosure) var(--atelier-motion-ease); }
+@keyframes atelier-panel-open { from { opacity: .45; } to { opacity: 1; } }
+:root[data-appearance="atelier"] [data-sidebar-panel-group] > [role="separator"]::after {
+  content: ''; position: absolute; left: calc(50% - 10px); top: -1px; width: 20px; height: 3px;
+  background: var(--atelier-control-edge); box-shadow: inset 0 -1px var(--atelier-control-highlight); pointer-events: none;
+}
+:root[data-appearance="atelier"] [data-sidebar-panel-group] > [role="separator"]:is(:hover, :focus-visible)::after { background: var(--atelier-brass); }
+
+/* Paper lists stay flat and still. Selection has a narrow index edge, independent of hover. */
+:root[data-appearance="atelier"] [data-material="content-row"][data-interactive="true"]:hover {
+  background: var(--muted); box-shadow: inset 0 1px var(--atelier-control-highlight), inset 0 -1px var(--atelier-shadow-soft);
+}
+:root[data-appearance="atelier"] [data-material="content-row"][data-active="true"] {
+  background: var(--accent); border-color: var(--border);
+  box-shadow: inset 2px 0 var(--atelier-brass-edge), inset 3px 0 var(--atelier-control-highlight), inset 0 1px var(--atelier-control-highlight);
+}
+:root[data-appearance="atelier"] [data-material="content-row"][data-drag-over="true"] {
+  background: var(--accent); border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); transition: none;
+}
+:root[data-appearance="atelier"] [data-material="content-row"][data-interactive="false"]:not([data-active="true"]):hover { background: transparent; }
+:root[data-appearance="atelier"] .entry-library-table-shell { background: var(--card); }
+:root[data-appearance="atelier"] .entry-library-table-shell [data-slot="table-head"] { box-shadow: inset 0 1px var(--atelier-control-highlight), inset 0 -1px var(--atelier-shadow-soft), var(--tw-shadow, 0 0 #0000); }
+:root[data-appearance="atelier"] .entry-library-table-shell [data-entry-id] > td { transition: background-color var(--atelier-motion-hover), box-shadow var(--atelier-motion-hover); }
+:root[data-appearance="atelier"] .entry-library-table-shell [data-entry-id]:hover > td { box-shadow: inset 0 1px var(--atelier-control-highlight), var(--tw-shadow, 0 0 #0000); }
+:root[data-appearance="atelier"] .entry-library-table-shell [data-entry-id][data-state="selected"] > td { box-shadow: inset 0 1px var(--atelier-control-highlight), inset 0 -1px var(--atelier-shadow-soft), var(--tw-shadow, 0 0 #0000); }
+:root[data-appearance="atelier"] .entry-library-table-shell [data-entry-id][data-state="selected"] > td:first-child { box-shadow: inset 2px 0 var(--atelier-brass-edge), inset 0 1px var(--atelier-control-highlight), var(--tw-shadow, 0 0 #0000); }
+:root[data-appearance="atelier"] :is([data-material="notebook-list"], .markdown-note-scroll, .entry-overview) { background-color: var(--card); }
+:root[data-appearance="atelier"] [data-material="notebook-list"] > div:first-child { background: var(--atelier-metal); box-shadow: inset 0 1px var(--atelier-control-highlight); }
+:root[data-appearance="atelier"] [data-material="notebook-list"] li { border-color: var(--border); box-shadow: inset 3px 0 var(--atelier-leather-edge), inset 5px 0 var(--atelier-highlight); transition: background-color var(--atelier-motion-hover); }
+:root[data-appearance="atelier"] [data-material="notebook-list"] li:has(button:not(:disabled)):hover { background: var(--muted); }
+:root[data-appearance="atelier"] .markdown-note-scroll { box-shadow: inset 3px 0 var(--atelier-shadow-soft), inset 4px 0 var(--atelier-control-highlight); }
+:root[data-appearance="atelier"] .entry-overview-breakable.rounded-md { background-color: var(--atelier-paper-label); }
+:root[data-appearance="atelier"] .entry-overview [data-slot="card"] { box-shadow: inset 0 1px var(--atelier-control-highlight), inset 1px 0 var(--atelier-highlight); }
+:root[data-appearance="atelier"] [data-material="composer"] {
+  background: var(--atelier-search);
+  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), inset 0 1px var(--atelier-control-highlight), inset 2px 0 var(--atelier-brass-edge), inset 3px 0 var(--atelier-control-highlight);
+  transition-property: border-color, box-shadow; transition-duration: var(--atelier-motion-hover);
+}
+:root[data-appearance="atelier"] [data-material="composer"]:focus-within { border-color: var(--ring); }
+/* Resizing has priority over decoration. Never transition inline tab transforms or panel heights. */
+:root[data-appearance="atelier"] [data-sidebar-panel-group][data-resizing="true"] { --atelier-motion-hover: 0ms; --atelier-motion-press: 0ms; --atelier-motion-disclosure: 0ms; }
+:root[data-appearance="atelier"] [data-sidebar-panel-group][data-resizing="true"] [data-material="panel-body"] { animation: none; }
+:root[data-appearance="atelier"] .workspace-tabsbar.is-tab-dragging .workspace-surface-tab { transition: none; }
+
+/* Real library papers; one scroll container, fixed row geometry, no new document state. */
+:root[data-appearance="atelier"] .library-paper-shelf {
+  flex: 1; min-height: 0; min-width: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable;
+  background: var(--atelier-paper); padding: 0 12px;
+}
+:root[data-appearance="atelier"] .library-shelf-rows { position: relative; min-width: 0; }
+:root[data-appearance="atelier"] .library-shelf-row { position: absolute; left: 0; right: 0; display: grid; padding: 20px 0 0; }
+:root[data-appearance="atelier"] .library-shelf-row::after {
+  content: ''; position: absolute; top: 246px; height: 17px; left: -12px; right: -12px;
+  background: var(--atelier-wood); border-top: 1px solid var(--atelier-wood-light);
+  box-shadow: inset 0 3px 2px var(--atelier-highlight), inset 0 -2px var(--atelier-shadow), 0 6px 9px var(--atelier-shadow-soft);
+  pointer-events: none;
+}
+:root[data-appearance="atelier"] .library-shelf-entry { min-width: 0; cursor: pointer; outline: none; border-radius: 4px; padding: 0 14px; }
+:root[data-appearance="atelier"] .library-shelf-entry:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+:root[data-appearance="atelier"] .library-shelf-entry.is-dragging { opacity: .55; }
+:root[data-appearance="atelier"] .library-book {
+  --book-cover: var(--atelier-book-red); --book-ink: var(--atelier-cover-ink);
+  position: relative; width: min(100% - 8px, 166px); height: 224px; margin: 0 auto;
+  container-type: inline-size; transform: rotate(-1deg);
+  color: var(--book-ink); text-align: left;
+}
+:root[data-appearance="atelier"] .library-book[data-cover-tone="1"] { --book-cover: var(--atelier-book-green); }
+:root[data-appearance="atelier"] .library-book[data-cover-tone="2"] { --book-cover: var(--atelier-book-sand); --book-ink: var(--atelier-cover-dark-ink); }
+:root[data-appearance="atelier"] .library-book[data-cover-tone="3"] { --book-cover: var(--atelier-book-blue); }
+:root[data-appearance="atelier"] .library-book[data-cover-tone="4"] { --book-cover: var(--atelier-book-clay); }
+:root[data-appearance="atelier"] .library-book[data-cover-tone="5"] { --book-cover: var(--atelier-book-slate); }
+:root[data-appearance="atelier"] .book-cover-fallback::before {
+  content: ''; position: absolute; inset: 3px -5px 0 6px; transform: skewY(2deg); border-radius: 2px 5px 5px 1px;
+  background: var(--atelier-pages); border: 1px solid var(--atelier-brass-edge); box-shadow: 5px 6px 9px var(--atelier-shadow);
+}
+:root[data-appearance="atelier"] .book-cover-fallback { position: relative; height: 100%; }
+:root[data-appearance="atelier"] .library-book[data-book-mode="shelf"] { perspective: 850px; }
+:root[data-appearance="atelier"] .library-book[data-book-mode="shelf"] .book-cover-fallback {
+  transform-style: preserve-3d;
+  transform-origin: 50% 50% calc(var(--atelier-book-depth) / -2);
+  transform: rotateX(var(--book-tilt-x, 0deg)) rotateY(var(--book-tilt-y, -6deg));
+  transition: transform var(--atelier-book-motion-duration) var(--atelier-motion-ease);
+}
+/* One continuous six-faced book. The front remains the original DOM typography. */
+:root[data-appearance="atelier"] .library-book[data-book-mode="shelf"] .book-cover-fallback::before { content: none; }
+:root[data-appearance="atelier"] .library-book-face { position: absolute; pointer-events: none; backface-visibility: hidden; }
+:root[data-appearance="atelier"] .library-book-back {
+  inset: 0; transform: translateZ(calc(0px - var(--atelier-book-depth))) rotateY(180deg);
+  background: var(--book-cover); border: 1px solid var(--atelier-shadow); border-radius: 2px;
+  box-shadow: -5px 6px 12px var(--atelier-shadow);
+}
+:root[data-appearance="atelier"] .library-book-spine {
+  top: 0; bottom: 0; left: calc(0px - var(--atelier-book-depth)); width: var(--atelier-book-depth);
+  transform-origin: right center; transform: rotateY(-90deg);
+  background: var(--atelier-weave), var(--book-cover); border: 1px solid var(--atelier-shadow);
+  box-shadow: inset 2px 0 3px var(--atelier-highlight), inset -2px 0 3px var(--atelier-shadow);
+}
+:root[data-appearance="atelier"] .library-book-spine::after { content: ''; position: absolute; inset: 16% 0; border-block: 2px solid var(--atelier-brass-edge); }
+:root[data-appearance="atelier"] .library-book-pages {
+  top: 3px; bottom: 3px; left: 100%; width: var(--atelier-book-depth);
+  transform-origin: left center; transform: rotateY(90deg);
+  background: var(--atelier-pages); border: 1px solid var(--atelier-brass-edge);
+  box-shadow: inset 3px 0 4px var(--atelier-shadow), inset -1px 0 var(--atelier-highlight);
+}
+:root[data-appearance="atelier"] :is(.library-book-top, .library-book-bottom) {
+  left: 2px; right: 2px; height: var(--atelier-book-depth); background: var(--atelier-pages);
+  border: 1px solid var(--atelier-brass-edge); box-shadow: inset 0 1px var(--atelier-highlight);
+}
+:root[data-appearance="atelier"] .library-book-top { top: calc(0px - var(--atelier-book-depth)); transform-origin: center bottom; transform: rotateX(90deg); }
+:root[data-appearance="atelier"] .library-book-bottom { top: 100%; transform-origin: center top; transform: rotateX(-90deg); }
+:root[data-appearance="atelier"] .library-book[data-book-mode="shelf"] .library-book-cover { transform: translateZ(0); backface-visibility: hidden; }
+:root[data-appearance="atelier"] .library-book[data-book-mode="shelf"] .library-bookmark { transform: translateZ(1px); }
+:root[data-appearance="atelier"] .library-book[data-book-mode="shelf"] .library-book-cover::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(var(--book-sheen-angle, 115deg), transparent 12%, var(--atelier-highlight) 44%, transparent 76%);
+  opacity: var(--book-sheen, 0); transition: opacity var(--atelier-book-motion-duration) var(--atelier-motion-ease);
+}
+:root[data-appearance="atelier"] .library-book[data-book-rendered="true"] { transform: none; }
+:root[data-appearance="atelier"] .library-book[data-book-rendered="true"] .book-cover-fallback { visibility: hidden; }
+:root[data-appearance="atelier"] .book-cover-canvas { position: absolute; inset: -8%; width: 116%; height: 116%; pointer-events: none; }
+:root[data-appearance="atelier"] .library-book::after { content: ''; position: absolute; z-index: 0; height: 16px; bottom: -9px; left: -8px; right: -14px; background: var(--atelier-book-contact); pointer-events: none; transform: translateX(var(--book-shadow-x, 0px)); transition: transform var(--atelier-book-motion-duration) var(--atelier-motion-ease); }
+:root[data-appearance="atelier"] :is(.book-cover-fallback, .book-cover-canvas) { z-index: 1; }
+:root[data-appearance="atelier"] .entry-overview-cover .library-book { width: 136px; height: 184px; }
+:root[data-appearance="atelier"] .entry-overview-cover .library-book-title { font-size: 16px; }
+:root[data-appearance="atelier"] .entry-overview-summary { background: var(--atelier-note-paper); border-color: var(--border); box-shadow: inset 1px 1px var(--atelier-control-highlight), 0 2px 3px var(--atelier-shadow-soft); }
+:root[data-appearance="atelier"] .entry-overview-summary h1 { font-family: Georgia, 'Microsoft YaHei', serif; }
+:root[data-appearance="atelier"] .entry-overview-section { background: transparent; box-shadow: none; }
+:root[data-appearance="atelier"] .entry-overview-section > :first-child { box-shadow: inset 0 1px var(--atelier-control-highlight); }
+:root[data-appearance="atelier"] :is(.markdown-note-scroll, [data-material="source-paper"]) { background: var(--atelier-note-paper); }
+:root[data-appearance="atelier"] [data-material="reader-popover"] { background: var(--atelier-dialog); border-color: var(--border); border-radius: var(--atelier-control-radius); box-shadow: inset 0 0 0 1px var(--atelier-control-highlight), 0 4px 12px var(--atelier-shadow); }
+:root[data-appearance="atelier"] .reader-surface-toolbar { background: var(--atelier-metal); box-shadow: inset 0 1px var(--atelier-control-highlight), inset 0 -1px var(--atelier-control-edge); }
+:root[data-appearance="atelier"] .library-book-cover {
+  position: relative; display: flex; flex-direction: column; height: 100%; border-radius: 2px 4px 4px 2px;
+  background: var(--atelier-weave), var(--book-cover); padding: 16px 14px 14px 22px;
+  box-shadow: inset 1px 0 1px var(--atelier-highlight), inset 6px 0 5px var(--atelier-shadow), inset 9px 0 1px var(--atelier-shadow-soft), inset 0 1px 1px var(--atelier-highlight), inset 0 -1px 1px var(--atelier-shadow), 3px 3px 5px var(--atelier-shadow-soft);
+}
+:root[data-appearance="atelier"] .library-book-cover::after { content: ''; position: absolute; inset: 8px 7px 7px 15px; border: 1px solid color-mix(in srgb, var(--book-ink) calc(25% + var(--book-rim-gain, 0%)), transparent); pointer-events: none; transition: border-color var(--atelier-motion-disclosure) var(--atelier-motion-ease); }
+:root[data-appearance="atelier"] .library-book-kicker { font-size: 6px; letter-spacing: .12em; opacity: .75; white-space: nowrap; }
+:root[data-appearance="atelier"] .library-book-title {
+  font: 500 clamp(11px, 8cqw, 15px)/1.23 Georgia, 'Microsoft YaHei', serif; margin-top: 18px;
+  display: -webkit-box; -webkit-line-clamp: 9; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere;
+}
+:root[data-appearance="atelier"] .library-book-motif { margin: auto 0 14px; width: 36%; height: 1px; background: currentColor; opacity: .28; flex-shrink: 0; }
+:root[data-appearance="atelier"] .library-book-topic { font-size: 9px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin-top: 8px; }
+:root[data-appearance="atelier"] .library-bookmark {
+  position: absolute; z-index: 1; top: -3px; right: 14px; width: 11px; height: 34px;
+  background: var(--atelier-brass); clip-path: polygon(0 0,100% 0,100% 100%,50% 82%,0 100%);
+}
+:root[data-appearance="atelier"] .library-shelf-entry[data-state="selected"] .library-book { outline: 2px solid var(--atelier-brass-edge); outline-offset: 3px; border-radius: 3px; }
+:root[data-appearance="atelier"] .library-book-caption { max-width: 180px; margin: 24px auto 0; font-size: 11px; }
+:root[data-appearance="atelier"] .library-book-progress { display: flex; align-items: center; gap: 10px; color: var(--muted-foreground); }
+:root[data-appearance="atelier"] .library-book-meter { flex: 1; height: 4px; border-radius: 3px; overflow: hidden; background: var(--muted); box-shadow: inset 0 1px 1px var(--atelier-shadow-soft); }
+:root[data-appearance="atelier"] .library-book-meter i { display: block; height: 100%; width: var(--reading-progress); background: var(--atelier-brass); }
+@media (prefers-reduced-motion: reduce), (forced-colors: active) {
+  :root[data-appearance="atelier"] [data-slot="switch-thumb"] { transition: none; }
+  :root[data-appearance="atelier"] .library-book[data-book-mode="shelf"] .book-cover-fallback { transform: rotateY(-6deg); transition: none; }
+  :root[data-appearance="atelier"] .library-book[data-book-mode="shelf"] .library-book-cover::before { opacity: 0; transition: none; }
+  :root[data-appearance="atelier"] .library-book::after { transform: none; transition: none; }
+  :root[data-appearance="atelier"] .library-book-cover::after { transition: none; }
+}

@@ -2,7 +2,6 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './tooltip';
-import { HOVER_TIMING } from './hover-interactions';
 
 class TestPointerEvent extends MouseEvent {
   pointerType = 'mouse';
@@ -19,14 +18,24 @@ function Demo() {
     <TooltipContent>调整阅读显示</TooltipContent></Tooltip></TooltipProvider>;
 }
 describe('Tooltip', () => {
-  it('uses a deliberate delay and the scaled tooltip layer', async () => {
+  it('recovers on movement after a click without requiring the pointer to leave', async () => {
+    render(<Demo />);
+    const trigger = screen.getByRole('button');
+    fireEvent.pointerMove(trigger);
+    expect(screen.getByRole('tooltip', { hidden: true })).toBeTruthy();
+    fireEvent.pointerDown(trigger, { buttons: 1 });
+    fireEvent.pointerMove(trigger, { buttons: 1 });
+    expect(screen.queryByRole('tooltip', { hidden: true })).toBeNull();
+    fireEvent.pointerUp(trigger);
+    fireEvent.pointerMove(trigger);
+    expect(screen.getByRole('tooltip', { hidden: true })).toBeTruthy();
+  });
+  it('opens without a delay in the scaled tooltip layer', async () => {
     render(<Demo />);
     const trigger = screen.getByRole('button');
     fireEvent.pointerEnter(trigger);
     fireEvent.pointerMove(trigger);
-    await tick(HOVER_TIMING.tooltip - 1);
-    expect(screen.queryByRole('tooltip', { hidden: true })).toBeNull();
-    await tick(1);
+    expect(screen.getByRole('tooltip', { hidden: true })).toBeTruthy();
     expect(screen.getByRole('tooltip', { hidden: true })).toBeTruthy();
     expect(document.querySelector('[data-slot="overlay-viewport"]')?.className).toContain('z-[var(--z-tooltip)]');
     fireEvent.pointerDown(trigger, { buttons: 1 });
@@ -46,7 +55,7 @@ describe('Tooltip', () => {
     expect(document.activeElement).toBe(trigger);
   });
 
-  it('does not resurrect a delayed tooltip after the window loses focus', async () => {
+  it('dismisses an immediate tooltip when the window loses focus', async () => {
     render(<Demo />);
     fireEvent.pointerEnter(screen.getByRole('button'));
     fireEvent.pointerMove(screen.getByRole('button'));

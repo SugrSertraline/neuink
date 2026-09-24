@@ -49,6 +49,7 @@ pub enum JobKind {
     Parser,
     IndexBuild,
     Translation,
+    ParagraphTranslation,
     Vectorize,
     Llm,
 }

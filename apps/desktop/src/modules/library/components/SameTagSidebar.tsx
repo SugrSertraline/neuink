@@ -11,18 +11,19 @@ import type { NoteTarget, TagMeta } from '@/shared/types/domain';
 import { TagNotesSidebarSection } from '@/modules/notes/components/TagNotesSidebarSection';
 import { buildTagPathById, buildTagTree } from '../utils/tagTree';
 import type { LibraryEntry } from './LibrarySidebar';
-import { SidebarPaperRow } from './SidebarPaperRow';
+import { SidebarPaperContents } from './SidebarPaperContents';
 import { SidebarPanel } from './SidebarPanel';
 import { TagNavigation } from './TagNavigation';
 import { useLibraryReadingStates } from '@/modules/reader/useLibraryReadingStates';
 
 
-export function SameTagSidebar({ entries, tags, tagId, descendants, status, error, layout, workspaceRoot = null, contextKey = '', contextReason, currentEntryId, onTagChange, onDescendantsChange, onRead, onDetails, onEditTags, onLocateEntry, onOpenTagNote }: {
+export function SameTagSidebar({ entries, tags, tagId, descendants, status, error, layout, workspaceRoot = null, contextKey = '', contextReason, currentEntryId, onTagChange, onDescendantsChange, onRead, onDetails, onOpenContent, onEditTags, onLocateEntry, onOpenTagNote }: {
   entries: LibraryEntry[]; tags: TagMeta[]; tagId: string | null; descendants: boolean;
   status: 'loading' | 'ready' | 'error'; error: string | null; layout: WorkspaceSurfaceLayout;
   workspaceRoot?: string | null; contextKey?: string; contextReason?: string; currentEntryId?: string | null;
   onTagChange: (id: string | null) => void; onDescendantsChange: (value: boolean) => void;
   onRead: (entry: LibraryEntry, pane: 'left' | 'right') => void; onDetails: (entry: LibraryEntry) => void;
+  onOpenContent: (entry: LibraryEntry, contentId: string, pane?: 'left' | 'right') => void;
   onEditTags?: () => void;
   onLocateEntry?: () => void;
   onOpenTagNote?: (target: NoteTarget, title: string, split?: boolean) => void;
@@ -32,6 +33,9 @@ export function SameTagSidebar({ entries, tags, tagId, descendants, status, erro
   const [locateRequest, setLocateRequest] = useState<string | null>(null);
   const [tagsOpen, setTagsOpen] = useState(true);
   const [papersOpen, setPapersOpen] = useState(true);
+  // The sidebar stays mounted across activity changes; filters never reset per-entry expansion.
+  const [expandedEntries, setExpandedEntries] = useState<Record<string, boolean>>({});
+  const [expandedNotes, setExpandedNotes] = useState<Record<string, boolean>>({});
   const tagTree = useMemo(() => buildTagTree(tags, entries), [tags, entries]);
   const filterKey = JSON.stringify([contextKey, tagId]);
   const [filter, setFilter] = useState({ key: filterKey, query: '' });
@@ -80,7 +84,8 @@ export function SameTagSidebar({ entries, tags, tagId, descendants, status, erro
           setLocateRequest(currentEntry.id);
         }}><LocateFixed size={15} aria-hidden="true" /></Button></TooltipTrigger><TooltipContent>{locateHint}</TooltipContent></Tooltip> : null}
       </div>;
-  return <aside ref={sidebarRef} className="app-sidebar" style={{ gridTemplateRows: 'minmax(0, 1fr)' }} aria-label="标签阅读">
+  return <aside ref={sidebarRef} className="app-sidebar" aria-label="标签阅读">
+      <div className="side-head"><span>标签阅读</span></div>
       <TagNavigation activeTag={tagId} nodes={tagTree} status={status} error={error} open={tagsOpen} onToggleOpen={() => setTagsOpen(value => !value)} onOpenTagDetails={id => { setQuery(''); onTagChange(id); }} onEditTags={onEditTags} revealActiveTag
         collection={{ query, toolbar, panels: true, contextLabel: contextReason, onSelectAll: () => { setQuery(''); onTagChange(null); } }}>
       <SidebarPanel name="论文" label={`论文${status === 'ready' && (tagId === null || valid) ? ` · ${filtered.length}` : ''}`} open={papersOpen} onToggle={() => setPapersOpen(value => !value)} weight={2}>
@@ -91,8 +96,12 @@ export function SameTagSidebar({ entries, tags, tagId, descendants, status, erro
           : filtered.length === 0 ? <p className="p-2 text-xs text-muted-foreground">{query.trim() ? '没有匹配的论文。' : '当前范围暂无论文。可在条目库为论文添加此标签。'}</p>
           : filtered.map(entry => {
             return <div key={entry.id} ref={entry.id === currentEntryId ? activeRowRef : undefined}>
-              <SidebarPaperRow entry={entry} layout={layout} paths={paths} state={reading.states[entry.id]} loading={reading.loading} error={reading.error}
+              <SidebarPaperContents entry={entry} layout={layout} paths={paths} state={reading.states[entry.id]} loading={reading.loading} error={reading.error}
                 active={currentEntryId === undefined ? undefined : entry.id === currentEntryId}
+                expanded={expandedEntries[entry.id] ?? false} notesExpanded={expandedNotes[entry.id] ?? true}
+                onExpandedChange={open => setExpandedEntries(current => ({ ...current, [entry.id]: open }))}
+                onNotesExpandedChange={open => setExpandedNotes(current => ({ ...current, [entry.id]: open }))}
+                onOpenContent={(contentId, pane) => onOpenContent(entry, contentId, pane)}
                 onOpen={() => onRead(entry, 'left')} onSplit={() => onRead(entry, 'right')} onDetails={() => onDetails(entry)} />
             </div>;
           })}

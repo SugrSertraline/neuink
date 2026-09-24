@@ -15,10 +15,10 @@ const entry: LibraryEntry = { id: 'entry', title: '论文', contents: [{ kind: '
 it('collapses document notes without hiding the create action and opens the unified trash', () => {
   const onOpenTrash = vi.fn();
   const onSelectContent = vi.fn();
-  const view = render(<ToastContext.Provider value={{ dismiss: noop, notify: () => 'toast' }}><TagPreferencesProvider><EntryContentSidebar entry={entry} tags={[]} activeContentId="overview" onBack={noop}
-    onOpenTrash={onOpenTrash} onCreateMarkdownNote={noop} onDeleteMarkdownNote={noop} onAttachPdf={noop} onCreatePdfVersion={noop}
-    onImportMineruClientResult={noop} onOpenMarkdownInPdfPane={noop} onOpenContentInRight={noop} onRenameMarkdownNote={noop}
-    onRenamePdfDisplayName={noop} onSelectContent={onSelectContent} onUpdateEntry={noop} /></TagPreferencesProvider></ToastContext.Provider>);
+  const view = render(<ToastContext.Provider value={{ dismiss: noop, notify: () => 'toast' }}><TagPreferencesProvider><EntryContentSidebar entry={entry} tags={[]} activeContentId="overview"
+    onOpenTrash={onOpenTrash} onCreateMarkdownNote={noop} onDeleteMarkdownNote={noop} onAttachPdf={noop}
+    onOpenMarkdownInPdfPane={noop} onOpenContentInRight={noop} onRenameMarkdownNote={noop}
+    onRenamePdfDisplayName={noop} onSelectContent={onSelectContent} /></TagPreferencesProvider></ToastContext.Provider>);
   fireEvent.click(view.getByRole('button', { name: '文档笔记 · 1' }));
   expect(view.queryByRole('button', { name: '阅读小结 文档笔记' })).toBeNull();
   expect(view.getByRole('button', { name: '新建文档笔记' })).toBeTruthy();
@@ -28,4 +28,6 @@ it('collapses document notes without hiding the create action and opens the unif
   fireEvent.click(view.getByRole('button', { name: '回收站 条目、笔记与标签' }));
   expect(onOpenTrash).toHaveBeenCalledOnce();
   expect(onSelectContent).not.toHaveBeenCalledWith('entry-trash');
+  expect(view.queryByRole('button', { name: '编辑条目' })).toBeNull();
+  expect(view.queryByRole('button', { name: '创建新版 PDF' })).toBeNull();
 });

@@ -1,6 +1,31 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  --reader-desk: var(--muted);
+  --reader-desk-weave: transparent;
+  --reader-paper: #fffefb;
+  --reader-paper-edge: #d0cabd;
+  --reader-paper-shadow: #34281924;
+  --reader-binding-shadow: #382c1d70;
+  --reader-ribbon: #87504b;
+  --reader-ribbon-ink: #fff9ed;
+  --reader-ribbon-edge: #e6ba9a65;
+  --reader-bookmark-surface: color-mix(in srgb, var(--reader-ribbon) 12%, var(--card));
+  --annotation-paper-yellow: #f7edb8;
+  --annotation-fold-yellow: #e2d18d;
+  --annotation-paper-green: #e1edcb;
+  --annotation-fold-green: #bbcca0;
+  --annotation-paper-blue: #dfeaf2;
+  --annotation-fold-blue: #b6cddd;
+  --annotation-paper-pink: #f4dedb;
+  --annotation-fold-pink: #dcb6b2;
+  --annotation-ink: #3b3428;
+  --annotation-secondary-ink: #6d6350;
+  --annotation-edge: #8b795e42;
+  --annotation-glue: #806d3510;
+  --annotation-tape: #fff9e3ab;
+  --annotation-tape-edge: #fffdf0c9;
+  --annotation-rule: #8d754a1a;
   --background: #f6f8fb;
   --foreground: #172033;
   --card: #ffffff;
@@ -47,6 +72,7 @@
   --z-reader-preview: 200;
   --z-menu: 300;
   --z-popover: 400;
+  --z-reader-selection: 450;
   --z-dialog: 500;
   --z-dialog-popover: 550;
   --z-tooltip: 600;
@@ -275,6 +301,195 @@
   --app-hover: #f5f3ff;
   --app-active: #ede9fe;
   --app-brand: #7c3aed;
+}
+
+/* Material extension: independent of data-theme accent presets, never changes feedback hues. */
+:root[data-appearance="atelier"] {
+  --reader-desk: #e2ddcf;
+  --reader-desk-weave: #ffffff20;
+  /* Keep all semantic-radius surfaces square, including cards and sidebar rows. */
+  --radius: 2px;
+  --background: #eeeae3;
+  --foreground: #413b34;
+  --card: #faf7ee;
+  --card-foreground: #413b34;
+  --popover: #fcf8ef;
+  --popover-foreground: #413b34;
+  --primary: #8b403d;
+  --primary-foreground: #fff3df;
+  --secondary: #ece3d5;
+  --secondary-foreground: #604b3b;
+  --muted: #eee7da;
+  --muted-foreground: #776b5d;
+  --accent: #e2d6c4;
+  --accent-foreground: #683b31;
+  --border: #cec3b1;
+  --input: #c9c0b1;
+  --ring: #8b403d;
+  --sidebar: #e7e2d8;
+  --sidebar-foreground: #413b34;
+  --sidebar-primary: #8b403d;
+  --sidebar-primary-foreground: #fff3df;
+  --sidebar-accent: #d9cfc0;
+  --sidebar-accent-foreground: #683b31;
+  --sidebar-border: #cec3b1;
+  --sidebar-ring: #8b403d;
+  --app-line: #cec3b1;
+  --app-hover: #eee7da;
+  --app-active: #e2d6c4;
+  --app-brand: #8b403d;
+  --atelier-highlight: #ffffff88;
+  --atelier-shadow: #46332238;
+  --atelier-shadow-soft: #4633221c;
+  --atelier-shadow-faint: #46332209;
+  --atelier-metal: #e9e5dd;
+  --atelier-control-radius: 2px;
+  --atelier-control-inner-radius: 1px;
+  --atelier-control-edge: #bdb8ad;
+  --atelier-control-highlight: #fffffff0;
+  --atelier-control-shade: #51453530;
+  --atelier-control-face: inset 0 1px var(--atelier-control-highlight), inset 1px 0 var(--atelier-highlight), inset 0 -1px var(--atelier-control-shade), inset -1px 0 var(--atelier-shadow-faint);
+  --atelier-control-hover: inset 0 2px var(--atelier-control-highlight), inset 1px 0 var(--atelier-control-highlight), inset 0 -1px var(--atelier-control-shade), inset -1px 0 var(--atelier-shadow-soft);
+  --atelier-control-selected: inset 0 1px var(--atelier-control-shade), inset 1px 0 var(--atelier-shadow-soft), inset 0 -1px var(--atelier-control-highlight), inset -1px 0 var(--atelier-highlight);
+  --atelier-motion-hover: 140ms;
+  --atelier-motion-press: 70ms;
+  --atelier-motion-disclosure: 180ms;
+  --atelier-motion-ease: cubic-bezier(.2, .8, .2, 1);
+  --atelier-button: #f5f3ed;
+  --atelier-button-hover: #fdfbf7;
+  --atelier-pressed: #ded8cd;
+  --atelier-search: #fcfaf5;
+  --atelier-action: #8b403d;
+  --atelier-action-hover: #974d46;
+  --atelier-action-pressed: #7e3c35;
+  --atelier-action-bevel: #ffffff38;
+  --atelier-switch-off: #d0c9be;
+  --atelier-switch-on: #8b403d;
+  --atelier-dialog: #faf7ee;
+  --atelier-paper: radial-gradient(ellipse at 48% 0, #fffdf5, #efeade);
+  --atelier-paper-label: #f3ebdc;
+  --atelier-weave: repeating-linear-gradient(0deg, #ffffff12 0 1px, #69523b04 1px 2px), repeating-linear-gradient(90deg, #ffffff0a 0 1px, transparent 1px 3px);
+  --atelier-leather: linear-gradient(135deg, #a35c51, #834039);
+  --atelier-leather-hover: linear-gradient(135deg, #af695b, #8f4840);
+  --atelier-leather-edge: #6f3930;
+  --atelier-leather-shine: #d2967d;
+  --atelier-brass: linear-gradient(90deg, #94794a, #d4bd83, #a88c54);
+  --atelier-brass-edge: #ac925d;
+  --atelier-wood: repeating-linear-gradient(1deg, #5e3e2615 0 1px, transparent 1px 4px), linear-gradient(#cfb483, #a78151 30%, #b38b60 58%, #805934);
+  --atelier-wood-light: #e2c795;
+  --atelier-pages: repeating-linear-gradient(0deg, #dbcfae 0 1px, #f2e8ce 1px 2px);
+  --atelier-cover-ink: #f1e4c8;
+  --atelier-cover-dark-ink: #433f34;
+  --atelier-book-paper: #f2e8ce;
+  --atelier-book-depth: 22px;
+  --atelier-book-motion-duration: 260ms;
+  --atelier-note-paper: repeating-linear-gradient(0deg, #9d8c6505 0 1px, transparent 1px 4px), #faf7ee;
+  --atelier-book-contact: radial-gradient(ellipse at center, #35251b4d, #35251b12 45%, transparent 72%);
+  --atelier-book-red: #713e35;
+  --atelier-book-green: #34554b;
+  --atelier-book-sand: #c4b89b;
+  --atelier-book-blue: #31475a;
+  --atelier-book-clay: #8a583e;
+  --atelier-book-slate: #596359;
+}
+
+/* Liquid Glass is an independent, opt-in material. Reading surfaces remain opaque. */
+:root[data-appearance="liquid-glass"] {
+  --radius: 0.875rem;
+  --background: #f3f4f6;
+  --foreground: #222326;
+  --card: #ffffff;
+  --card-foreground: #222326;
+  --popover: #fafafa;
+  --popover-foreground: #222326;
+  --primary: #1265c5;
+  --primary-foreground: #ffffff;
+  --secondary: #eceef1;
+  --secondary-foreground: #36383d;
+  --muted: #f0f1f3;
+  --muted-foreground: #65676e;
+  --accent: #e8f0fa;
+  --accent-foreground: #164d8b;
+  --border: #dddfe3;
+  --input: #c6c9d0;
+  --ring: #1265c5;
+  --sidebar: #f0f1f3;
+  --sidebar-foreground: #222326;
+  --sidebar-primary: #1265c5;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e8f0fa;
+  --sidebar-accent-foreground: #164d8b;
+  --sidebar-border: #d4d6dc;
+  --sidebar-ring: #1265c5;
+  --app-line: #dddfe3;
+  --app-hover: #eceef1;
+  --app-active: #e8f0fa;
+  --app-brand: #1265c5;
+  --glass-surface: #f0f1f3;
+  --glass-popup: #fafafa;
+  --glass-reader-scrolled: #fafafa;
+  --glass-reader-moving: #fafafa;
+  --glass-overview-panel: #ffffff;
+  --glass-filter: none;
+  --glass-toolbar: #f0f1f3;
+  --glass-control: #ffffff;
+  --glass-control-hover: #ffffff;
+  --glass-control-pressed: #e0e3e8;
+  --glass-switch-track: #bfc2c9;
+  --glass-switch-thumb: #fafafa;
+  --glass-input: #ffffff;
+  --glass-control-filter: none;
+  --glass-popup-filter: none;
+  --glass-edge: #ffffffb3;
+  --glass-chrome-edge: #24262b24;
+  --glass-highlight: #ffffffe6;
+  --glass-shadow: #20232b1f;
+  --glass-overlay: #23252b1a;
+  --glass-control-radius: 999px;
+  --glass-panel-radius: 22px;
+  /* A clear centre, one fine edge, no painted bevel or raised-key shadow. */
+  --glass-face: none;
+  --glass-tinted-face: none;
+  --glass-tinted-specular: #ffffff14;
+  --glass-rim: inset 0 1px 0 var(--glass-highlight);
+  --glass-control-shadow: var(--glass-rim), 0 0 0 .5px var(--glass-chrome-edge);
+  --glass-control-hover-shadow: var(--glass-rim), 0 0 0 .5px var(--glass-chrome-edge);
+  --glass-popup-shadow: 0 16px 40px var(--glass-shadow), 0 2px 8px #20232b0d, 0 0 0 .5px var(--glass-chrome-edge);
+  --glass-primary: #0050b4;
+  --glass-primary-hover: #00479f;
+  --glass-primary-foreground: var(--primary-foreground);
+  --glass-muted-foreground: #50525a;
+  /* One neutral light field behind window chrome; content panes never repaint it. */
+  --glass-ambient: radial-gradient(ellipse at 0% 8%, #ffffffd9, transparent 48%), radial-gradient(ellipse at 32% 100%, #ffffff80, transparent 56%), #dfe2e7;
+  --glass-specular: #ffffff1f;
+  --glass-specular-fade: #ffffff00;
+  --glass-prism-colors: #ffffff00 0deg, #ffffffeb 35deg, #ffffff66 62deg, #ffffff00 100deg, #272c391a 170deg, #ffffff00 215deg, #ffffffcc 245deg, #ffffff00 285deg;
+  --glass-motion: 120ms;
+  --glass-press-motion: 65ms;
+  --glass-ease: cubic-bezier(.2, .75, .25, 1);
+}
+
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root[data-appearance="liquid-glass"] {
+    --glass-surface: #ffffff42;
+    --glass-popup: #ffffff70;
+    --glass-reader-scrolled: #ffffff80;
+    --glass-reader-moving: #ffffff94;
+    --glass-overview-panel: #ffffff47;
+    --glass-toolbar: #ffffff08;
+    --glass-control: #ffffff59;
+    --glass-control-hover: #ffffff99;
+    --glass-control-pressed: #3b414e14;
+    --glass-switch-track: #666b7652;
+    --glass-switch-thumb: #ffffffd9;
+    --glass-input: #ffffff38;
+    --glass-primary: #005acbe6;
+    --glass-primary-hover: #005acbf2;
+    --glass-primary-foreground: #ffffff;
+    --glass-filter: blur(14px) saturate(110%);
+    --glass-control-filter: blur(3px) saturate(110%);
+    --glass-popup-filter: blur(16px) saturate(110%);
+  }
 }
 
 @theme inline {

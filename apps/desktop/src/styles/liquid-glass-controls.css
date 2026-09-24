@@ -1,0 +1,103 @@
+/* Glass lives on the existing controls. Geometry, focus rings and event owners remain intact. */
+:root[data-appearance="liquid-glass"] :where([data-ui="button"], [data-ui="toggle"], [data-ui="toggle-group-item"], [data-slot="tabs-trigger"], [data-slot="select-trigger"], [data-slot="input"], [data-slot="textarea"], [data-slot="input-group"], [data-slot="switch"], [data-slot="checkbox"]) {
+  --glass-control-elevation: 0 0 #0000;
+  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--glass-control-elevation);
+  transition-property: background-color, border-color, color, box-shadow;
+  transition-duration: var(--glass-motion);
+  transition-timing-function: var(--glass-ease);
+}
+:root[data-appearance="liquid-glass"] :is([data-ui="button"], [data-ui="toggle"], [data-ui="toggle-group-item"], [data-slot="select-trigger"], [data-slot="tabs-trigger"]) {
+  border-radius: var(--glass-control-radius);
+}
+:root[data-appearance="liquid-glass"] :is([data-ui="button"][data-variant="outline"], [data-ui="button"][data-variant="secondary"], [data-slot="select-trigger"], [data-ui="toggle"], [data-ui="toggle-group-item"]) {
+  background: var(--glass-face), var(--glass-control);
+  border-color: var(--glass-edge);
+  --glass-control-elevation: var(--glass-control-shadow);
+  -webkit-backdrop-filter: var(--glass-control-filter);
+  backdrop-filter: var(--glass-control-filter);
+}
+:root[data-appearance="liquid-glass"] [data-ui="button"][data-variant="default"] {
+  --glass-face: var(--glass-tinted-face);
+  --glass-specular: var(--glass-tinted-specular);
+  background: var(--glass-tinted-face), var(--glass-primary);
+  border-color: var(--glass-edge);
+  color: var(--glass-primary-foreground);
+  --glass-control-elevation: var(--glass-control-shadow);
+  -webkit-backdrop-filter: var(--glass-control-filter);
+  backdrop-filter: var(--glass-control-filter);
+}
+:root[data-appearance="liquid-glass"] [data-ui="button"][data-variant="default"]:hover:not(:disabled) { background-color: var(--glass-primary-hover); }
+:root[data-appearance="liquid-glass"] :is([data-ui="button"][data-variant="outline"], [data-ui="button"][data-variant="secondary"], [data-slot="select-trigger"], [data-ui="toggle"], [data-ui="toggle-group-item"]):is(:hover, :focus-visible):not(:disabled, [aria-disabled="true"]) {
+  background-color: var(--glass-control-hover);
+  --glass-control-elevation: var(--glass-control-hover-shadow);
+}
+:root[data-appearance="liquid-glass"] :is([data-ui="button"][data-variant="ghost"], [data-ui="button"][data-variant="plain"]):is(:hover, :focus-visible):not(:disabled, [aria-disabled="true"]) {
+  background: var(--glass-face), var(--glass-control);
+  --glass-control-elevation: var(--glass-rim);
+}
+:root[data-appearance="liquid-glass"] :is([data-ui="button"][data-variant="outline"], [data-ui="button"][data-variant="secondary"], [data-ui="button"][data-variant="ghost"], [data-ui="button"][data-variant="plain"], [data-slot="select-trigger"]):is(:active, [aria-expanded="true"], [aria-pressed="true"], [aria-selected="true"]):not(:disabled, [aria-disabled="true"]) {
+  background-color: var(--glass-control-pressed);
+  --glass-control-elevation: var(--glass-rim);
+}
+:root[data-appearance="liquid-glass"] [data-ui="button"]:active {
+  transition-duration: var(--glass-press-motion);
+  translate: none;
+}
+/* Disclosure and tree rows keep a single selection surface rather than a pill per child. */
+:root[data-appearance="liquid-glass"] :is([data-material="section-heading"], [data-material="content-row"]) > [data-ui="button"] {
+  border-radius: inherit;
+  --glass-control-elevation: 0 0 #0000;
+}
+:root[data-appearance="liquid-glass"] [data-material="section-heading"] > [data-ui="button"][aria-controls][aria-expanded] { background: transparent; }
+:root[data-appearance="liquid-glass"] [data-material="section-heading"] > [data-ui="button"][aria-controls][aria-expanded]:is(:hover, :focus-visible) { background-color: var(--glass-control); }
+:root[data-appearance="liquid-glass"] :is([data-slot="input"], [data-slot="textarea"], [data-slot="input-group"], [data-material="composer"]) {
+  background: var(--glass-input); border-color: var(--glass-chrome-edge);
+  border-radius: var(--radius);
+  --glass-control-elevation: var(--glass-rim);
+  -webkit-backdrop-filter: var(--glass-control-filter); backdrop-filter: var(--glass-control-filter);
+}
+:root[data-appearance="liquid-glass"] [data-slot="input"] { border-radius: var(--glass-control-radius); }
+:root[data-appearance="liquid-glass"] :is([data-ui="button"], [data-ui="toggle"], [data-slot="select-trigger"], [data-slot="input"], [data-slot="textarea"], [data-slot="input-group"], [data-slot="checkbox"])[aria-invalid="true"] { border-color: var(--destructive); }
+:root[data-appearance="liquid-glass"] [data-slot="search-input-icon"] { z-index: 1; pointer-events: none; }
+
+/* Existing Radix positions and keyboard state are authoritative. */
+:root[data-appearance="liquid-glass"] [data-slot="switch"] {
+  border-radius: var(--glass-control-radius);
+  border-color: var(--glass-chrome-edge);
+  background-image: var(--glass-face);
+  --glass-control-elevation: var(--glass-rim);
+}
+:root[data-appearance="liquid-glass"] [data-slot="switch"][data-state="unchecked"] { background-color: var(--glass-switch-track); }
+:root[data-appearance="liquid-glass"] [data-slot="switch"][data-state="checked"] { background-color: var(--primary); }
+:root[data-appearance="liquid-glass"] [data-slot="switch-thumb"] {
+  background: var(--glass-face), var(--glass-switch-thumb);
+  box-shadow: var(--glass-control-shadow);
+  transition: translate var(--glass-motion) var(--glass-ease), box-shadow var(--glass-motion);
+}
+:root[data-appearance="liquid-glass"] [data-slot="checkbox"] {
+  border-radius: 5px; --glass-control-elevation: var(--glass-rim);
+}
+:root[data-appearance="liquid-glass"] [data-slot="checkbox"][data-state="unchecked"] { background: var(--glass-control); border-color: var(--input); }
+/* Segmented controls share a base with one distinct selected glass capsule. */
+:root[data-appearance="liquid-glass"] :is([data-slot="tabs-list"], [data-slot="toggle-group"][data-spacing="0"]) {
+  border-radius: var(--glass-control-radius);
+  background: var(--glass-control); box-shadow: var(--glass-rim);
+  border-color: var(--glass-chrome-edge);
+}
+:root[data-appearance="liquid-glass"] [data-slot="toggle-group"][data-spacing="0"] [data-ui="toggle-group-item"] {
+  background: transparent; border-color: transparent; border-radius: var(--glass-control-radius);
+  --glass-control-elevation: 0 0 #0000;
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+:root[data-appearance="liquid-glass"] :is([data-slot="tabs-trigger"][data-state="active"], [data-ui="toggle-group-item"][data-state="on"], [data-ui="toggle-group-item"][aria-checked="true"], [data-ui="toggle"][aria-pressed="true"]) {
+  background: var(--glass-face), var(--glass-control-pressed); color: var(--accent-foreground);
+  --glass-control-elevation: var(--glass-control-shadow);
+}
+:root[data-appearance="liquid-glass"] [data-slot="toggle-group"][data-spacing="0"] [data-ui="toggle-group-item"]:is([data-state="on"], [aria-checked="true"]) {
+  background: var(--glass-face), var(--glass-control-hover); --glass-control-elevation: var(--glass-control-shadow);
+}
+/* Shared Radix menu rows retain their destructive/disabled semantics and original scroll owner. */
+:root[data-appearance="liquid-glass"] :is([data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-checkbox-item"], [data-slot="dropdown-menu-radio-item"], [data-slot="dropdown-menu-sub-trigger"], [data-slot="context-menu-item"], [data-slot="select-item"], [data-slot="command-item"]) { border-radius: calc(var(--radius) - 4px); }
+:root[data-appearance="liquid-glass"] :is([data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-checkbox-item"], [data-slot="dropdown-menu-radio-item"], [data-slot="dropdown-menu-sub-trigger"], [data-slot="context-menu-item"], [data-slot="select-item"], [data-slot="command-item"]):is([data-highlighted], [data-selected="true"]):not([data-variant="destructive"], [data-disabled]) {
+  background: var(--glass-control-pressed); box-shadow: var(--glass-rim);
+}

@@ -30,6 +30,7 @@ export function verifyHarnessResult({
   const toolEvents = grounded.toolEvents ?? [];
   const wantsTag = plan.deliverables.includes('tag_change_proposal');
   const wantsEntryMeta = plan.deliverables.includes('entry_meta_change_proposal');
+  const modelDriven = plan.executionMode !== undefined;
 
   if (plan.needsNoteProposal && proposals.length === 0) {
     errors.push('A note proposal was required, but no proposal was generated.');
@@ -37,17 +38,21 @@ export function verifyHarnessResult({
   if (wantsEntryMeta && entryMetaProposals.length === 0) {
     errors.push('An Entry metadata proposal was required, but no proposal was generated.');
   }
-  if (!wantsEntryMeta && entryMetaProposals.length > 0) {
+  if (!modelDriven && !wantsEntryMeta && entryMetaProposals.length > 0) {
     errors.push('A non-Entry-metadata task produced an Entry metadata proposal.');
   }
   if (wantsTag && tagProposals.length === 0) {
     errors.push('A Tag proposal was required, but no proposal was generated.');
   }
-  if (!wantsTag && tagProposals.length > 0) {
+  if (!modelDriven && !wantsTag && tagProposals.length > 0) {
     errors.push('A non-Tag task produced a Tag proposal.');
   }
-  if (invocationPlan.writePolicy === 'chat_only' && proposals.length > 0) {
+  if (invocationPlan.writePolicy === 'chat_only' &&
+    (proposals.length > 0 || entryMetaProposals.length > 0 || tagProposals.length > 0)) {
     errors.push('A chat-only task produced an unauthorized note proposal.');
+  }
+  if (invocationPlan.executionMode === 'plan' && grounded.agentLoopState?.createdEntryIds.length) {
+    errors.push('A read-only planning task created an Entry.');
   }
 
   verifyProposals(proposals, plan, errors);
@@ -115,12 +120,12 @@ function verifyEntryMetaProposals(
   errors: string[]
 ) {
   for (const proposal of proposals) {
-    if (!plan.entryMetaChange?.entryId || proposal.entryId !== plan.entryMetaChange.entryId) {
+    if (!plan.executionMode && (!plan.entryMetaChange?.entryId || proposal.entryId !== plan.entryMetaChange.entryId)) {
       errors.push('An Entry metadata proposal targeted the wrong Entry.');
     }
     const expectedFields = new Set(plan.entryMetaChange?.fields ?? []);
-    if (proposal.fields.some((field) => !expectedFields.has(field)) ||
-      proposal.fields.length !== expectedFields.size) {
+    if (!plan.executionMode && (proposal.fields.some((field) => !expectedFields.has(field)) ||
+      proposal.fields.length !== expectedFields.size)) {
       errors.push('An Entry metadata proposal changed fields outside the confirmed task.');
     }
     if (!proposal.afterTitle.trim()) {

@@ -391,6 +391,7 @@ function TabPane({
       {visible.map((surface) => (
         (() => {
           const index = tabs.findIndex((tab) => surfaceKey(tab) === surfaceKey(surface));
+          const canClose = surface.kind !== 'library';
           const transform = tabDragTransform({
             dragSource,
             index,
@@ -413,7 +414,7 @@ function TabPane({
           onAuxClick={(event) => {
             if (event.button === 1) {
               event.preventDefault();
-              onClose(pane, surface);
+              if (canClose) onClose(pane, surface);
             }
           }}
         >
@@ -425,21 +426,21 @@ function TabPane({
             </TooltipTrigger>
             <TooltipContent side="bottom" sideOffset={6}>{workspaceSurfaceLabel(surface, entries)}</TooltipContent>
           </Tooltip>
-          <button
+          {canClose ? <button
             aria-label={`关闭${workspaceSurfaceLabel(surface, entries)}`}
             data-tab-close="true"
             type="button"
             onClick={() => onClose(pane, surface)}
           >
             <X size={13} aria-hidden="true" />
-          </button>
+          </button> : null}
         </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
           <ContextMenuItem disabled={pane === 'left'} onSelect={() => onMove(surface, 'left')}>移到左侧</ContextMenuItem>
           <ContextMenuItem disabled={pane === 'right'} onSelect={() => onMove(surface, 'right')}>移到右侧分屏</ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem onSelect={() => onClose(pane, surface)}>关闭</ContextMenuItem>
+          {canClose ? <ContextMenuItem onSelect={() => onClose(pane, surface)}>关闭</ContextMenuItem> : null}
           <ContextMenuItem onSelect={() => onCloseOthers(pane, surface)}>关闭其他</ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem disabled={pane === 'left'} onSelect={() => onClosePane('left')}>关闭左侧</ContextMenuItem>

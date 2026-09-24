@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { ToastContext } from '@/shared/hooks/useToast';
+import { AppearanceProvider, APP_APPEARANCE_STORAGE_KEY } from '@/shared/components/AppearanceProvider';
 
 import type { LibraryEntry } from '../../library/components/LibrarySidebar';
 import { ENTRY_LIBRARY_PINNED_EDGES_STORAGE_KEY, EntryLibraryView } from './EntryLibraryView';
@@ -78,7 +79,7 @@ function renderLibrary(overrides: Partial<ComponentProps<typeof EntryLibraryView
     ...overrides
   };
   const result = render(<EntryLibraryView {...props} />, {
-    wrapper: ({ children }) => <TooltipProvider><ToastContext.Provider value={{ dismiss: vi.fn(), notify: vi.fn(() => 'toast') }}>{children}</ToastContext.Provider></TooltipProvider>
+    wrapper: ({ children }) => <AppearanceProvider><TooltipProvider><ToastContext.Provider value={{ dismiss: vi.fn(), notify: vi.fn(() => 'toast') }}>{children}</ToastContext.Provider></TooltipProvider></AppearanceProvider>
   });
   return { ...result, props, rerenderLibrary: (patch: Partial<typeof props>) => result.rerender(<EntryLibraryView {...props} {...patch} />) };
 }
@@ -87,6 +88,79 @@ const libraryTags = [
   { id: 'research', name: '研究', parent_id: null, created_at: '', updated_at: '' },
   { id: 'hci', name: 'HCI', parent_id: 'research', created_at: '', updated_at: '' }
 ];
+
+it('opens the independent relations page from the library header without selecting a paper', () => {
+  const onOpenRelations = vi.fn(); const { props } = renderLibrary({ onOpenRelations });
+  fireEvent.click(screen.getByRole('button', { name: '关系图' }));
+  expect(onOpenRelations).toHaveBeenCalledOnce(); expect(props.onSelectEntry).not.toHaveBeenCalled();
+});
+
+it('distinguishes default row opening from the explicit details command', () => {
+  const { props } = renderLibrary();
+  const row = screen.getByRole('row', { name: /可视分析论文/ });
+  fireEvent.click(row);
+  expect(props.onOpenEntryExplorer).toHaveBeenLastCalledWith(entry.id);
+  fireEvent.keyDown(row, { key: 'Enter' });
+  expect(props.onOpenEntryExplorer).toHaveBeenLastCalledWith(entry.id);
+  fireEvent.contextMenu(row);
+  fireEvent.click(screen.getByRole('menuitem', { name: '查看详情' }));
+  expect(props.onOpenEntryExplorer).toHaveBeenLastCalledWith(entry.id, 'overview');
+});
+
+describe('the optional bookshelf uses the existing library contract', () => {
+  beforeEach(() => {
+    window.localStorage.setItem(APP_APPEARANCE_STORAGE_KEY, 'atelier');
+    vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
+  });
+  it('keeps the same table node, filter, columns and scroll when switching displays', () => {
+    const { container } = renderLibrary();
+    const table = container.querySelector('[data-slot="table"]');
+    const scroll = container.querySelector('[data-slot="table-container"]')!;
+    scroll.scrollTop = 96;
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索条目' }), { target: { value: '可视分析' } });
+    expect(within(screen.getByRole('region', { name: '论文书架' })).getAllByRole('listitem')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('radio', { name: '列表' }));
+    expect(screen.getByRole('table', { name: '论文列表' })).toBe(table);
+    expect(scroll.scrollTop).toBe(96);
+    expect((screen.getByRole('textbox', { name: '搜索条目' }) as HTMLInputElement).value).toBe('可视分析');
+    fireEvent.click(screen.getByRole('radio', { name: '书架' }));
+    expect(container.querySelector('[data-slot="table"]')).toBe(table);
+    expect(window.localStorage.getItem('neuink.entryLibraryColumns.v1')).toBeNull();
+  });
+  it('opens details on click or Enter, and keeps split opening from bubbling', () => {
+    const { props } = renderLibrary();
+    const book = screen.getByRole('listitem', { name: entry.title });
+    fireEvent.click(book);
+    fireEvent.keyDown(book, { key: 'Enter' });
+    expect(props.onOpenEntryExplorer).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole('button', { name: `在右侧打开 ${entry.title}` }));
+    expect(props.onOpenEntryInSidePane).toHaveBeenCalledExactlyOnceWith(entry.id);
+    expect(props.onOpenEntryExplorer).toHaveBeenCalledTimes(2);
+  });
+  it('uses the same tag scope and empty/error/loading states', () => {
+    const { rerenderLibrary } = renderLibrary({ activeTag: 'research', tags: libraryTags });
+    fireEvent.click(screen.getByRole('radio', { name: '仅当前标签' }));
+    expect(screen.queryByRole('listitem', { name: entry.title })).toBeNull();
+    expect(within(screen.getByRole('region', { name: '论文书架' })).getByRole('status').textContent).toContain('直接归入当前标签');
+    fireEvent.click(screen.getByRole('radio', { name: '含子标签' }));
+    expect(screen.getByRole('listitem', { name: entry.title })).toBeTruthy();
+    rerenderLibrary({ status: 'loading' });
+    expect(within(screen.getByRole('region', { name: '论文书架' })).getByRole('status').textContent).toContain('正在打开');
+    rerenderLibrary({ status: 'error' });
+    expect(within(screen.getByRole('region', { name: '论文书架' })).getByRole('alert').textContent).toContain('无法加载');
+  });
+  it('suppresses opening after a bookshelf drag and clears it when changing displays', () => {
+    const { props } = renderLibrary();
+    const book = screen.getByRole('listitem', { name: entry.title });
+    Object.assign(book, { setPointerCapture: vi.fn(), hasPointerCapture: vi.fn(() => true), releasePointerCapture: vi.fn() });
+    fireEvent.pointerDown(book, { button: 0, clientX: 10, clientY: 10, pointerId: 7 });
+    fireEvent.pointerMove(book, { clientX: 100, clientY: 100, pointerId: 7 });
+    expect(document.body.style.cursor).toBe('grabbing');
+    fireEvent.click(screen.getByRole('radio', { name: '列表' }));
+    expect(document.body.style.cursor).toBe('');
+    expect(props.onOpenEntryExplorer).not.toHaveBeenCalled();
+  });
+});
 
 describe('EntryLibraryView context heading and toolbar', () => {
   it('keeps tag description drafts, paper scope and search when switching content and navigation visibility', () => {
@@ -111,21 +185,20 @@ describe('EntryLibraryView context heading and toolbar', () => {
     expect(screen.getByText(entry.title)).toBeTruthy();
   });
 
-  it('keeps statistics and context actions mounted beside the tabs, with creation in the same header slot', () => {
-    const { props } = renderLibrary({ activeTag: 'research', tags: libraryTags, onOpenTagReading: vi.fn() });
+  it('keeps statistics mounted beside the tabs, with creation in the same header slot', () => {
+    const { props } = renderLibrary({ activeTag: 'research', tags: libraryTags });
     const header = screen.getByLabelText('条目库页眉');
     const actions = within(header).getByLabelText('条目库操作');
     const statistics = within(actions).getByRole('button', { name: '阅读统计' });
-    const parallel = within(header).getByRole('button', { name: '平行阅读' });
+    expect(within(header).queryByRole('button', { name: '平行阅读' })).toBeNull();
+    expect(within(header).queryByRole('button', { name: '标签操作' })).toBeNull();
     expect(within(actions).getByRole('tablist', { name: '标签内容' })).toBeTruthy();
     fireEvent.mouseDown(within(actions).getByRole('tab', { name: '标签笔记' }), { button: 0, ctrlKey: false });
     expect(within(actions).getByRole('button', { name: '阅读统计' })).toBe(statistics);
-    expect(within(header).getByRole('button', { name: '平行阅读' })).toBe(parallel);
+    expect(within(header).queryByRole('button', { name: '平行阅读' })).toBeNull();
     expect(within(actions).getByRole('button', { name: '新建笔记' })).toBeTruthy();
     expect(screen.getAllByRole('button', { name: '新建笔记' })).toHaveLength(1);
     expect(screen.queryByRole('button', { name: '刷新' })).toBeNull();
-    fireEvent.click(parallel);
-    expect(props.onOpenTagReading).toHaveBeenCalledWith('research');
     const search = screen.getByRole('textbox', { name: '搜索标签笔记' }) as HTMLInputElement;
     fireEvent.change(search, { target: { value: '保留笔记搜索' } });
     fireEvent.mouseDown(within(actions).getByRole('tab', { name: '论文' }), { button: 0, ctrlKey: false });
@@ -147,19 +220,17 @@ describe('EntryLibraryView context heading and toolbar', () => {
     expect(screen.queryByRole('heading', { name: '条目库' })).toBeNull();
   });
 
-  it('shows the tag name, full path and count and passes the stable tag id to parallel reading', () => {
-    const { props } = renderLibrary({ activeTag: 'hci', tags: libraryTags, onOpenTagReading: vi.fn() });
+  it('shows the tag name, full path and count without extra tag actions', () => {
+    renderLibrary({ activeTag: 'hci', tags: libraryTags });
     expect(screen.getByRole('heading', { level: 1, name: 'HCI' }).title).toBe('HCI');
     const header = screen.getByLabelText('条目库页眉');
     expect(within(header).getByText('1 个条目 · 含子标签').title).toBe('1 个条目 · 含子标签');
     const toolbar = screen.getByLabelText('条目库筛选与操作');
     expect(within(toolbar).queryByText(/标签：/)).toBeNull();
-    const parallel = within(header).getByRole('button', { name: '平行阅读' });
-    expect(parallel.dataset.size).toBe('sm');
+    expect(within(header).queryByRole('button', { name: '平行阅读' })).toBeNull();
+    expect(within(header).queryByRole('button', { name: '标签操作' })).toBeNull();
     expect(within(toolbar).getByRole('button', { name: '清除搜索' }).dataset.size).toBe('icon-sm');
     expect(within(toolbar).getByRole('combobox', { name: '条目排序' }).dataset.size).toBe('default');
-    fireEvent.click(parallel);
-    expect(props.onOpenTagReading).toHaveBeenCalledWith('hci');
   });
 
   it('keeps the view filter visible alongside the tag and updates search counts', () => {
@@ -210,7 +281,7 @@ describe('EntryLibraryView context heading and toolbar', () => {
   });
 
   it('reacts to renaming or clearing the active tag without retaining stale heading text', () => {
-    const { rerenderLibrary } = renderLibrary({ activeTag: 'hci', tags: libraryTags, onOpenTagReading: vi.fn() });
+    const { rerenderLibrary } = renderLibrary({ activeTag: 'hci', tags: libraryTags });
     rerenderLibrary({ tags: libraryTags.map((tag) => tag.id === 'hci' ? { ...tag, name: '交互设计' } : tag) });
     expect(screen.getByRole('heading', { name: '交互设计' })).toBeTruthy();
     expect(screen.getByLabelText('条目库页眉').textContent).toContain('研究');
@@ -219,23 +290,22 @@ describe('EntryLibraryView context heading and toolbar', () => {
     expect(screen.queryByRole('button', { name: '平行阅读' })).toBeNull();
   });
 
-  it.each(['loading', 'error'] as const)('shows %s instead of a misleading count and disables parallel reading', (status) => {
-    renderLibrary({ activeTag: 'hci', tags: libraryTags, status, onOpenTagReading: vi.fn() });
+  it.each(['loading', 'error'] as const)('shows %s instead of a misleading count', (status) => {
+    renderLibrary({ activeTag: 'hci', tags: libraryTags, status });
     expect(screen.getByLabelText('条目库页眉').textContent).toContain(status === 'loading' ? '正在加载…' : '加载失败');
     expect(screen.getByLabelText('条目库页眉').textContent).not.toContain('个条目');
-    const parallel = screen.getByRole('button', { name: '平行阅读' }) as HTMLButtonElement;
-    expect(parallel.disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: '平行阅读' })).toBeNull();
   });
 
   it('does not expose a missing tag id as the page title or offer an invalid reading action', () => {
-    renderLibrary({ activeTag: 'missing-tag-id', onOpenTagReading: vi.fn() });
+    renderLibrary({ activeTag: 'missing-tag-id' });
     expect(screen.getByRole('heading', { name: '标签不可用' })).toBeTruthy();
     expect(screen.getByLabelText('条目库页眉').textContent).not.toContain('missing-tag-id');
     expect(screen.queryByRole('button', { name: '平行阅读' })).toBeNull();
   });
 
   it('does not imply that the global trash is filtered by a previously active tag', () => {
-    renderLibrary({ libraryView: 'trash', activeTag: 'hci', tags: libraryTags, onOpenTagReading: vi.fn() });
+    renderLibrary({ libraryView: 'trash', activeTag: 'hci', tags: libraryTags });
     expect(screen.getByRole('heading', { name: '回收站' })).toBeTruthy();
     expect(screen.getByLabelText('条目库页眉').textContent).not.toContain('HCI');
     expect(screen.queryByRole('button', { name: '平行阅读' })).toBeNull();
@@ -274,7 +344,7 @@ describe('EntryLibraryView pinned columns', () => {
     expect(table.style.width).toBe('max(100%, 1500px)');
     expect(table.style.minWidth).toBe('1500px');
     expect(table.style.maxWidth).toBe('none');
-    expect(table.querySelectorAll('col[data-responsive-spacer="true"]')).toHaveLength(1);
+    expect(table.querySelectorAll('col')).toHaveLength(9);
     expect(table.querySelector('col')?.style.maxWidth).toBe('420px');
     expect(cells[0].className).toContain('overflow-hidden');
   });
@@ -465,7 +535,7 @@ describe('EntryLibraryView pinned columns', () => {
   ])('keeps the $status message spanning all visible columns without pinning it', ({ status, text }) => {
     renderLibrary({ entries: [], status });
     const message = screen.getByText(text);
-    expect(message.getAttribute('colspan')).toBe('10');
+    expect(message.getAttribute('colspan')).toBe('9');
     expect(message.dataset.pinned).toBeUndefined();
   });
 });

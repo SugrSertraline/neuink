@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from './hover-card';
 import { Dialog, DialogContent, DialogTitle } from './dialog';
-import { HOVER_TIMING } from './hover-interactions';
+import { HOVER_TIMING, useReaderSelectionPriority } from './hover-interactions';
 
 class TestPointerEvent extends MouseEvent {
   pointerType: string;
@@ -12,7 +12,7 @@ class TestPointerEvent extends MouseEvent {
 }
 
 beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal('PointerEvent', TestPointerEvent); });
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); window.getSelection()?.removeAllRanges(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 async function tick(ms: number) { await act(async () => { vi.advanceTimersByTime(ms); }); }
 function Demo({ action = () => {}, changed = (_: boolean) => {} }) {
   return <HoverCard onOpenChange={changed}>
@@ -23,6 +23,62 @@ function Demo({ action = () => {}, changed = (_: boolean) => {} }) {
 async function hover() { fireEvent.pointerEnter(screen.getByText('预览条目')); await tick(HOVER_TIMING.open); }
 
 describe('shared hover contract', () => {
+  it.each(['pdf-text-layer', 'reflow'])('keeps %s text selection above hover after pointer release, then recovers without a cooldown', async (kind) => {
+    render(<><Demo /><p className={kind === 'pdf-text-layer' ? kind : undefined}
+      data-reading-selection-source={kind === 'reflow' ? 'segment-1' : undefined}>Selected passage</p></>);
+    await hover();
+    const range = document.createRange();
+    range.selectNodeContents(screen.getByText('Selected passage'));
+    window.getSelection()!.addRange(range);
+    fireEvent(document, new Event('selectionchange'));
+    expect(screen.queryByText('条目完整摘要')).toBeNull();
+    fireEvent.pointerUp(document.body);
+    fireEvent.pointerMove(screen.getByText('预览条目'), { buttons: 0 });
+    await tick(0);
+    expect(screen.queryByText('条目完整摘要')).toBeNull();
+    window.getSelection()!.removeAllRanges();
+    fireEvent(document, new Event('selectionchange'));
+    fireEvent.pointerMove(screen.getByText('预览条目'), { buttons: 0 });
+    await tick(0);
+    expect(screen.getByText('条目完整摘要')).toBeTruthy();
+  });
+
+  it('dismisses previews while selection tools own priority, including input focus and multiple owners', async () => {
+    function Owner({ active }: { active: boolean }) { useReaderSelectionPriority(active); return null; }
+    const view = (first: boolean, second: boolean) => <><Demo /><Owner active={first} /><Owner active={second} /><input aria-label="选区批注" /></>;
+    const ui = render(view(false, false));
+    await hover();
+    ui.rerender(view(true, true));
+    expect(screen.queryByText('条目完整摘要')).toBeNull();
+    act(() => screen.getByLabelText('选区批注').focus());
+    fireEvent.pointerMove(screen.getByText('预览条目'), { buttons: 0 });
+    expect(screen.queryByText('条目完整摘要')).toBeNull();
+    ui.rerender(view(false, true));
+    await hover();
+    expect(screen.queryByText('条目完整摘要')).toBeNull();
+    ui.rerender(view(false, false));
+    fireEvent.pointerMove(screen.getByText('预览条目'), { buttons: 0 });
+    await tick(0);
+    expect(screen.getByText('条目完整摘要')).toBeTruthy();
+  });
+
+  it('allows selecting and copying text within an existing hover preview', async () => {
+    render(<Demo />);
+    await hover();
+    const range = document.createRange();
+    range.selectNodeContents(screen.getByTestId('scroll-content'));
+    window.getSelection()!.addRange(range);
+    fireEvent(document, new Event('selectionchange'));
+    expect(screen.getByText('条目完整摘要')).toBeTruthy();
+  });
+  it('reopens on movement over the same trigger after scroll without requiring a leave', async () => {
+    render(<Demo />);
+    await hover();
+    fireEvent.scroll(document);
+    expect(screen.queryByText('条目完整摘要')).toBeNull();
+    fireEvent.pointerMove(screen.getByText('预览条目'));
+    expect(screen.getByText('条目完整摘要')).toBeTruthy();
+  });
   it('supports explicitly clickable full-text previews without waiting for hover', async () => {
     render(<HoverCard><HoverCardTrigger asChild openOnClick><button>更多摘要</button></HoverCardTrigger><HoverCardContent>完整文本</HoverCardContent></HoverCard>);
     const trigger = screen.getByText('更多摘要');
@@ -34,14 +90,12 @@ describe('shared hover contract', () => {
     fireEvent.pointerDown(document.body);
     expect(screen.queryByText('完整文本')).toBeNull();
   });
-  it('waits for intent and allows moving into the preview to scroll, select and act', async () => {
+  it('opens immediately and allows moving into the preview to scroll, select and act', async () => {
     const action = vi.fn();
     render(<Demo action={action} />);
     const trigger = screen.getByText('预览条目');
     fireEvent.pointerEnter(trigger);
-    await tick(HOVER_TIMING.open - 1);
-    expect(screen.queryByText('条目完整摘要')).toBeNull();
-    await tick(1);
+    await tick(0);
     const content = screen.getByTestId('scroll-content');
     fireEvent.pointerLeave(trigger);
     fireEvent.pointerEnter(content.closest('[data-hover-surface]')!);
@@ -57,9 +111,10 @@ describe('shared hover contract', () => {
     expect(screen.queryByText('条目完整摘要')).toBeNull();
   });
 
-  it.each(['blur', 'resize', 'neuink:reader-surface-change'])('dismisses on %s and cancels a pending open', async (type) => {
+  it.each(['blur', 'resize', 'neuink:reader-surface-change'])('dismisses an immediate preview on %s', async (type) => {
     render(<Demo />);
     fireEvent.pointerEnter(screen.getByText('预览条目'));
+    await tick(0);
     fireEvent(window, new Event(type));
     await tick(1000);
     expect(screen.queryByText('条目完整摘要')).toBeNull();

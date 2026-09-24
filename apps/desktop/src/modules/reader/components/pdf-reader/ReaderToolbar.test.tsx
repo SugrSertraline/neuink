@@ -13,6 +13,7 @@ describe('ReaderToolbar', () => {
   afterEach(() => cleanup());
   function buildPreferences(overrides = {}) {
     return {
+      openEntryPdfByDefault: true,
       autoTranslateTextSelection: false,
       closeSegmentOverlayOnBlankClick: true,
       closeSegmentOverlayOnSameSegmentClick: true,

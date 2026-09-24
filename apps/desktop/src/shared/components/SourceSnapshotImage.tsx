@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogTrigger } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
+import { SourceSnapshotImageDetail } from './SourceSnapshotImageDetail';
 import type { SourceSnapshotImageSize } from './SourceSnapshotPreview';
 
 export function SourceSnapshotImage({ alt, className, detailEnabled = false, fillWidth = false, size = 'standard', src, onError }: {
@@ -34,45 +35,6 @@ export function SourceSnapshotImage({ alt, className, detailEnabled = false, fil
         <span className="block py-1 text-[11px] text-muted-foreground">点击放大查看</span>
       </button>
     </DialogTrigger>
-    {open && <ImageDetail alt={alt} src={src} />}
+    {open && <SourceSnapshotImageDetail key={src} alt={alt} src={src} />}
   </Dialog>;
-}
-
-function ImageDetail({ alt, src }: { alt: string; src: string }) {
-  const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
-  const [natural, setNatural] = useState({ width: 0, height: 0 });
-  const [available, setAvailable] = useState({ width: 0, height: 0 });
-  const [zoom, setZoom] = useState<number | null>(null);
-  useEffect(() => {
-    const element = viewport;
-    if (!element) return;
-    const measure = () => setAvailable({ width: element.clientWidth, height: element.clientHeight });
-    measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [viewport]);
-  const fitted = natural.width && available.width
-    ? Math.min(1, available.width / natural.width, available.height / natural.height) : 1;
-  const scale = zoom ?? fitted;
-  return <DialogContent showCloseButton={false}
-    className="source-preview-detail grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-2"
-    onClick={(event) => event.stopPropagation()}>
-    <div className="flex min-w-0 flex-wrap items-center gap-2">
-      <div className="min-w-0 flex-1"><DialogTitle>图片详情</DialogTitle><DialogDescription className="truncate" title={alt}>{alt}</DialogDescription></div>
-      <Button size="xs" variant={zoom === null ? 'secondary' : 'outline'} onClick={() => setZoom(null)}>适应窗口</Button>
-      <Button size="xs" variant="outline" onClick={() => setZoom(1)}>原始大小</Button>
-      <Button size="xs" variant="outline" aria-label="缩小图片" disabled={scale <= 0.1} onClick={() => setZoom(Math.max(0.1, scale / 1.25))}>−</Button>
-      <span className="min-w-10 text-center text-xs">{Math.round(scale * 100)}%</span>
-      <Button size="xs" variant="outline" aria-label="放大图片" disabled={scale >= 4} onClick={() => setZoom(Math.min(4, scale * 1.25))}>+</Button>
-      <DialogClose asChild><Button size="xs" variant="outline">关闭大图</Button></DialogClose>
-    </div>
-    <div ref={setViewport} className="min-h-0 min-w-0 overflow-auto overscroll-contain rounded-md bg-muted" role="region" aria-label="图片详情内容" tabIndex={0}>
-      <img alt={alt} src={src} draggable={false}
-        onLoad={(event) => setNatural({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
-        className="mx-auto block h-auto"
-        style={natural.width ? { width: natural.width * scale, maxWidth: 'none' } : { maxWidth: '100%' }} />
-    </div>
-  </DialogContent>;
 }

@@ -1,0 +1,45 @@
+/* Paper → content / note group → note. The paper panel remains the only scroll owner. */
+.sidebar-paper-tree {
+  --sidebar-tree-guide: color-mix(in srgb, var(--muted-foreground) 32%, transparent);
+  padding-block: 2px;
+}
+.sidebar-paper-tree[data-expanded="true"] { padding-bottom: 6px; }
+.sidebar-paper-tree [data-sidebar-paper-heading] [data-material="content-row-main"] { font-weight: 600; }
+.sidebar-paper-tree[data-expanded="true"] [data-sidebar-paper-heading] [data-material="content-row-main"] { color: var(--foreground); }
+.sidebar-tree-children {
+  min-width: 0;
+  margin-inline-start: 12px;
+  padding-inline-start: 8px;
+}
+.sidebar-tree-children:not([hidden]) { animation: sidebar-tree-reveal 120ms ease-out; }
+.sidebar-tree-node { position: relative; min-width: 0; }
+.sidebar-tree-node::before,
+.sidebar-tree-node::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  border-color: var(--sidebar-tree-guide);
+}
+.sidebar-tree-node::before { inset-inline-start: -8px; top: 0; bottom: 0; border-inline-start-width: 1px; }
+.sidebar-tree-node:last-child::before { height: 14px; bottom: auto; }
+.sidebar-tree-node::after { inset-inline-start: -8px; top: 14px; width: 8px; border-top-width: 1px; }
+.sidebar-tree-node[data-current-branch="true"]::before,
+.sidebar-tree-node[data-current-branch="true"]::after { border-color: color-mix(in srgb, var(--primary) 65%, var(--border)); }
+.sidebar-paper-tree [data-density="compact"] { min-height: 28px; }
+.sidebar-paper-tree [data-sidebar-branch-heading] { border: 1px solid transparent; }
+/* Disclosure is part of its row, not a separately selected material button. Preserve the focus ring. */
+:root .app-sidebar .sidebar-paper-tree [data-ui="button"][data-sidebar-disclosure]:is(:hover, :active, :focus-visible, [aria-expanded]) {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000);
+  translate: none;
+}
+:root .sidebar-paper-tree [data-material="disclosure-control"] { background: transparent; box-shadow: none; }
+:root .sidebar-paper-tree [data-material="disclosure-icon"] { transition: rotate 140ms ease-out; }
+@keyframes sidebar-tree-reveal { from { opacity: .65; } to { opacity: 1; } }
+[data-sidebar-panel-group][data-resizing="true"] .sidebar-tree-children { animation: none; }
+[data-sidebar-panel-group][data-resizing="true"] .sidebar-paper-tree [data-material="disclosure-icon"] { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-tree-children:not([hidden]) { animation: none; }
+  :root .sidebar-paper-tree [data-material="disclosure-icon"] { transition: none; }
+}

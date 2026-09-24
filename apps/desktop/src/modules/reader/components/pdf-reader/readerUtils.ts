@@ -4,6 +4,7 @@ import type { SegmentType, SourceSegment } from "@/shared/types/domain";
 
 import type { PageSegments, SegmentRegionItem } from "./types";
 import { parseListItemRegions } from "./listItemRegions";
+import { revealPdfPage } from './pdfPageNavigation';
 
 export function inferPageCount(segments: SourceSegment[]) {
   return Math.max(1, ...segments.map((segment) => segment.page_idx + 1));
@@ -221,6 +222,19 @@ export function segmentDisplayLabel(segment: SourceSegment) {
   return segmentTypeLabel(segment.segment_type);
 }
 
+// CSS scroll-padding describes the unobscured reading area, including an optional floating toolbar.
+function readerViewport(container: HTMLElement) {
+  const rect = container.getBoundingClientRect();
+  // Border-box dimensions keep a visible scrollbar from being mistaken for CSS zoom.
+  const width = container.offsetWidth || container.clientWidth;
+  const height = container.offsetHeight || container.clientHeight;
+  const scaleX = width > 0 ? rect.width / width || 1 : 1;
+  const scaleY = height > 0 ? rect.height / height || 1 : 1;
+  const inset = Number.parseFloat(getComputedStyle(container).scrollPaddingTop) || 0;
+  return { rect, scaleX, scaleY, inset,
+    anchor: (fraction: number) => inset + Math.max(0, (container.clientHeight || rect.height) - inset) * fraction };
+}
+
 export function scrollToSegment(
   segmentUid: string,
   container: HTMLElement | null,
@@ -243,23 +257,24 @@ export function scrollToSegment(
     return false;
   }
 
+  const pageIdx = Number(target.closest<HTMLElement>('[data-pdf-page-index]')?.dataset.pdfPageIndex);
+  if (Number.isInteger(pageIdx) && revealPdfPage(container, pageIdx, () => scrollToSegment(segmentUid, container))) return true;
+
   const targetRect = target.getBoundingClientRect();
-  const containerRect = container.getBoundingClientRect();
+  const viewport = readerViewport(container);
 
   container.scrollTo({
     behavior: "smooth",
     left:
       container.scrollLeft +
-      targetRect.left -
-      containerRect.left -
+      (targetRect.left - viewport.rect.left) / viewport.scaleX -
       container.clientWidth / 2 +
-      targetRect.width / 2,
+      targetRect.width / viewport.scaleX / 2,
     top:
       container.scrollTop +
-      targetRect.top -
-      containerRect.top -
-      container.clientHeight / 2 +
-      targetRect.height / 2,
+      (targetRect.top - viewport.rect.top) / viewport.scaleY -
+      viewport.anchor(0.5) +
+      targetRect.height / viewport.scaleY / 2,
   });
   return true;
 }
@@ -445,6 +460,8 @@ export function scrollToPage(pageIdx: number, container: HTMLElement | null) {
     return false;
   }
 
+  if (revealPdfPage(container, pageIdx, () => scrollToPage(pageIdx, container))) return true;
+
   const target = Array.from(
     container.querySelectorAll<HTMLElement>('[data-pdf-page-index]'),
   ).find((element) => Number(element.dataset.pdfPageIndex) === pageIdx);
@@ -454,11 +471,11 @@ export function scrollToPage(pageIdx: number, container: HTMLElement | null) {
   }
 
   const targetRect = target.getBoundingClientRect();
-  const containerRect = container.getBoundingClientRect();
+  const viewport = readerViewport(container);
 
   const targetTop = Math.max(
     0,
-    container.scrollTop + targetRect.top - containerRect.top - 12,
+    container.scrollTop + (targetRect.top - viewport.rect.top) / viewport.scaleY - Math.max(12, viewport.inset),
   );
   // A page command should be deterministic in WebView2 and must not also move
   // the reader horizontally when the PDF is zoomed or displayed as a spread.
@@ -475,6 +492,8 @@ export function scrollToPdfRect(
     return false;
   }
 
+  if (revealPdfPage(container, pageIdx, () => scrollToPdfRect(pageIdx, rect, container))) return true;
+
   const page = Array.from(
     container.querySelectorAll<HTMLElement>('[data-pdf-page-index]'),
   ).find((element) => Number(element.dataset.pdfPageIndex) === pageIdx);
@@ -485,7 +504,7 @@ export function scrollToPdfRect(
 
   const [x0, y0, x1, y1] = rect;
   const surfaceRect = surface.getBoundingClientRect();
-  const containerRect = container.getBoundingClientRect();
+  const viewport = readerViewport(container);
   const centerX = surfaceRect.left + (((x0 + x1) / 2) / 1000) * surfaceRect.width;
   const centerY = surfaceRect.top + (((y0 + y1) / 2) / 1000) * surfaceRect.height;
 
@@ -493,19 +512,20 @@ export function scrollToPdfRect(
     behavior: "smooth",
     left: Math.max(
       0,
-      container.scrollLeft + centerX - containerRect.left - container.clientWidth / 2,
+      container.scrollLeft + (centerX - viewport.rect.left) / viewport.scaleX - container.clientWidth / 2,
     ),
     top: Math.max(
       0,
-      container.scrollTop + centerY - containerRect.top - container.clientHeight * 0.38,
+      container.scrollTop + (centerY - viewport.rect.top) / viewport.scaleY - viewport.anchor(0.38),
     ),
   });
   return true;
 }
 
 export function findNearestSegmentUidInViewport(container: HTMLElement) {
-  const containerRect = container.getBoundingClientRect();
-  const targetY = containerRect.top + containerRect.height * 0.42;
+  const viewport = readerViewport(container);
+  const containerRect = viewport.rect;
+  const targetY = containerRect.top + viewport.anchor(0.42) * viewport.scaleY;
   let nearestUid: string | null = null;
   let nearestDistance = Number.POSITIVE_INFINITY;
 
@@ -516,7 +536,7 @@ export function findNearestSegmentUidInViewport(container: HTMLElement) {
   mountedRegions.forEach((element) => {
     const rect = element.getBoundingClientRect();
 
-    if (rect.bottom < containerRect.top || rect.top > containerRect.bottom) {
+    if (rect.bottom < containerRect.top + viewport.inset * viewport.scaleY || rect.top > containerRect.bottom) {
       return;
     }
 
