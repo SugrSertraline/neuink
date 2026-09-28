@@ -1,0 +1,22 @@
+{
+  "tool": "image_gen built-in",
+  "date": "2026-09-28",
+  "outputs": {"controls":"wood-control-v2.png","objects":"objects-v2.png","seasons":"seasons-v2.png"},
+  "assets": [
+    {
+      "key": "controls",
+      "prompt": "Use case: stylized-concept. Asset type: production game UI button texture. One single horizontal rounded rectangular carved honey oak wooden button plate, front view orthographic, aspect ratio 3:1, inset smooth pale ivory ceramic center for overlaid dark text, narrow layered bevel oak border, subtle brass corner fasteners, tactile warm cozy dormitory game aesthetic, beautiful realistic handcrafted material, soft upper-left light, clear silhouette. Fills image with small transparent margin. Absolutely no text, symbols, logos, extra objects or background. Not a UI screenshot. Transparent background.",
+      "transparent_background": true
+    },
+    {
+      "key": "objects",
+      "prompt": "Use case: stylized-concept. Asset type: game icon sprite atlas. EXACT regular 2 by 2 equal grid on transparent background, four separate objects, each centered in its own equal square cell, identical scale, generous padding with no overlap. Top left: cream envelope with round moss green wax seal. Top right: warm leather photo album with a tiny landscape photo tucked under strap. Bottom left: moss green cloth travel journal with brass corner and bookmark. Bottom right: olive canvas backpack with leather straps. Cozy warm handcrafted skeuomorphic game icons, physically shaded sculpted depth, warm soft light upper left, front three quarter view, no labels or letters, no cell borders, no background. Each icon occupies 72 percent of its cell. Output square sprite atlas.",
+      "transparent_background": true
+    },
+    {
+      "key": "seasons",
+      "prompt": "Use case: stylized-concept. Asset type: four-season game exterior texture atlas, EXACT 2x2 grid of equal rectangles without gaps or frames. Every cell shows the same composition: tranquil tree-lined university campus path viewed from an upper dorm window, distant neutral low-rise university buildings, no recognizable landmarks claimed, sky in upper half, trees in lower half. Top-left spring pink blossoms fresh green trees; top-right summer lush green sunlit trees; bottom-left autumn golden amber leaves; bottom-right winter bare frosted trees and white snow. Warm detailed painterly 3D game environment matching a cozy realistic wooden dorm room, soft atmosphere, not flat vector, no text, no characters, no window frame, no UI, no poster. Square overall atlas, consistent camera and building geometry across all four cells.",
+      "transparent_background": false
+    }
+  ]
+}

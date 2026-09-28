@@ -1,0 +1,20 @@
+{
+  "tool": "image_gen built-in",
+  "skill": "imagegen",
+  "reference": "design-previews/seal-travel-v1/dorm-ui-v2.png",
+  "assets": [
+    {
+      "file": "dorm.png",
+      "prompt": "Edit this approved game home screen into a CLEAN GAME BACKGROUND ASSET ONLY. Preserve exact room layout, camera, upper bunk lower desk, bed ladder left, campus window center, door right, warm wood sage cozy dimensional illustrated rendering. REMOVE EVERY UI overlay: return button, dorm label, gear, status bubble, green travel button, destination text, entire bottom toolbar. REMOVE the seal character and the open notebook directly in front of it, leave a clean empty wooden desk patch at same location for separate animated sprite. Keep camera, lamp, books, charging pad, room decor. Remove all readable text and logos. No character, no buttons, no text, no interface. Extend plausible desk surface where toolbar was, preserve 16:10 composition. This must be room environment asset, not screenshot with controls."
+    },
+    {
+      "file": "seal.png",
+      "prompt": "Using the referenced approved home screen as CHARACTER reference only, extract/redraw ONLY the same adorable ivory SEAL ROBOT on a genuinely transparent background, no room, no UI, no shadow rectangle, no text, no contact floor. One full body 3/4 view facing left and toward viewer, soft matte ivory plump teardrop body, black screen face with two glowing amber oval eyes, two grey sage paddle flippers, twin lobed tail, two small cheek dots and thin teal charging seam. No book or props, no legs. Entire body fits with transparent padding. Same warm hand painted dimensional game rendering. Clean alpha cutout suitable for placing as independent animated sprite over dorm desk."
+    },
+    {
+      "file": "trial-photo.png",
+      "prompt": "Use approved seal robot visible in reference as identity. Generate one landscape illustrated GAME TRAVEL SOUVENIR PHOTO asset, no UI, no frame, no text. Same ivory seal robot with amber smiling display eyes, grey flippers and twin tail, small sage travel pouch, waving near an unnamed northern Chinese campus tree-lined footpath in autumn, warm sunlight and red-brick generic campus in distance, lovely tactile hand painted dimensional cozy game style matching reference. Character clear in foreground left, scenery right. No recognizable specific landmark or university logo; this is deliberately a fictional trial route awaiting future real location selection. No humanoid hands or legs, no frog."
+    }
+  ],
+  "note": "Campus architecture and trial photo are fictional illustration, not verified real locations. Seal PNG alpha checked. No text baked into UI controls."
+}

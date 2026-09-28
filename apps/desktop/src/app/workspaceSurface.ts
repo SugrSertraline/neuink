@@ -11,6 +11,7 @@ export type WorkspaceSurface =
   | { kind: 'note-review'; proposalId: string; label: string; entryId: string; noteId?: string | null }
   | { kind: 'library' }
   | { kind: 'relations' }
+  | { kind: 'paradise' }
   | { kind: 'settings'; target?: SettingsNavigationTarget }
   | { kind: 'create-entry' }
   | { kind: 'mineru-client-guide' }
@@ -350,7 +351,7 @@ export function surfaceKey(surface: WorkspaceSurface) {
     case 'owned-note': return `note:${noteTargetKey(surface.target)}`;
     case 'note': return `note:${surface.entryId}:${surface.noteId}`;
     case 'segment-notes': return `segment-records:${surface.entryId}`;
-    case 'library': case 'relations': case 'settings': case 'create-entry': case 'mineru-client-guide': case 'tag-editor': return surface.kind;
+    case 'library': case 'relations': case 'paradise': case 'settings': case 'create-entry': case 'mineru-client-guide': case 'tag-editor': return surface.kind;
     default: return `${surface.kind}:${surface.entryId}`;
   }
 }
@@ -398,6 +399,7 @@ export function workspaceSurfaceLabel(
     case 'assistant-reply': return '完整回复';
     case 'note-review': return `${surface.label} · 修改审阅`;
     case 'relations': return '关系图';
+    case 'paradise': return '校园旅行';
     case 'settings': return '设置';
     case 'create-entry': return '新建条目';
     case 'mineru-client-guide': return 'MinerU 客户端教程';

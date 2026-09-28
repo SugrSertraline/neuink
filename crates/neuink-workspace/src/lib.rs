@@ -1,5 +1,6 @@
 pub mod annotation_index;
 pub mod atomic_write;
+pub mod paradise;
 pub mod agent_execution;
 pub mod entry_meta;
 pub mod export;

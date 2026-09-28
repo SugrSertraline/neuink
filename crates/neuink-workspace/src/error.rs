@@ -5,6 +5,8 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum WorkspaceError {
     #[error("{0}")]
+    Paradise(String),
+    #[error("{0}")]
     PdfQueue(String),
     #[error("{0}")]
     PdfText(String),

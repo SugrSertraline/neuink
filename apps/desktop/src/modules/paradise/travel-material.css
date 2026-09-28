@@ -1,0 +1,35 @@
+/* User-approved game material exception. Real controls keep their semantics. */
+.travel-canvas{position:absolute;inset:0;pointer-events:none}.travel-canvas canvas{display:block;width:100%;height:100%}
+.travel-seal-still{display:block;position:absolute;inset:0}
+.seal-travel[data-weather=rain] .travel-room{filter:brightness(.87) saturate(.82)}.seal-travel[data-season=winter] .travel-room{filter:brightness(.94) saturate(.8)}
+.seal-travel[data-weather=cloudy] .travel-room,.seal-travel[data-weather=fog] .travel-room{filter:brightness(.88) saturate(.76)}
+.seal-travel[data-night=true] .travel-room{filter:brightness(.63) saturate(.72)}
+.travel-weather-report{border-block:1px solid var(--travel-edge);padding-block:12px}.travel-weather-report p{margin-bottom:8px}
+.travel-laptop-hit{position:absolute;left:38%;top:64%;width:16%;height:17%;background:none;border:0;pointer-events:auto;cursor:pointer;border-radius:12px}.travel-laptop-hit:focus-visible{outline:3px solid var(--travel-green);outline-offset:4px}
+.seal-travel .travel-companion-hit{left:20%;top:51%;width:31%;height:29%;filter:none;animation:none!important}
+.travel-scene-error{position:absolute;left:22%;top:13%;max-width:48%;padding:12px;background:var(--travel-paper);border:1px solid var(--travel-edge);border-radius:8px;pointer-events:auto;font-size:14px}
+.seal-travel [data-slot=button]{background-image:url('./assets/wood-control-v2.png');background-size:100% 100%;background-color:transparent;border:0;border-radius:10px;box-shadow:none;padding:13px 24px;color:var(--travel-ink);text-shadow:0 1px var(--travel-paper-light);filter:drop-shadow(0 3px 2px #291b153b);transition:filter 120ms,transform 100ms}
+.seal-travel [data-slot=button]:hover:not(:disabled){filter:brightness(1.08) drop-shadow(0 4px 3px #291b1540)}
+.seal-travel [data-slot=button]:active:not(:disabled){transform:translateY(2px);filter:brightness(.96)}
+.seal-travel [data-slot=button][aria-pressed=true]{outline:3px solid var(--travel-green);outline-offset:-7px}
+.seal-travel .travel-primary{font-size:23px;min-height:66px;padding:19px 32px;background-color:transparent;color:var(--travel-ink);border:0;box-shadow:none}
+.seal-travel .travel-dock{background:linear-gradient(var(--travel-wood-light),var(--travel-wood));border:2px solid var(--travel-edge);border-bottom:7px solid var(--travel-wood-dark);border-radius:14px;gap:6px;padding:2px 14px 9px;bottom:14px;box-shadow:0 8px 18px #27180b66,inset 0 2px #fff6}
+.seal-travel .travel-dock [data-slot=button]{background:none;padding:0 9px;min-width:105px;min-height:105px;gap:0;filter:none;text-shadow:0 1px var(--travel-wood-dark);color:var(--travel-paper-light)}
+.travel-object{display:inline-block;background-image:url('./assets/objects-v2.png');background-repeat:no-repeat;background-size:200% 200%;width:76px;height:76px;flex-shrink:0;filter:drop-shadow(0 3px 2px #27180b44)}
+.travel-object-letter{background-position:0 0}.travel-object-album{background-position:100% 0}.travel-object-journal{background-position:0 100%}.travel-object-bag{background-position:100% 100%;width:30px;height:30px}
+.travel-dock [data-slot=button]:hover .travel-object{transform:rotate(-5deg) translateY(-3px)}
+.seal-travel .travel-modal{border:9px ridge var(--travel-wood-light);border-radius:10px;background:repeating-linear-gradient(0deg,transparent 0 3px,#80634305 3px 4px),var(--travel-paper);box-shadow:inset 0 0 0 2px var(--travel-edge),0 12px 34px #21140770}
+.travel-modal-header{background:linear-gradient(var(--travel-paper-light),var(--travel-paper));box-shadow:0 3px 4px #3b271614}
+.travel-modal-header [data-slot=button]{padding:11px 15px;min-width:48px}
+.travel-action-options{display:flex;flex-wrap:wrap;gap:8px}.travel-action-options [data-slot=button]{min-width:105px}.travel-form fieldset legend{font-weight:600;margin-bottom:8px}
+.travel-climate{margin-left:auto}.travel-header .travel-settings{margin-left:0}.travel-depart{max-width:255px;gap:8px;bottom:23%}.travel-status{top:38%;left:23%}
+@container(max-width:650px){.travel-header{gap:6px;flex-wrap:wrap}.travel-header .travel-place{display:none}.seal-travel .travel-header [data-slot=button]{font-size:12px;padding:12px}.travel-header .travel-settings{padding:12px}.travel-status{left:12px;top:83px;max-width:calc(100% - 24px)}.travel-depart{top:137px;bottom:auto;right:12px;max-width:173px}.seal-travel .travel-depart [data-slot=button]{font-size:13px;padding:11px 18px}.seal-travel .travel-primary{font-size:19px;min-height:50px}.seal-travel .travel-dock [data-slot=button]{min-width:72px;min-height:90px;padding:0 5px}.travel-object{width:62px;height:62px}.travel-object-bag{width:24px;height:24px}.travel-dock{max-width:calc(100% - 20px)}.seal-travel .travel-companion-hit{left:20%;width:36%}}
+@container(max-height:480px){.travel-depart{top:73px;bottom:auto;gap:3px}.seal-travel .travel-depart [data-slot=button]{padding:7px 16px;min-height:34px;font-size:13px}.seal-travel .travel-dock [data-slot=button]{min-height:50px;min-width:70px;flex-direction:column}.travel-object{width:35px;height:35px}.travel-status{top:75px;left:16px}.travel-depart .travel-route{display:none}}
+@media(prefers-reduced-motion:reduce){.seal-travel [data-slot=button],.travel-object{transition:none!important;transform:none!important}}
+@container(max-width:650px){.seal-travel .travel-companion-hit{left:30%;width:25%}}
+.seal-travel .travel-companion-hit{left:52.5%;top:59%;width:16%;height:15%;overflow:hidden}
+.seal-travel .travel-laptop-hit{left:48.4%;top:70.1%;width:13%;height:13%}
+.seal-travel button,.seal-travel input,.seal-travel select,.seal-travel textarea{font-family:var(--font-travel)}
+.seal-travel [data-slot=button]{font-size:18px;letter-spacing:.03em;font-weight:600}
+.seal-travel .travel-dock{left:20px;transform:none}
+@container(max-width:650px){.travel-stage{left:calc(50% - 20cqh)}.seal-travel .travel-dock{left:50%;transform:translateX(-50%)}.seal-travel .travel-header [data-slot=button],.seal-travel .travel-depart [data-slot=button]{font-size:15px}.seal-travel .travel-dock [data-slot=button]{font-size:17px}.travel-depart .travel-route{display:none}}

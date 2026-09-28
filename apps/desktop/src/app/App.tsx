@@ -1,4 +1,4 @@
-import { Library, ListFilter, MessageSquare, PanelRight, Search, Settings } from 'lucide-react';
+import { Library, ListFilter, MessageSquare, PanelRight, Search, Settings, Sprout } from 'lucide-react';
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import {
   type CSSProperties,
@@ -1997,6 +1997,9 @@ export function App() {
             <AppearanceIcon kind="tags"><ListFilter size={18} aria-hidden="true" /></AppearanceIcon>
           </ActivityButton>
           <div className="spacer" />
+          <ActivityButton active={focusedSurface.kind === 'paradise'} label="彩蛋 · 校园旅行" onClick={() => openWorkspaceSurface({ kind: 'paradise' })}>
+            <Sprout size={18} aria-hidden="true" />
+          </ActivityButton>
           <ActivityButton
             active={focusedSurface.kind === 'settings'}
             label="设置"

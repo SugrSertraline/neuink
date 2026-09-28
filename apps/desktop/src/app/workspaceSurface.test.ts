@@ -20,6 +20,18 @@ const reflowA: WorkspaceSurface = { kind: 'reflow', entryId: 'a' };
 const noteA: WorkspaceSurface = { kind: 'note', entryId: 'a', noteId: 'n1' };
 const pdfB: WorkspaceSurface = { kind: 'pdf', entryId: 'b' };
 
+it('opens a singleton campus tab without removing readers and supports moving it', () => {
+  const campus: WorkspaceSurface = { kind: 'paradise' };
+  const opened = workspaceSurfaceReducer(layout(), { type: 'open', surface: campus });
+  expect(opened.leftTabs).toContain(pdfA);
+  expect(surfaceKey(campus)).toBe('paradise');
+  expect(workspaceSurfaceLabel(campus, [])).toBe('校园旅行');
+  const moved = workspaceSurfaceReducer(opened, { type: 'move', key: 'paradise', pane: 'right' });
+  const reopened = workspaceSurfaceReducer(moved, { type: 'open', surface: campus });
+  expect([...reopened.leftTabs, ...reopened.rightTabs].filter(s => s.kind === 'paradise')).toHaveLength(1);
+  expect(surfaceNoteTarget(campus)).toBeNull();
+});
+
 it('opens a reply as a separate reusable read-only tab, movable between panes and released on close', () => {
   const reply: WorkspaceSurface = { kind: 'assistant-reply', message: { message_id: 'answer', role: 'assistant', content: '回答', source_links: [], created_at: '' } };
   const initial = layout({ focusedPane: 'right' });

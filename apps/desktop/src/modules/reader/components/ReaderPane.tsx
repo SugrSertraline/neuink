@@ -1,4 +1,6 @@
 import { ReadingStateRetention } from './navigation/ReadingStateRetention';
+import { lazy, Suspense } from 'react';
+const ParadisePage = lazy(() => import('@/modules/paradise/ParadisePage').then(module => ({ default: module.ParadisePage })));
 import { BrowserSurface } from '@/modules/browser/BrowserSurface';
 import { AssistantReplyReader } from '@/modules/assistant/components/AssistantReplyReader';
 import {
@@ -1026,6 +1028,11 @@ export function ReaderPane({
       return <ReadingSessionContext.Provider value={note ? { active: surfaceLayout.focusedPane === pane, onReady: () => undefined, note } : null}>{reader}</ReadingSessionContext.Provider>;
     }
     switch (surface.kind) {
+      case 'paradise':
+        return workspaceRoot ? <Suspense fallback={<div role="status" className="p-6 text-sm text-muted-foreground">正在打开校园…</div>}><ParadisePage key={workspaceRoot} root={workspaceRoot} entries={entries}
+          active={surfaceLayout[pane]?.kind === 'paradise'}
+          onBack={() => onOpenSurface({ kind: 'library' }, pane)}
+          onOpenEntry={entry => onOpenSurface({ kind: entry.pdfFileName ? 'pdf' : 'entry-overview', entryId: entry.id }, pane)} /></Suspense> : <EmptyPane />;
       case 'relations':
         return <RelationsPage key={workspaceRoot} entries={entries} tags={tags} trashedEntries={trashedEntries}
           active={surfaceLayout[pane]?.kind === 'relations'}

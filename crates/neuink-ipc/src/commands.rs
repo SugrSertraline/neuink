@@ -1,4 +1,5 @@
 pub mod annotation;
+pub mod paradise;
 pub mod assistant;
 pub mod assistant_proposal;
 pub mod assistant_routing;

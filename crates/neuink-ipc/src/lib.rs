@@ -3,6 +3,8 @@ pub mod commands;
 pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     let handler: Box<dyn Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync> = Box::new(tauri::generate_handler![
         commands::browser::browser_command,
+        commands::paradise::read_paradise,
+        commands::paradise::save_paradise,
         commands::pdf_text::inspect_pdf_text,
         commands::pdf_text::read_assistant_pdf_bytes,
         commands::pdf_text::cache_pdf_text,

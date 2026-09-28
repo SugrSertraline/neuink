@@ -1,0 +1,19 @@
+{
+  "tool": "built-in image_gen",
+  "date": "2026-09-28",
+  "assets": [
+    {
+      "file": "seal-parts-v3.png",
+      "prompt": "Use case: illustration-story. Asset type: production 2D cutout-animation sprite atlas, transparent PNG. Image 1 is character identity reference only, Image 2 is palette/style reference for a warm dorm game. Redraw the seal robot as a visibly HAND PAINTED 2D gouache illustration, warm ivory body, charcoal faceplate, sage green flippers, soft brown outlines, restrained painted shadows, paper brush texture; NOT a 3D render, no glossy plastic, no photorealism. Fixed slightly elevated three-quarter view, facing viewer a little toward the left, cute compact silhouette. EXACT layout: 3 equal columns by 2 equal rows, six invisible equal cells. Each isolated component centered inside its own cell with at least 12 percent transparent padding, no component crosses a cell. TOP LEFT: only the complete ivory head-and-torso connected bean body with dark EMPTY faceplate, no eyes, no flippers, no tail. TOP MIDDLE: separate left sage flipper, round shoulder at upper right and paddle tip down-left. TOP RIGHT: separate right sage flipper, round shoulder at upper left and paddle tip down-right. BOTTOM LEFT: separate two-lobed sage tail, narrow attachment at lower left, two lobes extend upper right. BOTTOM MIDDLE: only a pair of warm gold smiling arch eyes on transparency, no faceplate or body. BOTTOM RIGHT: only pair of gold sleepy shallow closed-eye curves on transparency. All components designed to overlap cleanly in a single assembled character, with no exposed machinery. No background, no shadow outside pieces, no floor, no grid lines, no labels, no text, no other objects. Genuine transparent alpha."
+    },
+    {
+      "file": "laptop-painted-v3.png",
+      "prompt": "Use case: illustration-story. Asset type: transparent PNG game prop for a 2D paper-cutout animation. Image 1 is a style reference for warm hand-painted gouache palette and visible brushed outlines, Image 2 is placement/perspective reference only. Draw ONE small open laptop computer, three-quarter view slightly from above, viewer can see the entire screen and keyboard. Muted warm grey-green case, ivory keys, fine soft brown hand-drawn outlines, a matte dark sage screen with only a few subtle cream horizontal writing lines (no legible words, no logos). Screen leans back mildly. The keyboard front edge is almost horizontal, angles recede toward upper right. Cozy student-dorm illustrated game prop, gently painted shadows on the object itself, paper brush texture, NOT a 3D render, NOT photorealistic, no glossy highlights, no sharp metallic bevels. Centered, full object within image, 12 percent padding. Genuine transparent background; NO table, NO character, NO room, NO surrounding cast shadow or glow, no halo or vignette. Single prop only, ready to composite onto the wooden desk."
+    },
+    {
+      "file": "dorm-clear-desk-v3.png",
+      "prompt": "Use case: precise-object-edit. Image 1 is the edit target: the existing dorm game background. Remove ONLY the small camera and its brown strap sitting on the foreground wooden desk near the chair (right of desk center), fill that exact area with matching clean wood grain and warm light, leaving room for a separate animated 2D laptop sprite. Keep the entire room, loft bed, desk geometry, mug, charging puck, books, chair, window, plants, colors, lighting, perspective, framing and image dimensions unchanged. Do not add a laptop or character. Do not add text. Preserve the illustrated cozy appearance. This is a local object removal only, not a redesign."
+    }
+  ],
+  "notes": "2D cutout components, original transparent PNGs preserved. Runtime Canvas 2D source rectangles in sealSprites.ts; no 3D model."
+}

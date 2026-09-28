@@ -408,6 +408,7 @@ export type AssistantActiveSurfaceSnapshot = {
     | 'entry-trash'
     | 'library'
     | 'relations'
+    | 'paradise'
     | 'note'
     | 'pdf'
     | 'reflow'

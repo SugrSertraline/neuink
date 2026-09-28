@@ -1,0 +1,14 @@
+{
+  "tool": "built-in image_gen",
+  "date": "2026-09-28",
+  "assets": [
+    {
+      "file": "dorm-window-v4.png",
+      "prompt": "Use case: background-extraction. Image 1 is the EDIT TARGET: a dorm room game background. Change ONLY the glass panes of the window: REMOVE ALL outdoor scenery/sky/buildings/trees visible through ALL THREE panes, leaving actual fully transparent alpha holes, not white, not checkerboard painted in. Preserve the opaque window mullions, frame, sill, potted plant and all indoor objects, bed, chair, desk, door, lighting and exact original framing and proportions unchanged. The entire room remains opaque; only the window glass becomes alpha zero. This is a production 2D game foreground layer, with seasonal scenery to be placed behind it at runtime. No new objects, no characters, no laptop, no text. Keep original landscape aspect ratio."
+    },
+    {
+      "file": "laptop-rear-v4.png",
+      "prompt": "Use case: precise-object-edit. Image 1 is style reference and laptop edit target. Redraw this same small sage-gray hand-painted laptop from the REAR LEFT angle, as seen across a desk toward its seated user. The plain rounded outer back of the upright screen faces the viewer (no text, no logo). Keyboard deck extends AWAY from the viewer to the upper RIGHT towards the user, only partly visible behind lid. Soft gouache warm cream edge strokes, flat 2D painted game sprite, no 3D rendering. Whole laptop isolated with generous padding on genuine transparent alpha, no ground, no glow, no scene, no added objects. Landscape canvas."
+    }
+  ]
+}

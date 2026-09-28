@@ -1,6 +1,16 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  /* Isolated campus-travel Easter egg; does not recolor reader surfaces. */
+  --travel-paper: #f5e6c9;
+  --travel-paper-light: #fff8e9;
+  --travel-ink: #493a2a;
+  --font-travel: "KaiTi", "STKaiti", "Kaiti SC", "Microsoft YaHei UI", serif;
+  --travel-edge: #b59769;
+  --travel-wood: #79583c;
+  --travel-wood-light: #aa835b;
+  --travel-wood-dark: #35271d;
+  --travel-green: #65744b;
   --reader-desk: var(--muted);
   --reader-desk-weave: transparent;
   --reader-paper: #fffefb;

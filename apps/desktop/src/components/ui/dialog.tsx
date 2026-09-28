@@ -53,15 +53,18 @@ function DialogContent({
   overlayClassName,
   showCloseButton = true,
   layout = "default",
+  portalContainer,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   overlayClassName?: string
   showCloseButton?: boolean
   /** Stable viewport-bounded frame with DialogBody as its only scroll owner. */
   layout?: "default" | "bounded"
+  /** Scoped surfaces such as the campus game keep their modal inside their viewport. */
+  portalContainer?: HTMLElement | null
 }) {
   return (
-    <DialogPortal>
+    <DialogPortal container={portalContainer}>
       <DialogOverlay className={overlayClassName} />
       <DialogPrimitive.Content
         data-slot="dialog-content"

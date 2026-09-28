@@ -18,7 +18,7 @@ const surfaces: WorkspaceSurface[] = [{ kind: 'library' }, { kind: 'settings' },
   { kind: 'segment-notes', entryId: 'a', segmentUid: 'other' }, { kind: 'source-links', entryId: 'a' }, { kind: 'entry-trash', entryId: 'a' },
   { kind: 'note-review', entryId: 'a', noteId: 'note-a', proposalId: 'p', label: 'Note A' },
   { kind: 'create-entry' }, { kind: 'mineru-client-guide' }, { kind: 'tag-editor' },
-  { kind: 'tag-reading', tagId: 'tag' }, { kind: 'tag-details', tagId: 'tag' }];
+  { kind: 'tag-reading', tagId: 'tag' }, { kind: 'tag-details', tagId: 'tag' }, { kind: 'paradise' }];
 function layout(left: WorkspaceSurface, right: WorkspaceSurface | null, focusedPane: 'left' | 'right' = 'left'): WorkspaceSurfaceLayout {
   return { left, right, focusedPane, leftTabs: [left], rightTabs: right ? [right] : [] };
 }
