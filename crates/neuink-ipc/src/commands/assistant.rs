@@ -23,27 +23,36 @@ mod agent_run_registry;
 mod agent_runtime;
 mod note_apply;
 mod note_apply_content;
+#[cfg(test)]
+mod note_apply_recovery_tests;
 mod note_apply_store;
 #[cfg(test)]
 mod note_apply_tests;
-#[cfg(test)]
-mod note_apply_recovery_tests;
 mod tag_recommendations;
 
 pub use note_apply::{ApplyNoteProposalRequest, ApplyNoteProposalResponse};
 
 #[tauri::command]
-pub fn read_agent_execution(root: PathBuf, id: String) -> Result<Option<neuink_workspace::agent_execution::AgentExecution>, String> {
+pub fn read_agent_execution(
+    root: PathBuf,
+    id: String,
+) -> Result<Option<neuink_workspace::agent_execution::AgentExecution>, String> {
     neuink_workspace::agent_execution::read(&root, &id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn save_agent_execution(root: PathBuf, record: neuink_workspace::agent_execution::AgentExecution) -> Result<neuink_workspace::agent_execution::AgentExecution, String> {
+pub fn save_agent_execution(
+    root: PathBuf,
+    record: neuink_workspace::agent_execution::AgentExecution,
+) -> Result<neuink_workspace::agent_execution::AgentExecution, String> {
     neuink_workspace::agent_execution::save(&root, record).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn list_agent_executions(root: PathBuf, conversation_id: String) -> Result<Vec<neuink_workspace::agent_execution::AgentExecution>, String> {
+pub fn list_agent_executions(
+    root: PathBuf,
+    conversation_id: String,
+) -> Result<Vec<neuink_workspace::agent_execution::AgentExecution>, String> {
     neuink_workspace::agent_execution::list(&root, &conversation_id).map_err(|e| e.to_string())
 }
 
@@ -115,6 +124,8 @@ pub struct ReadEntryAssistantContextResponse {
     pub entry_title: String,
     pub markdown: String,
     pub sources: Vec<EntryAssistantSource>,
+    pub has_pdf: bool,
+    pub parsed_segment_count: usize,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -261,6 +272,7 @@ pub fn list_tools<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Vec<ToolDescri
             }),
         },
     ];
+    tools.extend(super::research::descriptors(&app));
     if assistant_tools_enabled(&app) {
         tools.extend([
             ToolDescriptor {
@@ -488,7 +500,11 @@ fn normalized_sciverse_schema_payload(value: Value) -> Result<Value, String> {
 }
 
 #[tauri::command]
-pub async fn list_mcp_tools(root: std::path::PathBuf, server_id: String, call_id: String) -> Result<Value, String> {
+pub async fn list_mcp_tools(
+    root: std::path::PathBuf,
+    server_id: String,
+    call_id: String,
+) -> Result<Value, String> {
     agent_runtime::list_mcp_tools(root, server_id, call_id).await
 }
 
@@ -677,6 +693,9 @@ pub fn get_assistant_context_snapshot(
     let document = request.active_entry_id.as_ref().and_then(|entry_id| {
         match read_entry_assistant_context_from_workspace(&workspace, entry_id.clone()) {
             Ok(context) => {
+                if context.has_pdf && context.parsed_segment_count == 0 {
+                    warnings.push("PDF 尚未完整解析；可使用 read_entry_assistant_context、read_pdf_pages 或 search_pdf_text 读取文字层，扫描页需 OCR。".to_string());
+                }
                 if context.markdown.trim().is_empty() {
                     return None;
                 }
@@ -735,11 +754,8 @@ fn read_segment_content_from_workspace(
         .read_entry(&entry_id)
         .map_err(|error| error.to_string())?;
     let segment = workspace
-        .read_segments(&entry_id)
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .find(|segment| segment_matches_uid(segment, &segment_uid))
-        .ok_or_else(|| format!("segment not found: {segment_uid}"))?;
+        .resolve_source_segment(&entry_id, &segment_uid)
+        .map_err(|error| error.to_string())?;
 
     Ok(ReadSegmentContentResponse {
         entry_id,
@@ -764,8 +780,12 @@ fn read_entry_assistant_context_from_workspace(
         .read_annotations(&entry_id)
         .map_err(|error| error.to_string())?;
 
+    let parsed_segment_count = segments.len();
+    let has_pdf = workspace.layout().entry_pdf_file(&entry_id).is_file();
     if segments.is_empty() && annotations.is_empty() {
         return Ok(ReadEntryAssistantContextResponse {
+            has_pdf,
+            parsed_segment_count,
             entry_id,
             entry_title: entry.title,
             markdown: String::new(),
@@ -858,6 +878,8 @@ fn read_entry_assistant_context_from_workspace(
     }
 
     Ok(ReadEntryAssistantContextResponse {
+        has_pdf,
+        parsed_segment_count,
         entry_id,
         entry_title: entry.title,
         markdown,
@@ -870,14 +892,6 @@ fn logical_segment_uid(segment: &neuink_domain::SourceSegment) -> String {
         .continuation_group_id
         .clone()
         .unwrap_or_else(|| segment.uid.as_str().to_string())
-}
-
-fn segment_matches_uid(segment: &neuink_domain::SourceSegment, uid: &SegmentUid) -> bool {
-    segment.uid == *uid
-        || segment
-            .continuation_group_id
-            .as_deref()
-            .is_some_and(|group_id| group_id == uid.as_str())
 }
 
 async fn invoke_search_segments<R: tauri::Runtime>(

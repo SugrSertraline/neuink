@@ -99,6 +99,7 @@ fn sentence_alignment_preserves_abbreviations_numbers_and_rejects_missing_or_rew
 
 fn document_translation(fixture: &Fixture) -> EntryTranslation {
     EntryTranslation {
+        task: None,
         schema_version: 1,
         entry_id: fixture.request.entry_id.clone(),
         source_language: "en".into(),

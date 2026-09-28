@@ -1,4 +1,5 @@
 import type { AgentLoopState } from './state';
+import { AgentToolNotExecutedError } from './agent';
 
 const MAX_IDENTICAL_CALLS = 2;
 const MAX_IDENTICAL_FAILURES = 2;
@@ -17,7 +18,10 @@ export class AgentLoopGuard {
   beforeToolCall(toolName: string, input: unknown) {
     this.state.toolCallCount += 1;
     if (this.state.toolCallCount > this.state.maxToolCalls) {
-      this.stop(`Agent stopped after ${this.state.maxToolCalls} tool calls.`);
+      throw new AgentToolNotExecutedError('TOOL_LIMIT_REACHED：工具调用上限已到，本次未执行。请总结已有结果。');
+    }
+    if (this.state.noProgressCount >= 3) {
+      throw new AgentToolNotExecutedError('TOOL_LIMIT_REACHED：连续调用没有新信息，本次未执行。请总结已有结果与限制。');
     }
 
     const fingerprint = toolFingerprint(toolName, input);
@@ -25,10 +29,10 @@ export class AgentLoopGuard {
       (candidate) => candidate === fingerprint
     ).length;
     if (identicalCalls >= MAX_IDENTICAL_CALLS) {
-      this.stop(`Agent cycle detected: ${toolName} was called repeatedly with identical input.`);
+      throw new AgentToolNotExecutedError(`TOOL_REPEAT_SKIPPED：${toolName} 已使用相同参数调用多次，本次未执行。请换方法或总结已有结果。`);
     }
     if ((this.state.failedToolFingerprints[fingerprint] ?? 0) >= MAX_IDENTICAL_FAILURES) {
-      this.stop(`Agent stopped retrying the same failed ${toolName} call.`);
+      throw new AgentToolNotExecutedError(`TOOL_REPEAT_SKIPPED：${toolName} 重复失败，本次未执行。请换方法或说明限制。`);
     }
 
     this.state.recentToolFingerprints.push(fingerprint);
@@ -44,9 +48,7 @@ export class AgentLoopGuard {
       ? this.state.noProgressCount + 1
       : 0;
     this.state.lastObservation = nextObservation;
-    if (this.state.noProgressCount >= 3) {
-      this.stop('Agent stopped because repeated tool results made no progress.');
-    }
+    // Always deliver a completed result. Reject the NEXT call before any effects instead.
   }
 
   recordFailure(fingerprint: string) {

@@ -26,6 +26,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/shared/hooks/useToast";
+import { useAppearance } from '@/shared/components/AppearanceProvider';
 import type { ReaderPreferences } from "@/shared/lib/readerPreferences";
 import type {
   Annotation,
@@ -56,6 +57,7 @@ import type {
 import { GlobalMarkdownNotePane } from "./pdf-reader/GlobalMarkdownNotePane";
 import { FloatingSegmentPanel } from "./pdf-reader/FloatingSegmentPanel";
 import { PdfReaderDocumentPane } from "./pdf-reader/PdfReaderDocumentPane";
+import { effectivePdfBookMode } from './pdf-reader/pdfReadingMode';
 import { ReaderMessage } from "./pdf-reader/ReaderMessage";
 import {
   findSegmentByLogicalOrRealUid,
@@ -286,6 +288,8 @@ function MineruPdfReaderBody({
     reloadKey,
   });
   const readingSession = useReadingSession();
+  const { appearance } = useAppearance();
+  const bookMode = effectivePdfBookMode(appearance, readerPreferences);
   const jumpRequest = readingSession?.jump ?? externalJumpRequest;
   const [hoveredSegmentUid, setHoveredSegmentUid] = useState<string | null>(
     null,
@@ -450,6 +454,10 @@ function MineruPdfReaderBody({
     bySegmentUid: translationBySegmentUid,
     exportTranslation,
     pause: pauseTranslation,
+    cancel: cancelTranslation,
+    resume: resumeTranslation,
+    translationPaused,
+    stopPending: translationStopPending,
     setTaskOpen: setTranslationTaskOpen,
     start: startTranslation,
     taskOpen: translationTaskOpen,
@@ -475,7 +483,7 @@ function MineruPdfReaderBody({
       notePaneOpen: globalNotePaneOpen,
       segments,
     });
-  const effectivePageDisplayMode = readerPreferences.pageTurningMode === 'book' && pdfViewportWidth < 860
+  const effectivePageDisplayMode = bookMode && pdfViewportWidth < 860
     ? 'single' : readerPreferences.pageDisplayMode;
   const {
     handleCtrlWheelZoom,
@@ -1044,8 +1052,8 @@ function MineruPdfReaderBody({
     try {
       await onRetryPdfParse(entry.id);
       notify({
-        title: "已重新提交解析",
-        description: "PDF 解析任务已重新提交，请等待解析服务返回结果。",
+        title: "已加入解析队列",
+        description: "可在左侧条目库的解析队列中查看进度、调整等待顺序。",
       });
     } catch (caught) {
       notify({
@@ -1063,7 +1071,7 @@ function MineruPdfReaderBody({
     setParseRetryBusy(true);
     try {
       await onStartPdfParse(entry.id);
-      notify({ title: '已开始解析', description: 'PDF 已提交给自定义 MinerU 服务。' });
+      notify({ title: '已加入解析队列', description: '可在左侧条目库的解析队列中查看进度、调整等待顺序。' });
     } catch (caught) {
       notify({ tone: 'danger', title: '开始解析失败', description: caught instanceof Error ? caught.message : String(caught) });
     } finally {
@@ -1138,6 +1146,9 @@ function MineruPdfReaderBody({
         onDismissRecommendedTags={dismissTagSuggestions}
         onRecommendedTagToggle={toggleRecommendedTag}
         onPauseTranslation={() => void pauseTranslation()}
+        onCancelTranslation={() => void cancelTranslation()}
+        onResumeTranslation={() => void resumeTranslation()}
+        translationStopPending={translationStopPending}
         onOpenTranslationTask={() => setTranslationTaskOpen(true)}
         onOpenPdf={pdfPath ? () => void openOriginalPdf() : undefined}
         onReaderPreferencesChange={onReaderPreferencesChange}
@@ -1167,6 +1178,10 @@ function MineruPdfReaderBody({
         onCreateTranslationNote={!translationBusy && translation ? exportTranslation : undefined}
       />
       <TranslationTaskDialog
+        stopPending={translationStopPending}
+        onPause={translationBusy ? () => void pauseTranslation() : undefined}
+        onCancel={translationBusy || translationPaused ? () => void cancelTranslation() : undefined}
+        onResume={translationPaused ? () => void resumeTranslation() : undefined}
         exportContext={{ entryId: entry.id, entryTitle: entry.title, workspaceRoot }}
         busy={translationBusy || translatingSegmentUid !== null}
         detail={translationDetail}
@@ -1335,7 +1350,7 @@ function MineruPdfReaderBody({
             searchMatchCountsByPage={pdfTextSearch.matchCountsByPage}
             searchQuery={pdfTextSearch.query}
             pageWidth={pageWidth}
-            bookMode={readerPreferences.pageTurningMode === 'book'}
+            bookMode={bookMode}
             zoom={zoom}
             resumePageIdx={resumeBookmarkRef.current?.page}
             leftInset={PDF_RAIL_WIDTH}

@@ -2,16 +2,19 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MockLanguageModelV3, simulateReadableStream } from 'ai/test';
 import { jsonSchema, tool, type ToolSet } from 'ai';
 import { DEFAULT_AGENT_RUNTIME_SETTINGS } from '@/shared/lib/agentRuntimeSettings';
-import { invokeAssistantTool, type LlmProfile } from '@/shared/ipc/assistantApi';
+import { invokeAssistantTool, listTools, type LlmProfile } from '@/shared/ipc/assistantApi';
+import { runResearchTool } from '@/shared/ipc/researchApi';
+import { createAssistantTools } from './tools';
 import { createNeuinkModel } from './provider';
 import { answerWithGroundedAgent } from './qna';
 import { agentExecutors, createAgentDriver } from './agentDriver';
 import { finalizeVerifiedProposals } from '../runtime/verifiedProposal';
-import { DurableExecution } from '../runtime/durableExecution';
-import { Agent, RunBudget } from '../agent-core';
+import { DurableExecution, canReplayAssistantTool } from '../runtime/durableExecution';
+import { Agent, AgentLoopGuard, AgentLoopGuardError, createAgentLoopState, RunBudget } from '../agent-core';
 import { saveAgentExecution, type AgentExecutionRecord } from '@/shared/ipc/agentExecutionApi';
 
 vi.mock('@/shared/ipc/agentExecutionApi', () => ({ saveAgentExecution: vi.fn(async (_, record) => ({ ...record, revision: record.revision + 1 })) }));
+vi.mock('@/shared/ipc/researchApi', async original => ({ ...await original<typeof import('@/shared/ipc/researchApi')>(), runResearchTool: vi.fn() }));
 
 vi.mock('./provider', () => ({ createNeuinkModel: vi.fn(), generationSettings: () => ({}) }));
 vi.mock('@/shared/ipc/assistantApi', async (original) => ({
@@ -25,11 +28,13 @@ vi.mock('@/shared/ipc/assistantApi', async (original) => ({
 const profile = { id: 'test', model: 'test', base_url: 'https://example.invalid', api_key: null } as LlmProfile;
 const scope = { entry_ids: ['entry'], entry_titles: ['Paper'], tag_ids: [], tag_names: [] };
 
-function fakeModel(turns: Array<{ text?: string; truncated?: boolean; call?: { name: string; args: unknown } }>) {
+function fakeModel(turns: Array<{ text?: string; error?: Error; effect?: () => void; truncated?: boolean; call?: { name: string; args: unknown } }>) {
   let index = 0;
   return new MockLanguageModelV3({ doStream: async () => {
     const turn = turns[index++];
     if (!turn) throw new Error('Unexpected provider turn');
+    turn.effect?.();
+    if (turn.error) throw turn.error;
     return { stream: simulateReadableStream({ chunks: [
       { type: 'stream-start', warnings: [] },
       ...(turn.call ? [{ type: 'tool-call' as const, toolCallId: `call-${index}`, toolName: turn.call.name, input: JSON.stringify(turn.call.args) }] : [
@@ -43,6 +48,141 @@ function fakeModel(turns: Array<{ text?: string; truncated?: boolean; call?: { n
 beforeEach(() => vi.clearAllMocks());
 
 describe('production agent wiring', () => {
+  it('persists a failed read, skips repeated denied URLs, searches another source and finishes', async () => {
+    vi.mocked(listTools).mockResolvedValueOnce([
+      { name: 'read_webpage', description: 'Read', parameters_schema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } },
+      { name: 'search_web', description: 'Search', parameters_schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } }
+    ]);
+    vi.mocked(runResearchTool).mockRejectedValueOnce(new Error('远程服务返回 HTTP 403'))
+      .mockResolvedValueOnce({ results: [] });
+    const model = fakeModel([
+      { call: { name: 'read_webpage', args: { url: 'https://example.org/paper' } } },
+      { call: { name: 'read_webpage', args: { url: 'https://example.org/paper#title' } } },
+      { call: { name: 'search_web', args: { query: 'paper alternative public source' } } },
+      { text: '原页面拒绝访问；替代检索未找到可验证结果，无法确认全文。' }
+    ]);
+    vi.mocked(createNeuinkModel).mockReturnValue(model);
+    const loopGuard = new AgentLoopGuard(createAgentLoopState('Read paper'));
+    const runtime = await createAssistantTools({ root: 'fixture', scope, loopGuard });
+    const saved = vi.fn(async () => {});
+    const agent = new Agent({ driver: createAgentDriver({ settings: profile, system: '', tools: runtime.tools }),
+      tools: agentExecutors(runtime.tools), messages: [{ role: 'user' as const, content: 'Read paper' }],
+      budget: new RunBudget(), saveCheckpoint: saved, canReplayTool: canReplayAssistantTool,
+      beforeTurn: () => loopGuard.startTurn(), isFatal: error => error instanceof AgentLoopGuardError });
+    expect(await agent.run()).toContain('原页面拒绝访问');
+    expect(runResearchTool).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(runResearchTool).mock.calls.map(call => call[0])).toEqual(['read_webpage', 'search_web']);
+    expect(JSON.stringify(model.doStreamCalls[1].prompt)).toContain('其他公开来源');
+    expect(JSON.stringify(model.doStreamCalls[2].prompt)).toContain('READ_RETRY_SKIPPED');
+    expect(runtime.events.map(event => event.status)).toEqual(['error', 'error', 'done']);
+    expect(saved).toHaveBeenCalled();
+  });
+  it.each(['read_webpage', 'search_web', 'search_papers'])('continues after a durable %s timeout instead of reporting uncertain writes', async name => {
+    vi.mocked(createNeuinkModel).mockReturnValue(fakeModel([
+      { call: { name, args: {} } }, { text: '暂时无法访问该来源，以下仅整理已知信息。' }
+    ]));
+    const execute = vi.fn(async (): Promise<unknown> => { throw new Error('远程连接失败或超时'); });
+    const tools: ToolSet = { [name]: tool({ inputSchema: jsonSchema({ type: 'object', properties: {} }), execute }) };
+    const agent = new Agent({ driver: createAgentDriver({ settings: profile, system: '', tools }), tools: agentExecutors(tools),
+      messages: [{ role: 'user' as const, content: 'Search' }], budget: new RunBudget(),
+      saveCheckpoint: async () => {}, canReplayTool: canReplayAssistantTool });
+    expect(await agent.run()).toContain('仅整理已知');
+    expect(execute).toHaveBeenCalledOnce();
+    expect(JSON.stringify(agent.messages)).toContain('error-text');
+  });
+  it('asks the model to correct paper recommendations with IDs absent from actual retrieval', async () => {
+    const model = fakeModel([
+      { text: '```neuink-papers\n{"items":[{"ref":"research:invented","reason":"A claim"}]}\n```' },
+      { text: '没有可验证的论文记录，无法给出推荐。' }
+    ]);
+    vi.mocked(createNeuinkModel).mockReturnValue(model);
+    const result = await answerWithGroundedAgent({ question: '推荐论文', root: 'fixture', scope, settings: profile });
+    expect(result.answer).toContain('没有可验证');
+    expect(JSON.stringify(model.doStreamCalls[1].prompt)).toContain('not retrieved in this run');
+    expect(invokeAssistantTool).not.toHaveBeenCalled();
+  });
+  it('returns an unavailable-tool error for disabled search and lets the model synthesize', async () => {
+    const model = fakeModel([
+      { call: { name: 'search_web', args: { query: 'ACL code completion' } } },
+      { text: 'Web search is unavailable; no web search was performed.' }
+    ]);
+    vi.mocked(createNeuinkModel).mockReturnValue(model);
+    const result = await answerWithGroundedAgent({ question: 'Search ACL papers', root: 'fixture', scope, settings: profile });
+    expect(result.answer).toContain('unavailable');
+    const continuation = JSON.stringify(model.doStreamCalls[1].prompt);
+    expect(continuation).toContain('TOOL_UNAVAILABLE');
+    expect(continuation).not.toContain('Tool arguments are invalid');
+    expect(invokeAssistantTool).not.toHaveBeenCalled();
+    expect(model.doStreamCalls[0].tools?.some(t => t.type === 'function' && t.name === 'search_web')).toBe(false);
+  });
+  it('corrects wrong paper-search fields without calling the service with invalid input', async () => {
+    const model = fakeModel([
+      { call: { name: 'search_papers', args: { query: 'ACL code', top_k: '10' } } },
+      { call: { name: 'search_papers', args: { query: 'ACL code', limit: 10 } } },
+      { text: 'Summary of the actual result' }
+    ]);
+    vi.mocked(createNeuinkModel).mockReturnValue(model);
+    const execute = vi.fn(async (_input: unknown) => ({ papers: [] }));
+    const tools: ToolSet = { search_papers: tool({ inputSchema: jsonSchema({
+      type: 'object', additionalProperties: false, properties: { query: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 10 } }, required: ['query']
+    }), execute }) };
+    const agent = new Agent({ driver: createAgentDriver({ settings: profile, system: '', tools }), tools: agentExecutors(tools), messages: [{ role: 'user' as const, content: 'Search ACL papers' }], budget: new RunBudget() });
+    expect(await agent.run()).toBe('Summary of the actual result');
+    expect(execute).toHaveBeenCalledOnce();
+    expect(execute.mock.calls[0][0]).toEqual({ query: 'ACL code', limit: 10 });
+    expect(JSON.stringify(model.doStreamCalls[1].prompt)).toContain('Allowed fields: query, limit');
+  });
+  it('forces synthesis after repeated unavailable calls instead of spending all twelve turns', async () => {
+    const model = fakeModel([
+      ...Array.from({ length: 3 }, () => ({ call: { name: 'search_web', args: { query: 'ACL' } } })),
+      { text: 'Search unavailable; no results to verify.' }
+    ]);
+    vi.mocked(createNeuinkModel).mockReturnValue(model);
+    const agent = new Agent({ driver: createAgentDriver({ settings: profile, system: '', tools: {} }), tools: {}, messages: [{ role: 'user' as const, content: 'Search ACL papers' }], budget: new RunBudget() });
+    expect(await agent.run()).toContain('unavailable');
+    expect(model.doStreamCalls).toHaveLength(4);
+    // AI SDK omits tool_choice entirely when the declaration list is empty.
+    expect(model.doStreamCalls[3].tools).toBeUndefined();
+    expect(JSON.stringify(model.doStreamCalls[3].prompt)).toContain('No more tool calls are permitted');
+  });
+  it('spends the final turn summarizing rather than making another search', async () => {
+    const model = fakeModel([
+      { call: { name: 'search_web', args: { query: 'ACL' } } },
+      { text: 'Partial results, with limitations.' }
+    ]);
+    vi.mocked(createNeuinkModel).mockReturnValue(model);
+    const execute = vi.fn(async () => ({ results: [] }));
+    const tools: ToolSet = { search_web: tool({ inputSchema: jsonSchema({ type: 'object', properties: { query: { type: 'string' } } }), execute }) };
+    const agent = new Agent({ driver: createAgentDriver({ settings: profile, system: '', tools }), tools: agentExecutors(tools), messages: [{ role: 'user' as const, content: 'Search ACL papers' }], budget: new RunBudget(), maxTurns: 2 });
+    expect(await agent.run()).toContain('Partial');
+    expect(execute).toHaveBeenCalledOnce();
+    expect(model.doStreamCalls[1].tools).toBeUndefined();
+    expect(JSON.stringify(model.doStreamCalls[1].prompt)).toContain('Give the final answer now');
+  });
+  it('removes search tools after six searches and rejects a provider that still calls them', async () => {
+    const model = fakeModel([
+      ...Array.from({ length: 7 }, (_, i) => ({ call: { name: 'search_web', args: { query: `ACL variant ${i}` } } })),
+      { text: 'Summary with incomplete coverage.' }
+    ]);
+    vi.mocked(createNeuinkModel).mockReturnValue(model);
+    const execute = vi.fn(async () => ({ results: [] }));
+    const tools: ToolSet = { search_web: tool({ inputSchema: jsonSchema({ type: 'object', properties: { query: { type: 'string' } } }), execute }) };
+    const agent = new Agent({ driver: createAgentDriver({ settings: profile, system: '', tools }), tools: agentExecutors(tools),
+      messages: [{ role: 'user' as const, content: 'Search ACL papers' }], budget: new RunBudget() });
+    expect(await agent.run()).toContain('incomplete');
+    expect(execute).toHaveBeenCalledTimes(6);
+    expect(model.doStreamCalls[6].tools).toBeUndefined();
+    expect(JSON.stringify(model.doStreamCalls[7].prompt)).toContain('TOOL_UNAVAILABLE');
+  });
+  it('never executes a provider tool call during forced final synthesis', async () => {
+    vi.mocked(createNeuinkModel).mockReturnValue(fakeModel([{ call: { name: 'write', args: {} } }]));
+    const execute = vi.fn(async () => 'written');
+    const tools: ToolSet = { write: tool({ inputSchema: jsonSchema({ type: 'object', properties: {} }), execute }) };
+    const agent = new Agent({ driver: createAgentDriver({ settings: profile, system: '', tools }), tools: agentExecutors(tools),
+      messages: [{ role: 'user' as const, content: 'Write' }], budget: new RunBudget(), maxTurns: 1 });
+    await expect(agent.run()).rejects.toThrow('未执行这些操作');
+    expect(execute).not.toHaveBeenCalled();
+  });
   it('waits for structured choices, then still requires separate write approval', async () => {
     const model = fakeModel([
       { call: { name: 'ask_user', args: { title: '选择输出', previewMarkdown: '## 研究问题\n\n## 方法', questions: [
@@ -215,6 +355,7 @@ describe('production agent wiring', () => {
     expect(JSON.stringify(parentContinuation)).toContain('42 participants [S1]');
   });
   it('resumes the same interrupted child actor with its saved source ledger and budget', async () => {
+    const controller = new AbortController();
     const runtimeSettings = structuredClone(DEFAULT_AGENT_RUNTIME_SETTINGS);
     runtimeSettings.subagents[0].enabled = true;
     const options = {
@@ -226,12 +367,13 @@ describe('production agent wiring', () => {
     } as unknown as Parameters<typeof answerWithGroundedAgent>[0];
     vi.mocked(createNeuinkModel).mockReturnValue(fakeModel([
       { call: { name: 'task_run_subagent', args: { agent_id: 'evidence-agent', instruction: 'Read entry/s1 and cite it.' } } },
-      { call: { name: 'read_segment_content', args: { entry_id: 'entry', segment_uid: 's1' } } }
+      { call: { name: 'read_segment_content', args: { entry_id: 'entry', segment_uid: 's1' } } },
+      { effect: () => controller.abort(new Error('User stopped')), error: new Error('User stopped') }
     ]));
     const budget = new RunBudget();
     const record: AgentExecutionRecord = { id: 'execution-child', conversationId: 'conversation', revision: 0, status: 'running', updatedAt: '', payload: {} };
     const execution = new DurableExecution('fixture', record, budget);
-    await expect(answerWithGroundedAgent({ ...options, budget, execution })).rejects.toThrow('子任务执行中断');
+    await expect(answerWithGroundedAgent({ ...options, budget, execution, abortSignal: controller.signal })).rejects.toThrow('User stopped');
     await execution.flush();
     const saved = structuredClone(record);
     const restoredBudget = new RunBudget();

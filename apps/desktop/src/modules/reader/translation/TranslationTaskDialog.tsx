@@ -39,6 +39,10 @@ export function TranslationTaskDialog({
   segments,
   translation,
   busy = false,
+  stopPending,
+  onPause,
+  onCancel,
+  onResume,
   message,
   progress,
   onOpenChange,
@@ -49,6 +53,10 @@ export function TranslationTaskDialog({
   segments: SourceSegment[];
   translation: EntryTranslation | null;
   busy?: boolean;
+  stopPending?: 'pause' | 'cancel' | 'resume' | null;
+  onPause?: () => void;
+  onCancel?: () => void;
+  onResume?: () => void;
   detail?: string | null;
   message?: string | null;
   progress?: JobProgress | null;
@@ -60,6 +68,7 @@ export function TranslationTaskDialog({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [selectedTypes, setSelectedTypes] = useState<Set<SegmentType>>(new Set());
   const initializedForOpenRef = useRef(false);
+  const previousTaskIdRef = useRef<string | null>(null);
   const statuses = useMemo(
     () => new Map((translation?.segments ?? []).map((segment) => [segment.segment_uid, segment])),
     [translation]
@@ -88,9 +97,13 @@ export function TranslationTaskDialog({
     return current;
   }, { all: 0, pending: 0, translated: 0, failed: 0 });
   const completedCount = counts.translated;
+  const paused = !busy && translation?.status === 'paused' && Boolean(translation.task);
+  const taskLocked = busy || paused || Boolean(stopPending);
   const displayedCompleted = busy && progress ? progress.current : completedCount;
   const displayedTotal = busy && progress ? progress.total : rows.length;
-  const runningMessage = busy
+  const runningMessage = stopPending
+    ? stopPending === 'resume' ? '正在继续翻译…' : stopPending === 'pause' ? '正在暂停翻译…' : '正在取消翻译…'
+    : busy
     ? message?.match(/已接收\s*(\d+)\s*字/)
       ? `正在翻译 · 已接收 ${message.match(/已接收\s*(\d+)\s*字/)?.[1]} 字`
       : '正在翻译'
@@ -114,6 +127,14 @@ export function TranslationTaskDialog({
     setSelected(new Set());
   }, [open, rows]);
 
+  useEffect(() => {
+    if (!open) return;
+    const task = translation?.task;
+    if (task) setSelected(new Set(Object.keys(task.source_hashes)));
+    else if (previousTaskIdRef.current) setSelected(new Set());
+    previousTaskIdRef.current = task?.job_id ?? null;
+  }, [open, translation?.task?.job_id]);
+
   const toggleType = (segmentType: SegmentType) => {
     const enabled = selectedTypes.has(segmentType);
     setSelectedTypes((current) => {
@@ -133,6 +154,7 @@ export function TranslationTaskDialog({
   };
 
   const run = (mode: RunMode) => {
+    if (taskLocked) return;
     const candidates = rows.filter((row) => {
       if (!selected.has(row.segment.uid) || row.status === 'skipped') return false;
       if (mode === 'force') return true;
@@ -161,12 +183,19 @@ export function TranslationTaskDialog({
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Clock3 aria-hidden="true" className="shrink-0 text-primary" size={15} />
             <span>
-              {busy
+              {busy || stopPending
                 ? `${runningMessage || '正在翻译'} · ${displayedCompleted}/${displayedTotal}`
-                : `翻译进度：已完成 ${completedCount}/${rows.length}`}
+                : `${translation?.status === 'paused' ? '已暂停' : translation?.status === 'canceled' ? '已取消' : '翻译进度'}：已完成 ${completedCount}/${rows.length}`}
             </span>
           </div>
           <Progress value={progressValue} />
+          {(busy || paused) && (onPause || onCancel || onResume) ? <div className="flex flex-wrap items-center gap-2">
+            {paused && onResume ? <Button size="xs" disabled={Boolean(stopPending)} onClick={onResume}>继续翻译</Button> : null}
+            {onPause ? <Button size="xs" variant="outline" disabled={Boolean(stopPending)} onClick={onPause}>暂停翻译</Button> : null}
+            {onCancel ? <Button size="xs" variant="outline" disabled={Boolean(stopPending)} onClick={onCancel}>取消翻译</Button> : null}
+            <span className="text-xs text-muted-foreground">{paused ? `任务已保留，剩余 ${translation?.task?.remaining_segment_uids.length ?? 0} 个片段；继续后处理原选择范围。` : '暂停可继续当前任务；取消结束任务，已有译文保留。'}</span>
+          </div> : null}
+          {!busy && translation?.status === 'canceled' ? <p className="text-xs text-muted-foreground">翻译任务已取消，已有译文保留。如有需要，请重新选择内容创建新任务。</p> : null}
         </div>
 
         <div className="grid gap-2 rounded-md border p-2">
@@ -187,7 +216,7 @@ export function TranslationTaskDialog({
                 return (
                   <Button
                     aria-pressed={enabled}
-                    disabled={busy || typeCount === 0}
+                    disabled={taskLocked || typeCount === 0}
                     key={segmentType}
                     size="xs"
                     type="button"
@@ -213,7 +242,7 @@ export function TranslationTaskDialog({
                 <input
                   aria-label="全选当前列表"
                   checked={allVisibleSelected}
-                  disabled={busy || actionableVisible.length === 0}
+                  disabled={taskLocked || actionableVisible.length === 0}
                   type="checkbox"
                   onChange={() => setSelected((current) => {
                     const next = new Set(current);
@@ -234,7 +263,7 @@ export function TranslationTaskDialog({
                     <input
                       aria-label={`选择第 ${segment.page_idx + 1} 页 ${segmentTypeLabel(segment.segment_type)}`}
                       checked={selected.has(segment.uid)}
-                      disabled={busy || status === 'skipped'}
+                      disabled={taskLocked || status === 'skipped'}
                       type="checkbox"
                       onChange={() => setSelected((current) => {
                         const next = new Set(current);
@@ -253,7 +282,7 @@ export function TranslationTaskDialog({
                       {status === 'failed' ? (
                         <Button
                           aria-label={`重试第 ${segment.page_idx + 1} 页`}
-                          disabled={busy}
+                          disabled={taskLocked}
                           size="icon-xs"
                           title="重试此 Block"
                           type="button"
@@ -275,10 +304,10 @@ export function TranslationTaskDialog({
         <DialogFooter>
           {exportContext ? <ReadingExportButton {...exportContext} disabled={busy || completedCount === 0}
             scope={{ kinds: ['translation'] }} label="导出已保存译文" scopeLabel="导出已保存译文" /> : null}
-          <Button disabled={busy || selected.size === 0} size="sm" type="button" variant="outline" onClick={() => run('force')}>
+          <Button disabled={taskLocked || selected.size === 0} size="sm" type="button" variant="outline" onClick={() => run('force')}>
             重新翻译选中
           </Button>
-          <Button disabled={busy || selected.size === 0} size="sm" type="button" onClick={() => run('pending')}>
+          <Button disabled={taskLocked || selected.size === 0} size="sm" type="button" onClick={() => run('pending')}>
             翻译选中（{selected.size}）
           </Button>
         </DialogFooter>

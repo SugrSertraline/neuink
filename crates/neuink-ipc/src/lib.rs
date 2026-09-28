@@ -1,7 +1,17 @@
 pub mod commands;
 
 pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
-    builder.invoke_handler(tauri::generate_handler![
+    let handler: Box<dyn Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync> = Box::new(tauri::generate_handler![
+        commands::browser::browser_command,
+        commands::pdf_text::inspect_pdf_text,
+        commands::pdf_text::read_assistant_pdf_bytes,
+        commands::pdf_text::cache_pdf_text,
+        commands::research::get_research_settings,
+        commands::research::save_research_settings,
+        commands::research::run_research_tool,
+        commands::research::cancel_research_call,
+        commands::research::preview_research_import,
+        commands::research::approve_research_import,
         commands::translation::paragraph::read_paragraph_translations,
         commands::translation::paragraph::translate_paragraph,
         commands::translation::paragraph::set_paragraph_translation_view,
@@ -40,6 +50,9 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
         commands::entry::purge_entry,
         commands::entry::purge_trash_item,
         commands::entry::queue_pdf_parse,
+        commands::pdf_parse_queue::read_pdf_parse_queue,
+        commands::pdf_parse_queue::move_pdf_parse_queue,
+        commands::pdf_parse_queue::process_pdf_parse_queue,
         commands::entry::read_note,
         commands::entry::rename_pdf_display_name,
         commands::entry::refresh_parse_status,
@@ -137,10 +150,20 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
         commands::translation::begin_entry_translation,
         commands::translation::finish_entry_translation,
         commands::translation::pause_entry_translation,
+        commands::translation::lifecycle::resume_entry_translation,
+        commands::translation::lifecycle::cancel_translation_task,
         commands::translation::read_entry_translation,
         commands::translation::run_entry_translation,
         commands::translation::translate_entry_segment,
         commands::translation::save_translation_context,
         commands::translation::upsert_translated_segments,
-    ])
+    ]);
+    builder.invoke_handler(move |invoke| {
+        // Custom commands also require a trusted application WebView, independently of plugin ACLs.
+        if invoke.message.webview_ref().label() != "main" {
+            invoke.resolver.reject("External pages cannot access application commands");
+            return true;
+        }
+        handler(invoke)
+    })
 }

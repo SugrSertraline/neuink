@@ -1,9 +1,12 @@
-import { ArrowLeftRight, ChevronDown, Link2, PanelRight, X } from 'lucide-react';
+import { ArrowLeftRight, ChevronDown, Link2, PanelRight, Pin, Plus, X } from 'lucide-react';
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import {
@@ -27,6 +30,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils';
 import {
   surfaceKey,
+  isEntryReadingView,
   workspaceSurfaceLabel,
   type WorkspacePaneId,
   type WorkspaceSurface,
@@ -36,31 +40,40 @@ import {
   resolveWorkspaceSurfacePair,
   workspaceSurfacePairRelationLabel
 } from './workspaceSurfacePairing';
+import { EntryTabHoverSwitch, entryTabViews } from './EntryTabHoverSwitch';
 
 const TAB_WIDTH = 176;
 const MENU_WIDTH = 34;
 const TAB_STEP = 180;
 
 type WorkspaceTabsBarProps = {
-  entries: Array<{ id: string; title: string }>;
+  onNewBrowser?: () => void;
+  entries: Array<{ id: string; title: string; pdfFileName?: string | null }>;
   layout: WorkspaceSurfaceLayout;
   onAddToAssistantContext?: (surface: WorkspaceSurface) => void;
   onClose: (pane: WorkspacePaneId, surface: WorkspaceSurface) => void;
   onCloseOthers: (pane: WorkspacePaneId, surface: WorkspaceSurface) => void;
+  onCloseToRight?: (pane: WorkspacePaneId, surface: WorkspaceSurface) => void;
   onClosePane: (pane: WorkspacePaneId) => void;
   onMove: (surface: WorkspaceSurface, pane: WorkspacePaneId, targetIndex?: number) => void;
+  onSetPinned?: (surface: WorkspaceSurface, pinned: boolean) => void;
+  onSwitchEntryView?: (pane: WorkspacePaneId, surface: WorkspaceSurface, view: 'entry-overview' | 'pdf' | 'reflow') => void;
   onSelect: (pane: WorkspacePaneId, surface: WorkspaceSurface) => void;
   onSwap: () => void;
 };
 
 export function WorkspaceTabsBar({
+  onNewBrowser,
   entries,
   layout,
   onAddToAssistantContext,
   onClose,
   onCloseOthers,
+  onCloseToRight,
   onClosePane,
   onMove,
+  onSetPinned,
+  onSwitchEntryView,
   onSelect,
   onSwap
 }: WorkspaceTabsBarProps) {
@@ -80,6 +93,13 @@ export function WorkspaceTabsBar({
     rect: DOMRect;
   } | null>(null);
   const suppressNextTabClickRef = useRef(false);
+  const captureRef = useRef<{ element: HTMLElement; id: number } | null>(null);
+  const releaseCapture = () => {
+    const capture = captureRef.current;
+    captureRef.current = null;
+    if (capture?.element.hasPointerCapture?.(capture.id)) capture.element.releasePointerCapture(capture.id);
+  };
+  useEffect(() => () => releaseCapture(), []);
   const dragActive = pointerDrag?.dragging === true;
   const draggingKey = pointerDrag?.dragging ? surfaceKey(pointerDrag.surface) : null;
   const pairRelationLabel = layout.right
@@ -89,10 +109,11 @@ export function WorkspaceTabsBar({
     : null;
 
   const startPointerDrag = (surface: WorkspaceSurface, event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || event.target instanceof Element && event.target.closest('[data-tab-close="true"]')) {
+    if (event.button !== 0 || event.isPrimary === false || event.target instanceof Element && event.target.closest('[data-tab-close="true"]')) {
       return;
     }
     setDropTarget(null);
+    captureRef.current = { element: event.currentTarget, id: event.pointerId };
     dragVisualRef.current = {
       grabX: event.clientX - event.currentTarget.getBoundingClientRect().left,
       grabY: event.clientY - event.currentTarget.getBoundingClientRect().top,
@@ -159,11 +180,12 @@ export function WorkspaceTabsBar({
       if (event.pointerId !== pointerDrag.pointerId) {
         return;
       }
-      const dragging = pointerDrag.dragging || Math.hypot(event.clientX - pointerDrag.startX, event.clientY - pointerDrag.startY) >= 3;
+      const dragging = pointerDrag.dragging || Math.hypot(event.clientX - pointerDrag.startX, event.clientY - pointerDrag.startY) >= 4;
       if (!dragging) {
         return;
       }
       event.preventDefault();
+      if (!pointerDrag.dragging) captureRef.current?.element.setPointerCapture?.(event.pointerId);
       setPointerDrag((current) => current && !current.dragging ? { ...current, dragging: true } : current);
       setDragCursor({ x: event.clientX, y: event.clientY });
       const offsetX = event.clientX - pointerDrag.startX;
@@ -179,7 +201,7 @@ export function WorkspaceTabsBar({
     };
 
     const resetPointerDrag = () => {
-      const visual = dragVisualRef.current;
+      releaseCapture();
       dragVisualRef.current = null;
       setDragCursor(null);
       setDropTarget(null);
@@ -219,12 +241,14 @@ export function WorkspaceTabsBar({
     window.addEventListener('pointermove', handlePointerMove, { capture: true });
     window.addEventListener('pointerup', finishPointerDrag, { capture: true });
     window.addEventListener('pointercancel', cancelPointerDrag, { capture: true });
+    window.addEventListener('lostpointercapture', cancelPointerDrag, { capture: true });
     window.addEventListener('blur', cancelPointerDrag);
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.removeEventListener('pointermove', handlePointerMove, { capture: true });
       window.removeEventListener('pointerup', finishPointerDrag, { capture: true });
       window.removeEventListener('pointercancel', cancelPointerDrag, { capture: true });
+      window.removeEventListener('lostpointercapture', cancelPointerDrag, { capture: true });
       window.removeEventListener('blur', cancelPointerDrag);
       window.removeEventListener('keydown', handleKeyDown);
     };
@@ -251,10 +275,14 @@ export function WorkspaceTabsBar({
           label="左侧标签"
           pane="left"
           tabs={layout.leftTabs}
+          pinnedTabKeys={layout.pinnedTabKeys ?? []}
           onClose={onClose}
           onCloseOthers={onCloseOthers}
+          onCloseToRight={onCloseToRight}
           onClosePane={onClosePane}
           onMove={onMove}
+          onSetPinned={onSetPinned}
+          onSwitchEntryView={onSwitchEntryView}
           dropIndex={dropTarget?.pane === 'left' ? dropTarget.index : null}
           draggingKey={draggingKey}
           dragSource={{ index: sourceIndex, pane: sourcePane }}
@@ -270,10 +298,14 @@ export function WorkspaceTabsBar({
             label="右侧标签"
             pane="right"
             tabs={layout.rightTabs}
+            pinnedTabKeys={layout.pinnedTabKeys ?? []}
             onClose={onClose}
             onCloseOthers={onCloseOthers}
+            onCloseToRight={onCloseToRight}
             onClosePane={onClosePane}
             onMove={onMove}
+            onSetPinned={onSetPinned}
+            onSwitchEntryView={onSwitchEntryView}
             dropIndex={dropTarget?.pane === 'right' ? dropTarget.index : null}
             draggingKey={draggingKey}
             dragSource={{ index: sourceIndex, pane: sourcePane }}
@@ -283,8 +315,9 @@ export function WorkspaceTabsBar({
           />
         ) : null}
       </div>
-      {split ? (
+      {split || onNewBrowser ? (
         <div className="workspace-tabsbar-actions">
+          {onNewBrowser ? <Button aria-label="新建网页标签" title="新建网页标签" size="icon-sm" variant="ghost" type="button" onClick={onNewBrowser}><Plus size={16} /></Button> : null}
           {pairRelationLabel ? (
             <span
               aria-label={pairRelationLabel}
@@ -296,7 +329,7 @@ export function WorkspaceTabsBar({
               联动
             </span>
           ) : null}
-          <Button
+          {split ? <Button
             aria-label="交换左右分屏"
             size="icon-xs"
             title="交换左右分屏"
@@ -305,7 +338,7 @@ export function WorkspaceTabsBar({
             onClick={onSwap}
           >
             <ArrowLeftRight size={13} aria-hidden="true" />
-          </Button>
+          </Button> : null}
         </div>
       ) : null}
       {!split && dragActive ? (
@@ -344,10 +377,14 @@ function TabPane({
   label,
   pane,
   tabs,
+  pinnedTabKeys,
   onClose,
   onCloseOthers,
+  onCloseToRight,
   onClosePane,
   onMove,
+  onSetPinned,
+  onSwitchEntryView,
   dropIndex,
   draggingKey,
   dragSource,
@@ -356,14 +393,18 @@ function TabPane({
   onSelect
 }: {
   active: WorkspaceSurface;
-  entries: Array<{ id: string; title: string }>;
+  entries: Array<{ id: string; title: string; pdfFileName?: string | null }>;
   label: string;
   pane: WorkspacePaneId;
   tabs: WorkspaceSurface[];
+  pinnedTabKeys: string[];
   onClose: (pane: WorkspacePaneId, surface: WorkspaceSurface) => void;
   onCloseOthers: (pane: WorkspacePaneId, surface: WorkspaceSurface) => void;
+  onCloseToRight?: (pane: WorkspacePaneId, surface: WorkspaceSurface) => void;
   onClosePane: (pane: WorkspacePaneId) => void;
   onMove: (surface: WorkspaceSurface, pane: WorkspacePaneId, targetIndex?: number) => void;
+  onSetPinned?: (surface: WorkspaceSurface, pinned: boolean) => void;
+  onSwitchEntryView?: (pane: WorkspacePaneId, surface: WorkspaceSurface, view: 'entry-overview' | 'pdf' | 'reflow') => void;
   dropIndex: number | null;
   draggingKey: string | null;
   dragSource: { index: number; pane: WorkspacePaneId | null };
@@ -392,6 +433,8 @@ function TabPane({
         (() => {
           const index = tabs.findIndex((tab) => surfaceKey(tab) === surfaceKey(surface));
           const canClose = surface.kind !== 'library';
+          const pinned = pinnedTabKeys.includes(surfaceKey(surface));
+          const entry = isEntryReadingView(surface) ? entries.find((item) => item.id === surface.entryId) : undefined;
           const transform = tabDragTransform({
             dragSource,
             index,
@@ -405,9 +448,11 @@ function TabPane({
           className={cn(
             'workspace-surface-tab',
             surfaceKey(surface) === activeKey && 'is-active',
+            pinned && 'is-pinned',
             draggingKey === surfaceKey(surface) && 'is-dragging',
             dropIndex === index && 'is-drop-target'
           )}
+          data-allow-context-menu="true"
           data-workspace-tab-index={index}
           style={transform ? { transform } : undefined}
           onPointerDown={(event) => onPointerDragStart(surface, event)}
@@ -418,15 +463,27 @@ function TabPane({
             }
           }}
         >
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button type="button" onClick={() => onSelect(pane, surface)}>
-                <span className="truncate">{workspaceSurfaceLabel(surface, entries)}</span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" sideOffset={6}>{workspaceSurfaceLabel(surface, entries)}</TooltipContent>
-          </Tooltip>
-          {canClose ? <button
+          {isEntryReadingView(surface) && onSwitchEntryView ? (
+            <EntryTabHoverSwitch
+              dragging={draggingKey !== null}
+              entry={entry}
+              pinned={pinned}
+              surface={surface}
+              onSelect={() => onSelect(pane, surface)}
+              onSwitch={(view) => onSwitchEntryView(pane, surface, view)}
+            />
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button type="button" onClick={() => onSelect(pane, surface)}>
+                  {pinned ? <Pin size={12} aria-hidden="true" className="workspace-tab-pin" /> : null}
+                  <span className="truncate">{workspaceSurfaceLabel(surface, entries)}</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={6}>{workspaceSurfaceLabel(surface, entries)}</TooltipContent>
+            </Tooltip>
+          )}
+          {canClose && !pinned ? <button
             aria-label={`关闭${workspaceSurfaceLabel(surface, entries)}`}
             data-tab-close="true"
             type="button"
@@ -437,14 +494,31 @@ function TabPane({
         </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
-          <ContextMenuItem disabled={pane === 'left'} onSelect={() => onMove(surface, 'left')}>移到左侧</ContextMenuItem>
+          {isEntryReadingView(surface) && onSwitchEntryView ? <>
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>切换条目视图</ContextMenuSubTrigger>
+              <ContextMenuSubContent>
+                {entryTabViews.map(({ kind, label }) => <ContextMenuItem
+                  key={kind}
+                  disabled={surface.kind === kind || (kind !== 'entry-overview' && !entry?.pdfFileName)}
+                  onSelect={() => onSwitchEntryView(pane, surface, kind)}
+                >{label}</ContextMenuItem>)}
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+            <ContextMenuSeparator />
+          </> : null}
+          {onSetPinned ? <ContextMenuItem onSelect={() => onSetPinned(surface, !pinned)}>{pinned ? '取消固定' : '固定在标签栏左侧'}</ContextMenuItem> : null}
+          <ContextMenuItem disabled={pane === 'left'} onSelect={() => onMove(surface, 'left')}>移到左侧分栏</ContextMenuItem>
           <ContextMenuItem disabled={pane === 'right'} onSelect={() => onMove(surface, 'right')}>移到右侧分屏</ContextMenuItem>
           <ContextMenuSeparator />
           {canClose ? <ContextMenuItem onSelect={() => onClose(pane, surface)}>关闭</ContextMenuItem> : null}
           <ContextMenuItem onSelect={() => onCloseOthers(pane, surface)}>关闭其他</ContextMenuItem>
+          {onCloseToRight ? <ContextMenuItem
+            disabled={!tabs.slice(index + 1).some((tab) => tab.kind !== 'library' && !pinnedTabKeys.includes(surfaceKey(tab)))}
+            onSelect={() => onCloseToRight(pane, surface)}
+          >关闭右侧标签</ContextMenuItem> : null}
           <ContextMenuSeparator />
-          <ContextMenuItem disabled={pane === 'left'} onSelect={() => onClosePane('left')}>关闭左侧</ContextMenuItem>
-          <ContextMenuItem disabled={pane === 'right'} onSelect={() => onClosePane('right')}>关闭右侧</ContextMenuItem>
+          <ContextMenuItem onSelect={() => onClosePane(pane)}>关闭当前分栏</ContextMenuItem>
         </ContextMenuContent>
         </ContextMenu>
           );

@@ -46,6 +46,20 @@ beforeEach(() => {
 });
 
 describe('real harness wiring (only model and IPC transports are replaced)', () => {
+  it('delivers and saves the parent answer after a failed read without failing the conversation', async () => {
+    vi.mocked(createNeuinkModel).mockReturnValue(scriptedModel([
+      { call: { name: 'read_segment_content', args: { entry_id: 'entry', segment_uid: 's1' } } },
+      { text: '读取失败，无法确认该论文内容。' }
+    ]));
+    vi.mocked(invokeAssistantTool).mockRejectedValue(new Error('file unavailable'));
+    const answer = await runAssistantHarness({ ...options, scope: { ...options.scope, entry_ids: ['entry'], entry_titles: ['Paper'] } });
+    expect(answer.answer).toContain('无法确认');
+    expect(answer.hadRecoverableFailures).toBe(true);
+    expect(answer.taskState?.status).toBe('completed');
+    expect(answer.toolEvents).toContainEqual(expect.objectContaining({ toolName: 'read_segment_content', status: 'error' }));
+    await acknowledgeExecution(options.root, answer.executionId!, false);
+    expect(stored.status).toBe('completed');
+  });
   it('persists and resumes the main Agent response without a planner, memory call or duplicate model request', async () => {
     const answer = await runAssistantHarness(options);
     expect(answer.answer).toContain('选择');

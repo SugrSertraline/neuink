@@ -73,6 +73,9 @@ export function ReaderToolbar({
   onExportTranslation,
   onExportPaper,
   onPauseTranslation,
+  onCancelTranslation,
+  onResumeTranslation,
+  translationStopPending,
   onOpenTranslationTask,
   onReaderPreferencesChange,
   onCurrentPageChange,
@@ -115,6 +118,9 @@ export function ReaderToolbar({
   onExportTranslation: () => void;
   onExportPaper?: () => void;
   onPauseTranslation: () => void;
+  onCancelTranslation?: () => void;
+  onResumeTranslation?: () => void;
+  translationStopPending?: 'pause' | 'cancel' | 'resume' | null;
   onOpenTranslationTask: () => void;
   onReaderPreferencesChange: (preferences: ReaderPreferences) => void;
   onCurrentPageChange?: (pageNumber: number) => void;
@@ -131,6 +137,7 @@ export function ReaderToolbar({
   onZoomOut: () => void;
 }) {
   const readingSession = useReadingSession();
+  const translationPaused = !translationBusy && translation?.status === 'paused' && Boolean(translation.task);
   const hasTranslation = Boolean(
     translation?.segments.some((segment) => segment.status === 'translated')
   );
@@ -142,6 +149,8 @@ export function ReaderToolbar({
     parseStatus={entry.status} parsed={entry.status === 'Parsed'} reparseBusy={reparseBusy} translationBusy={translationBusy}
     onExportTranslation={onExportTranslation} onExportPaper={segmentCount > 0 ? onExportPaper : undefined}
     onOpenPdf={onOpenPdf} onOpenTranslationTask={onOpenTranslationTask} onPauseTranslation={onPauseTranslation}
+    onCancelTranslation={onCancelTranslation} translationStopPending={translationStopPending}
+    onResumeTranslation={onResumeTranslation} translationPaused={translationPaused}
     onReparsePdf={onReparsePdf} onRetryPdfParse={onRetryPdfParse} onRevealPdf={onRevealPdf} onStartPdfParse={onStartPdfParse} />;
 
   // The parallel-reading frame already owns the title and PDF/reflow switch.
@@ -185,12 +194,15 @@ export function ReaderToolbar({
       >
         {translationBusy ? (
           <ToolbarTooltip content="暂停当前翻译任务">
-          <Button aria-label="暂停翻译" className="pdf-reader-toolbar-overflow-action shrink-0" size="sm" type="button" variant="outline" onClick={onPauseTranslation}>
+          <Button disabled={Boolean(translationStopPending)} aria-label="暂停翻译" className="pdf-reader-toolbar-overflow-action shrink-0" size="sm" type="button" variant="outline" onClick={onPauseTranslation}>
             <Pause size={14} aria-hidden="true" />
             <span className="pdf-reader-toolbar-label">暂停</span>
           </Button>
           </ToolbarTooltip>
         ) : null}
+
+        {translationPaused && onResumeTranslation ? <Button disabled={Boolean(translationStopPending)} className="pdf-reader-toolbar-overflow-action shrink-0" size="sm" onClick={onResumeTranslation}><Play size={14} aria-hidden="true" />继续翻译</Button> : null}
+        {(translationBusy || translationPaused) && onCancelTranslation ? <Button disabled={Boolean(translationStopPending)} className="pdf-reader-toolbar-overflow-action shrink-0" size="sm" variant="outline" onClick={onCancelTranslation}>取消翻译</Button> : null}
 
         {onExportPaper && segmentCount > 0 ? (
           <ToolbarTooltip content="导出解析全文、中文译稿或中英对照，支持 Word、TXT 和图片资料包">
@@ -257,7 +269,7 @@ export function ReaderToolbar({
           </ToolbarTooltip>
         ) : null}
 
-        {entry.status === 'Queued' && onStartPdfParse ? (
+        {(entry.status === 'Not started' || entry.status === 'Canceled') && onStartPdfParse ? (
           <ToolbarTooltip content="原 PDF 已可阅读；开始解析后将增加片段、重排和证据能力">
             <Button
               aria-label="开始解析 PDF"
@@ -385,6 +397,10 @@ function ReaderToolbarOverflowMenu({
   onOpenPdf,
   onOpenTranslationTask,
   onPauseTranslation,
+  onCancelTranslation,
+  onResumeTranslation,
+  translationPaused,
+  translationStopPending,
   onReparsePdf,
   onRetryPdfParse,
   onRevealPdf,
@@ -401,6 +417,10 @@ function ReaderToolbarOverflowMenu({
   onOpenPdf?: () => void;
   onOpenTranslationTask: () => void;
   onPauseTranslation: () => void;
+  onCancelTranslation?: () => void;
+  onResumeTranslation?: () => void;
+  translationPaused: boolean;
+  translationStopPending?: 'pause' | 'cancel' | 'resume' | null;
   onReparsePdf?: () => void;
   onRetryPdfParse?: () => void;
   onRevealPdf?: () => void;
@@ -417,16 +437,18 @@ function ReaderToolbarOverflowMenu({
           type="button"
           variant={compact && translationBusy ? 'secondary' : 'outline'}
         >
-          {compact ? translationBusy ? '翻译中' : '工具' : <MoreHorizontal size={14} aria-hidden="true" />}
+          {compact ? translationBusy ? '翻译中' : translationPaused ? '翻译已暂停' : '工具' : <MoreHorizontal size={14} aria-hidden="true" />}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent viewportAligned align="end">
         {translationBusy ? (
-          <DropdownMenuItem onSelect={onPauseTranslation}>
+          <DropdownMenuItem disabled={Boolean(translationStopPending)} onSelect={onPauseTranslation}>
             <Pause size={14} aria-hidden="true" />
             暂停翻译
           </DropdownMenuItem>
         ) : null}
+        {translationPaused && onResumeTranslation ? <DropdownMenuItem disabled={Boolean(translationStopPending)} onSelect={onResumeTranslation}><Play size={14} aria-hidden="true" />继续翻译</DropdownMenuItem> : null}
+        {(translationBusy || translationPaused) && onCancelTranslation ? <DropdownMenuItem disabled={Boolean(translationStopPending)} onSelect={onCancelTranslation}>取消翻译</DropdownMenuItem> : null}
         {onExportPaper ? <DropdownMenuItem onSelect={onExportPaper}>
           <Download size={14} aria-hidden="true" />导出论文内容
         </DropdownMenuItem> : null}
@@ -452,7 +474,7 @@ function ReaderToolbarOverflowMenu({
             重新解析 PDF
           </DropdownMenuItem>
         ) : null}
-        {parseStatus === 'Queued' && onStartPdfParse ? (
+        {(parseStatus === 'Not started' || parseStatus === 'Canceled') && onStartPdfParse ? (
           <DropdownMenuItem disabled={reparseBusy} onSelect={onStartPdfParse}>
             <Play size={14} aria-hidden="true" />
             开始解析 PDF

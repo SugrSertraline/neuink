@@ -11,6 +11,10 @@ pub mod note_catalog;
 #[cfg(test)]
 mod note_catalog_tests;
 pub mod source_availability;
+pub mod pdf_text;
+pub mod pdf_parse_queue;
+#[cfg(test)]
+mod pdf_parse_queue_tests;
 pub mod tag_details;
 pub mod reading_state;
 pub mod paragraph_translation;
@@ -31,5 +35,5 @@ pub use search::{WorkspaceSearchOptions, WorkspaceSearchRecord, WorkspaceSearchR
 pub use trash::{TrashItem, TrashItemKind};
 pub use workspace::{
     EntryTranslation, TranslatedSegment, TranslatedSegmentStatus, TranslationPaperContext,
-    TranslationProgress, TranslationStatus, TranslationTerm, Workspace,
+    TranslationProgress, TranslationStatus, TranslationTerm, TranslationTaskSnapshot, Workspace,
 };

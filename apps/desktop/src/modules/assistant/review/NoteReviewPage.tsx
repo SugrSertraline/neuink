@@ -3,6 +3,7 @@ import { ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useNoteReview } from './NoteReviewContext';
 import { buildNoteReviewDiff, noteReviewVersions } from './noteReviewDiff';
+import { buildRenderedNoteDiff } from './renderedNoteDiff';
 import { revealReviewTarget } from './reviewNavigation';
 import { NoteDiffLines, NoteDiffContext, noteChangeKind } from './NoteDiffLines';
 import { NoteReviewDecisionBar } from './NoteReviewDecisionBar';
@@ -21,12 +22,13 @@ export function NoteReviewPage({ proposalId, onOpenNote }: {
     if (!proposal) return { blocks: [], error: '修改记录尚未加载，请从对应的对话提案重新打开。' };
     try {
       const { before, after } = noteReviewVersions(proposal);
-      return { blocks: buildNoteReviewDiff(before, after), error: null };
+      const totals = buildNoteReviewDiff(before, after).reduce((total, block) => block.kind === 'change'
+        ? { added: total.added + block.afterCount, removed: total.removed + block.beforeCount } : total, { added: 0, removed: 0 });
+      return { blocks: buildRenderedNoteDiff(before, after), totals, error: null };
     } catch (error) { return { blocks: [], error: error instanceof Error ? error.message : String(error) }; }
   }, [proposal]);
   const count = result.blocks.filter(block => block.kind === 'change').length;
-  const totals = result.blocks.reduce((total, block) => block.kind === 'change'
-    ? { added: total.added + block.afterCount, removed: total.removed + block.beforeCount } : total, { added: 0, removed: 0 });
+  const totals = result.totals ?? { added: 0, removed: 0 };
   const locate = (index: number) => {
     setSelected(index);
     const element = changeRefs.current.get(index);
@@ -61,24 +63,24 @@ export function NoteReviewPage({ proposalId, onOpenNote }: {
       </span> : null}
     </div>
     <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 [scrollbar-gutter:stable]">
-      <p className="mb-3 text-xs text-muted-foreground">Markdown 对比：红色 − 为删除，绿色 + 为新增；修改以删旧、增新成对显示。确认前不会写入笔记。</p>
+      <p className="mb-3 text-xs text-muted-foreground">内容已渲染：红色 − 为修改前，绿色 + 为修改后；图表、表格和公式按完整内容展示。确认前不会写入笔记。</p>
       {result.error ? <p role="alert" className="text-sm text-destructive">{result.error}</p> : null}
       {proposal?.error ? <p role="alert" className="mb-2 text-xs text-destructive">{proposal.error}</p> : null}
       {proposal?.noteTitle && proposal.noteTitle !== proposal.title ? <div className="mb-3 border-l-2 border-primary pl-2 text-sm">
         <span className="font-medium">标题修改</span><p className="break-words">{proposal.noteTitle} → {proposal.title}</p>
       </div> : null}
       {result.blocks.map((block, index) => block.kind === 'context'
-        ? <NoteDiffContext key={`context-${index}`} text={block.text} />
+        ? <NoteDiffContext key={`context-${index}`} text={block.text} entryId={proposal?.entryId} />
         : <section key={block.id} ref={element => { if (element) changeRefs.current.set(block.id, element); else changeRefs.current.delete(block.id); }}
           tabIndex={-1} aria-label={`修改 ${block.id + 1}`} className={`my-3 border-l-2 bg-muted/30 outline-none focus-visible:ring-2 focus-visible:ring-ring ${selected === block.id ? 'border-primary' : 'border-border'}`}>
           <Button size="sm" variant="ghost" className="h-auto w-full justify-start whitespace-normal rounded-none text-left"
             aria-expanded={!collapsed.has(block.id)} aria-controls={`change-${proposalId}-${block.id}`}
             onClick={() => { setSelected(block.id); setCollapsed(current => { const next = new Set(current); if (!next.delete(block.id)) next.add(block.id); return next; }); }}>
-            <span className="min-w-0">修改 {block.id + 1} · {noteChangeKind(block)} · <span className="font-mono text-xs">−{block.beforeLine},{block.beforeCount} +{block.afterLine},{block.afterCount}</span></span>
+            <span className="min-w-0">修改 {block.id + 1} · {noteChangeKind(block)}</span>
             <span className="ml-auto shrink-0 text-xs text-muted-foreground">{collapsed.has(block.id) ? '展开' : '收起'}</span>
           </Button>
           <div id={`change-${proposalId}-${block.id}`} hidden={collapsed.has(block.id)}>
-            {!collapsed.has(block.id) ? <NoteDiffLines block={block} /> : null}
+            {!collapsed.has(block.id) ? <NoteDiffLines block={block} entryId={proposal?.entryId} /> : null}
           </div>
         </section>)}
     </div>

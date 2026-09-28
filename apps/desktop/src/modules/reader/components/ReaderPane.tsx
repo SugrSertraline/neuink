@@ -1,4 +1,6 @@
 import { ReadingStateRetention } from './navigation/ReadingStateRetention';
+import { BrowserSurface } from '@/modules/browser/BrowserSurface';
+import { AssistantReplyReader } from '@/modules/assistant/components/AssistantReplyReader';
 import {
   useEffect,
   useRef,
@@ -72,6 +74,7 @@ import { useSourceBacklinks } from './useSourceBacklinks';
 import { setSegmentNoteBookmark } from '@/shared/ipc/workspaceApi';
 
 type ReaderPaneProps = EntryPdfHandlers & {
+  onUpdateBrowser?: (id: string, url: string, title: string) => void;
   librarySection: 'papers' | 'notes';
   onLibrarySectionChange: (section: 'papers' | 'notes') => void;
   onOpenTagLibrary: (tagId: string, section?: 'papers' | 'notes') => void;
@@ -198,6 +201,7 @@ type LinkedReaderSegment = {
 };
 
 export function ReaderPane({
+  onUpdateBrowser,
   onUpdateTagDescription,
   onOpenTrash,
   onRestoreTagArchive,
@@ -926,6 +930,11 @@ export function ReaderPane({
     />
   );
   const renderSurface = (surface: WorkspaceSurface, sibling: WorkspaceSurface | null, pane: WorkspacePaneId) => {
+    if (surface.kind === 'assistant-reply') return <AssistantReplyReader message={surface.message} />;
+    if (surface.kind === 'browser') return <BrowserSurface id={surface.id} initialUrl={surface.url}
+      active={surfaceLayout[pane]?.kind === 'browser' && surfaceKey(surfaceLayout[pane]!) === surfaceKey(surface)}
+      onFocus={() => onFocusSurface(pane)}
+      onChange={(url, title) => onUpdateBrowser?.(surface.id, url, title)} />;
     if (surface.kind === 'note-review') return <NoteReviewPage key={surface.proposalId} proposalId={surface.proposalId} onOpenNote={onOpenEntryNote} />;
     if (surface.kind === 'tag-details') return <TagDetailsView key={`${workspaceRoot}:${surface.tagId}`} root={workspaceRoot} tagId={surface.tagId} tags={tags} entries={entries} initialView={surface.view}
       onDescription={onUpdateTagDescription} onOpenNote={(target, label) => onOpenSurface(noteSurface(target, label), pane)}

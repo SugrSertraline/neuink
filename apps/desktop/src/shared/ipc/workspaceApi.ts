@@ -677,7 +677,7 @@ export type AnnotationCatalogRecord = {
   segment_status: 'current' | 'page_anchored' | 'orphaned' | 'missing';
 };
 
-export type TranslationStatus = 'idle' | 'running' | 'succeeded' | 'failed' | 'partial';
+export type TranslationStatus = 'idle' | 'running' | 'succeeded' | 'failed' | 'partial' | 'paused' | 'canceled';
 
 export type TranslatedSegmentStatus = 'pending' | 'translated' | 'skipped' | 'failed';
 
@@ -713,6 +713,7 @@ export type TranslatedSegment = {
 };
 
 export type EntryTranslation = {
+  task?: { job_id: string; profile_id: string; force: boolean; source_hashes: Record<string, string>; remaining_segment_uids: string[]; created_at: string } | null;
   created_at: string;
   entry_id: EntryId;
   error: string | null;
@@ -740,7 +741,7 @@ export type JobKind =
   | 'vectorize'
   | 'llm';
 
-export type JobStatus = 'queued' | 'processing' | 'succeeded' | 'failed' | 'canceled';
+export type JobStatus = 'queued' | 'processing' | 'paused' | 'succeeded' | 'failed' | 'canceled';
 
 // Rust 侧 JobScope 用内部标签 + 扁平字段序列化：
 // {"kind":"entry","root":...,"entry_id":...} / {"kind":"workspace","root":...}
@@ -769,7 +770,7 @@ export type Job = {
 export type JobEvent = {
   emitted_at: string;
   job: Job;
-  kind: 'queued' | 'started' | 'progress' | 'succeeded' | 'failed' | 'canceled';
+  kind: 'queued' | 'started' | 'progress' | 'paused' | 'succeeded' | 'failed' | 'canceled';
   payload: unknown;
 };
 
@@ -799,13 +800,15 @@ export async function importAndParsePdf(
 export async function queuePdfParse(
   root: string,
   entryId: EntryId,
-  pdfPath: string
+  pdfPath: string,
+  enqueue = true
 ): Promise<EntryMeta> {
   return invoke<EntryMeta>('queue_pdf_parse', {
     request: {
       root,
       entry_id: entryId,
-      pdf_path: pdfPath
+      pdf_path: pdfPath,
+      enqueue
     }
   });
 }
@@ -953,6 +956,14 @@ export async function translateEntrySegment(
   return invoke<EntryTranslationResponse>('translate_entry_segment', {
     request: { root, entry_id: entryId, segment_uid: segmentUid }
   });
+}
+
+export async function resumeEntryTranslation(root: string, entryId: string, jobId: string): Promise<RunEntryTranslationResponse> {
+  return invoke('resume_entry_translation', { request: { root, entry_id: entryId, job_id: jobId } });
+}
+
+export async function cancelTranslationTask(root: string, entryId: string, jobId: string): Promise<RunEntryTranslationResponse> {
+  return invoke('cancel_translation_task', { request: { root, entry_id: entryId, job_id: jobId } });
 }
 
 export async function pauseEntryTranslation(jobId: string): Promise<Job | null> {

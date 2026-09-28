@@ -175,6 +175,7 @@ export function useWorkspaceResourceActions({
       setParseSubmissionCount((count) => count + 1);
       void submitQueuedPdfParse(workspaceRoot, entryId, endpoint, apiKey)
         .then((response) => {
+          if (currentRoot.current !== workspaceRoot) return;
           setEntries((current) => [
             response.entry,
             ...current.filter((entry) => entry.id !== response.entry.id)
@@ -186,6 +187,7 @@ export function useWorkspaceResourceActions({
           );
         })
         .catch(async (caught) => {
+          if (currentRoot.current !== workspaceRoot) return;
           setError(caught instanceof Error ? caught.message : String(caught));
           await refreshEntries(workspaceRoot);
         })
@@ -238,7 +240,7 @@ export function useWorkspaceResourceActions({
         setError(null);
 
         if (request.pdfPath) {
-          const queued = await queuePdfParse(root, created.id, request.pdfPath);
+          const queued = await queuePdfParse(root, created.id, request.pdfPath, readAutoParseOnPdfImport());
           setEntries((current) => [
             queued,
             ...current.filter((entry) => entry.id !== queued.id)
@@ -279,7 +281,7 @@ export function useWorkspaceResourceActions({
         return;
       }
       try {
-        const queued = await queuePdfParse(root, entryId, pdfPath);
+        const queued = await queuePdfParse(root, entryId, pdfPath, readAutoParseOnPdfImport());
         setEntries((current) =>
           current.map((entry) => (entry.id === queued.id ? queued : entry))
         );
@@ -312,6 +314,7 @@ export function useWorkspaceResourceActions({
       }
       try {
         const response = await retryPdfParse(root, entryId, endpoint, apiKey);
+        if (currentRoot.current !== root) return;
         setEntries((current) =>
           current.map((entry) => (entry.id === response.entry.id ? response.entry : entry))
         );
@@ -333,6 +336,7 @@ export function useWorkspaceResourceActions({
     async (entryId: string, endpoint: string, apiKey?: string) => {
       if (!root) return;
       const response = await submitQueuedPdfParse(root, entryId, endpoint, apiKey);
+      if (currentRoot.current !== root) return;
       setEntries((current) =>
         current.map((entry) => (entry.id === response.entry.id ? response.entry : entry))
       );

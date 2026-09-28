@@ -3,6 +3,7 @@ import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { FileText } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { AssistantComposerTargetPicker, type ComposerPickerItem } from './AssistantComposerTargetPicker';
 
 import type { LibraryEntry } from '@/modules/library/components/LibrarySidebar';
 import type { TagMeta } from '@/shared/types/domain';
@@ -114,6 +115,7 @@ export function AssistantComposerEditor({
 }: AssistantComposerEditorProps) {
   const lastResetKeyRef = useRef(resetKey);
   const [suggestionRange, setSuggestionRange] = useState<SuggestionRange | null>(null);
+  const [dismissedSuggestion, setDismissedSuggestion] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const targets = useMemo(
     () => buildTargets(entries, tags, contextItems),
@@ -125,12 +127,24 @@ export function AssistantComposerEditor({
     }
     const query = suggestionRange.query.trim().toLowerCase();
     return targets
+      .filter(target => target.kind === 'entry' && (target.contentKind === 'pdf' || target.contentKind === 'note'))
       .filter((target) => {
-        const haystack = targetSearchText(target).toLowerCase();
+        const haystack = mentionSearchText(target).toLocaleLowerCase();
         return !query || haystack.includes(query);
       })
       .slice(0, 8);
   }, [suggestionRange, targets]);
+  const pickerItems = useMemo((): ComposerPickerItem<ComposerTarget>[] => targets.map(target => ({
+    id: targetContextItemId(target),
+    kind: target.kind === 'tag' ? 'tag' : target.contentKind === 'pdf' ? 'pdf' : target.contentKind === 'note' ? 'note' : 'entry',
+    label: target.kind === 'tag' ? target.tag.name : target.contentKind === 'pdf'
+      ? target.entry.pdfFileName ?? target.entry.title : target.contentKind === 'note' ? target.contentTitle ?? target.entry.title : target.entry.title,
+    description: target.kind === 'tag' ? '标签范围' : target.entry.title,
+    searchText: targetSearchText(target),
+    value: target
+  })), [targets]);
+  const suggestionKey = suggestionRange ? `${suggestionRange.from}:${suggestionRange.to}:${suggestionRange.query}` : null;
+  const showSuggestions = suggestionKey !== null && dismissedSuggestion !== suggestionKey;
 
   const editor = useEditor({
     editable: !disabled,
@@ -140,24 +154,27 @@ export function AssistantComposerEditor({
           'min-h-24 w-full rounded-sm px-1 py-1 text-sm leading-6 outline-none prose-p:m-0'
       },
       handleKeyDown: (_view, event) => {
-        if (suggestionRange && filteredTargets.length > 0) {
+        if (showSuggestions) {
           if (event.key === 'ArrowDown') {
+            if (!filteredTargets.length) return false;
             event.preventDefault();
             setActiveIndex((index) => (index + 1) % filteredTargets.length);
             return true;
           }
           if (event.key === 'ArrowUp') {
+            if (!filteredTargets.length) return false;
             event.preventDefault();
             setActiveIndex((index) => (index - 1 + filteredTargets.length) % filteredTargets.length);
             return true;
           }
-          if (event.key === 'Enter') {
+          if (event.key === 'Enter' && suggestionRange?.query.trim() && filteredTargets.length > 0 && !event.isComposing) {
             event.preventDefault();
             insertTarget(filteredTargets[activeIndex] ?? filteredTargets[0]);
             return true;
           }
           if (event.key === 'Escape') {
             event.preventDefault();
+            setDismissedSuggestion(suggestionKey);
             setSuggestionRange(null);
             return true;
           }
@@ -231,6 +248,7 @@ export function AssistantComposerEditor({
     lastResetKeyRef.current = resetKey;
     editor.commands.clearContent();
     setSuggestionRange(null);
+    setDismissedSuggestion(null);
   }, [editor, resetKey]);
 
   useEffect(() => {
@@ -260,20 +278,33 @@ export function AssistantComposerEditor({
     setSuggestionRange(null);
   };
 
+  const insertPickedTarget = (target: ComposerTarget) => {
+    if (!editor || disabled) return;
+    editor.chain().focus().insertContent([
+      { type: 'contextMention', attrs: targetToMention(target) },
+      { type: 'text', text: ' ' }
+    ]).run();
+    setSuggestionRange(null);
+  };
+
   return (
     <div data-material="composer" className="relative min-w-0 rounded-md border bg-background transition focus-within:ring-2 focus-within:ring-ring/30">
       <div className="min-w-0 p-2">
         <EditorContent editor={editor} />
         {!serializeComposer(editor?.getJSON() ?? { type: 'doc' }).text.trim() && !disabled ? (
           <div className="pointer-events-none absolute left-3 top-3 text-sm text-muted-foreground">
-            Ask a question, or type @ to insert context inline
+            输入问题；用“选择”附加范围，或在正文中输入 @ 搜索 PDF／笔记
           </div>
         ) : null}
       </div>
-      {suggestionRange && filteredTargets.length > 0 ? (
+      <div className="flex justify-end border-t border-border/60 px-2 py-1">
+        <AssistantComposerTargetPicker items={pickerItems} disabled={disabled} onSelect={insertPickedTarget} />
+      </div>
+      {showSuggestions ? (
         <div
           className="absolute bottom-full left-2 z-50 mb-2 max-h-56 w-[min(24rem,calc(100%-1rem))] overflow-auto rounded-md border bg-popover p-1 text-xs shadow-lg"
           role="listbox"
+          aria-label="匹配的 PDF 和笔记"
         >
           {filteredTargets.map((target, index) => (
             <button
@@ -292,13 +323,15 @@ export function AssistantComposerEditor({
             >
               <FileText className="shrink-0 text-muted-foreground" size={12} aria-hidden="true" />
               <span className="min-w-0 flex-1 truncate">
-                {targetLabel(target)}
+                {targetFileName(target)}
               </span>
-              <span className="shrink-0 text-[10px] uppercase text-muted-foreground">
-                {targetKindLabel(target)}
+              <span className="max-w-24 shrink-0 truncate text-[10px] text-muted-foreground">
+                {target.kind === 'entry' ? target.entry.title : ''}
               </span>
             </button>
           ))}
+          {!filteredTargets.length ? <p className="px-2 py-1 text-muted-foreground">没有匹配的 PDF 或笔记；@ 会保留为正文。</p> : null}
+          <p className="border-t px-2 py-1 text-muted-foreground">按 Esc 保留 @ 文字；输入名称后按 Enter 选择。</p>
         </div>
       ) : null}
     </div>
@@ -347,21 +380,27 @@ function entryContentTargets(entry: LibraryEntry): EntryContextTarget[] {
 }
 
 function findSuggestionRange(editor: NonNullable<ReturnType<typeof useEditor>>): SuggestionRange | null {
-  if (editor.view.composing) {
+  if (editor.view.composing || !editor.state.selection.empty) {
     return null;
   }
-  const { from } = editor.state.selection;
-  const before = editor.state.doc.textBetween(Math.max(0, from - 80), from, '\n', '\uFFFC');
-  const match = before.match(/(^|[\s\u3000])@([^\s@\uFFFC]*)$/u);
+  const { $from, from } = editor.state.selection;
+  const before = $from.parent.textBetween(Math.max(0, $from.parentOffset - 120), $from.parentOffset, '', '\uFFFC');
+  return findInlineMention(before, from);
+}
+
+/** Detect only the @ expression under the cursor; never rewrite literal editor text. */
+export function findInlineMention(before: string, cursor: number): SuggestionRange | null {
+  // Inline @ works after Chinese prose and punctuation. ASCII emails/URLs remain literal.
+  const match = before.match(/(^|[^A-Za-z0-9._+\-])@([^@\uFFFC]*)$/u);
   if (!match || match.index === undefined) {
     return null;
   }
   const prefixLength = match[1]?.length ?? 0;
   const matchText = match[0].slice(prefixLength);
   return {
-    from: from - matchText.length,
+    from: cursor - matchText.length,
     query: match[2] ?? '',
-    to: from
+    to: cursor
   };
 }
 
@@ -388,7 +427,9 @@ function targetToMention(target: ComposerTarget) {
   const label =
     contentKind === 'entry'
       ? target.entry.title
-      : `${target.entry.title} / ${target.contentTitle ?? kindLabel(contentKind)}`;
+      : contentKind === 'pdf'
+        ? target.entry.pdfFileName ?? target.entry.title
+        : target.contentTitle ?? target.entry.title;
   return {
     contentId: contentKind === 'entry' ? null : target.contentId ?? contentKind,
     contentKind,
@@ -504,29 +545,29 @@ function targetContextItemId(target: ComposerTarget) {
     : `entry:${target.entry.id}:${kind}:${target.contentId ?? kind}`;
 }
 
-function targetLabel(target: ComposerTarget) {
-  if (target.kind === 'tag') return target.tag.name;
-  const contentKind = target.contentKind ?? 'entry';
-  return contentKind === 'entry'
-    ? target.entry.title
-    : `${target.entry.title} / ${target.contentTitle ?? kindLabel(contentKind)}`;
-}
-
-function targetKindLabel(target: ComposerTarget) {
-  if (target.kind === 'tag') return 'Tag scope';
-  return kindLabel(target.contentKind ?? 'entry');
-}
-
 function targetSearchText(target: ComposerTarget) {
   if (target.kind === 'tag') return `${target.tag.name} tag`;
   return [
     target.entry.title,
+    target.entry.pdfFileName,
     target.entry.tags.join(' '),
     target.contentTitle,
     target.contentKind
   ]
     .filter(Boolean)
     .join(' ');
+}
+
+function targetFileName(target: ComposerTarget) {
+  if (target.kind === 'tag') return target.tag.name;
+  if (target.contentKind === 'pdf') return target.entry.pdfFileName ?? target.entry.title;
+  if (target.contentKind === 'note') return target.contentTitle ?? target.entry.title;
+  return target.entry.title;
+}
+
+function mentionSearchText(target: ComposerTarget) {
+  if (target.kind === 'tag') return '';
+  return [targetFileName(target), target.entry.title].join(' ');
 }
 
 function kindLabel(kind: string | null | undefined) {

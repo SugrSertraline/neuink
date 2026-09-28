@@ -164,7 +164,8 @@ impl LlmClient {
                     output(&accumulated);
                 }
                 if let Some(progress) = &self.progress {
-                    progress(received_chars);
+                    // Count decoded model output, not UTF-8 bytes or SSE envelopes.
+                    progress(accumulated.chars().count());
                 }
             }
             // Flush an unterminated final SSE line exactly once, after EOF.

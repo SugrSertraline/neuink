@@ -1,6 +1,8 @@
 import type { AgentCheckpoint, RunBudget } from '../agent-core';
 import { AgentPersistenceError } from '../agent-core';
 import { saveAgentExecution, type AgentExecutionRecord } from '@/shared/ipc/agentExecutionApi';
+import { RESEARCH_READ_TOOLS } from '@/shared/ipc/researchApi';
+import { PLANNING_READ_TOOLS } from './executionPolicy';
 
 /** Application-owned durable state. No model credentials or executable configuration belong here. */
 export class DurableExecution {
@@ -64,8 +66,7 @@ function checkpointSaveError(error: unknown): AgentPersistenceError {
 
 /** Explicit allowlist: unknown and external tools are NOT assumed read-only. */
 export function canReplayAssistantTool(name: string) {
-  return new Set(['ask_user', 'search_segments', 'read_segment_content', 'read_entry_assistant_context',
-    'search_sciverse_evidence', 'read_sciverse_content', 'read_current_note', 'read_note',
+  return new Set([...PLANNING_READ_TOOLS, ...RESEARCH_READ_TOOLS, 'ask_user',
     'task_run_subagent', 'note_propose_create', 'note_propose_patch',
     'segment_note_propose_patch', 'entry_propose_meta_patch', 'tag_propose_change']).has(name);
 }

@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { Button } from '@/components/ui/button';
+import { ResearchImportApproval } from './ResearchImportApproval';
 import { decideToolApproval, getToolApprovals, subscribeToolApprovals, type PendingToolApproval } from '../runtime/toolApproval';
 
 /** Compact, keyboard-accessible confirmation. No auto-focus or implicit Enter-to-approve. */
@@ -18,6 +19,7 @@ export function ToolApprovalPanel({ root, conversationId, onOpen }: {
 }
 
 function Approval({ item }: { item: PendingToolApproval }) {
+  if (item.toolName === 'import_papers') return <ResearchImportApproval item={item} />;
   const input = item.input as Record<string, unknown> | null;
   const appearanceNames: Record<string, string> = { standard: '标准', atelier: '工作室', 'liquid-glass': '液态玻璃' };
   const title = item.toolName === 'create_entry' ? '新增条目' : item.toolName === 'app_set_appearance' ? '修改外观' : '调用外部工具';

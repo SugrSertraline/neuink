@@ -18,10 +18,6 @@ export function resolveActiveActivityPanel({
   sidebarOpen: boolean;
   sidePanel: SidePanel;
 }): SidePanel | null {
-  if (focusedSurfaceKind === 'settings') {
-    return null;
-  }
-
   if (sidebarOpen) {
     return sidePanel;
   }

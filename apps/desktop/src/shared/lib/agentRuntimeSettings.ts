@@ -19,6 +19,8 @@ const DEFAULT_MAIN_DESCRIPTION = 'Neuink 全局主助手，负责直接响应用
 const DEFAULT_MAIN_PROMPT = 'You are Neuink Main Assistant. Stay grounded in workspace evidence and create user-confirmable proposals for note or Entry metadata writes.';
 
 const DEFAULT_MAIN_TOOL_IDS: AgentToolId[] = [
+  'read_pdf_pages', 'search_pdf_text',
+  'search_papers', 'search_web', 'read_webpage', 'import_papers',
   'app.set_appearance',
   'create_entry',
   'search_segments',
@@ -37,6 +39,7 @@ const DEFAULT_MAIN_TOOL_IDS: AgentToolId[] = [
 ];
 
 const EVIDENCE_TOOL_IDS: AgentToolId[] = [
+  'read_pdf_pages', 'search_pdf_text',
   'search_segments',
   'read_segment_content',
   'read_entry_assistant_context',
@@ -96,6 +99,7 @@ function createSubagent(
 }
 
 export const DEFAULT_AGENT_RUNTIME_SETTINGS: AgentRuntimeSettings = {
+  capabilityRevision: 2,
   mainAssistant: createMainAssistant({}),
   mcpServers: [],
   subagents: [
@@ -142,7 +146,8 @@ export function normalizeAgentRuntimeSettings(
     return DEFAULT_AGENT_RUNTIME_SETTINGS;
   }
   return {
-    mainAssistant: normalizeMainAssistant(settings.mainAssistant),
+    capabilityRevision: 2,
+    mainAssistant: normalizeMainAssistant(settings.mainAssistant, settings.capabilityRevision ?? 0),
     mcpServers: normalizeMcpServers(settings.mcpServers),
     subagents: normalizeSubagents(settings.subagents),
     toolPackages: normalizeToolPackages(settings.toolPackages),
@@ -150,15 +155,20 @@ export function normalizeAgentRuntimeSettings(
   };
 }
 
-function normalizeMainAssistant(value: unknown) {
+function normalizeMainAssistant(value: unknown, revision = 2) {
   if (!value || typeof value !== 'object') {
     return DEFAULT_AGENT_RUNTIME_SETTINGS.mainAssistant;
   }
   const normalized = createMainAssistant(value as Partial<MainAssistantProfile>);
+  // Extend only the former complete built-in grant set. Explicitly restricted profiles stay restricted.
+  // Native descriptors still require the user to opt in to the external service in Settings.
+  const research = ['search_papers', 'search_web', 'read_webpage', 'import_papers'] as AgentToolId[];
+  const pdf = ['read_pdf_pages', 'search_pdf_text'] as AgentToolId[];
+  const hadStandardTools = DEFAULT_MAIN_TOOL_IDS.filter(id => !research.includes(id) && !pdf.includes(id)).every(id => normalized.enabledToolIds.includes(id));
   return {
     ...normalized,
     allowedSubagentIds: normalized.allowedSubagentIds.filter((id) => id !== 'patch-planner-agent'),
-    enabledToolIds: [...new Set(normalized.enabledToolIds)]
+    enabledToolIds: [...new Set([...normalized.enabledToolIds, ...(revision < 1 && hadStandardTools ? research : []), ...(revision < 2 && hadStandardTools ? pdf : [])])]
   };
 }
 
@@ -298,8 +308,12 @@ function deniedToolReason(
   if (!agent.permissions.canInvokeTools) {
     return 'tool invocation disabled';
   }
-  if (toolId === 'skill.search' || toolId === 'skill.load') {
+  if (!isActiveTool(toolId)) {
     return 'unsupported tool';
+  }
+  if (toolId === 'import_papers' && (agent.kind !== 'main_assistant' ||
+      !agent.permissions.canWriteProposals || agent.sandbox === 'read-only')) {
+    return 'paper import requires main assistant write approval permission';
   }
   if (toolId.startsWith('mcp.')) {
     const [, serverId, ...toolParts] = toolId.split('.');
@@ -332,6 +346,7 @@ function deniedToolReason(
   }
   if (
     (toolId === 'search_segments' ||
+      toolId === 'read_pdf_pages' || toolId === 'search_pdf_text' ||
       toolId === 'read_segment_content' ||
       toolId === 'read_entry_assistant_context') &&
     !agent.permissions.canReadWorkspaceWide
@@ -381,7 +396,8 @@ function unique<T>(value: T, index: number, array: T[]) {
 }
 
 function isActiveTool(id: string) {
-  return id !== 'skill.search' && id !== 'skill.load';
+  return id.startsWith('mcp.') || DEFAULT_MAIN_TOOL_IDS.includes(id as AgentToolId) ||
+    ['search_sciverse_metadata', 'get_sciverse_metadata_catalog', 'search_sciverse_paper_schema', 'get_sciverse_paper_schema'].includes(id);
 }
 
 function activePermissions(permissions: AgentPermissions): AgentPermissions {

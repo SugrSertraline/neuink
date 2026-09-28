@@ -13,6 +13,9 @@ import {
 } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { usePdfParseQueue } from '@/shared/hooks/usePdfParseQueue';
+import { PdfParseQueuePanel } from '@/modules/library/components/PdfParseQueuePanel';
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia } from '@/components/ui/empty';
 import {
   Dialog,
   DialogContent,
@@ -55,6 +58,8 @@ import {
   type SidePanel
 } from './activityBarState';
 import { WorkspaceTabsBar } from './WorkspaceTabsBar';
+import { assistantSurfaceContext } from './assistantSurfaceContext';
+import { BROWSER_OPEN_EVENT, browserTitle, normalizeBrowserUrl } from '@/modules/browser/browserUrl';
 import {
   clampWorkspaceSplitLeftWidth,
   getWorkspaceSplitMinimums
@@ -77,6 +82,8 @@ import { useSidebarResize } from './useSidebarResize';
 import { useUnsavedWindowCloseGuard } from './useUnsavedWindowCloseGuard';
 import type { PdfJumpRequest, SidePaneState, SidePaneTarget } from '../modules/reader/types';
 import { SearchDialog } from '../modules/search/components/SearchDialog';
+import { AssistantReplyActionsContext } from '../modules/assistant/components/AssistantReplyActionsContext';
+import { ResearchPaperActionsProvider } from '../modules/assistant/components/ResearchPaperActions';
 import { AppearanceIcon } from '../shared/components/AppearanceIcon';
 import { AppearanceExit } from '../shared/components/AppearanceExit';
 import { SearchPanel } from '../modules/search/components/SearchPanel';
@@ -424,6 +431,16 @@ export function App() {
   const [workspaceSplitLeftWidth, setWorkspaceSplitLeftWidth] = useState<number | null>(
     readStoredWorkspaceSplitLeftWidth
   );
+  useEffect(() => {
+    const open = (event: Event) => {
+      try {
+        const url = normalizeBrowserUrl(String((event as CustomEvent).detail));
+        dispatchSurface({ type: 'open', surface: { kind: 'browser', id: crypto.randomUUID(), url, title: browserTitle(url) } });
+      } catch { notify({ tone: 'danger', title: '无法打开链接', description: '只支持有效的外部 HTTP(S) 网页地址。' }); }
+    };
+    window.addEventListener(BROWSER_OPEN_EVENT, open);
+    return () => window.removeEventListener(BROWSER_OPEN_EVENT, open);
+  }, [notify]);
   const appShellRef = useRef<HTMLElement | null>(null);
   const workspaceSplitPreviewWidthRef = useRef<number | null>(workspaceSplitLeftWidth);
   const [activeContentByEntryId, setActiveContentByEntryId] = useState<Record<string, string | null>>({});
@@ -467,6 +484,10 @@ export function App() {
     () => workspace.entries.map((entry) => toLibraryEntry(entry, tagPathById)),
     [tagPathById, workspace.entries]
   );
+  const parseQueue = usePdfParseQueue(workspace.status === 'ready' ? workspace.root : null,
+    mineruEndpoint, parserApiKey,
+    workspace.entries.map(entry => `${entry.id}:${entry.pdf?.parse.status}`).join('|'),
+    () => workspace.refreshEntries());
   const hasActiveParseTasks = useMemo(
     () =>
       workspace.entries.some((entry) => {
@@ -644,29 +665,8 @@ export function App() {
     sidebarOpen,
     sidePanel
   });
-  const activeEntryId = 'entryId' in focusedSurface ? focusedSurface.entryId : null;
-  const activeEntry = useMemo(
-    () => (activeEntryId ? entries.find((entry) => entry.id === activeEntryId) ?? null : null),
-    [activeEntryId, entries]
-  );
-  const activeAssistantSurface = useMemo<AssistantActiveSurfaceSnapshot>(() => {
-    const surfaceEntryId = 'entryId' in focusedSurface ? focusedSurface.entryId : null;
-    const focusedSegmentUid = 'segmentUid' in focusedSurface
-      ? focusedSurface.segmentUid ?? null
-      : (focusedSurface.kind === 'pdf' || focusedSurface.kind === 'reflow') &&
-        activeAssistantSegment?.entryId === surfaceEntryId
-        ? activeAssistantSegment.segmentUid
-        : null;
-    return {
-      capturedAt: new Date().toISOString(),
-      entryId: surfaceEntryId,
-      kind: focusedSurface.kind,
-      noteId: focusedSurface.kind === 'note' || focusedSurface.kind === 'note-review' ? focusedSurface.noteId ?? null : null,
-      pane: surfaceLayout.focusedPane,
-      segmentUid: focusedSegmentUid,
-      surfaceKey: surfaceKey(focusedSurface)
-    };
-  }, [activeAssistantSegment, focusedSurface, surfaceLayout.focusedPane]);
+  const { entry: activeEntry, note: activeAssistantNote, segment: activeAssistantSegmentForPanel, surface: activeAssistantSurface } = useMemo(
+    () => assistantSurfaceContext(surfaceLayout, entries, activeAssistantSegment), [surfaceLayout, entries, activeAssistantSegment]);
   const sidebarContext = resolveEntrySidebarContext(surfaceLayout);
   const sidebarNote = resolveTagNoteSidebarContext(surfaceLayout);
   const sidebarEntry = sidebarContext ? entries.find((entry) => entry.id === sidebarContext.entryId) ?? null : null;
@@ -674,42 +674,6 @@ export function App() {
   const readingContext = useSameTagContext(workspace.root, surfaceLayout, entries, workspace.tags, activeTag, sidebarOpen && sidePanel === 'same-tag' && workspace.status === 'ready');
   const sameTagId = readingContext.tagId;
   const activeContentId = entryContentId(focusedSurface);
-  const activeAssistantNote = useMemo<AssistantActiveNote | null>(() => {
-    const sidePaneNoteTarget = sidePane.target?.kind === 'markdown-note' ? sidePane.target : null;
-    const noteEntry = sidePaneNoteTarget
-      ? entries.find((entry) => entry.id === sidePaneNoteTarget.entryId) ?? null
-      : activeEntry;
-    if (!noteEntry) {
-      return null;
-    }
-
-    const noteId =
-      sidePaneNoteTarget?.noteId ??
-      (noteEntry.id === activeEntry?.id ? noteIdFromContentId(activeContentId) : null);
-    const note = noteId
-      ? noteEntry.contents.find(
-          (content) => content.kind === 'note' && content.note_id === noteId
-        )
-      : null;
-
-    if (!note) {
-      return null;
-    }
-
-    return {
-      entryId: noteEntry.id,
-      entryTitle: noteEntry.title,
-      noteId: note.note_id,
-      noteTitle: note.title
-    };
-  }, [activeContentId, activeEntry, entries, sidePane.target]);
-  const activeAssistantSegmentForPanel = useMemo(() => {
-    const panelEntry = activeEntry;
-    if (!panelEntry || activeAssistantSegment?.entryId !== panelEntry.id) {
-      return null;
-    }
-    return activeAssistantSegment;
-  }, [activeAssistantSegment, activeEntry, selectedEntry]);
   const openContentTabs = [];
 
 
@@ -1943,6 +1907,10 @@ export function App() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <ResearchPaperActionsProvider key={workspace.root ?? 'no-workspace'} root={workspace.root}>
+      <AssistantReplyActionsContext.Provider value={{ root: workspace.root, openReply: message => {
+        openWorkspaceSurface({ kind: 'assistant-reply', message });
+      }, openSource: openAssistantSource, addSciverseSource: addSciversePaperToLibrary }}>
       <NoteReviewProvider key={workspace.root ?? 'no-workspace'}
         onOpen={({ proposal }) => openWorkspaceSurface({ kind: 'note-review', proposalId: proposal.id, label: proposal.title, entryId: proposal.entryId, noteId: proposal.noteId })}
         onShowAssistant={() => { setSidePanel('assistant'); setSidebarOpen(true); }}>
@@ -1956,13 +1924,25 @@ export function App() {
         style={shellStyle}
       >
         <WorkspaceTabsBar
+          onNewBrowser={() => dispatchSurface({ type: 'open', surface: { kind: 'browser', id: crypto.randomUUID() } })}
           entries={entries}
           layout={surfaceLayout}
           onAddToAssistantContext={addWorkspaceSurfaceToAssistantContext}
           onClose={requestCloseSurfaceTab}
           onCloseOthers={(pane, surface) => closeGuard.requestClose((pane === 'left' ? surfaceLayout.leftTabs : surfaceLayout.rightTabs)
-            .filter((tab) => surfaceKey(tab) !== surfaceKey(surface)).map((tab) => ({ pane, surface: tab })))}
+            .filter((tab) => surfaceKey(tab) !== surfaceKey(surface) && tab.kind !== 'library' && !surfaceLayout.pinnedTabKeys?.includes(surfaceKey(tab)))
+            .map((tab) => ({ pane, surface: tab })))}
+          onCloseToRight={(pane, surface) => {
+            const tabs = pane === 'left' ? surfaceLayout.leftTabs : surfaceLayout.rightTabs;
+            const index = tabs.findIndex((tab) => surfaceKey(tab) === surfaceKey(surface));
+            if (index < 0) return;
+            closeGuard.requestClose(tabs.slice(index + 1)
+              .filter((tab) => tab.kind !== 'library' && !surfaceLayout.pinnedTabKeys?.includes(surfaceKey(tab)))
+              .map((tab) => ({ pane, surface: tab })));
+          }}
           onClosePane={(pane) => closeGuard.requestClose((pane === 'left' ? surfaceLayout.leftTabs : surfaceLayout.rightTabs).map((surface) => ({ pane, surface })))}
+          onSetPinned={(surface, pinned) => dispatchSurface({ type: 'setPinned', key: surfaceKey(surface), pinned })}
+          onSwitchEntryView={(pane, surface, view) => dispatchSurface({ type: 'switchEntryView', pane, key: surfaceKey(surface), view })}
           onMove={(surface, pane, targetIndex) => {
             const sourcePane = surfaceLayout.leftTabs.some((tab) => surfaceKey(tab) === surfaceKey(surface)) ? 'left' : 'right';
             if (sourcePane !== pane && hasUnsavedSurface(surface)) {
@@ -1997,7 +1977,7 @@ export function App() {
             label={sidebarNote ? '笔记详情' : '条目详情'}
             onClick={() => toggleSidePanel('details')}
           >
-            <PanelRight size={18} aria-hidden="true" />
+            <AppearanceIcon kind="details"><PanelRight size={18} aria-hidden="true" /></AppearanceIcon>
           </ActivityButton>
           <ActivityButton
             active={activeActivityPanel === 'search'}
@@ -2035,7 +2015,16 @@ export function App() {
         ) : sidebarOpen && librarySidebarMode === 'empty-details' ? (
           <aside className="app-sidebar">
             <div className="side-head">条目详情</div>
-            <div className="p-3 text-xs leading-5 text-muted-foreground">打开条目或笔记后，可在这里查看详情。</div>
+            <Empty data-material="sidebar-empty" className="min-h-0 justify-start overflow-y-auto rounded-none px-5 py-6">
+              <EmptyHeader className="my-auto max-w-52 shrink-0 gap-3">
+                <EmptyMedia variant="icon" className="mb-0 size-12 bg-muted/60 text-muted-foreground/50" aria-hidden="true">
+                  <PanelRight className="size-6" strokeWidth={1.5} />
+                </EmptyMedia>
+                <EmptyDescription className="text-xs leading-6">
+                  打开条目或笔记后<br />可在这里查看详情
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           </aside>
         ) : sidebarOpen && (librarySidebarMode === 'library' || librarySidebarMode === 'entry-details') ? (
           <LibrarySidebar
@@ -2045,6 +2034,9 @@ export function App() {
             activeContentId={sidebarContext?.contentId ?? null}
             entries={entries}
             trashItemCount={workspace.trashItems.length + workspace.tagArchiveCount}
+            parseQueue={<PdfParseQueuePanel controller={parseQueue}
+              onOpen={id => openWorkspaceSurface(entryContentSurface(id, 'pdf'))}
+              onRetry={id => workspace.retryPdfParseForEntry(id, mineruEndpoint, parserApiKey)} />}
             error={workspace.error}
             entryExplorerOpen={librarySidebarMode === 'entry-details'}
             recentReadingEntryIds={recentReadingEntryIds}
@@ -2160,6 +2152,7 @@ export function App() {
           />
         ) : null}
         <ReaderPane
+          onUpdateBrowser={(id, url, title) => dispatchSurface({ type: 'updateBrowser', id, url, title })}
           onUpdateTagDescription={workspace.updateWorkspaceTagDescription}
           onOpenTrash={() => selectLibraryView('trash')}
           key={workspace.root ?? 'no-workspace'}
@@ -2299,6 +2292,8 @@ export function App() {
       </main>
       </WorkspaceNotesProvider>
       </NoteReviewProvider>
+      </AssistantReplyActionsContext.Provider>
+      </ResearchPaperActionsProvider>
       <footer className="statusbar">
         <AppearanceExit />
         <button type="button">侧栏</button>

@@ -104,6 +104,7 @@ function fieldSummary(fields: Record<string, string>) {
 }
 
 function statusLabel(status: string) {
+  if (status === 'Not started') return '未解析';
   if (status === 'Parsed') {
     return '已解析';
   }

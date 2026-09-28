@@ -56,6 +56,7 @@ import type { AssistantEntryMetaProposal, AssistantTagProposal } from '../types/
 import { useWorkspaceResourceActions } from './useWorkspaceResourceActions';
 import { listTagArchives } from '../ipc/tagReadingApi';
 import { createWorkspaceReadScope } from './workspaceReadScope';
+import { onResearchLibraryChanged } from '../ipc/researchApi';
 
 type WorkspaceStatus = 'loading' | 'ready' | 'error';
 
@@ -134,6 +135,14 @@ export function useWorkspace() {
     },
     [readScope, root, selectFirstEntry]
   );
+
+  useEffect(() => {
+    if (!root) return;
+    let closed = false;
+    const failed = (caught: unknown) => { if (!closed) setError(`论文导入列表刷新失败：${String(caught)}`); };
+    const stop = onResearchLibraryChanged(root, () => { void refreshEntries(root).catch(failed); }, failed);
+    return () => { closed = true; stop(); };
+  }, [root, refreshEntries]);
 
   const applyOpenedWorkspace = useCallback(
     (workspace: {
@@ -465,7 +474,7 @@ export function useWorkspace() {
     deleteWorkspaceTag,
     importPdfForEntry,
     importPdfForSelectedEntry,
-    isParsingPdf: parseSubmissionCount > 0,
+    isParsingPdf: parseSubmissionCount > 0 || entries.some(entry => ['uploading', 'uploaded', 'parsing'].includes(entry.pdf?.parse.status ?? '')),
     isRefreshingParseStatus,
     purgeWorkspaceEntry,
     createMarkdownSourceLink,

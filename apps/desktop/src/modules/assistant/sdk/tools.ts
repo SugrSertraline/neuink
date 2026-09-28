@@ -1,8 +1,11 @@
 import { jsonSchema, tool, type JSONSchema7, type ToolSet } from 'ai';
+import { PDF_TOOL_NAMES } from './pdfTools';
+import { loadAssistantToolCatalog } from './toolCatalog';
+import { assertResearchRetry } from './researchRecovery';
+import { buildDiagramArtifact } from './diagramArtifact';
 
 import type {
   AssistantContextSnapshot,
-  AssistantToolDescriptor,
   AssistantToolTraceEvent,
   ConversationMessage,
   ConversationSourceLink,
@@ -11,7 +14,7 @@ import type {
   ReadSegmentContentResponse,
   ScopeSnapshot
 } from '@/shared/ipc/assistantApi';
-import { invokeAssistantTool, listTools, listMcpTools } from '@/shared/ipc/assistantApi';
+import { invokeAssistantTool } from '@/shared/ipc/assistantApi';
 import type {
   AgentInvocationPlan,
   AssistantActiveNote,
@@ -64,7 +67,6 @@ import {
 import type { AgentExecutionSelection, AgentRuntimeSettings, AgentToolId } from '@/shared/types/agentRuntime';
 import {
   auditAgentToolPermissions,
-  configuredAgentToolIds,
   buildAgentSystemPrompt,
   resolveAllowedSubagents
 } from '@/shared/lib/agentRuntimeSettings';
@@ -73,7 +75,7 @@ import { assistantContextCharBudget } from './contextBudget';
 import { runSubagentTask } from '../runtime/subagent';
 import type { DurableExecution } from '../runtime/durableExecution';
 import { stableHash } from '../runtime/evidenceLedger';
-import { abortable, AgentStoppedError, RunBudget, type AgentLoopGuard } from '../agent-core';
+import { RunBudget, type AgentLoopGuard } from '../agent-core';
 import { SourceLedger } from '../runtime/sourceLedger';
 import type { ApplicationActions } from '../runtime/applicationActions';
 import { resolveModelProfile } from './modelTasks';
@@ -86,6 +88,8 @@ import {
 } from './entryMetaProposalTool';
 
 const SUPPORTED_TOOL_NAMES = new Set([
+  ...PDF_TOOL_NAMES,
+  'search_papers', 'search_web', 'read_webpage', 'import_papers',
   'search_segments',
   'read_segment_content',
   'read_entry_assistant_context',
@@ -175,6 +179,8 @@ type CreateAssistantToolsOptions = {
 };
 
 type AssistantToolRuntime = {
+  availabilityNotes: string[];
+  identityToolNames: string[];
   snapshot: () => ToolRuntimeState;
   events: AssistantToolTraceEvent[];
   observations: Array<{ output: unknown; toolName: string }>;
@@ -184,6 +190,8 @@ type AssistantToolRuntime = {
 };
 
 export type ToolRuntimeState = {
+  /** First-run capabilities: restoration may narrow availability, never expand it. */
+  toolNames?: string[];
   events: AssistantToolTraceEvent[];
   observations: Array<{ output: unknown; toolName: string }>;
   createdEntries: Array<[string, AssistantEntryMetaTarget]>;
@@ -236,20 +244,9 @@ export async function createAssistantTools({
   scope
 }: CreateAssistantToolsOptions): Promise<AssistantToolRuntime> {
   abortSignal?.throwIfAborted();
-  const descriptors = await listTools();
-  for (const server of runtimeSettings?.mcpServers ?? []) {
-    if (invocationPlan?.executionMode === 'plan' || !server.enabled || !activeExecution?.agent.allowedMcpServerIds?.includes(server.id) ||
-        !activeExecution.agent.permissions.canInvokeTools) continue;
-    const prefix = `mcp.${server.id}.`;
-    const granted = configuredAgentToolIds(runtimeSettings!, activeExecution.agent);
-    if (!granted.some(id => id.startsWith(prefix) && (!invocationPlan || invocationPlan.enabledToolIds.includes(id)))) continue;
-    const catalog = await abortable(listMcpTools(root, server.id, abortSignal), abortSignal);
-    abortSignal?.throwIfAborted();
-    for (const item of catalog.tools) {
-      descriptors.push({ name: `mcp.${server.id}.${item.name}`,
-        description: item.description ?? item.name, parameters_schema: item.inputSchema });
-    }
-  }
+  const { descriptors, notes: availabilityNotes, events: initializationErrors } = await loadAssistantToolCatalog({
+    root, signal: abortSignal, runtimeSettings, activeExecution, invocationPlan
+  });
   const events: AssistantToolTraceEvent[] = [...(restoredState?.events ?? [])];
   const observations: Array<{ output: unknown; toolName: string }> = [...(restoredState?.observations ?? [])];
   const ledger = sourceLedger ?? new SourceLedger(initialSourceByMarker);
@@ -280,6 +277,7 @@ export async function createAssistantTools({
   };
 
   const tools: ToolSet = {};
+  for (const event of initializationErrors) emit(event);
   const createdEntryByTitle = new Map<string, AssistantEntryMetaTarget>(restoredState?.createdEntries);
   const readNoteSnapshots = new Map<string, { markdown: string; title: string }>(restoredState?.readNotes);
 
@@ -298,6 +296,45 @@ export async function createAssistantTools({
     runtimeSettings
   );
   const enabledToolIds = new Set<AgentToolId>(permissionAudit.allowedToolIds);
+
+  // Host-owned read-only presentation capability. It does not write to the workspace.
+  if (!activeExecution || activeExecution.agent.kind === 'main_assistant') {
+    tools.present_diagram = tool<unknown, unknown>({
+      description: 'Present a mind map or flowchart in Neuink. Supply nodes and, for a flowchart, edges as structured data. The host validates evidence markers and renders the diagram. Call this when the user requests a visual diagram; do not place raw Mermaid in the final answer.',
+      inputSchema: jsonSchema<unknown>({
+        type: 'object', additionalProperties: false, required: ['kind', 'title', 'nodes'],
+        properties: {
+          kind: { type: 'string', enum: ['mindmap', 'flowchart'] },
+          title: { type: 'string', minLength: 1, maxLength: 120 },
+          nodes: { type: 'array', minItems: 1, maxItems: 60, items: { type: 'object', additionalProperties: false,
+            required: ['id', 'label'], properties: {
+              id: { type: 'string', pattern: '^[A-Za-z][A-Za-z0-9_]{0,31}$' },
+              label: { type: 'string', minLength: 1, maxLength: 120 },
+              parent_id: { type: 'string' },
+              source_markers: { type: 'array', items: { type: 'integer', minimum: 1 } }
+            } } },
+          edges: { type: 'array', maxItems: 100, items: { type: 'object', additionalProperties: false,
+            required: ['from', 'to'], properties: {
+              from: { type: 'string' }, to: { type: 'string' }, label: { type: 'string', maxLength: 80 }
+            } } }
+        }
+      } as JSONSchema7),
+      execute: async (input, options) => {
+        (options.abortSignal ?? abortSignal)?.throwIfAborted();
+        try {
+          const diagram = buildDiagramArtifact(input, new Set(sourceByMarker.keys()));
+          emit({ id: options.toolCallId, input, status: 'done', toolName: 'present_diagram',
+            summary: `已生成${diagram.kind === 'mindmap' ? '思维导图' : '流程图'}：${diagram.title}`,
+            diagram, sources: diagram.sourceMarkers.map(marker => sourceByMarker.get(marker)!).filter(Boolean) });
+          return { status: 'rendered', kind: diagram.kind, title: diagram.title,
+            source_markers: diagram.sourceMarkers, mermaid: diagram.code };
+        } catch (error) {
+          emit({ id: options.toolCallId, input, status: 'error', toolName: 'present_diagram', error: errorMessage(error) });
+          throw error;
+        }
+      }
+    });
+  }
 
   if (enabledToolIds.has('app.set_appearance') && applicationActions && activeExecution?.agent.kind === 'main_assistant') {
     tools.app_set_appearance = tool({
@@ -396,6 +433,7 @@ export async function createAssistantTools({
   }
 
   for (const descriptor of descriptors) {
+    if (descriptor.name === 'import_papers' && (!canPropose || activeExecution?.agent.kind !== 'main_assistant')) continue;
     if (!SUPPORTED_TOOL_NAMES.has(descriptor.name) && !descriptor.name.startsWith('mcp.')) {
       continue;
     }
@@ -407,7 +445,7 @@ export async function createAssistantTools({
     assertModelToolNameAvailable(tools, descriptor.name, exposedToolName);
     tools[exposedToolName] = tool<unknown, unknown>({
       // MCP declarations/annotations are not a trusted guarantee of read-only behavior.
-      needsApproval: descriptor.name.startsWith('mcp.'),
+      needsApproval: descriptor.name.startsWith('mcp.') || descriptor.name === 'import_papers',
       description: toolDescription(descriptor),
       inputSchema: jsonSchema<unknown>(modelInputSchema(descriptor)),
       execute: async (input, options) => {
@@ -418,6 +456,7 @@ export async function createAssistantTools({
         try {
           const normalizedInput = normalizeToolInput(toolName, input, { root, scope });
           assertToolPrerequisites(toolName, normalizedInput, observations);
+          assertResearchRetry(toolName, normalizedInput, events);
           fingerprint = loopGuard?.beforeToolCall(toolName, normalizedInput);
           emit({
             id: toolCallId,
@@ -428,6 +467,7 @@ export async function createAssistantTools({
           });
 
           const output = await executeTool(toolName, normalizedInput, {
+            toolCallId,
             addSource,
             signal: options.abortSignal ?? abortSignal,
             contextBudget
@@ -440,6 +480,7 @@ export async function createAssistantTools({
             id: toolCallId,
             input: publicInput(normalizedInput),
             sources: output.sources,
+            researchPapers: 'researchPapers' in output ? output.researchPapers : undefined,
             status: 'done',
             summary: output.summary,
             toolName
@@ -758,11 +799,6 @@ export async function createAssistantTools({
             runtimeSettings,
             scope,
             settings: profile
-          }).catch(error => {
-            // Preserve the parent's pending delegation so resumption reuses this child actor,
-            // rather than asking the model to create a different child with a new call id.
-            if (execution) throw new AgentStoppedError('子任务执行中断，已保留检查点；继续任务将沿用原子任务和已完成的证据。');
-            throw error;
           });
           loopGuard?.recordSuccess(result);
           emit({
@@ -798,12 +834,20 @@ export async function createAssistantTools({
   }
 
   assertValidModelToolNames(tools);
+  if (restoredState?.toolNames) {
+    const frozen = new Set(restoredState.toolNames);
+    for (const name of Object.keys(tools)) if (!frozen.has(name)) delete tools[name];
+  }
+  const toolNames = Object.keys(tools);
+  const identityToolNames = restoredState?.toolNames ? [...restoredState.toolNames] : toolNames;
   return {
-    snapshot: () => ({ events, observations, createdEntries: [...createdEntryByTitle], readNotes: [...readNoteSnapshots] }),
+    availabilityNotes,
+    identityToolNames,
+    snapshot: () => ({ toolNames: [...identityToolNames], events, observations, createdEntries: [...createdEntryByTitle], readNotes: [...readNoteSnapshots] }),
     events,
     observations,
     sourceByMarker,
-    toolNames: Object.keys(tools),
+    toolNames,
     tools
   };
 }

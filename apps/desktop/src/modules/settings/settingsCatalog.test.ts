@@ -9,7 +9,7 @@ describe('settings discovery', () => {
     for (const query of ['主助手', '子助手', 'MCP', 'Skills']) expect(searchSettings(query)).toEqual([]);
     expect(searchSettings('sciverse').map(item => item.id)).toEqual(['tools-services']);
   });
-  it.each([['main-agent', 'models'], ['subagents', 'models'], ['skills', 'external-tools']])('redirects the saved hidden page %s to %s', (saved, expected) => {
+  it.each([['main-agent', 'models'], ['subagents', 'models'], ['removed-page', 'appearance']])('redirects the saved hidden page %s to %s', (saved, expected) => {
     window.localStorage.setItem('neuink.settings.lastTab', saved);
     expect(readSettingsTab()).toBe(expected);
     window.localStorage.clear();

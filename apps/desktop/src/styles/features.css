@@ -604,11 +604,11 @@
 }
 
 .workspace-tabsbar-panes.is-split .workspace-tab-pane:last-child {
-  padding-right: 32px;
+  padding-right: 64px;
 }
 
 .workspace-tabsbar.has-pair-status .workspace-tab-pane:last-child {
-  padding-right: 86px;
+  padding-right: 118px;
 }
 
 .workspace-tabsbar:not(.is-split) .workspace-tab-pane {
@@ -743,7 +743,19 @@
   box-shadow: 0 1px 3px color-mix(in srgb, #000 12%, transparent);
 }
 
+.workspace-surface-tab.is-pinned {
+  border-left-color: var(--primary);
+}
+
+.workspace-tab-pin {
+  flex: 0 0 auto;
+  margin-right: 5px;
+  color: var(--muted-foreground);
+}
+
 .workspace-surface-tab > button:first-child {
+  display: inline-flex;
+  align-items: center;
   min-width: 0;
   flex: 1;
   justify-content: flex-start;

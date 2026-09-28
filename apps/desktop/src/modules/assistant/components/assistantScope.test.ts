@@ -42,6 +42,24 @@ describe('buildTagMentionScopes', () => {
 });
 
 describe('buildConversationMentionScope', () => {
+  it('does not widen a new Tag conversation to the whole library', () => {
+    const result = buildConversationMentionScope({ entries: [entry('outside', [])], messages: [], tags: [] });
+    expect(result.entry_ids).toEqual([]);
+    expect(result.tag_ids).toEqual([]);
+  });
+
+  it('adds only explicitly mentioned notes when history contains no Tag', () => {
+    const result = buildConversationMentionScope({
+      entries: [entry('destination', []), entry('outside', [])], tags: [],
+      messages: [{ message_id: 'user', role: 'user', content: '追加到 [C1]', created_at: '', source_links: [],
+        parts: [{ type: 'context-snapshot', items: [], composer: { text: '追加到 [C1]', mentions: [{
+          charOffset: 4, entryId: 'destination', entryTitle: '目标笔记', id: 'note', kind: 'note',
+          contentId: 'note', label: '目标笔记', marker: '[C1]'
+        }] } }] }]
+    });
+    expect(result.entry_ids).toEqual(['destination']);
+  });
+
   it('reconstructs Tag papers and the destination Entry after restart', () => {
     const result = buildConversationMentionScope({
       entries: [entry('paper-a', ['se']), entry('study-notes', [])],

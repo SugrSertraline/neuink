@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { RELATION_LABELS, type RelationGraph, type RelationNode, type RelationEvidence } from './relationGraph';
 import { RelationIcon } from './RelationIcon';
 
-const STATUS_LABELS = { Parsed: '已解析', 'No PDF': '无 PDF', Queued: '排队中', Uploading: '上传中', Parsing: '解析中', Failed: '解析失败', Canceled: '已取消' };
+const STATUS_LABELS = { Parsed: '已解析', 'No PDF': '无 PDF', 'Not started': '未解析', Queued: '排队中', Uploading: '上传中', Parsing: '解析中', Failed: '解析失败', Canceled: '已取消' };
 
 export function RelationDetails({ node, graph, onSelect, onClose, onOpen, onSource, onFocus }: {
   node: RelationNode; graph: RelationGraph; onSelect: (id: string) => void; onClose: () => void;

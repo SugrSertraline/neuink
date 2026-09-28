@@ -9,7 +9,7 @@ import { NoteReviewPage } from './NoteReviewPage';
 
 const proposal: AssistantNoteProposal = {
   id: 'p', entryId: 'e', entryTitle: '论文', noteId: 'n', title: '研究笔记', action: 'replace',
-  beforeMarkdown: '# 标题\n旧结论\n不变正文\n旧方法', markdown: '# 标题\n新结论\n不变正文\n新方法',
+  beforeMarkdown: '# 标题\n\n旧结论\n\n不变正文\n\n旧方法', markdown: '# 标题\n\n新结论\n\n不变正文\n\n新方法',
   createdAt: '', status: 'pending', sources: []
 };
 afterEach(cleanup);

@@ -6,6 +6,8 @@ import type { RequestRoute } from './requestRouter';
 // An explicit allowlist: unknown MCP effects and delegated agents cannot acquire
 // write access through a read-only planning turn.
 export const PLANNING_READ_TOOLS: ReadonlySet<string> = new Set([
+  'read_pdf_pages', 'search_pdf_text',
+  'search_papers', 'search_web', 'read_webpage',
   'read_current_note', 'read_note', 'read_entry_assistant_context', 'read_segment_content',
   'search_segments', 'search_sciverse_evidence', 'read_sciverse_content',
   'search_sciverse_metadata', 'get_sciverse_metadata_catalog',
@@ -30,7 +32,7 @@ export function buildDirectExecution(settings: AgentRuntimeSettings, request: st
   const invocationPlan: AgentInvocationPlan = {
     executionMode: mode, enabledToolIds, mainAssistantId: agent.id, mode: 'agent_execute',
     missing: [], requiredToolIds: [], subagentTasks: [],
-    sourcePolicy: 'mixed', failurePolicy: 'stop', rationale: plan.rationale,
+    sourcePolicy: 'mixed', failurePolicy: 'report_to_agent', rationale: plan.rationale,
     writePolicy: readOnly || !agent.permissions.canWriteProposals ? 'chat_only' : 'proposal_only'
   };
   if (mode === 'act' && route?.path === 'lightweight_chat') {

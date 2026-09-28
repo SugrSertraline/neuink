@@ -1,5 +1,5 @@
 import { ArrowLeft } from 'lucide-react';
-import { useLayoutEffect, useRef, type ReactNode } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Tabs } from '@/components/ui/tabs';
 import type { LlmApiProtocol } from '@/shared/ipc/assistantApi';
@@ -71,7 +71,6 @@ export type SettingsPanelLayoutProps = {
   maxOutputTokens: string;
   model: string;
   modelPresets: ModelPreset[];
-  modelRefreshBusy: boolean;
   name: string;
   onBack?: () => void;
   onApiProtocolChange: (value: LlmApiProtocol) => void;
@@ -84,15 +83,15 @@ export type SettingsPanelLayoutProps = {
   onForgetRecentWorkspace: (root: string) => void;
   onClearAll: () => void;
   onCreateProfile: () => Promise<boolean>;
-  onModelChange: (value: string) => void;
-  onModelPresetSelect: (value: string) => void;
+  onModelMetadataSelect: (preset: ModelPreset) => void;
   onNameChange: (value: string) => void;
   onNewProfile: () => void;
   onParserEndpointChange: (value: string) => void;
   onParserApiKeyChange: (value: string) => void;
   onReaderPreferencesChange: (preferences: ReaderPreferences) => void;
   onProviderPresetSelect: (label: string) => void;
-  onRefreshModels: () => void;
+  onProviderMetadataSelect?: (preset: ProviderPreset) => void;
+  onRefreshModels: (signal: AbortSignal) => Promise<void>;
   onRemoveCurrent: () => void;
   onDeleteProfile: (profileId: string) => Promise<void> | void;
   onSaveProfile: () => Promise<boolean>;
@@ -108,8 +107,6 @@ export type SettingsPanelLayoutProps = {
   onTestProfile: (profile: LlmProfileLike) => void;
   profileTestStates: Record<string, { message?: string; status: 'error' | 'idle' | 'success' | 'testing' }>;
   providerPreset: ProviderPreset | null;
-  providerPresets: ProviderPreset[];
-  providersExpanded: boolean;
   settings: SettingsStateLike;
   sidebarMode: boolean;
   temperature: string;
@@ -134,9 +131,6 @@ export type SettingsPanelLayoutProps = {
   onUpdateRuntimeSettings: (nextSettings: AgentRuntimeSettings) => void;
   formatCacheTime: (value: string) => string;
   formatContextLength: (value?: number) => string;
-  providerLogo: (preset: ProviderPreset) => ReactNode;
-  collapsedProviderCount: number;
-  onToggleProvidersExpanded: () => void;
   runtimeSettings: AgentRuntimeSettings;
   selectedAgentId: string | null;
 };

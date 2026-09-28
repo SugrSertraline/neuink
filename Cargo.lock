@@ -3242,6 +3242,7 @@ dependencies = [
  "base64 0.22.1",
  "blake3",
  "chrono",
+ "encoding_rs",
  "futures-util",
  "keyring",
  "neuink-config",
@@ -3251,13 +3252,18 @@ dependencies = [
  "neuink-sciverse",
  "neuink-search",
  "neuink-workspace",
+ "quick-xml 0.39.4",
  "reqwest 0.12.28",
+ "scraper",
  "serde",
  "serde_json",
  "tauri",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
+ "webview2-com",
+ "windows-core 0.61.2",
  "zip 2.4.2",
 ]
 
@@ -4269,6 +4275,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdcc8dd4e2f670d309a5f0e83fe36dfdc05af317008fea29144da1a2ac858e5e"
 dependencies = [
  "memchr",
+ "serde",
 ]
 
 [[package]]

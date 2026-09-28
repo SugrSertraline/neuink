@@ -48,6 +48,10 @@ export function usePdfTranslationController({
     activeJob,
     currentJobKey,
     pauseTranslation: pauseTask,
+    cancelTranslation: cancelTask,
+    resumeTranslation: resumeTask,
+    translationPaused,
+    stopPending,
     startTranslation: startTask,
     translation,
     translationBusy,
@@ -68,10 +72,6 @@ export function usePdfTranslationController({
       ),
     [translation],
   );
-  const canResume =
-    translation?.status === "failed" ||
-    translation?.status === "partial" ||
-    translation?.status === "running";
   useEffect(() => {
     handledJobKeyRef.current = null;
   }, [entryId]);
@@ -84,6 +84,7 @@ export function usePdfTranslationController({
       return;
     }
     if (activeJob.status === "processing" || activeJob.status === "queued") {
+      handledJobKeyRef.current = null;
       return;
     }
 
@@ -98,10 +99,10 @@ export function usePdfTranslationController({
       });
       return;
     }
-    if (activeJob.status === "canceled") {
+    if (activeJob.status === "canceled" || activeJob.status === "paused") {
       notify({
-        title: "已暂停翻译",
-        description: "已保留当前翻译进度，可稍后继续。",
+        title: activeJob.status === "paused" ? "已暂停翻译" : "已取消翻译任务",
+        description: activeJob.status === "paused" ? "任务已保留，点击“继续翻译”接着处理剩余内容。" : "未完成部分已取消，已有译文保留。",
       });
       return;
     }
@@ -233,9 +234,19 @@ export function usePdfTranslationController({
 
   return {
     bySegmentUid,
-    canResume,
+    translationPaused,
+    resume: async () => {
+      try { await resumeTask(); }
+      catch (error) { notify({ tone: "danger", title: "继续翻译失败", description: String(error) }); }
+    },
     exportTranslation,
     pause,
+    cancel: async () => {
+      if (!translationBusy && !translationPaused) return;
+      try { await cancelTask(); }
+      catch { notify({ tone: "danger", title: "取消翻译失败", description: "暂时无法取消翻译，请重试。" }); }
+    },
+    stopPending,
     setTaskOpen,
     setVisible,
     start,

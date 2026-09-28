@@ -1,11 +1,12 @@
 ﻿import type { LlmApiProtocol } from '@/shared/ipc/assistantApi';
 
-export type ModelPreset = {
+import type { ModelFacts } from '@/modules/assistant/sdk/modelCatalog';
+
+export type ModelPreset = ModelFacts & {
   id: string;
   label?: string;
   maxContextLength?: number;
   maxOutputTokens?: number;
-  metadataSource?: 'built_in' | 'openrouter' | 'provider';
   modelContextLength?: number;
   providerContextLength?: number;
   temperature?: number;
@@ -24,6 +25,16 @@ export type ProviderPreset = {
 };
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
+  {
+    baseUrl: 'https://api.anthropic.com/v1',
+    brand: { background: '#111827', foreground: '#ffffff', mark: 'AN' },
+    label: 'Anthropic / Claude', protocol: 'anthropic', models: []
+  },
+  {
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    brand: { background: '#111827', foreground: '#ffffff', mark: 'GE' },
+    label: 'Google / Gemini', protocol: 'google', models: []
+  },
   {
     baseUrl: 'https://api.deepseek.com',
     brand: { background: '#101828', foreground: '#ffffff', mark: 'DS' },

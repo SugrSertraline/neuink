@@ -5,6 +5,10 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum WorkspaceError {
     #[error("{0}")]
+    PdfQueue(String),
+    #[error("{0}")]
+    PdfText(String),
+    #[error("{0}")]
     ParagraphTranslation(String),
     #[error("{0}")]
     TagReading(String),

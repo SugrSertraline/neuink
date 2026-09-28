@@ -40,6 +40,7 @@ export function TagBadges({ tags, compact = false }: { tags: string[]; compact?:
 }
 
 export function StatusBadge({ status }: { status: LibraryEntryStatus }) {
+  if (status === 'Not started') return <Badge variant="outline">未解析</Badge>;
   if (status === 'Parsed') {
     return <Badge className="bg-success text-white">已解析</Badge>;
   }

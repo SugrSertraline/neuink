@@ -1,15 +1,11 @@
 import {
-  ChevronDown,
-  ChevronUp,
   Loader2,
-  Pencil,
   Plus,
   RefreshCw,
   Save,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -31,9 +27,23 @@ import {
 } from '@/components/ui/select';
 
 import type { SettingsPanelLayoutProps } from './SettingsPanelLayout';
+import { usePublicModelCatalog } from '../usePublicModelCatalog';
+import { enrichModelFacts, findModelMetadata, mergeModelMetadata } from '@/modules/assistant/sdk/modelCatalog';
+import type { ModelPreset } from './providerPresets';
+import { ModelCatalogPicker } from './ModelCatalogPicker';
+import { ModelMetadataSummary } from './ModelMetadataSummary';
+import { ProviderCatalogPicker } from './ProviderCatalogPicker';
+import { useModelAutoSync } from '../useModelAutoSync';
+import type { ProviderOption } from '../providerCatalog';
 
 export function ModelProfileEditor({ props, open, onOpenChange }: { props: SettingsPanelLayoutProps; open: boolean; onOpenChange: (open: boolean) => void }) {
   const [saveError, setSaveError] = useState(false);
+  const publicCatalog = usePublicModelCatalog(open);
+  const [chosen, setChosen] = useState<ModelPreset>();
+  const [manualProvider, setManualProvider] = useState<ProviderOption>();
+  const [protocolPending, setProtocolPending] = useState(false);
+  useEffect(() => { setChosen(undefined); }, [open, props.baseUrl]);
+  useEffect(() => { setManualProvider(undefined); setProtocolPending(false); }, [open]);
   useEffect(() => { if (open) setSaveError(false); }, [open]);
   const {
     apiKey,
@@ -41,15 +51,12 @@ export function ModelProfileEditor({ props, open, onOpenChange }: { props: Setti
     baseUrl,
     busy,
     cachedModelCatalog,
-    collapsedProviderCount,
     editingProfile,
     formatCacheTime,
-    formatContextLength,
     maxContextLength,
     maxOutputTokens,
     model,
     modelPresets,
-    modelRefreshBusy,
     name,
     onApiKeyChange,
     onApiProtocolChange,
@@ -57,139 +64,87 @@ export function ModelProfileEditor({ props, open, onOpenChange }: { props: Setti
     onCreateProfile,
     onMaxContextLengthChange,
     onMaxOutputTokensChange,
-    onModelChange,
-    onModelPresetSelect,
     onNameChange,
     onProviderPresetSelect,
     onRefreshModels,
     onSaveProfile,
     onTemperatureChange,
-    onToggleProvidersExpanded,
     onTopPChange,
-    providerLogo,
-    providerPreset,
-    providerPresets,
-    providersExpanded,
     temperature,
     topP
   } = props;
-  const selectedModelMetadata = modelPresets.find(preset => preset.id === model);
+  const modelSync = useModelAutoSync({ open: open && !busy && !protocolPending, baseUrl, apiKey, apiProtocol, sync: onRefreshModels });
+  const catalogModels = publicCatalog.catalog?.models ?? [];
+  const localPreset = modelPresets.find(preset => preset.id === model);
+  const chosenMetadata = chosen?.id === model && chosen.metadataSource
+    ? mergeModelMetadata(chosen.metadataSource === 'provider' ? localPreset ?? chosen : chosen,
+      catalogModels.find(m => m.providerId === chosen.providerId && m.id === chosen.id)) : undefined;
+  const selectedModelMetadata = chosenMetadata ?? (localPreset
+    ? enrichModelFacts(localPreset, baseUrl, catalogModels) : findModelMetadata(catalogModels, baseUrl, model));
+  const selectModel = (preset: ModelPreset) => { setChosen(preset); props.onModelMetadataSelect(preset); };
   return (
                 <Dialog open={open} onOpenChange={open => { if (!busy) onOpenChange(open); }}>
-                  <DialogContent className="grid settings-model-editor h-[min(760px,calc(100dvh-2rem))] w-[min(720px,calc(100vw-2rem))] max-w-none grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden p-0 sm:max-w-none">
+                  <DialogContent onOpenAutoFocus={event => {
+                    event.preventDefault();
+                    // Keep modal keyboard focus without opening the first editable combobox.
+                    if (event.target instanceof HTMLElement) event.target.focus({ preventScroll: true });
+                  }} className="grid settings-model-editor h-[min(760px,calc(100dvh-2rem))] w-[min(720px,calc(100vw-2rem))] max-w-none grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden p-0 sm:max-w-none">
                     <DialogHeader className="border-b px-4 py-3">
                       <DialogTitle className="min-w-0 break-words pr-6">{editingProfile ? `模型配置：${editingProfile.name}` : '新增模型配置'}</DialogTitle>
                       <DialogDescription>修改后点击保存。取消会放弃本次编辑。</DialogDescription>
                     </DialogHeader>
                     <div className="min-h-0 overflow-y-auto px-4 py-4"><fieldset disabled={busy} className="min-w-0">
                 <div className="border-b pb-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <h3 className="text-sm font-semibold">服务商预设</h3>
-                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                        选择服务商快速填充，或点「自定义」填写任意接口地址并选择协议。
-                      </p>
-                    </div>
-                    <Badge variant="outline">{providerPreset?.label ?? '自定义'}</Badge>
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    <Button
-                      className="border-dashed"
-                      size="xs"
-                      type="button"
-                      variant="outline"
-                      onClick={() => onProviderPresetSelect('__custom__')}
-                    >
-                      <Pencil />
-                      自定义
-                    </Button>
-                    {providerPresets.map((preset) => (
-                      <Button
-                        key={preset.label}
-                        size="xs"
-                        type="button"
-                        variant="outline"
-                        onClick={() => onProviderPresetSelect(preset.label)}
-                      >
-                        {providerLogo(preset)}
-                        {preset.label}
-                      </Button>
-                    ))}
-                    {collapsedProviderCount > 0 ? (
-                      <Button size="xs" type="button" variant="ghost" onClick={onToggleProvidersExpanded}>
-                        {providersExpanded ? <ChevronUp /> : <ChevronDown />}
-                        {providersExpanded ? '收起' : `展开 ${collapsedProviderCount} 个`}
-                      </Button>
-                    ) : null}
-                  </div>
+                  <h3 className="mb-2 text-sm font-semibold">模型提供商</h3>
+                  <ProviderCatalogPicker catalog={catalogModels} baseUrl={baseUrl} busy={busy} selectedLabel={manualProvider?.label}
+                    onSelect={preset => { setManualProvider(undefined); setProtocolPending(false); setChosen(undefined); if (props.onProviderMetadataSelect) props.onProviderMetadataSelect(preset); else onProviderPresetSelect(preset.label); }}
+                    onManualSelect={provider => {
+                      onProviderPresetSelect('__custom__');
+                      onNameChange(provider.label); onBaseUrlChange(provider.baseUrl);
+                      setManualProvider(provider); setProtocolPending(true); setChosen(undefined);
+                    }}
+                    onCustom={() => { setManualProvider(undefined); setProtocolPending(false); onProviderPresetSelect('__custom__'); }} />
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">支持名称、中文别名、缩写和地址模糊搜索。内置预设离线可用；更多提供商来自公开目录。</p>
+                  {manualProvider && protocolPending && <p role="status" className="mt-1 text-xs leading-5 text-muted-foreground">已选择 {manualProvider.label}，可以先浏览其模型。{manualProvider.reason}确认前不会请求接口或保存配置。</p>}
                 </div>
     
                 <div className="grid gap-4">
                   <div className="grid min-w-0 gap-4 pt-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <Label htmlFor="llm-model-preset">从模型列表选择</Label>
-                      <Button
-                        disabled={modelRefreshBusy || !baseUrl}
-                        size="xs"
-                        type="button"
-                        variant="outline"
-                        onClick={onRefreshModels}
-                      >
-                        {modelRefreshBusy ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-                        同步模型与参数
-                      </Button>
+                      <Label htmlFor="llm-model">模型 ID</Label>
                     </div>
-                    {modelPresets.length > 0 ? (
-                      <Select
-                        value={modelPresets.some((preset) => preset.id === model) ? model : ''}
-                        onValueChange={onModelPresetSelect}
-                      >
-                        <SelectTrigger id="llm-model-preset">
-                          <SelectValue placeholder="选择已拉取或内置的模型" />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-80">
-                          {modelPresets.map((preset) => (
-                            <SelectItem key={preset.id} value={preset.id}>
-                              {preset.label ?? preset.id} · 上下文 {formatContextLength(preset.maxContextLength)}
-                              {preset.maxOutputTokens ? ` · 最大输出 ${formatContextLength(preset.maxOutputTokens)}` : ''}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <div className="rounded-xl border border-dashed border-border/70 bg-muted/20 px-3 py-3 text-xs text-muted-foreground">
-                        当前 Base URL 没有可用列表。可点击“同步模型与参数”从服务端 `/models` 拉取，或直接填写模型 ID。
-                      </div>
-                    )}
-                    {cachedModelCatalog ? (
-                      <div className="text-[11px] leading-5 text-muted-foreground">
-                        当前使用缓存模型列表，共 {cachedModelCatalog.models.length} 个，更新于{' '}
-                        {formatCacheTime(cachedModelCatalog.updatedAt)}；再次同步会刷新并回填当前模型参数。
-                      </div>
-                    ) : providerPreset ? (
-                      <div className="text-[11px] leading-5 text-muted-foreground">
-                        当前正在使用内置预设；点击同步后会切换为服务端与 OpenRouter 目录返回的实时参数。
-                      </div>
-                    ) : null}
+                    <ModelCatalogPicker baseUrl={baseUrl} providerId={manualProvider?.id} model={model} presets={modelPresets} catalog={catalogModels} busy={busy} onSelect={selectModel}
+                      onCustomChange={id => {
+                        const preset = modelPresets.find(p => p.id === id.trim());
+                        selectModel(preset ? enrichModelFacts(preset, baseUrl, catalogModels) : findModelMetadata(catalogModels, baseUrl, id) ?? { id });
+                      }} />
+                    <div className="flex flex-wrap items-center gap-2 text-xs" role="status">
+                      {modelSync.status === 'loading' && <Loader2 aria-hidden className="size-3 animate-spin text-muted-foreground" />}
+                      <span className={modelSync.status === 'error' ? 'text-destructive' : 'text-muted-foreground'}>{modelSync.message}</span>
+                      {modelSync.status === 'error' && <Button size="xs" type="button" variant="outline" onClick={modelSync.retry}>重试同步</Button>}
+                    </div>
+                    <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">公开目录与同步说明</summary><div className="mt-2 grid gap-2">
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <Button size="xs" variant="outline" type="button" disabled={publicCatalog.busy || busy} onClick={publicCatalog.refresh}>
+                        <RefreshCw />{publicCatalog.busy ? '正在更新公开目录…' : '更新公开模型目录'}
+                      </Button>
+                      {publicCatalog.catalog && <span>{new Set(catalogModels.map(m => m.providerId)).size} 个服务商 / {catalogModels.length} 条记录 · 最近同步 {formatCacheTime(publicCatalog.catalog.updatedAt)}</span>}
+                    </div>
+                    <p className="text-xs leading-5 text-muted-foreground">公开目录来自 models.dev / OpenRouter，无需额外密钥；不发送你的 API Key、接口地址或搜索词。选择模型自动填入参数，更新目录不会覆盖已填写的值。</p>
+                    {cachedModelCatalog && <p className="text-xs text-muted-foreground">当前接口列表缓存：{cachedModelCatalog.models.length} 项，{formatCacheTime(cachedModelCatalog.updatedAt)}。接口列表与公开目录独立更新。</p>}
+                    {publicCatalog.error && <p role="alert" className="text-xs text-destructive">{publicCatalog.error}</p>}
+                    {publicCatalog.catalog?.warnings.map(warning => <p key={warning} role="status" className="text-xs text-muted-foreground">{warning}</p>)}
+                    </div></details>
     
                     <div className="settings-fields-grid grid gap-3">
                       <div className="grid gap-2">
                         <Label htmlFor="llm-name">名称</Label>
                         <Input id="llm-name" value={name} onChange={(event) => onNameChange(event.target.value)} />
                       </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="llm-model">模型 ID</Label>
-                        <Input
-                          id="llm-model"
-                          placeholder="deepseek-v4-flash / qwen2.5:7b / gpt-4o-mini"
-                          value={model}
-                          onChange={(event) => onModelChange(event.target.value)}
-                        />
-                      </div>
                     </div>
     
-                    <div className="settings-fields-grid grid gap-3">
-                      <div className="grid gap-2">
+                    <div className="settings-fields-grid grid items-start gap-3" data-ui="model-connection-fields">
+                      <div className="grid content-start gap-2">
                         <Label htmlFor="llm-base-url">Base URL</Label>
                         <Input
                           id="llm-base-url"
@@ -198,23 +153,23 @@ export function ModelProfileEditor({ props, open, onOpenChange }: { props: Setti
                           onChange={(event) => onBaseUrlChange(event.target.value)}
                         />
                       </div>
-                      <div className="grid gap-2">
+                      <div className="grid content-start gap-2">
                         <Label htmlFor="llm-api-protocol">接口类型</Label>
-                        <Select value={apiProtocol} onValueChange={onApiProtocolChange}>
-                          <SelectTrigger id="llm-api-protocol">
-                            <SelectValue placeholder="选择接口协议" />
+                        <Select value={protocolPending ? '' : apiProtocol} onValueChange={value => { onApiProtocolChange(value as typeof apiProtocol); setProtocolPending(false); }}>
+                          <SelectTrigger id="llm-api-protocol" className="w-full" aria-describedby="model-protocol-help" aria-invalid={protocolPending || undefined}>
+                            <SelectValue placeholder="请选择此服务的接口类型" />
                           </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="openai_compatible">OpenAI 兼容（/chat/completions）</SelectItem>
-                            <SelectItem value="anthropic">Anthropic（/v1/messages）</SelectItem>
-                            <SelectItem value="google">Google Gemini（generateContent）</SelectItem>
+                          <SelectContent viewportAligned>
+                            <SelectItem value="openai_compatible">OpenAI 兼容</SelectItem>
+                            <SelectItem value="anthropic">Anthropic / Claude</SelectItem>
+                            <SelectItem value="google">Google / Gemini</SelectItem>
                           </SelectContent>
                         </Select>
-                        <p className="text-[11px] leading-5 text-muted-foreground">
-                          决定请求格式与认证头：Bearer、x-api-key 或 x-goog-api-key。自定义服务地址可任选一种协议。
-                        </p>
                       </div>
                     </div>
+                    <p id="model-protocol-help" className="text-xs leading-5 text-muted-foreground">
+                      {protocolPending ? '请选择服务商实际支持的接口类型；不确定时查看服务商的接入说明。' : '接口类型决定请求格式，请按服务商的接入说明选择，不要仅按模型名称判断。'}
+                    </p>
     
                     <div className="grid gap-2">
                       <Label htmlFor="llm-api-key">API Key</Label>
@@ -225,9 +180,11 @@ export function ModelProfileEditor({ props, open, onOpenChange }: { props: Setti
                         value={apiKey}
                         onChange={(event) => onApiKeyChange(event.target.value)}
                       />
+                      <p className="text-xs text-muted-foreground">输入暂停后自动向此接口获取模型列表，不发起对话。更换地址会清空旧密钥。</p>
                     </div>
     
-                    <details className="settings-advanced"><summary>高级参数</summary>
+                    <section className="grid gap-3 border-t pt-3" aria-labelledby="model-parameters-title">
+                    <h3 id="model-parameters-title" className="text-sm font-medium">高级参数</h3>
                     <div className="settings-fields-grid grid gap-3">
                       <div className="grid gap-2">
                         <Label htmlFor="llm-context">上下文窗口（Token）</Label>
@@ -275,28 +232,12 @@ export function ModelProfileEditor({ props, open, onOpenChange }: { props: Setti
                       />
                     </div>
 
-                    </details>
-                    {selectedModelMetadata ? (
-                      <div className="grid gap-1 rounded-md border border-info-border bg-info-surface px-3 py-2 text-[11px] leading-5 text-info">
-                        <span>
-                          元数据来源：{modelMetadataSourceLabel(selectedModelMetadata.metadataSource)}
-                        </span>
-                        <span>
-                          当前采用上下文：{formatContextLength(selectedModelMetadata.maxContextLength)}
-                          {selectedModelMetadata.modelContextLength &&
-                          selectedModelMetadata.providerContextLength &&
-                          selectedModelMetadata.modelContextLength !== selectedModelMetadata.providerContextLength
-                            ? `（OpenRouter 主路由参考 ${formatContextLength(selectedModelMetadata.providerContextLength)}）`
-                            : ''}
-                          {selectedModelMetadata.maxOutputTokens
-                            ? `；最大输出：${formatContextLength(selectedModelMetadata.maxOutputTokens)}`
-                            : '；最大输出：目录未提供'}
-                        </span>
-                      </div>
-                    ) : null}
+                    </section>
+                    <ModelMetadataSummary model={selectedModelMetadata} context={maxContextLength} output={maxOutputTokens} />
+                    {selectedModelMetadata && <Button type="button" size="xs" variant="outline" onClick={() => selectModel(selectedModelMetadata)}>使用以上参考参数</Button>}
 
                     <p className="text-[11px] leading-5 text-muted-foreground">
-                      上下文窗口是输入与输出合计容量；最大输出只是单次回答上限，两者不是同一个数值。同步结果可继续手动覆盖。
+                      上下文窗口是输入与输出合计容量；最大输出只是单次回答上限，两者不是同一个数值。可在高级参数中手动覆盖。
                     </p>
                   </div>
     
@@ -311,7 +252,7 @@ export function ModelProfileEditor({ props, open, onOpenChange }: { props: Setti
                         </DialogClose>
                         {editingProfile ? (
                           <Button
-                            disabled={busy || !baseUrl || !model}
+                            disabled={busy || protocolPending || !baseUrl || !model}
                             size="sm"
                             type="button"
                             onClick={async () => { setSaveError(false); if (await onSaveProfile()) onOpenChange(false); else setSaveError(true); }}
@@ -321,7 +262,7 @@ export function ModelProfileEditor({ props, open, onOpenChange }: { props: Setti
                           </Button>
                         ) : (
                           <Button
-                            disabled={busy || !baseUrl || !model}
+                            disabled={busy || protocolPending || !baseUrl || !model}
                             size="sm"
                             type="button"
                             onClick={async () => { setSaveError(false); if (await onCreateProfile()) onOpenChange(false); else setSaveError(true); }}
@@ -334,15 +275,5 @@ export function ModelProfileEditor({ props, open, onOpenChange }: { props: Setti
                   </DialogContent>
                 </Dialog>
   );
-}
-
-function modelMetadataSourceLabel(source: SettingsPanelLayoutProps['modelPresets'][number]['metadataSource']) {
-  if (source === 'provider') {
-    return '当前 API 的 /models';
-  }
-  if (source === 'openrouter') {
-    return 'OpenRouter 公共模型目录';
-  }
-  return '内置预设（建议同步）';
 }
 

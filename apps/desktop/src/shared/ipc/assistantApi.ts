@@ -150,6 +150,8 @@ export function conversationSourceKey(source: ConversationSourceLink) {
 export type ConversationRole = 'user' | 'assistant';
 
 export type AssistantToolTraceEvent = {
+  diagram?: import('@/modules/assistant/sdk/diagramArtifact').AssistantDiagramArtifact;
+  researchPapers?: import('./researchApi').ResearchPaper[];
   error?: string;
   id: string;
   input?: unknown;
@@ -195,7 +197,9 @@ export type AssistantMessagePart =
     }
   | {
       id: string;
+      diagram?: import('@/modules/assistant/sdk/diagramArtifact').AssistantDiagramArtifact;
       sourceLinks?: ConversationSourceLink[];
+      researchPapers?: import('./researchApi').ResearchPaper[];
       summary: string;
       toolName: string;
       type: 'tool-result';
@@ -290,6 +294,8 @@ export type AnalyzeEntryTagsResponse = {
 };
 
 export type ReadEntryAssistantContextResponse = {
+  has_pdf?: boolean;
+  parsed_segment_count?: number;
   entry_id: EntryId;
   entry_title: string;
   markdown: string;

@@ -59,6 +59,7 @@ pub enum JobKind {
 pub enum JobStatus {
     Queued,
     Processing,
+    Paused,
     Succeeded,
     Failed,
     Canceled,
@@ -110,6 +111,7 @@ pub struct JobEvent {
 pub enum JobEventKind {
     Queued,
     Started,
+    Paused,
     Progress,
     Succeeded,
     Failed,
@@ -129,6 +131,26 @@ impl LocalJobManager {
     pub fn create(&self, kind: JobKind, scope: Option<JobScope>, total: usize) -> JobEvent {
         let job = Job::queued(kind, scope, total);
         self.record(job, JobEventKind::Queued, Value::Null)
+    }
+
+    /// Restore a durable paused task only when it is absent (e.g. after restart).
+    pub fn restore_paused(&self, mut job: Job) -> Result<Job, String> {
+        if job.status != JobStatus::Paused {
+            return Err("Only paused jobs can be restored".into());
+        }
+        let mut inner = self.inner.lock().map_err(|error| error.to_string())?;
+        job.updated_at = Utc::now();
+        let restored = inner.jobs.entry(job.id.clone()).or_insert(job).clone();
+        trim_jobs(&mut inner.jobs);
+        Ok(restored)
+    }
+
+    pub fn pause(&self, job_id: &str, payload: Value) -> Option<JobEvent> {
+        self.update(job_id, JobEventKind::Paused, payload, |job| {
+            job.status = JobStatus::Paused;
+            job.message = Some("已暂停翻译，可继续当前任务".into());
+            job.error = None;
+        })
     }
 
     pub fn start(&self, job_id: &str, message: impl Into<String>) -> Option<JobEvent> {
@@ -293,7 +315,10 @@ fn trim_jobs(jobs: &mut HashMap<String, Job>) {
             .filter(|job| {
                 matches!(
                     job.status,
-                    JobStatus::Succeeded | JobStatus::Failed | JobStatus::Canceled
+                    JobStatus::Succeeded
+                        | JobStatus::Failed
+                        | JobStatus::Canceled
+                        | JobStatus::Paused
                 )
             })
             .min_by_key(|job| job.updated_at)
@@ -320,6 +345,24 @@ mod tests {
         }
 
         assert_eq!(manager.list().len(), 256);
+    }
+
+    #[test]
+    fn paused_task_keeps_identity_and_progress_when_resumed() {
+        let manager = LocalJobManager::new();
+        let event = manager.create(JobKind::Translation, None, 3);
+        manager.progress(&event.job.id, 1, 3, "working", Value::Null);
+        let paused = manager.pause(&event.job.id, Value::Null).unwrap();
+        assert_eq!(paused.job.status, super::JobStatus::Paused);
+        let after_restart = LocalJobManager::new();
+        after_restart.restore_paused(paused.job).unwrap();
+        let resumed = after_restart.start(&event.job.id, "resume").unwrap();
+        assert_eq!(resumed.job.id, event.job.id);
+        assert_eq!(
+            (resumed.job.progress.current, resumed.job.progress.total),
+            (1, 3)
+        );
+        assert_eq!(resumed.job.status, super::JobStatus::Processing);
     }
 
     #[test]

@@ -23,6 +23,7 @@ enum EntrySource { Segments(Vec<SourceSegment>), Missing(SourceStatus) }
 impl Workspace {
     pub fn inspect_sources(&self, sources: &[SegmentRef]) -> Vec<SourceAvailability> {
         let mut cache = BTreeMap::new();
+        let mut pdf_revisions = BTreeMap::new();
         sources.iter().map(|source| {
             let entry = cache.entry(source.entry_id.clone()).or_insert_with(|| {
                 if crate::tag_reading::validate_id(source.entry_id.as_str()).is_err() {
@@ -47,6 +48,20 @@ impl Workspace {
             });
             let status = match entry {
                 EntrySource::Missing(status) => status.clone(),
+                EntrySource::Segments(_) if source.segment_uid.as_str().starts_with(crate::pdf_text::PDF_TEXT_PREFIX) => {
+                    match crate::pdf_text::pdf_text_anchor(source.segment_uid.as_str()) {
+                        Some((revision, page_idx)) if source.page == page_idx + 1 => {
+                            let current = pdf_revisions.entry(source.entry_id.clone()).or_insert_with(||
+                                self.read_assistant_pdf_bytes(&source.entry_id, None).map(|bytes| blake3::hash(&bytes).to_hex().to_string()));
+                            match current {
+                                Ok(current) if current == revision => SourceStatus::Available,
+                                Ok(_) => SourceStatus::ContentChanged,
+                                Err(_) => SourceStatus::Unavailable,
+                            }
+                        }
+                        _ => SourceStatus::Unavailable,
+                    }
+                }
                 EntrySource::Segments(segments) => match segments.iter().find(|segment|
                     segment.uid == source.segment_uid || segment.continuation_group_id.as_deref() == Some(source.segment_uid.as_str())) {
                     None => SourceStatus::SegmentMissing,

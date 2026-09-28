@@ -26,6 +26,10 @@ export { isMineruImagePath } from './sourceSnapshotMath';
 export type SourceSnapshotImageSize = 'compact' | 'standard' | 'large' | 'full';
 
 type SourceSnapshotPreviewProps = {
+  /** Authored notes must not undergo heuristic MinerU/OCR text repair. */
+  normalization?: 'mineru' | 'none';
+  /** Review surfaces show a readable error instead of reverting to source. */
+  renderedOnly?: boolean;
   renderInlineText?: (children: ReactNode) => ReactNode;
   allowScroll?: boolean;
   /** When provided, resolve images only from these verified assets, never from the document's URLs. */
@@ -48,6 +52,7 @@ type SourceSnapshotPreviewProps = {
 };
 
 type MarkdownPreviewErrorBoundaryProps = {
+  renderedOnly?: boolean;
   children: ReactNode;
   fallback: string;
 };
@@ -70,6 +75,7 @@ class MarkdownPreviewErrorBoundary extends Component<
 
   render() {
     if (this.state.hasError) {
+      if (this.props.renderedOnly) return <p role="alert" className="text-sm text-destructive">这部分内容暂时无法渲染，请检查内容格式。</p>;
       return (
         <span className="whitespace-pre-wrap break-words font-mono text-[0.92em]">
           {this.props.fallback}
@@ -124,33 +130,35 @@ function deriveSnapshotValues(
   segmentType: SegmentType | undefined,
   workspaceRoot: string | null | undefined,
   sourceEntryId: string | null | undefined,
-  relatedImagePath: string | null | undefined
+  relatedImagePath: string | null | undefined,
+  normalization: 'mineru' | 'none'
 ): SnapshotDerivations {
-  const cacheKey = `${markdown}\u0000${segmentType ?? ''}\u0000${workspaceRoot ?? ''}\u0000${sourceEntryId ?? ''}\u0000${relatedImagePath ?? ''}`;
-  const cached = derivationCache.get(cacheKey);
+  const cacheKey = `${normalization}\u0000${markdown}\u0000${segmentType ?? ''}\u0000${workspaceRoot ?? ''}\u0000${sourceEntryId ?? ''}\u0000${relatedImagePath ?? ''}`;
+  // Full note snapshots are owned by their mounted review, not the hover cache.
+  const cached = normalization === 'none' ? undefined : derivationCache.get(cacheKey);
   if (cached) {
     derivationCache.delete(cacheKey);
     derivationCache.set(cacheKey, cached);
     return cached;
   }
 
-  const raw = normalizeLooseMarkdownBlocks(
+  const raw = normalization === 'none' ? markdown : normalizeLooseMarkdownBlocks(
     normalizeInlineHtml(decodeHtmlEntities(markdown.trim()))
   );
-  const displayMarkdown = normalizeSegmentMarkdown(raw, segmentType);
+  const displayMarkdown = normalization === 'none' ? raw : normalizeSegmentMarkdown(raw, segmentType);
   const values: SnapshotDerivations = {
     directImageUrl: resolveSourceSnapshotAssetUrl(raw, workspaceRoot, sourceEntryId),
     displayMarkdown,
     // Repair prose separately: HTML tags must not participate in the math
     // heuristics, otherwise valid cell delimiters can be discarded.
-    normalized: displayMarkdown.split(/(<table\b[\s\S]*?<\/table>)/gi)
+    normalized: normalization === 'none' ? raw : displayMarkdown.split(/(<table\b[\s\S]*?<\/table>)/gi)
       .map((part) => /^<table\b/i.test(part) ? part : normalizeMathMarkdown(part, segmentType)).join(''),
     raw,
     relatedImageUrl: relatedImagePath
       ? resolveSourceSnapshotAssetUrl(relatedImagePath, workspaceRoot, sourceEntryId)
       : null
   };
-  derivationCache.set(cacheKey, values);
+  if (normalization !== 'none') derivationCache.set(cacheKey, values);
   while (derivationCache.size > DERIVATION_CACHE_LIMIT) {
     const oldest = derivationCache.keys().next().value;
     if (typeof oldest !== 'string') break;
@@ -160,6 +168,8 @@ function deriveSnapshotValues(
 }
 
 function SourceSnapshotPreviewImpl({
+  normalization = 'mineru',
+  renderedOnly = false,
   renderInlineText,
   allowScroll = true,
   assetUrls,
@@ -194,7 +204,8 @@ function SourceSnapshotPreviewImpl({
     segmentType,
     workspaceRoot,
     sourceEntryId,
-    relatedImagePath
+    relatedImagePath,
+    normalization
   );
   const verifiedAsset = (path: string) => assetUrls && Object.prototype.hasOwnProperty.call(assetUrls, path) ? assetUrls[path] : null;
   const directImageUrl = assetUrls ? verifiedAsset(raw) : derivedDirectImageUrl;
@@ -217,7 +228,7 @@ function SourceSnapshotPreviewImpl({
   // remark/rehype/KaTeX pipeline made every preview mount noticeably slow, so
   // render syntax-free text directly and keep the pipeline for content that
   // actually needs it.
-  if (isPlainMarkdownText(normalized)) {
+  if (normalization !== 'none' && isPlainMarkdownText(normalized)) {
     return (
       <div
         className={cn(
@@ -258,7 +269,7 @@ function SourceSnapshotPreviewImpl({
           src={relatedImageUrl}
         />
       ) : null}
-      <MarkdownPreviewErrorBoundary fallback={raw}>
+      <MarkdownPreviewErrorBoundary fallback={raw} renderedOnly={renderedOnly}>
         <ReactMarkdown
         components={{
           ...inlineComponents,
@@ -289,7 +300,7 @@ function SourceSnapshotPreviewImpl({
                 fillWidth={imageFillWidth} size={imageSize}
                 src={resolved}
               />
-            ) : assetUrls ? (
+            ) : assetUrls || renderedOnly ? (
               <span role="note" className="my-2 block rounded-sm border border-dashed p-2 text-xs">图片缺失或不可用，无法预览。</span>
             ) : (
               <code className="break-all rounded bg-muted px-1 py-0.5 font-mono text-[11px]">

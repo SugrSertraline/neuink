@@ -50,6 +50,7 @@ impl PdfParseState {
                 | (Parsing, Failed)
                 | (Parsing, Canceled)
                 | (Failed, Queued)
+                | (Canceled, Queued)
                 // A successfully parsed entry can be re-submitted for parsing.
                 | (Succeeded, Queued)
         )

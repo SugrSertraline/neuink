@@ -241,19 +241,19 @@ export function AssistantPanel({
   currentRootRef.current = root;
   const [readingChoice, setReadingChoice] = useState<{ root: string | null; value: AssistantReadingChoice }>({ root, value: null });
   const chosenReadingObject = readingChoice.root === root ? readingChoice.value : null;
-  const readingContext = resolveAssistantReadingContext({ choice: chosenReadingObject, entries, items: assistantContext.items,
+  const readingContext = resolveAssistantReadingContext({ choice: chosenReadingObject, entries, tags, items: assistantContext.items,
     activeEntry, activeNote, activeSegment, activeSurface });
 
   const selectedTagIds = useMemo(
     () =>
-      composerSnapshot.mentions
+      [...(readingContext.tag ? [readingContext.tag.id] : []), ...composerSnapshot.mentions
         .filter((mention) => mention.kind === 'tag' && mention.tagId)
-        .map((mention) => mention.tagId as string),
-    [composerSnapshot.mentions]
+        .map((mention) => mention.tagId as string)],
+    [composerSnapshot.mentions, readingContext.tag]
   );
   const scope = useMemo(
-    () => buildAssistantScope({ activeEntry: readingContext.entry, activeTag: readingContext.bound ? null : activeTag, entries, selectedTagIds, tags }),
-    [readingContext.entry, readingContext.bound, activeTag, entries, selectedTagIds, tags]
+    () => buildAssistantScope({ activeEntry: readingContext.entry, activeTag: readingContext.bound || readingContext.entry || readingContext.surface.kind !== 'library' ? null : activeTag, entries, selectedTagIds, tags }),
+    [readingContext.entry, readingContext.bound, readingContext.surface.kind, activeTag, entries, selectedTagIds, tags]
   );
   const selectedProfile = useMemo(
     () => profiles.find((profile) => profile.id === selectedProfileId) ?? null,
@@ -475,6 +475,7 @@ export function AssistantPanel({
           question: trimmed
         }),
         question: trimmed,
+        scope: structuredClone(scope),
         snapshot
       };
       const controller = runAbortControllerRef.current;
@@ -538,7 +539,7 @@ export function AssistantPanel({
       runNote,
       runSegment,
       runSurface,
-      scope,
+      scope: queued?.scope ?? scope,
       selectedProfile,
       setBusy: guard(setBusy),
       setComposerResetKey: guard(setComposerResetKey),
@@ -1193,7 +1194,7 @@ export function AssistantPanel({
             onRemove={onRemoveAssistantContextItem}
           />
 
-          <AssistantReadingContextControl context={readingContext} entries={entries} busy={busy} choice={chosenReadingObject}
+          <AssistantReadingContextControl context={readingContext} entries={entries} tags={tags} busy={busy} choice={chosenReadingObject}
             onChange={value => setReadingChoice({ root, value })} />
 
           <ExecutionRecovery root={root} conversationId={conversation?.id} busy={busy}
