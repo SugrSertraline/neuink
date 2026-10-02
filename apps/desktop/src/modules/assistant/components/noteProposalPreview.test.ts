@@ -5,7 +5,7 @@ import type { AssistantNoteProposal } from '@/shared/types/assistant';
 import { buildNoteProposalPreview } from './noteProposalPreview';
 
 describe('buildNoteProposalPreview', () => {
-  it('shows only added Markdown for append proposals', () => {
+  it('keeps complete versions for append proposals', () => {
     const preview = buildNoteProposalPreview(proposal({
       action: 'append',
       afterMarkdown: '# Existing\n\nNew paragraph',
@@ -14,11 +14,11 @@ describe('buildNoteProposalPreview', () => {
     }));
 
     expect(preview).toEqual({
-      kind: 'change', label: 'Added', text: 'New paragraph', tone: 'after'
+      kind: 'diff', before: '# Existing', after: '# Existing\n\nNew paragraph'
     });
   });
 
-  it('shows only added Markdown for prepend proposals', () => {
+  it('keeps complete versions for prepend proposals', () => {
     const preview = buildNoteProposalPreview(proposal({
       action: 'prepend',
       afterMarkdown: 'New paragraph\n\n# Existing',
@@ -27,11 +27,11 @@ describe('buildNoteProposalPreview', () => {
     }));
 
     expect(preview).toEqual({
-      kind: 'change', label: 'Added', text: 'New paragraph', tone: 'after'
+      kind: 'diff', before: '# Existing', after: 'New paragraph\n\n# Existing'
     });
   });
 
-  it('shows only removed Markdown for delete patches', () => {
+  it('uses authoritative patch output with complete Markdown context', () => {
     const preview = buildNoteProposalPreview(proposal({
       action: 'patch',
       afterMarkdown: '# Note',
@@ -41,7 +41,7 @@ describe('buildNoteProposalPreview', () => {
     }));
 
     expect(preview).toEqual({
-      kind: 'change', label: 'Removed', text: 'Remove me', tone: 'before'
+      kind: 'diff', before: '# Note\n\nRemove me', after: '# Note\n'
     });
   });
 
@@ -59,13 +59,13 @@ describe('buildNoteProposalPreview', () => {
     }));
 
     expect(preview).toEqual({
-      kind: 'change', label: 'Removed', text: 'Remove me', tone: 'before'
+      kind: 'diff', before: '# Note\n\nRemove me\n\nKeep me', after: '# Note\n\nKeep me\n'
     });
   });
 
   it('keeps local before and after context for mixed edits', () => {
     const preview = buildNoteProposalPreview(proposal({
-      action: 'patch',
+      action: 'replace',
       afterMarkdown: 'one\ntwo changed\nthree',
       beforeMarkdown: 'one\ntwo\nthree',
       markdown: 'one\ntwo changed\nthree'

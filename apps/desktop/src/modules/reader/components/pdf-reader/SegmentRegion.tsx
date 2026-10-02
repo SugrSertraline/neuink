@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, KeyboardEvent, MouseEvent } from 'react';
 import { Link2, MessageCircle, StickyNote } from 'lucide-react';
 
@@ -15,12 +15,12 @@ import type { Annotation, SourceSegment } from '@/shared/types/domain';
 import { segmentColor, segmentDisplayLabel } from './readerUtils';
 import { ListHoverPreview } from './ListHoverPreview';
 import { translatedListItemText } from './listItemTranslation';
+import { FittedTranslation } from './FittedTranslation';
+import { preservesOriginalContent } from '../../translation/translationEligibility';
 import { parseListItemRegions, type ListItemRegion } from './listItemRegions';
 
 const PREVIEW_MARGIN = 12;
 const PREVIEW_COLUMN_GAP = 18;
-const REPLACEMENT_MIN_WIDTH = 24;
-const REPLACEMENT_MIN_HEIGHT = 8;
 
 function SegmentRegionImpl({
   flashed,
@@ -28,6 +28,7 @@ function SegmentRegionImpl({
   hasNote,
   active,
   hovered,
+  interactionSuppressed = false,
   isContinuation,
   listItemIndex,
   pageIdx,
@@ -55,6 +56,7 @@ function SegmentRegionImpl({
   translationStatus,
   translationMode,
   translationVisible,
+  replacementFontSize,
   workspaceRoot,
   onAddSourceLink,
   onPreviewPointerEnter,
@@ -66,6 +68,7 @@ function SegmentRegionImpl({
   hasNote: boolean;
   active: boolean;
   hovered: boolean;
+  interactionSuppressed?: boolean;
   isContinuation: boolean;
   listItemIndex?: number;
   pageIdx: number;
@@ -93,22 +96,21 @@ function SegmentRegionImpl({
   translationStatus: TranslationStatus | null;
   translationMode: 'replace' | 'hover';
   translationVisible: boolean;
+  replacementFontSize?: number;
   workspaceRoot: string | null;
   onAddSourceLink?: (segment: SourceSegment) => void;
   onPreviewPointerEnter?: () => void;
   onPreviewPointerLeave?: () => void;
   onToggleSegment: (segment: SourceSegment) => void;
 }) {
-  const regionRef = useRef<HTMLDivElement | null>(null);
-  const [regionSize, setRegionSize] = useState({ height: 0, width: 0 });
   const [hoveredListItemBbox, setHoveredListItemBbox] = useState<ListItemRegion['bbox'] | null>(null);
   const [x0, y0, x1, y1] = regionBbox;
   const color = segmentColor(segment.segment_type);
   const displayLabel = segmentDisplayLabel(segment);
   const hasIndicators = hasNote || hasAnnotation || sourceBacklinkCount > 0;
-  const visible = showRegions || (hovered && previewShowRegion);
+  const visible = !interactionSuppressed && (showRegions || (hovered && previewShowRegion));
   const indicatorsExpanded = hovered || active;
-  const interactive = showRegions || flashed || hasIndicators || hovered || active;
+  const interactive = !interactionSuppressed && (showRegions || flashed || hasIndicators || hovered || active);
   const translatedText = useMemo(() => {
     const fullTranslation = translatedSegment?.translated_text?.trim() || null;
     if (
@@ -122,44 +124,20 @@ function SegmentRegionImpl({
   }, [listItemIndex, segment.segment_type, segment.markdown, segment.text, translatedSegment?.source_text, translatedSegment?.translated_text]);
   const showTranslationMask =
     translationVisible && translationMode === 'replace' && shouldMaskInTranslationMode(segment);
-  const showTranslationReplacement = showTranslationMask && Boolean(translatedText);
+  const showTranslationReplacement = showTranslationMask;
   const replacementStyle = useMemo(
     () =>
       buildReplacementTextStyle({
-        height: regionSize.height,
         segmentType: segment.segment_type,
-        text: translatedText ?? '',
-        width: regionSize.width
+        preferredFontSize: replacementFontSize,
       }),
-    [regionSize.height, regionSize.width, segment.segment_type, translatedText]
+    [segment.segment_type, replacementFontSize]
   );
   const listItemRegions = useMemo(
     () => parseListItemRegions(segment.mineru_metadata?.list_item_regions),
     [segment.mineru_metadata?.list_item_regions],
   );
 
-  useEffect(() => {
-    const node = regionRef.current;
-    if (!showTranslationMask || !node || typeof ResizeObserver === 'undefined') {
-      return;
-    }
-
-    const updateSize = () => {
-      const rect = node.getBoundingClientRect();
-      setRegionSize((current) => {
-        const next = {
-          height: Math.round(rect.height),
-          width: Math.round(rect.width)
-        };
-        return current.height === next.height && current.width === next.width ? current : next;
-      });
-    };
-
-    updateSize();
-    const observer = new ResizeObserver(updateSize);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [showTranslationMask]);
 
   useEffect(() => {
     if (!active) {
@@ -180,7 +158,6 @@ function SegmentRegionImpl({
 
   return (
     <div
-      ref={regionRef}
       className={cn(
         'absolute rounded-[2px] text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50',
         'pointer-events-none',
@@ -220,24 +197,20 @@ function SegmentRegionImpl({
       {showTranslationMask ? (
         <div
           className={cn(
-            'absolute -inset-[2px] z-[1] flex overflow-hidden bg-white text-foreground transition-opacity duration-100',
-            active && 'opacity-0'
+            'absolute inset-0 z-[1] flex overflow-hidden bg-white text-foreground'
           )}
         >
           {showTranslationReplacement ? (
-            <div
-              className="translation-replacement-preview min-w-0 flex-1 overflow-hidden px-px py-0"
-              style={replacementStyle}
-            >
+            <FittedTranslation fontSize={Number(replacementStyle.fontSize)} missing={!translatedText}>
               <SourceSnapshotPreview
                 allowScroll={false}
                 flush
-                markdown={translatedText ?? ''}
+                markdown={translatedText || '缺少翻译'}
                 segmentType={segment.segment_type}
                 sourceEntryId={sourceEntryId}
                 workspaceRoot={workspaceRoot}
               />
-            </div>
+            </FittedTranslation>
           ) : null}
         </div>
       ) : null}
@@ -289,7 +262,7 @@ function SegmentRegionImpl({
       ) : null}
 
 
-      {active && previewPosition ? (
+      {!interactionSuppressed && active && previewPosition ? (
         <SegmentPreview
           isContinuation={isContinuation}
           listItemRegions={listItemRegions}
@@ -353,10 +326,8 @@ function listItemHighlightStyle(
 }
 
 type ReplacementTextStyleInput = {
-  height: number;
+  preferredFontSize?: number;
   segmentType: SourceSegment['segment_type'];
-  text: string;
-  width: number;
 };
 
 function segmentIndicatorClassName(
@@ -386,58 +357,22 @@ function segmentIndicatorClassName(
 }
 
 function buildReplacementTextStyle({
-  height,
+  preferredFontSize,
   segmentType,
-  text,
-  width
 }: ReplacementTextStyleInput): CSSProperties {
   const isHeading = segmentType === 'heading';
-  const isTable = segmentType === 'table';
-  const measuredText = plainTextForMeasurement(text);
-  const availableWidth = Math.max(REPLACEMENT_MIN_WIDTH, width - 2);
-  const availableHeight = Math.max(REPLACEMENT_MIN_HEIGHT, height);
-
-  if (width <= 0 || height <= 0) {
-    return {
-      fontSize: isHeading ? 18 : 12,
-      fontWeight: isHeading ? 700 : 400,
-      lineHeight: isHeading ? '20px' : '14px'
-    };
-  }
-
-  const minSize = Math.max(6, Math.min(isHeading ? 11 : 8, Math.floor(availableHeight * 0.8)));
-  const preferredMaxSize = isHeading ? 30 : isTable ? 16 : 21;
-  const heightMaxSize = Math.max(minSize, Math.floor(availableHeight * (isHeading ? 0.78 : 0.72)));
-  const maxSize = Math.max(minSize, Math.min(preferredMaxSize, heightMaxSize));
-  const lineUnits = measurePreviewLineUnits(measuredText);
-
-  for (let fontSize = maxSize; fontSize >= minSize; fontSize -= 1) {
-    const lineHeight = replacementLineHeight(fontSize, isHeading);
-    const estimatedHeight = estimateTextHeight(
-      lineUnits,
-      availableWidth,
-      fontSize,
-      lineHeight
-    );
-
-    if (estimatedHeight <= availableHeight) {
-      return {
-        fontSize,
-        fontWeight: isHeading ? 700 : 400,
-        lineHeight: `${lineHeight}px`
-      };
-    }
-  }
-
+  // Keep peer paragraphs at the same reading size. Overflow is scrollable;
+  // fitting each block by shrinking its text made adjacent paragraphs inconsistent.
+  const fontSize = preferredFontSize ? preferredFontSize * (isHeading ? 1.35 : 1) : isHeading ? 18 : 12;
   return {
-    fontSize: minSize,
+    fontSize,
     fontWeight: isHeading ? 700 : 400,
-    lineHeight: `${replacementLineHeight(minSize, isHeading)}px`
+    lineHeight: `${replacementLineHeight(fontSize, isHeading)}px`
   };
 }
 
 function replacementLineHeight(fontSize: number, isHeading: boolean) {
-  return Math.max(fontSize + 1, Math.ceil(fontSize * (isHeading ? 1.08 : 1.12)));
+  return Math.max(fontSize + 2, Math.ceil(fontSize * (isHeading ? 1.15 : 1.35)));
 }
 
 function plainTextForMeasurement(text: string) {
@@ -468,7 +403,7 @@ function plainTextForMeasurement(text: string) {
 }
 
 function shouldMaskInTranslationMode(segment: SourceSegment) {
-  return segment.segment_type !== 'figure' && segment.segment_type !== 'math';
+  return !preservesOriginalContent(segment.segment_type);
 }
 
 function SegmentPreview({
@@ -576,9 +511,16 @@ function SegmentPreview({
       anchor={{ x: position.x, top: position.segmentTop, bottom: position.segmentBottom }}
       width={previewLayout.width}
       maxHeight={previewLayout.maxHeight}
-      interactive={isScrollableList}
-      onPointerEnter={isScrollableList ? onPointerEnter : undefined}
-      onPointerLeave={isScrollableList ? onPointerLeave : undefined}
+      interactive
+      className="pdf-segment-preview font-sans"
+      role="region"
+      aria-label="片段悬停预览"
+      tabIndex={0}
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
+      onPointerDown={event => event.stopPropagation()}
+      onClick={event => event.stopPropagation()}
+      onKeyDown={event => { if (event.key !== 'Escape') event.stopPropagation(); }}
     >
       <div className="mb-1 flex items-center gap-2 px-2 pt-2">
         <Badge variant="secondary">
@@ -751,18 +693,14 @@ export function buildPreviewLayout({
   const maxWidth = Math.max(0, viewportWidth - PREVIEW_MARGIN * 2);
   const availableHeight = Math.max(0, viewportHeight - PREVIEW_MARGIN * 2);
   const maxHeight = availableHeight * previewCardHeightScale(size);
-  const hasTable = hasTableLikeContent(text);
   const cardScale = previewCardWidthScale(size);
   const fontScale = previewFontScale(fontSize);
 
   const candidates = (preferScrollable
-    ? [{ columns: 1, fontSize: 12, lineHeight: 20, width: 480 }]
+    ? [{ columns: 1, fontSize: 13, lineHeight: 21, width: 480 }]
     : [
-    { columns: 1, fontSize: 12, lineHeight: 20, width: 500 },
-    { columns: 1, fontSize: 12, lineHeight: 20, width: 640 },
-    { columns: hasTable ? 1 : 2, fontSize: 11, lineHeight: 18, width: 820 },
-    { columns: hasTable ? 1 : 3, fontSize: 10, lineHeight: 16, width: 1040 },
-    { columns: hasTable ? 1 : 4, fontSize: 9, lineHeight: 15, width: 1180 }
+    { columns: 1, fontSize: 13, lineHeight: 21, width: 500 },
+    { columns: 1, fontSize: 13, lineHeight: 21, width: 640 }
   ])
     .map((candidate) => ({
       ...candidate,

@@ -241,6 +241,7 @@ export function SegmentRail({
             flashSegmentUid={flashSegmentUid}
             item={item}
             key={markerKey}
+            open={hoveredMarkerKey === markerKey}
             pointerY={pointerY}
             railHeight={railHeight}
             railWidth={railWidth}

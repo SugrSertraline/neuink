@@ -20,6 +20,21 @@ const reflowA: WorkspaceSurface = { kind: 'reflow', entryId: 'a' };
 const noteA: WorkspaceSurface = { kind: 'note', entryId: 'a', noteId: 'n1' };
 const pdfB: WorkspaceSurface = { kind: 'pdf', entryId: 'b' };
 
+it('opens a reply as a separate reusable read-only tab, movable between panes and released on close', () => {
+  const reply: WorkspaceSurface = { kind: 'assistant-reply', message: { message_id: 'answer', role: 'assistant', content: '回答', source_links: [], created_at: '' } };
+  const initial = layout({ focusedPane: 'right' });
+  const opened = workspaceSurfaceReducer(initial, { type: 'open', surface: reply });
+  expect(opened.rightTabs).toContain(noteA);
+  expect(opened.rightTabs).toContain(reply);
+  expect(workspaceSurfaceReducer(opened, { type: 'open', surface: reply }).rightTabs).toHaveLength(opened.rightTabs.length);
+  const moved = workspaceSurfaceReducer(opened, { type: 'move', key: surfaceKey(reply), pane: 'left' });
+  expect(moved.left).toBe(reply);
+  expect(surfaceNoteTarget(reply)).toBeNull();
+  expect(workspaceSurfaceLabel(reply, [])).toBe('完整回复');
+  const closed = workspaceSurfaceReducer(moved, { type: 'close', pane: 'left', key: surfaceKey(reply) });
+  expect([...closed.leftTabs, ...closed.rightTabs]).not.toContain(reply);
+});
+
 it('opens review separately from the editable note while retaining its context and stable tab identity', () => {
   const review: WorkspaceSurface = { kind: 'note-review', entryId: 'a', noteId: 'n1', proposalId: 'p', label: 'Reading note' };
   const opened = workspaceSurfaceReducer(layout(), { type: 'open', surface: review });
@@ -44,6 +59,24 @@ function layout(overrides: Partial<WorkspaceSurfaceLayout> = {}): WorkspaceSurfa
 }
 
 describe('workspaceSurfaceReducer', () => {
+  it('duplicates a view without duplicating its document and closes only that view', () => {
+    const copied = workspaceSurfaceReducer(layout(), { type: 'duplicate', key: 'pdf:a', pane: 'right', viewId: 'copy-1' });
+    expect(copied.left).toEqual(pdfA);
+    expect(copied.right).toMatchObject({ kind: 'pdf', entryId: 'a', viewId: 'copy-1' });
+    expect(surfaceKey(copied.right!)).toBe('pdf:a:view:copy-1');
+    const switched = workspaceSurfaceReducer(copied, { type: 'switchEntryView', pane: 'right', key: surfaceKey(copied.right!), view: 'reflow' });
+    expect(switched.right).toMatchObject({ kind: 'reflow', entryId: 'a', viewId: 'copy-1' });
+    expect(switched.left).toEqual(pdfA);
+    const closed = workspaceSurfaceReducer(copied, { type: 'close', pane: 'right', key: surfaceKey(copied.right!) });
+    expect(closed.leftTabs).toContain(pdfA);
+    expect(closed.rightTabs.some(tab => tab.viewId === 'copy-1')).toBe(false);
+  });
+  it('keeps note ownership identical across copied views and does not copy settings', () => {
+    const copied = workspaceSurfaceReducer(layout(), { type: 'duplicate', key: surfaceKey(noteA), pane: 'left', viewId: 'note-copy' });
+    expect(surfaceNoteTarget(copied.left)).toEqual(surfaceNoteTarget(noteA));
+    const state = layout({ left: { kind: 'settings' }, leftTabs: [{ kind: 'settings' }] });
+    expect(workspaceSurfaceReducer(state, { type: 'duplicate', key: 'settings', pane: 'right', viewId: 'copy' })).toBe(state);
+  });
   it('applies the PDF preference only to default entry opening, with an overview fallback', () => {
     const withPdf = { pdfFileName: 'paper.pdf' };
     expect(defaultEntryContentId(withPdf, true)).toBe('pdf');
@@ -164,8 +197,41 @@ describe('workspaceSurfaceReducer', () => {
       left: library,
       leftTabs: [library],
       right: null,
-      rightTabs: []
+      rightTabs: [],
+      pinnedTabKeys: []
     });
+  });
+
+  it('pins tabs before unpinned tabs, constrains drag order, and unpins into the ordinary group', () => {
+    const pinned = workspaceSurfaceReducer(layout(), { type: 'setPinned', key: surfaceKey(reflowA), pinned: true });
+    expect(pinned.leftTabs).toEqual([reflowA, library, pdfA]);
+    expect(pinned.pinnedTabKeys).toEqual([surfaceKey(reflowA)]);
+    const dragged = workspaceSurfaceReducer(pinned, { type: 'move', key: surfaceKey(pdfA), pane: 'left', targetIndex: 0 });
+    expect(dragged.leftTabs[0]).toBe(reflowA);
+    const unpinned = workspaceSurfaceReducer(dragged, { type: 'setPinned', key: surfaceKey(reflowA), pinned: false });
+    expect(unpinned.pinnedTabKeys).toEqual([]);
+    expect(unpinned.leftTabs).toEqual([reflowA, pdfA, library]);
+  });
+
+  it('keeps pinned tabs and the library when closing other tabs, then clears closed pins', () => {
+    const pinned = workspaceSurfaceReducer(layout({ leftTabs: [library, pdfA, reflowA, pdfB], right: noteA, rightTabs: [noteA] }), { type: 'setPinned', key: surfaceKey(reflowA), pinned: true });
+    const closed = workspaceSurfaceReducer(pinned, { type: 'closeOthers', pane: 'left', key: surfaceKey(pdfA) });
+    expect(closed.leftTabs).toEqual([reflowA, library, pdfA]);
+    const removed = workspaceSurfaceReducer(closed, { type: 'close', pane: 'left', key: surfaceKey(reflowA) });
+    expect(removed.pinnedTabKeys).toEqual([]);
+  });
+
+  it('switches a reading tab in place and transfers its pin without duplicating an existing view', () => {
+    const initial = layout({ leftTabs: [library, pdfA], right: noteA, rightTabs: [noteA] });
+    const pinned = workspaceSurfaceReducer(initial, { type: 'setPinned', key: surfaceKey(pdfA), pinned: true });
+    const switched = workspaceSurfaceReducer(pinned, { type: 'switchEntryView', pane: 'left', key: surfaceKey(pdfA), view: 'reflow' });
+    expect(switched.leftTabs).toEqual([reflowA, library]);
+    expect(switched.left).toEqual(reflowA);
+    expect(switched.pinnedTabKeys).toEqual([surfaceKey(reflowA)]);
+    const existing = workspaceSurfaceReducer(layout(), { type: 'switchEntryView', pane: 'left', key: surfaceKey(pdfA), view: 'reflow' });
+    expect(existing.leftTabs).toEqual([library, pdfA, reflowA]);
+    expect(existing.left).toEqual(reflowA);
+    expect(existing.leftTabs.filter((tab) => surfaceKey(tab) === surfaceKey(reflowA))).toHaveLength(1);
   });
 
   it('reorders a tab without changing the active surface', () => {

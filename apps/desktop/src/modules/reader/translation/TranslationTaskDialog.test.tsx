@@ -31,6 +31,53 @@ beforeAll(() => {
 afterEach(cleanup);
 
 describe('TranslationTaskDialog', () => {
+  it('offers pause/cancel and keeps stopping feedback above progress updates', () => {
+    const onPause = vi.fn();
+    const onCancel = vi.fn();
+    const props = { open: true, busy: true, segments: [segment], translation: null, onOpenChange: vi.fn(), onTranslate: vi.fn(), onPause, onCancel };
+    const view = render(<TranslationTaskDialog {...props} />);
+    fireEvent.click(view.getByRole('button', { name: '暂停翻译' }));
+    fireEvent.click(view.getByRole('button', { name: '取消翻译' }));
+    expect(onPause).toHaveBeenCalledOnce();
+    expect(onCancel).toHaveBeenCalledOnce();
+    view.rerender(<TranslationTaskDialog {...props} stopPending="cancel" message="正在翻译 · 已接收 123 字" />);
+    expect(view.getByRole('button', { name: '暂停翻译' })).toHaveProperty('disabled', true);
+    expect(view.getByRole('button', { name: '取消翻译' })).toHaveProperty('disabled', true);
+    expect(view.getByText(/正在取消翻译/)).toBeTruthy();
+    expect(view.queryByText(/已接收 123/)).toBeNull();
+  });
+
+  it.each(['paused', 'canceled'] as const)('allows a new selection when %s has no saved task', (status) => {
+    const translation = { ...translationWithSkippedSegment(segment), status, segments: [] };
+    const view = render(<TranslationTaskDialog open segments={[segment]} translation={translation} onOpenChange={vi.fn()} onTranslate={vi.fn()} />);
+    expect(view.getByText(status === 'paused' ? /已暂停：/ : /已取消：/)).toBeTruthy();
+    fireEvent.click(view.getByRole('checkbox', { name: '选择第 1 页 段落' }));
+    expect(view.getByRole('button', { name: '翻译选中（1）' })).toHaveProperty('disabled', false);
+    expect(view.queryByRole('button', { name: '取消翻译' })).toBeNull();
+  });
+  it('keeps the paused selection locked and offers resume/cancel; cancellation clears task selection', () => {
+    const onResume = vi.fn();
+    const onCancel = vi.fn();
+    const props = { open: true, segments: [segment], onOpenChange: vi.fn(), onTranslate: vi.fn(), onResume, onCancel };
+    const saved: EntryTranslation = { ...translationWithSkippedSegment(segment), status: 'paused', segments: [],
+      task: { job_id: 'j1', profile_id: 'm1', force: true, source_hashes: { [segment.uid]: 'hash' }, remaining_segment_uids: [segment.uid], created_at: '' } };
+    const view = render(<TranslationTaskDialog {...props} translation={saved} />);
+    expect(view.getByRole('checkbox', { name: '选择第 1 页 段落' })).toHaveProperty('disabled', true);
+    expect(view.getByRole('button', { name: '翻译选中（1）' })).toHaveProperty('disabled', true);
+    fireEvent.click(view.getByRole('button', { name: '继续翻译' }));
+    expect(onResume).toHaveBeenCalledOnce();
+    view.rerender(<TranslationTaskDialog {...props} translation={saved} stopPending="resume" />);
+    expect(view.getByRole('button', { name: '继续翻译' })).toHaveProperty('disabled', true);
+    expect(view.getByRole('button', { name: '取消翻译' })).toHaveProperty('disabled', true);
+    view.rerender(<TranslationTaskDialog {...props} translation={saved} />);
+    fireEvent.click(view.getByRole('button', { name: '取消翻译' }));
+    expect(onCancel).toHaveBeenCalledOnce();
+    view.rerender(<TranslationTaskDialog {...props} translation={{ ...saved, status: 'canceled', task: null }} />);
+    expect(view.queryByRole('button', { name: '继续翻译' })).toBeNull();
+    expect(view.queryByRole('button', { name: '取消翻译' })).toBeNull();
+    expect(view.getByRole('button', { name: '翻译选中（0）' })).toBeTruthy();
+    expect(view.getByRole('checkbox', { name: '选择第 1 页 段落' })).toHaveProperty('disabled', false);
+  });
   it('renders source previews above the dialog layer', async () => {
     const { getByRole } = render(
       <TranslationTaskDialog
@@ -186,6 +233,27 @@ describe('TranslationTaskDialog', () => {
 
     expect(queryByText(rawError)).toBeNull();
     expect(getByText('翻译失败，可重试')).toBeTruthy();
+  });
+
+  it('retries all failed blocks without selecting them or retranslating successful blocks', () => {
+    const second = sourceSegment('failed-2', 'table', 'Table source');
+    const successful = sourceSegment('translated-1', 'heading', 'Heading source');
+    const failed = translationWithSkippedSegment(segment).segments[0];
+    const translation: EntryTranslation = {
+      ...translationWithSkippedSegment(segment),
+      progress: { failed: 2, skipped: 0, total: 3, translated: 1 },
+      segments: [
+        { ...failed, status: 'failed', error: 'bad JSON' },
+        { ...failed, segment_uid: second.uid, segment_type: second.segment_type, source_text: second.text, status: 'failed', error: 'empty response' },
+        { ...failed, segment_uid: successful.uid, segment_type: successful.segment_type, source_text: successful.text, status: 'translated', translated_text: '标题', error: null }
+      ]
+    };
+    const onTranslate = vi.fn().mockResolvedValue(undefined);
+    const view = render(<TranslationTaskDialog open segments={[segment, second, successful]} translation={translation}
+      onOpenChange={vi.fn()} onTranslate={onTranslate} />);
+
+    fireEvent.click(view.getByRole('button', { name: '重试失败项（2）' }));
+    expect(onTranslate).toHaveBeenCalledWith([segment, second], 'retry');
   });
 });
 

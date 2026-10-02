@@ -514,11 +514,17 @@ impl Workspace {
         Ok(segments)
     }
 
-    pub(crate) fn resolve_source_segment(
+    pub fn resolve_source_segment(
         &self,
         entry_id: &EntryId,
         segment_uid: &SegmentUid,
     ) -> Result<SourceSegment, WorkspaceError> {
+        if segment_uid
+            .as_str()
+            .starts_with(crate::pdf_text::PDF_TEXT_PREFIX)
+        {
+            return self.resolve_pdf_text_segment(entry_id, segment_uid);
+        }
         self.read_segments(entry_id)?
             .into_iter()
             .find(|segment| {
@@ -726,8 +732,11 @@ impl Workspace {
         validate_segment_note_text(&text)?;
         let segment_uid = self.resolve_source_segment(entry_id, &segment_uid)?.uid;
         let mut notes = self.read_segment_notes(entry_id)?;
-        let current = notes.iter().find(|note| note.segment_uid == segment_uid)
-            .map(|note| note.text.as_str()).unwrap_or_default();
+        let current = notes
+            .iter()
+            .find(|note| note.segment_uid == segment_uid)
+            .map(|note| note.text.as_str())
+            .unwrap_or_default();
         if expected_text.is_some_and(|expected| expected != current) {
             return Err(WorkspaceError::SegmentNoteConflict(current.to_string()));
         }
@@ -1834,6 +1843,8 @@ pub(crate) struct WorkspaceFile {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct EntryTranslation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<TranslationTaskSnapshot>,
     pub schema_version: u16,
     pub entry_id: EntryId,
     pub source_language: String,
@@ -1848,6 +1859,17 @@ pub struct EntryTranslation {
     pub updated_at: chrono::DateTime<Utc>,
 }
 
+/// Durable task intent, never credentials. Removing this ends the task, not its output.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct TranslationTaskSnapshot {
+    pub job_id: String,
+    pub profile_id: String,
+    pub force: bool,
+    pub source_hashes: std::collections::HashMap<SegmentUid, String>,
+    pub remaining_segment_uids: Vec<SegmentUid>,
+    pub created_at: chrono::DateTime<Utc>,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TranslationStatus {
@@ -1856,6 +1878,8 @@ pub enum TranslationStatus {
     Succeeded,
     Failed,
     Partial,
+    Paused,
+    Canceled,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

@@ -416,8 +416,8 @@ mod tests {
 
         let mut google = profile("google-profile");
         google.api_protocol = LlmApiProtocol::Google;
-        let parsed: LlmProfile = serde_json::from_str(&serde_json::to_string(&google).unwrap())
-            .unwrap();
+        let parsed: LlmProfile =
+            serde_json::from_str(&serde_json::to_string(&google).unwrap()).unwrap();
         assert_eq!(parsed.api_protocol, LlmApiProtocol::Google);
     }
 

@@ -220,6 +220,8 @@ pub struct QueuePdfParseRequest {
     pub root: PathBuf,
     pub entry_id: EntryId,
     pub pdf_path: PathBuf,
+    #[serde(default)]
+    pub enqueue: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -907,13 +909,7 @@ pub async fn import_and_parse_pdf(
         .clear_mineru_outputs(&request.entry_id)
         .map_err(|error| error.to_string())?;
     set_parse_state(&workspace, &request.entry_id, PdfParseStatus::Queued, None)?;
-    submit_pdf_parse_task(
-        &workspace,
-        &request.entry_id,
-        request.endpoint,
-        request.api_key,
-    )
-    .await
+    queued_parse_response(&workspace, &request.entry_id)
 }
 
 #[tauri::command]
@@ -929,7 +925,15 @@ pub fn queue_pdf_parse(request: QueuePdfParseRequest) -> Result<EntryMeta, Strin
     workspace
         .clear_mineru_outputs(&request.entry_id)
         .map_err(|error| error.to_string())?;
-    set_parse_state(&workspace, &request.entry_id, PdfParseStatus::Queued, None)
+    if request.enqueue {
+        workspace
+            .enqueue_pdf_parse(&request.entry_id)
+            .map_err(|error| error.to_string())
+    } else {
+        workspace
+            .read_entry(&request.entry_id)
+            .map_err(|error| error.to_string())
+    }
 }
 
 #[tauri::command]
@@ -1059,13 +1063,7 @@ pub async fn submit_queued_pdf_parse(
 
     let workspace =
         neuink_workspace::Workspace::open(request.root).map_err(|error| error.to_string())?;
-    submit_pdf_parse_task(
-        &workspace,
-        &request.entry_id,
-        request.endpoint,
-        request.api_key,
-    )
-    .await
+    queued_parse_response(&workspace, &request.entry_id)
 }
 
 #[tauri::command]
@@ -1084,34 +1082,43 @@ pub async fn retry_pdf_parse(
     let Some(pdf) = entry.pdf else {
         return Err("entry has no PDF to parse".to_string());
     };
-    if !matches!(pdf.parse.status, PdfParseStatus::Failed | PdfParseStatus::Succeeded) {
+    if !matches!(
+        pdf.parse.status,
+        PdfParseStatus::Failed | PdfParseStatus::Succeeded | PdfParseStatus::Canceled
+    ) {
         return Err("只有解析失败或已完成的 PDF 可以重新解析".to_string());
     }
 
-    workspace
-        .clear_segments(&request.entry_id)
-        .map_err(|error| error.to_string())?;
-    workspace
-        .clear_mineru_outputs(&request.entry_id)
-        .map_err(|error| error.to_string())?;
-    set_parse_state(&workspace, &request.entry_id, PdfParseStatus::Queued, None)?;
-    submit_pdf_parse_task(
-        &workspace,
-        &request.entry_id,
-        request.endpoint,
-        request.api_key,
-    )
-    .await
+    queued_parse_response(&workspace, &request.entry_id)
 }
 
-async fn submit_pdf_parse_task(
+fn queued_parse_response(
+    workspace: &neuink_workspace::Workspace,
+    entry_id: &EntryId,
+) -> Result<ImportAndParsePdfResponse, String> {
+    let entry = workspace
+        .enqueue_pdf_parse(entry_id)
+        .map_err(|error| error.to_string())?;
+    Ok(ImportAndParsePdfResponse {
+        task_id: entry.pdf.as_ref().and_then(|pdf| pdf.parse.task_id.clone()),
+        entry,
+        segment_count: 0,
+    })
+}
+
+pub(super) async fn submit_pdf_parse_task(
     workspace: &neuink_workspace::Workspace,
     entry_id: &EntryId,
     endpoint: String,
     api_key: Option<String>,
 ) -> Result<ImportAndParsePdfResponse, String> {
-    set_parse_state(workspace, entry_id, PdfParseStatus::Uploading, None)?;
-    set_parse_state(workspace, entry_id, PdfParseStatus::Uploaded, None)?;
+    // The scheduler has atomically claimed Queued -> Uploading before reaching here.
+    workspace
+        .clear_segments(entry_id)
+        .map_err(|error| error.to_string())?;
+    workspace
+        .clear_mineru_outputs(entry_id)
+        .map_err(|error| error.to_string())?;
     let pdf_path = workspace
         .entry_pdf_path(entry_id)
         .map_err(|error| error.to_string())?;

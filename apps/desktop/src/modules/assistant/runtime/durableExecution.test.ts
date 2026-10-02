@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunBudget } from '../agent-core';
 import { DurableExecution, canReplayAssistantTool } from './durableExecution';
+import { RESEARCH_READ_TOOLS } from '@/shared/ipc/researchApi';
+import { PLANNING_READ_TOOLS } from './executionPolicy';
 import { saveAgentExecution, type AgentExecutionRecord } from '@/shared/ipc/agentExecutionApi';
 vi.mock('@/shared/ipc/agentExecutionApi', () => ({ saveAgentExecution: vi.fn() }));
 beforeEach(() => vi.clearAllMocks());
@@ -30,7 +32,12 @@ describe('execution persistence', () => {
   it('does not treat external tools or writes as safe replay operations', () => {
     expect(canReplayAssistantTool('mcp_service_write')).toBe(false);
     expect(canReplayAssistantTool('create_entry')).toBe(false);
+    expect(canReplayAssistantTool('import_papers')).toBe(false);
+    expect(canReplayAssistantTool('mcp_read_webpage')).toBe(false);
+    for (const name of RESEARCH_READ_TOOLS) expect(canReplayAssistantTool(name)).toBe(true);
+    for (const name of PLANNING_READ_TOOLS) expect(canReplayAssistantTool(name)).toBe(true);
     expect(canReplayAssistantTool('read_segment_content')).toBe(true);
+    expect(canReplayAssistantTool('present_diagram')).toBe(true);
     expect(canReplayAssistantTool('ask_user')).toBe(true); // Re-ask, never infer consent after restart.
   });
   it.each([

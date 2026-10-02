@@ -21,6 +21,8 @@ export function WorkspaceSurfaceDeck({ layout, onFocus, renderSurface }: {
       style={{ gridColumn: pane === 'left' ? 1 : 3, gridRow: 1 }}
       data-workspace-drop-pane={active ? pane : undefined}
       data-workspace-surface-kind={surface.kind}
+      data-workspace-surface-key={surfaceKey(surface)}
+      data-workspace-surface-active={active}
       data-workspace-tab-count={pane === 'left' ? layout.leftTabs.length : layout.rightTabs.length}
       onPointerDown={() => onFocus(pane)}>
       {renderSurface(active ? activeSurface! : surface, layout[pane === 'left' ? 'right' : 'left'], pane, active)}

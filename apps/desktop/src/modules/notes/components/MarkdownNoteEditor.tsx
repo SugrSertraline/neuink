@@ -303,6 +303,7 @@ export function MarkdownNoteEditor({
 
   const {
     acceptRemoteConflict,
+    runInsertionOnce,
     canEdit,
     cancelTitleEdit,
     changeVersion,
@@ -363,6 +364,7 @@ export function MarkdownNoteEditor({
     sourcePanelOpen,
     visibleSourceLinks
   } = useMarkdownSourceLinks({
+    runInsertionOnce,
     canEdit,
     changeVersion,
     editor,
@@ -523,15 +525,16 @@ export function MarkdownNoteEditor({
       return;
     }
 
-    insertNoteImageIntoEditor(editor, noteImageToInsert.markdownPath, noteImageToInsert.alt);
+    const inserted = runInsertionOnce(`image:${noteImageToInsert.id}`, () => insertNoteImageIntoEditor(editor, noteImageToInsert.markdownPath, noteImageToInsert.alt));
     handledNoteImageId.current = noteImageToInsert.id;
+    if (!inserted) return;
     notify({
       tone: 'success',
       title: '片段图片已插入',
       description: noteImageToInsert.markdownPath
     });
     onNoteImageInsertedRef.current?.(noteImageToInsert.id);
-  }, [canEdit, editor, loadFailed, loading, noteImageToInsert, notify]);
+  }, [canEdit, editor, loadFailed, loading, noteImageToInsert, notify, runInsertionOnce]);
 
   const saveFromFocusedEditor = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
@@ -563,6 +566,7 @@ export function MarkdownNoteEditor({
   return (
     <NoteSourcesProvider root={workspaceRoot} links={noteLinks}>
     <div
+      data-guide-note-save-state={loading ? 'loading' : error ? 'error' : saving ? 'saving' : dirty ? 'dirty' : canEdit ? 'saved' : 'read-only'}
       className={cn(
         'markdown-note-editor grid h-full w-full min-h-0 min-w-0 max-w-full grid-cols-1 grid-rows-[minmax(0,1fr)]',
         editorScopeKey && 'markdown-note-editor-embedded'

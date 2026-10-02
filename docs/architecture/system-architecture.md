@@ -52,7 +52,6 @@ React / TypeScript
   agent-runtime/
     settings.json
     runs/
-  agent-skills/               # 旧版本遗留用户文件，当前不会读取或执行
   .neuink-cache/
 ```
 
@@ -181,11 +180,17 @@ RelationCanvas 使用共享 PointerPreview 和 Popover 展示悬停与节点详�
 
 `MemorySearchIndex` 提供关键词索引。`PersistentSemanticSearchIndex` 使用本地 Embedding 生成并保存 JSON 向量记录；Hybrid 通过 RRF 合并关键词与语义结果。
 
-搜索缓存按 Workspace 和记录指纹失效。只有解析成功的 PDF Segment 进入 PDF grounding；Entry、Tag、Field 和 Note 不受 PDF 解析状态限制。
+搜索缓存按 Workspace 和记录指纹失效。解析成功的 PDF Segment 进入索引检索；Entry、Tag、Field 和 Note 不受 PDF 解析状态限制。未解析 PDF 可通过 Assistant 的基础文字层工具按页读取和字面搜索，不进入 Segment 索引，也不把条目标记为已解析。
 
 默认 Embedding 模型资源从 Tauri resource 的 `embedding-models/default/` 加载，不在运行时静默下载。模型缺失时语义能力不可用。
 
 ## 7. Assistant
+
+未解析 PDF 的降级读取复用 PDF.js：`read_pdf_pages` 每次至多 5 页，`search_pdf_text` 每次扫描至多 20 页；`read_entry_assistant_context` 在没有解析片段但存在 PDF 时自动读取前 3 页以内，并返回续读位置、空白／扫描页与截断提示。只在模型实际调用工具时提取，不自动 OCR、上传解析或扫描全库。工具受现有冻结范围、权限、预算、取消与恢复规则约束。
+
+Rust 仅通过验证后的 EntryId 读取本地 PDF、校验 BLAKE3 文件版本并原子保存可重建文字缓存；前端独占 PDF Worker 逐页提取、清理页面并在完成／异常／取消时销毁 Worker。同一 WebView 串行提取，限制 30 秒、64 MiB、2,000 页、每页 20,000 字符及每条目 8 MiB 缓存。缓存不包含 API Key，不修改 Segment、解析状态或业务更新时间。
+
+基础文字证据使用 `pdf-text-v1:<文件 hash>:<零基物理页码>`，只有已保存、非空且版本一致的文字页能生成来源。Note Apply 复用既有确认、正文引用位置、Source Link 快照和事务；来源打开沿用阅读器物理页回退，不伪造 bbox。文件变化后拒绝旧证据写入，既有笔记保留快照并报告内容变化；缓存清理不影响既有笔记的快照与页码导航。图表、公式、双栏顺序和扫描文字不保证可读，必须提示完整解析／OCR 的边界。
 
 当前链路：
 
@@ -214,11 +219,25 @@ RelationCanvas 使用共享 PointerPreview 和 Popover 展示悬停与节点详�
 
 模块的就近边界说明见 `apps/desktop/src/modules/assistant/README.md`。
 
+模型规格目录由 `assistant/sdk/modelCatalog` 归一化 models.dev / OpenRouter 公共数据，`modelCatalogStore` 管理固定匿名请求、24 小时本机缓存与有界失败回退；只在配置编辑／显式接口列表同步时读取，不进入逐轮推理链路。精确匹配当前 endpoint 和模型 ID，逐字段保留服务商实际限制；目录不授权工具、配置协议或证明模型可调用。模型编辑器将公开参考与当前填写值分开展示，仅明确选择才回填，保存仍走既有 LlmProfile IPC。凭据不发送到公开目录；内置预设、公共目录和已保存的连接是三个独立层次。未捆绑上游全量快照，首次离线只能使用内置预设或手动填写，缓存建立后可离线检索。
+
+`settings/providerCatalog` 将公开目录提供商与内置连接预设去重合并；只有明确地址和支持的 SDK 协议才允许自动填充，不加载远程 npm 包，不将目录视作调用授权。`catalogSearch` 只做本地候选排序，与规格精确匹配分开。选择提供商修改当前连接草稿，不切换编辑身份，跨地址清除旧密钥；模型 ID 输入与候选选择共用单一字段，真实保存仍由 SettingsPanel 发起。
+
+缺少连接资料的提供商仍可选择：ModelProfileEditor 持有所选目录 ID 和待确认协议状态，先展示其模型；已校验的地址可回填，协议不可猜测。用户明确选择当前宿主支持的接口类型前，不同步、不保存。专有协议需要用户提供兼容接口，并不因目录存在而自动获得新适配器。该选择状态属于编辑会话，关闭后清理；模型列表始终跟随所选提供商／当前接口，无第二个范围选择状态，保留手填 ID。
+
+`useModelAutoSync` 由打开的模型编辑器持有，地址／协议／密钥变化防抖 800ms 后请求接口模型列表；远端等待密钥、本地回环可空。请求取消与 20 秒期限归该 hook，关闭或输入变更即取消；SettingsPanel 只提交未取消结果到候选缓存，不覆盖当前模型／参数或保存连接。同步状态就地显示，失败才允许显式重试，不自动重试或记录凭据；公开目录更新保持独立。手动更改地址也清空旧密钥，避免自动请求把原凭据送往新服务。
+
 持久化执行由 `durableHarness -> durableExecution -> shared/ipc/agentExecutionApi -> neuink-workspace::agent_execution` 承担。检查点先于工具副作用保存，包含主/子 actor 消息、待执行调用、读取快照、来源账本、待审核提案和请求预算。Rust 使用原子写、CAS 与进程间文件锁拒绝陈旧写入；对话删除后不允许继续保存其任务。恢复为用户显式操作：已完成工具不重放，未完成只读工具可重试，结果不明的写操作或 MCP 必须先核对。Conversation 完成交付后确认执行终态，交付确认失败不清空已有结果。
 
 模型调用前的上下文压缩仅改变请求投影，完整记录和特殊溯源保持不变；任务理解、主/子循环、摘要与结束记忆共用请求预算。TS 循环仍位于 WebView，Rust 不复制推理循环，重启后可从新格式检查点恢复但不会在应用关闭后继续后台执行。
 
 ## 8. 配置和安全
+
+网页标签是独立的 `browser` WorkspaceSurface，以稳定 ID 持有地址与标题，导航不重建标签。`modules/browser` 管理 DOM 几何、可见性和释放，`shared/ipc/browserApi` 调用 Rust 的有界原生 WebView 服务；页面滚动和历史由 WebView 持有，不进入 Agent。最多保留 8 个网页，后台隐藏、关闭释放，布局变动不重新导航；浮层和拖动期间隐藏原生子视图，避免遮挡本地确认框。当前仅 Windows 实现安全隔离；其它平台失败关闭，普通浏览器预览明确提示限制。
+
+远程页先以空白地址创建，在移除 Tauri/Wry 自动注册的应用协议过滤器后才导航；隔离失败不加载远程内容。主 WebView 独占 capabilities 和业务命令，远程页无本地文件、IPC 或模型连接权限。Windows 隔离适配依赖锁定版本 Wry 0.55 的 `http://{scheme}.*` 过滤器形式，升级时必须重新核对并做原生验证。HTTP(S) 地址不允许内嵌凭据、应用协议与本机回环地址；拒绝弹窗和自动下载，论文导入继续走既有确认流程。这不是完整浏览器或网络代理隔离，未提供插件、下载管理或网页 DOM 自动附送给助手。
+
+助手的隐式阅读对象仅来自当前焦点 surface，不再从后台 sidePane 或伴随笔记推断。显式阅读选择／附带选区仍优先，发送后冻结任务上下文；不可用对象显式报错，不回退成其它论文。资料库只读范围包含未解析条目，空范围不能被解释为全库；模型提供范围之外的条目 ID 必须拒绝。标签笔记尚无直接读写工具，界面明确提示，不借用旁边论文。
 
 - Parser、LLM、Agent 和 MCP 配置通过显式设置管理；
 - 主 Agent 权限限制工具、Subagent、Workspace 读取和 Proposal；
@@ -226,6 +245,7 @@ RelationCanvas 使用共享 PointerPreview 和 Popover 展示悬停与节点详�
 - 日志和导出不得泄漏 API Key。
 
 ## 9. 架构变更原则
+
 
 - 先追踪真实调用链，再修改边界；
 - IPC 保持薄，用户数据写入集中在 Rust 服务；

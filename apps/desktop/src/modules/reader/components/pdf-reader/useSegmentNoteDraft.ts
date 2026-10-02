@@ -58,7 +58,7 @@ export function useSegmentNoteDraft({
 
   const discardNote = useCallback(() => {
     if (selectedSegment) {
-      onSharedDraftChange?.(logicalSegmentUid(selectedSegment), null);
+      onSharedDraftChange?.(logicalSegmentUid(selectedSegment), savedNoteText);
     }
     setNoteText(savedNoteText);
   }, [onSharedDraftChange, savedNoteText, selectedSegment]);

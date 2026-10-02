@@ -1,4 +1,4 @@
-import { createOwnedNote, readOwnedNote, setTagNoteDeleted } from '@/shared/ipc/noteOwnerApi';
+import { createOwnedNote, purgeTagNote, readOwnedNote, setTagNoteDeleted } from '@/shared/ipc/noteOwnerApi';
 import type { CatalogNote } from '@/shared/ipc/noteCatalogApi';
 import { noteOwnerKey } from '@/shared/lib/noteOwner';
 import type { NoteTarget } from '@/shared/types/domain';
@@ -29,5 +29,14 @@ export function useTagNoteActions(scope: string) {
     await setTagNoteDeleted(model.root, note.target.owner.tag_id, note.target.note_id, deleted, revision);
     model.refresh();
   });
-  return { ...action, writable, create, setDeleted };
+  const purge = (note: CatalogNote) => action.run(async isCurrent => {
+    if (!writable || !model?.root || note.target.owner.kind !== 'tag_reading' || !note.deleted_at || note.error) return;
+    if (hasUnsavedMarkdownNote(noteOwnerKey(note.target.owner), note.target.note_id)) {
+      throw new Error('笔记仍有未保存内容，请返回编辑器处理后重试。');
+    }
+    if (!isCurrent()) return;
+    await purgeTagNote(model.root, note.target.owner.tag_id, note.target.note_id, note.revision);
+    model.refresh();
+  });
+  return { ...action, writable, create, setDeleted, purge };
 }

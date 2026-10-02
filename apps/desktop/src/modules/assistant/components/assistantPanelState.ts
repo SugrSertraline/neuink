@@ -405,7 +405,9 @@ export function buildAssistantMessageParts({
     if (event.summary) {
       parts.push({
         id: event.id,
+        diagram: event.diagram,
         sourceLinks: event.sources,
+        researchPapers: event.researchPapers,
         summary: event.summary,
         toolName: event.toolName,
         type: 'tool-result'

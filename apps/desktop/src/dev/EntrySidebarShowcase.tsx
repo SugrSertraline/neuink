@@ -171,7 +171,7 @@ function SidebarShowcase() {
       </div>
       <div role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" aria-valuemin={220} aria-valuemax={sidebarResize.maxWidth} aria-valuenow={sidebarResize.effectiveWidth} tabIndex={0}
         className="w-1 shrink-0 cursor-col-resize touch-none bg-border focus-visible:bg-primary" onPointerDown={sidebarResize.onPointerDown} onKeyDown={sidebarResize.onKeyDown} />
-      {sidebarResize.previewWidth !== null && <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 w-px bg-primary" style={{ left: sidebarResize.previewWidth }} />}
+      <div aria-hidden="true" ref={sidebarResize.previewRef} hidden className="app-sidebar-resize-preview" style={{ left: 0 }} />
       <div className="app-editor min-w-0 flex-1" style={{ gridColumn: 'auto', gridRow: 'auto' }}><div className={`grid h-full min-h-0 ${layout.right ? 'grid-cols-2' : 'grid-cols-1'}`}>
         {(['left', 'right'] as const).map(pane => {
           const surface = layout[pane];

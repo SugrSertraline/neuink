@@ -1,4 +1,9 @@
 import { jsonSchema, tool, type JSONSchema7, type ToolSet } from 'ai';
+import { isResearchTool, runResearchTool, researchPapersFromResult } from '@/shared/ipc/researchApi';
+import { researchOutput } from './researchOutput';
+import { formatSciverseSearchOutput } from './sciverseOutput';
+export { formatSciverseSearchOutput } from './sciverseOutput';
+import { isPdfTool, runPdfTool } from './pdfTools';
 
 import type {
   AssistantContextSnapshot,
@@ -176,6 +181,19 @@ export function normalizeToolInput(
 ) {
   const object = asObject(input);
 
+  if (isPdfTool(toolName)) {
+    const search = toolName === 'search_pdf_text';
+    const start = object.start_page ?? 1, count = object.page_count ?? (search ? 20 : 3);
+    if (!Number.isInteger(start) || Number(start) < 1 || Number(start) > 2000 || !Number.isInteger(count) || Number(count) < 1 || Number(count) > (search ? 20 : 5)) {
+      throw new Error('PDF 页码范围无效；读取每次最多 5 页，搜索最多 20 页。');
+    }
+    const query = search ? requiredString(object.query, 'query') : undefined;
+    if (query && query.length > 200) throw new Error('PDF 搜索词不能超过 200 个字符。');
+    return { root, entry_id: entryIdOrSingleScope(object.entry_id, scope), start_page: start, page_count: count, ...(query ? { query } : {}) };
+  }
+
+  if (isResearchTool(toolName)) return { ...object, root };
+
   if (toolName.startsWith('mcp.')) {
     return {
       args: object,
@@ -273,13 +291,21 @@ export async function executeTool(
   {
     addSource,
     signal,
-    contextBudget
+    contextBudget,
+    toolCallId
   }: {
     addSource: (source: ConversationSourceLink) => number;
     signal?: AbortSignal;
     contextBudget: number;
+    toolCallId?: string;
   }
 ) {
+  if (isPdfTool(toolName)) return runPdfTool(toolName, input, addSource, contextBudget, signal);
+  if (isResearchTool(toolName)) {
+    const result = await runResearchTool(toolName, input, signal, toolCallId);
+    return { modelOutput: researchOutput(result, contextBudget), sources: [], researchPapers: toolName === 'search_papers' ? researchPapersFromResult(result) : undefined, summary: toolName === 'import_papers'
+      ? '已完成论文下载尝试；请查看各项结果。' : '已获取外部检索结果（不代表已读论文全文）。' };
+  }
   if (toolName.startsWith('mcp.')) {
     const result = await invokeMcpTool(toolName, input, signal);
     return {
@@ -307,12 +333,18 @@ export async function executeTool(
       'read_entry_assistant_context',
       input
     );
+    signal?.throwIfAborted();
+    if (result.has_pdf && result.parsed_segment_count === 0) {
+      const fallback = await runPdfTool('read_pdf_pages', { ...input, start_page: 1, page_count: 3 }, addSource, contextBudget, signal);
+      return { ...fallback, modelOutput: { ...fallback.modelOutput, requested_tool: 'read_entry_assistant_context',
+        note: 'PDF 尚未完整解析，已自动读取前 3 页以内的文字层；按 next_page 继续 read_pdf_pages，不能把这部分当成全文。' } };
+    }
     return formatReadEntryOutput(result, addSource, contextBudget);
   }
 
   if (toolName === 'search_sciverse_evidence') {
     const result = await invokeAssistantTool<SciverseAgenticSearchResponse>(toolName, input);
-    return formatSciverseSearchOutput(result, addSource, String(input.query));
+    return formatSciverseSearchOutput(result, addSource, String(input.query), contextBudget);
   }
 
   if (toolName === 'read_sciverse_content') {
@@ -490,92 +522,6 @@ export function formatReadSegmentOutput(
   };
 }
 
-export function formatSciverseSearchOutput(
-  result: SciverseAgenticSearchResponse,
-  addSource: (source: ConversationSourceLink) => number,
-  query: string
-) {
-  const evidence = (result.hits ?? []).slice(0, 12).map((hit) => {
-    const source: ConversationSourceLink = {
-      provider: 'sciverse',
-      doc_id: hit.doc_id,
-      chunk_id: hit.chunk_id,
-      title: hit.title || 'Sciverse document',
-      quote: compactQuote(hit.chunk),
-      offset: hit.offset,
-      page_no: hit.page_no,
-      score: hit.score,
-      abstract: hit.abstract,
-      authors: hit.author,
-      publication_year: hit.publication_published_year,
-      venue: hit.publication_venue_name_unified,
-      citation_count: hit.citation_count,
-      primary_topic: hit.primary_topic,
-      doi: hit.doi,
-      access_is_oa: hit.access_is_oa,
-      access_oa_url: hit.access_oa_url,
-      access_license: hit.access_license,
-      source_type: hit.source_type,
-      resource_file_name: hit.file_name
-    };
-    const marker = addSource(source);
-    return {
-      chunk_id: hit.chunk_id,
-      doc_id: hit.doc_id,
-      marker: `[S${marker}]`,
-      offset: hit.offset,
-      page_no: hit.page_no,
-      score: hit.score,
-      snippet: hit.chunk,
-      title: source.title,
-      abstract: hit.abstract,
-      authors: hit.author,
-      publication_year: hit.publication_published_year,
-      venue: hit.publication_venue_name_unified,
-      citation_count: hit.citation_count,
-      primary_topic: hit.primary_topic,
-      doi: hit.doi,
-      access_is_oa: hit.access_is_oa,
-      access_oa_url: hit.access_oa_url,
-      access_license: hit.access_license,
-      source_type: hit.source_type,
-      resource_file_name: hit.file_name
-    };
-  });
-  return {
-    modelOutput: {
-      evidence,
-      kind: 'search_sciverse_evidence',
-      query,
-      source: 'sciverse'
-    },
-    sources: evidence.map((item) => ({
-      provider: 'sciverse' as const,
-      doc_id: item.doc_id,
-      chunk_id: item.chunk_id,
-      title: item.title,
-      quote: compactQuote(item.snippet),
-      offset: item.offset,
-      page_no: item.page_no,
-      score: item.score,
-      abstract: item.abstract,
-      authors: item.authors,
-      publication_year: item.publication_year,
-      venue: item.venue,
-      citation_count: item.citation_count,
-      primary_topic: item.primary_topic,
-      doi: item.doi,
-      access_is_oa: item.access_is_oa,
-      access_oa_url: item.access_oa_url,
-      access_license: item.access_license,
-      source_type: item.source_type,
-      resource_file_name: item.resource_file_name
-    })),
-    summary: evidence.length
-      ? `Found ${evidence.length} Sciverse evidence chunk${evidence.length === 1 ? '' : 's'} for "${query}".`
-      : `No Sciverse evidence matched "${query}".`
-  };
-}
 
 export function formatSciverseContentOutput(
   result: SciverseContentResponse,
@@ -650,7 +596,7 @@ export function formatReadEntryOutput(
     sources,
     summary: result.markdown.trim()
       ? `Read parsed markdown for ${result.entry_title} (${originalMarkerToMarker.size} source markers).`
-      : `${result.entry_title} has no parsed PDF markdown yet.`
+      : `${result.entry_title} 暂无解析正文${result.has_pdf ? '，可用 PDF 基础读取工具读取文字层。' : '或可读 PDF，请附加文件或选择其他资料。'}`
   };
 }
 
@@ -1540,7 +1486,7 @@ export function modelInputSchema(descriptor: AssistantToolDescriptor): JSONSchem
     objectSchema.required = (objectSchema.required ?? []).filter((key: string) => key !== 'root');
   }
 
-  describeProperty(objectSchema, 'query', 'Search phrase or question to locate relevant PDF segments.');
+  describeProperty(objectSchema, 'query', 'Search phrase or question. Use a concise query relevant to this tool.');
   describeProperty(objectSchema, 'mode', 'Search mode. Prefer hybrid for content lookup; use keyword for exact terms.');
   describeProperty(objectSchema, 'scope_entry_ids', 'Optional Entry ids. Omit this to use the current Neuink scope.');
   describeProperty(objectSchema, 'top_k', 'Optional maximum number of segment hits to return.');
@@ -1548,7 +1494,9 @@ export function modelInputSchema(descriptor: AssistantToolDescriptor): JSONSchem
   describeProperty(objectSchema, 'segment_uid', 'Segment uid returned by search_segments.');
   describeProperty(objectSchema, 'doc_id', 'Sciverse document id returned by search_sciverse_evidence.');
   describeProperty(objectSchema, 'offset', 'Optional Unicode character offset for Sciverse content.');
-  describeProperty(objectSchema, 'limit', 'Maximum Sciverse content characters to read.');
+  describeProperty(objectSchema, 'limit', descriptor.name === 'search_papers'
+    ? 'Maximum number of papers, an integer from 1 to 10. Use limit, not top_k.'
+    : 'Maximum content characters to read.');
   describeProperty(objectSchema, 'title', 'Optional Sciverse paper title from the search result.');
   describeProperty(objectSchema, 'chunk_id', 'Optional Sciverse chunk id from the search result.');
   describeProperty(objectSchema, 'page_no', 'Optional Sciverse page number from the search result.');
@@ -1587,7 +1535,7 @@ export function toolDescription(descriptor: AssistantToolDescriptor) {
     return `${descriptor.description} Use this after search_segments when a snippet is not enough.`;
   }
   if (descriptor.name === 'read_entry_assistant_context') {
-    return `${descriptor.description} Use this only for an explicitly selected, named, or confirmed Entry.`;
+    return `${descriptor.description} Use this only for an explicitly selected, named, or confirmed Entry. If no parsed segments exist, the host reads up to the first 3 PDF text-layer pages automatically. Continue with read_pdf_pages / search_pdf_text; respect next_page and incomplete/OCR warnings.`;
   }
   if (descriptor.name === 'search_sciverse_evidence') {
     return `${descriptor.description} Preserve every returned marker and source identifier in the answer.`;
@@ -1602,7 +1550,7 @@ export function scopedEntryIds(value: unknown, scope: ScopeSnapshot) {
   const requested = stringArray(value);
 
   if (scope.entry_ids.length === 0) {
-    return requested;
+    throw new Error('当前冻结范围没有可检索条目，请先选择论文或调整范围。');
   }
 
   if (requested.length === 0) {
@@ -1610,8 +1558,10 @@ export function scopedEntryIds(value: unknown, scope: ScopeSnapshot) {
   }
 
   const allowed = new Set(scope.entry_ids);
-  const filtered = requested.filter((entryId) => allowed.has(entryId));
-  return filtered.length > 0 ? filtered : scope.entry_ids;
+  if (requested.some(entryId => !allowed.has(entryId))) {
+    throw new Error('检索条目超出冻结范围，不能自动扩大到其他论文。');
+  }
+  return requested;
 }
 
 export function entryIdOrSingleScope(value: unknown, scope: ScopeSnapshot) {
@@ -1647,6 +1597,7 @@ export function searchMode(value: unknown) {
 }
 
 export function runningSummary(toolName: string, input: JsonObject) {
+  if (isPdfTool(toolName)) return toolName === 'search_pdf_text' ? '正在搜索 PDF 文字层…' : '正在按页读取 PDF 文字层…';
   if (toolName === 'search_segments') {
     return `Searching parsed PDF segments for "${String(input.query)}" using ${String(input.mode)}.`;
   }
@@ -1777,14 +1728,22 @@ export function trimToBudget(text: string, budget: number) {
 
 export function trimSciverseJson(value: SciverseJsonResponse, budget: number) {
   const text = JSON.stringify(value);
-  if (text.length <= Math.min(16_000, budget)) {
+  const limit = Math.min(16_000, Math.floor(budget));
+  if (text.length <= limit) {
     return value;
   }
-  return {
-    ...value,
-    _neuink_truncated: true,
-    _neuink_preview: trimToBudget(text, Math.min(16_000, budget))
-  };
+  // Do not spread the original response back into a supposedly truncated result.
+  // Account for JSON escaping as well as the wrapper, including quotes/newlines in schemas.
+  const wrap = (length: number) => ({ _neuink_truncated: true, _neuink_preview: text.slice(0, length) });
+  if (limit < JSON.stringify(wrap(0)).length) throw new Error('Sciverse context budget is too small.');
+  let low = 0;
+  let high = Math.min(text.length, limit);
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (JSON.stringify(wrap(mid)).length <= limit) low = mid;
+    else high = mid - 1;
+  }
+  return wrap(low);
 }
 
 export function errorMessage(error: unknown) {

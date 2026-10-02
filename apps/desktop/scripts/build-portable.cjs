@@ -1,4 +1,5 @@
 const { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } = require('node:fs');
+const { verifyResources, copyResources } = require('./onboarding-resources.cjs');
 const { execFileSync, spawn } = require('node:child_process');
 const path = require('node:path');
 
@@ -17,6 +18,7 @@ const modelSource = path.join(
   'default',
 );
 const envExampleSource = path.join(projectRoot, '.env.example');
+const onboardingSource = path.join(desktopRoot, 'src-tauri', 'resources', 'onboarding');
 const skipBuild = process.argv.includes('--skip-build');
 const powershell = process.env.SystemRoot
   ? path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
@@ -29,6 +31,7 @@ void main().catch((caught) => {
 });
 
 async function main() {
+  verifyResources(onboardingSource);
   const runtimeSource = findVcRuntimeDir();
   if (!skipBuild) {
     console.log('步骤 1/3：构建 Tauri release exe…');
@@ -63,11 +66,13 @@ async function main() {
   mkdirSync(path.join(portableRoot, 'embedding-models'), { recursive: true });
 
   await copyPortableResources(executableSource, portableRoot, runtimeSource);
+  copyResources(onboardingSource, path.join(portableRoot, 'resources', 'onboarding'));
   writeFileSync(path.join(portableRoot, '使用说明.txt'), '\ufeff' + [
     'Neuink Windows x64 便携版', '',
     '1. 完整解压此压缩包到一个可写目录。',
     '2. 双击 Neuink.exe 启动，无需安装 Node.js、Rust 或启动开发服务。',
     '3. 请保留同目录的 embedding-models 文件夹，用于本地语义搜索。', '',
+    '请保留 resources/onboarding 文件夹；新手教程的演示 PDF、解析结果与笔记无需联网即可准备。',
     '适用于 Windows 10 1903 或更新版本、Windows 11（64 位）。已附带 Visual C++ 运行库。',
     '系统需要 Microsoft Edge WebView2 Runtime；若提示缺失，请从微软官方网站安装后再运行。',
     '资料库和设置沿用应用默认位置，可在“设置 → 资料库与数据”中更改资料库位置。',

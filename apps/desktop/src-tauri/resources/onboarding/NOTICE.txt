@@ -1,0 +1,13 @@
+Offline onboarding resource slot
+
+Expected filename: attention-is-all-you-need.pdf
+Paper: Attention Is All You Need, Vaswani et al., 2017 (arXiv:1706.03762).
+Source: https://arxiv.org/abs/1706.03762v7
+
+The local development bundle uses the user's existing PDF and MinerU results,
+copied from their library at their request. It contains no user notes, API keys,
+server addresses, task history or reading history. Demo notes are NeuInk examples.
+The original paper and parsed assets are ignored by Git, not relicensed as NeuInk
+code. Before public distribution, obtain permission for redistributing the paper
+or supply a verified redistributable version and update this notice.
+Runtime preparation is offline and creates an independent demo entry.

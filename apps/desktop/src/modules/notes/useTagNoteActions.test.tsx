@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { readOwnedNote, setTagNoteDeleted } from '@/shared/ipc/noteOwnerApi';
+import { purgeTagNote, readOwnedNote, setTagNoteDeleted } from '@/shared/ipc/noteOwnerApi';
 import type { CatalogNote } from '@/shared/ipc/noteCatalogApi';
 import { hasUnsavedMarkdownNote, saveMarkdownNoteBeforeClose } from './editor/noteDirtyRegistry';
 import { useWorkspaceNotes } from './WorkspaceNotesContext';
 import { useTagNoteActions } from './useTagNoteActions';
 
 vi.mock('./WorkspaceNotesContext', () => ({ useWorkspaceNotes: vi.fn() }));
-vi.mock('@/shared/ipc/noteOwnerApi', () => ({ createOwnedNote: vi.fn(), readOwnedNote: vi.fn(), setTagNoteDeleted: vi.fn() }));
+vi.mock('@/shared/ipc/noteOwnerApi', () => ({ createOwnedNote: vi.fn(), purgeTagNote: vi.fn(), readOwnedNote: vi.fn(), setTagNoteDeleted: vi.fn() }));
 vi.mock('./editor/noteDirtyRegistry', () => ({ hasUnsavedMarkdownNote: vi.fn(), saveMarkdownNoteBeforeClose: vi.fn() }));
 const note: CatalogNote = { target: { owner: { kind: 'tag_reading', tag_id: 'software' }, note_id: 'draft' }, title: '草稿',
   owner_title: '软件工程', updated_at: '', deleted_at: null, revision: 'old', links: [], error: null };
@@ -24,7 +24,7 @@ it('saves unsaved edits and deletes using the new revision, not the stale catalo
   vi.mocked(readOwnedNote).mockResolvedValue({ note_id: 'draft', title: '草稿', markdown: 'saved', links: [], revision: 'new' });
   vi.mocked(setTagNoteDeleted).mockResolvedValue(undefined);
   const { result } = renderHook(() => useTagNoteActions('paper/tag-notes'));
-  act(() => result.current.setDeleted(note, true));
+  await act(async () => { await result.current.setDeleted(note, true); });
   await waitFor(() => expect(setTagNoteDeleted).toHaveBeenCalledWith('root', 'software', 'draft', true, 'new'));
   expect(readOwnedNote).toHaveBeenCalledWith('root', note.target);
 });
@@ -32,7 +32,14 @@ it('saves unsaved edits and deletes using the new revision, not the stale catalo
 it('keeps the note when unsaved edits cannot be persisted', async () => {
   vi.mocked(saveMarkdownNoteBeforeClose).mockResolvedValue(false);
   const { result } = renderHook(() => useTagNoteActions('paper/tag-notes'));
-  act(() => result.current.setDeleted(note, true));
+  await act(async () => { await result.current.setDeleted(note, true); });
   await waitFor(() => expect(result.current.error).toContain('未保存'));
   expect(setTagNoteDeleted).not.toHaveBeenCalled();
+});
+
+it('rejects permanent deletion while an editor still has unsaved content', async () => {
+  const { result } = renderHook(() => useTagNoteActions('paper/tag-notes'));
+  await act(async () => { await result.current.purge({ ...note, deleted_at: '2026-09-28T00:00:00Z' }); });
+  expect(result.current.error).toContain('未保存');
+  expect(purgeTagNote).not.toHaveBeenCalled();
 });

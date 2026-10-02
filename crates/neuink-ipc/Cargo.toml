@@ -20,6 +20,10 @@ futures-util.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+quick-xml = { version = "0.39.4", features = ["serialize"] }
+scraper = { version = "0.24", default-features = false }
+encoding_rs = "0.8"
+tempfile = "3"
 tauri.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["sync", "process", "io-util", "time"] }
@@ -28,6 +32,8 @@ zip.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { workspace = true, features = ["windows-native"] }
+webview2-com = "0.38.2"
+windows-core = "0.61.2"
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 keyring = { workspace = true, features = ["apple-native"] }

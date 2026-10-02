@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRuntimeSettings {
+    #[serde(default)]
+    pub capability_revision: u32,
     pub main_assistant: AgentProfile,
     #[serde(default)]
     pub mcp_servers: Vec<AgentMcpServer>,
@@ -91,4 +93,23 @@ pub struct AgentPermissions {
     pub can_read_workspace_wide: bool,
     #[serde(default)]
     pub can_write_proposals: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn capability_revision_survives_native_storage_and_unknown_extension_fields_do_not() {
+        let settings:AgentRuntimeSettings=serde_json::from_value(serde_json::json!({
+            "version":4,"capabilityRevision":1,"unusedExtension":{},
+            "mainAssistant":{"id":"main-assistant","name":"Main","permissions":{},"systemPrompt":"Host tools only","enabledToolIds":["read_note"]}
+        })).unwrap();
+        let stored = serde_json::to_value(settings).unwrap();
+        assert_eq!(stored["capabilityRevision"], 1);
+        assert_eq!(
+            stored["mainAssistant"]["enabledToolIds"],
+            serde_json::json!(["read_note"])
+        );
+        assert!(stored.get("unusedExtension").is_none());
+    }
 }

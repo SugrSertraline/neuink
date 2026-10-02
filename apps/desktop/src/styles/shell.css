@@ -284,6 +284,7 @@
   position: absolute;
   top: 0;
   bottom: 0;
+  left: var(--app-activity-width);
   z-index: 95;
   width: 3px;
   border-radius: 999px;
@@ -293,7 +294,11 @@
     0 0 18px color-mix(in srgb, var(--primary) 28%, transparent);
   opacity: 0.72;
   pointer-events: none;
-  transform: translateX(-1.5px);
+  transform: translate3d(calc(var(--app-sidebar-preview-width, 0px) - 1.5px), 0, 0);
+}
+
+.app-shell.is-sidebar-resizing .app-sidebar-resize-preview {
+  will-change: transform;
 }
 
 .app-note-pane-resizer {
@@ -527,13 +532,9 @@
   content: "";
 }
 
-.app-shell.is-sidebar-resizing .app-sidebar {
-  filter: saturate(0.72);
-  opacity: 0.82;
-}
-
+.app-shell.is-sidebar-resizing .app-sidebar,
 .app-shell.is-sidebar-resizing .app-sidebar::after {
-  opacity: 1;
+  transition: none;
 }
 
 .app-shell:has(.tabsbar.is-assistant-context-dragging) .app-sidebar[data-assistant-context-dropzone="true"]::after {

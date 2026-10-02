@@ -1,8 +1,8 @@
 export const PARSER_AUTO_PARSE_STORAGE_KEY = 'neuink.parser.autoParseOnPdfImport';
 
 export function readAutoParseOnPdfImport() {
-  if (typeof window === 'undefined') return true;
-  return window.localStorage.getItem(PARSER_AUTO_PARSE_STORAGE_KEY) !== '0';
+  if (typeof window === 'undefined') return false;
+  return window.localStorage.getItem(PARSER_AUTO_PARSE_STORAGE_KEY) === '1';
 }
 
 export function persistAutoParseOnPdfImport(enabled: boolean) {

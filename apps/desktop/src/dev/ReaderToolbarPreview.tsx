@@ -57,7 +57,7 @@ export function ReaderToolbarPreview() {
           onZoomIn={noop} onZoomOut={noop} onApplyRecommendedTags={noop} onDismissRecommendedTags={noop}
           onRecommendedTagToggle={noop} onTagSuggestionsOpenChange={noop} onExportTranslation={noop}
           onExportPaper={() => setMessage('PDF 导出已触发')} onPauseTranslation={noop} onOpenTranslationTask={noop}
-          onOpenPdf={noop} onRevealPdf={noop} onReparsePdf={noop} />
+          onOpenPdf={noop} onRevealPdf={noop} />
         <p className="p-3 text-sm">PDF 正文区域</p>
       </section>
     </div>

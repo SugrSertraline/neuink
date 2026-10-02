@@ -241,19 +241,19 @@ export function AssistantPanel({
   currentRootRef.current = root;
   const [readingChoice, setReadingChoice] = useState<{ root: string | null; value: AssistantReadingChoice }>({ root, value: null });
   const chosenReadingObject = readingChoice.root === root ? readingChoice.value : null;
-  const readingContext = resolveAssistantReadingContext({ choice: chosenReadingObject, entries, items: assistantContext.items,
+  const readingContext = resolveAssistantReadingContext({ choice: chosenReadingObject, entries, tags, items: assistantContext.items,
     activeEntry, activeNote, activeSegment, activeSurface });
 
   const selectedTagIds = useMemo(
     () =>
-      composerSnapshot.mentions
+      [...(readingContext.tag ? [readingContext.tag.id] : []), ...composerSnapshot.mentions
         .filter((mention) => mention.kind === 'tag' && mention.tagId)
-        .map((mention) => mention.tagId as string),
-    [composerSnapshot.mentions]
+        .map((mention) => mention.tagId as string)],
+    [composerSnapshot.mentions, readingContext.tag]
   );
   const scope = useMemo(
-    () => buildAssistantScope({ activeEntry: readingContext.entry, activeTag: readingContext.bound ? null : activeTag, entries, selectedTagIds, tags }),
-    [readingContext.entry, readingContext.bound, activeTag, entries, selectedTagIds, tags]
+    () => buildAssistantScope({ activeEntry: readingContext.entry, activeTag: readingContext.bound || readingContext.entry || readingContext.surface.kind !== 'library' ? null : activeTag, entries, selectedTagIds, tags }),
+    [readingContext.entry, readingContext.bound, readingContext.surface.kind, activeTag, entries, selectedTagIds, tags]
   );
   const selectedProfile = useMemo(
     () => profiles.find((profile) => profile.id === selectedProfileId) ?? null,
@@ -475,6 +475,7 @@ export function AssistantPanel({
           question: trimmed
         }),
         question: trimmed,
+        scope: structuredClone(scope),
         snapshot
       };
       const controller = runAbortControllerRef.current;
@@ -538,7 +539,7 @@ export function AssistantPanel({
       runNote,
       runSegment,
       runSurface,
-      scope,
+      scope: queued?.scope ?? scope,
       selectedProfile,
       setBusy: guard(setBusy),
       setComposerResetKey: guard(setComposerResetKey),
@@ -1193,12 +1194,36 @@ export function AssistantPanel({
             onRemove={onRemoveAssistantContextItem}
           />
 
-          <AssistantReadingContextControl context={readingContext} entries={entries} busy={busy} choice={chosenReadingObject}
+          <AssistantReadingContextControl context={readingContext} entries={entries} tags={tags} busy={busy} choice={chosenReadingObject}
             onChange={value => setReadingChoice({ root, value })} />
 
           <ExecutionRecovery root={root} conversationId={conversation?.id} busy={busy}
             onResume={(id) => { void send(undefined, id); }} />
           <AssistantComposerEditor
+            actions={busy ? <>
+              <Button size="sm" type="button" variant="outline" onClick={cancelRun}>
+                <Square />
+                停止
+              </Button>
+              <Button
+                disabled={!selectedProfile || !question.trim() || Boolean(queuedDraft) || readingContext.unavailable}
+                size="sm"
+                type="button"
+                onClick={() => void send()}
+              >
+                <Send />
+                {queuedDraft ? '已排队' : '排队发送'}
+              </Button>
+            </> : <Button
+              data-guide="assistant-send"
+              disabled={!selectedProfile || !question.trim() || readingContext.unavailable}
+              size="sm"
+              type="button"
+              onClick={() => void send()}
+            >
+              <Send />
+              发送
+            </Button>}
             composerDraft={composerDraft}
             contextItems={assistantContext.items}
             disabled={composerDisabled}
@@ -1228,35 +1253,6 @@ export function AssistantPanel({
             }}
             onSubmit={() => void send()}
           />
-          <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
-            {busy ? (
-              <>
-                <Button size="sm" type="button" variant="outline" onClick={cancelRun}>
-                  <Square />
-                  停止
-                </Button>
-                <Button
-                  disabled={!selectedProfile || !question.trim() || Boolean(queuedDraft) || readingContext.unavailable}
-                  size="sm"
-                  type="button"
-                  onClick={() => void send()}
-                >
-                  <Send />
-                  {queuedDraft ? '已排队' : '排队发送'}
-                </Button>
-              </>
-            ) : (
-              <Button
-                disabled={!selectedProfile || !question.trim() || readingContext.unavailable}
-                size="sm"
-                type="button"
-                onClick={() => void send()}
-              >
-                <Send />
-                发送
-              </Button>
-            )}
-          </div>
           </div>
         </div>
       </div>

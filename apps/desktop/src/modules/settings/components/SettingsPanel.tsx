@@ -6,7 +6,7 @@ import {
   ChevronUp,
   KeyRound
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useToast } from '@/shared/hooks/useToast';
 import { Button } from '@/components/ui/button';
@@ -77,6 +77,7 @@ import {
 type SettingsPanelProps = {
   navigationTarget?: SettingsNavigationTarget;
   onBack?: () => void;
+  onOpenMineruClientGuide: () => void;
   parserEndpoint: string;
   parserApiKey: string;
   readerPreferences: ReaderPreferences;
@@ -115,7 +116,6 @@ type ModelCatalogCache = Record<
   }
 >;
 
-const COLLAPSED_PROVIDER_COUNT = 8;
 const MODEL_CATALOG_CACHE_STORAGE_KEY = 'neuink.llmModelCatalog.v1';
 const DEFAULT_TRANSLATION_AUTOMATION: TranslationAutomationSettings = {
   auto_translate_pdf: false,
@@ -129,6 +129,7 @@ const DEFAULT_TRANSLATION_AUTOMATION: TranslationAutomationSettings = {
 export function SettingsPanel({
   navigationTarget,
   onBack,
+  onOpenMineruClientGuide,
   parserEndpoint,
   parserApiKey,
   readerPreferences,
@@ -174,11 +175,9 @@ export function SettingsPanel({
   const [topP, setTopP] = useState('');
   const [maxOutputTokens, setMaxOutputTokens] = useState('');
   const [busy, setBusy] = useState(false);
-  const [modelRefreshBusy, setModelRefreshBusy] = useState(false);
   const [modelCatalogCache, setModelCatalogCache] = useState<ModelCatalogCache>(() =>
     readModelCatalogCache()
   );
-  const [providersExpanded, setProvidersExpanded] = useState(false);
   const [customParserEndpoint, setCustomParserEndpoint] = useState(parserEndpoint);
   const [customParserApiKey, setCustomParserApiKey] = useState(parserApiKey);
   const [savedParserEndpoint, setSavedParserEndpoint] = useState(parserEndpoint);
@@ -228,9 +227,6 @@ export function SettingsPanel({
   const cachedModelCatalog = modelCatalogCache[modelCatalogKey] ?? null;
   const modelPresets =
     cachedModelCatalog?.models.length ? cachedModelCatalog.models : providerPreset?.models ?? [];
-  const visibleProviderPresets = providersExpanded
-    ? PROVIDER_PRESETS
-    : PROVIDER_PRESETS.slice(0, COLLAPSED_PROVIDER_COUNT);
   const effectiveParserEndpoint = customParserEndpoint.trim();
 
   useEffect(() => {
@@ -356,9 +352,9 @@ export function SettingsPanel({
   });
   const feedback: Array<{ key: string; message: string; error?: boolean; retry?: () => void }> = [
     ...Object.entries(loadErrors).map(([key, error]) => ({ key, error: true,
-      message: `${key === 'models' ? '模型' : key === 'workspace' ? '资料库' : '助手与技能'}配置加载失败：${error}`,
+      message: `${key === 'models' ? '模型' : key === 'workspace' ? '资料库' : '助手与工具'}配置加载失败：${error}`,
       retry: () => key === 'models' ? setReloadModels(n => n + 1) : key === 'workspace' ? setReloadWorkspace(n => n + 1) : setReloadRuntime(n => n + 1) })),
-    ...([['阅读偏好', readerSave], ['解析地址', parserEndpointSave], ['解析凭据', parserKeySave], ['助手与技能', runtimeSave], ['自动翻译', translationSave], ['任务模型', taskSave]] as const)
+    ...([['阅读偏好', readerSave], ['解析地址', parserEndpointSave], ['解析凭据', parserKeySave], ['助手与工具', runtimeSave], ['自动翻译', translationSave], ['任务模型', taskSave]] as const)
       .filter(([, status]) => status.dirty || status.error || status.saving)
       .map(([key, status]) => ({ key, error: Boolean(status.error), message: `${key}：${status.error ? '保存失败，修改已保留' : status.saving ? '保存中…' : '未保存'}`, retry: status.error ? status.retry : undefined }))
   ];
@@ -382,8 +378,8 @@ export function SettingsPanel({
     setApiProtocol(resolveLlmApiProtocol(profile.api_protocol));
     setModel(profile.model);
     setApiKey(profile.api_key ?? '');
-    setMaxContextLength(String(profile.max_context_length ?? 8192));
-    setTemperature(profile.temperature == null ? '0.2' : String(profile.temperature));
+    setMaxContextLength(profile.max_context_length == null ? '' : String(profile.max_context_length));
+    setTemperature(profile.temperature == null ? '' : String(profile.temperature));
     setTopP(profile.top_p == null ? '' : String(profile.top_p));
     setMaxOutputTokens(profile.max_output_tokens == null ? '' : String(profile.max_output_tokens));
   };
@@ -415,8 +411,8 @@ export function SettingsPanel({
     setApiProtocol('openai_compatible');
     setModel('');
     setApiKey('');
-    setMaxContextLength('8192');
-    setTemperature('0.2');
+    setMaxContextLength('');
+    setTemperature('');
     setTopP('');
     setMaxOutputTokens('');
   };
@@ -498,12 +494,12 @@ export function SettingsPanel({
   };
 
   const applyProviderPreset = (preset: ProviderPreset) => {
+    if (!sameBaseUrl(baseUrl, preset.baseUrl)) setApiKey('');
     setName(preset.label);
     setBaseUrl(preset.baseUrl);
     setApiProtocol(preset.protocol);
-    setEditingId(null);
     const cachedModels = modelCatalogCache[normalizeBaseUrl(preset.baseUrl)]?.models ?? [];
-    applyModelPreset(cachedModels[0] ?? preset.models[0]);
+    applyModelPreset(cachedModels[0] ?? preset.models[0] ?? { id: '' });
   };
 
   const applyModelPreset = (preset: ModelPreset) => {
@@ -511,16 +507,17 @@ export function SettingsPanel({
     setMaxContextLength(
       preset.maxContextLength == null ? '' : String(preset.maxContextLength)
     );
-    setTemperature(preset.temperature == null ? '0.2' : String(preset.temperature));
+    // Published capability metadata is not a recommended sampling setting.
+    if (preset.supportsTemperature === false) { setTemperature(''); setTopP(''); }
     setMaxOutputTokens(
       preset.maxOutputTokens == null ? '' : String(preset.maxOutputTokens)
     );
   };
 
-  const refreshModels = async () => {
-    setModelRefreshBusy(true);
-    try {
-      const models = await listOpenAiCompatibleModels({ baseUrl, apiKey, apiProtocol });
+  const refreshModels = async (signal: AbortSignal) => {
+      const models = await listOpenAiCompatibleModels({ baseUrl: baseUrl.trim(), apiKey, apiProtocol, signal });
+      signal.throwIfAborted();
+      if (!models.length) throw new Error('模型列表为空');
       const nextModels = mergeModelPresets(
         models.map((model) => mergeRemoteModelPreset(model, providerPreset?.models ?? [])),
         providerPreset?.models ?? []
@@ -536,30 +533,7 @@ export function SettingsPanel({
         }
       };
       setModelCatalogCache(nextCache);
-      writeModelCatalogCache(nextCache);
-      const synchronizedModel = nextModels.find((preset) => preset.id === model.trim());
-      if (synchronizedModel) {
-        applyModelPreset(synchronizedModel);
-      }
-      notify({
-        tone: 'success',
-        title: synchronizedModel ? '模型参数已同步' : '模型列表已更新',
-        description: synchronizedModel
-          ? `已从实时目录回填 ${synchronizedModel.id} 的上下文窗口与最大输出。`
-          : `已拉取并缓存 ${nextModels.length} 个模型；当前模型 ID 未在目录中找到，可继续手动配置。`
-      });
-    } catch (caught) {
-      const reason = caught instanceof Error ? caught.message : String(caught);
-      notify({
-        tone: 'danger',
-        title: '模型列表更新失败',
-        description: cachedModelCatalog
-          ? `${reason}；已保留上次缓存的 ${cachedModelCatalog.models.length} 个模型。`
-          : `${reason}；当前没有缓存，请使用内置预设或手动填写模型 ID。`
-      });
-    } finally {
-      setModelRefreshBusy(false);
-    }
+      try { writeModelCatalogCache(nextCache); } catch { /* Current-window catalog remains available if storage is full. */ }
   };
 
   const test = async () => {
@@ -798,7 +772,6 @@ export function SettingsPanel({
       baseUrl={baseUrl}
       busy={busy}
       cachedModelCatalog={cachedModelCatalog}
-      collapsedProviderCount={PROVIDER_PRESETS.length > COLLAPSED_PROVIDER_COUNT ? PROVIDER_PRESETS.length : 0}
       customParserEndpoint={customParserEndpoint}
       customParserApiKey={customParserApiKey}
       readerPreferences={draftReaderPreferences}
@@ -813,13 +786,13 @@ export function SettingsPanel({
       maxOutputTokens={maxOutputTokens}
       model={model}
       modelPresets={modelPresets}
-      modelRefreshBusy={modelRefreshBusy}
       name={name}
       onApiKeyChange={setApiKey}
       onApiProtocolChange={setApiProtocol}
       onBack={onBack}
-      onBaseUrlChange={setBaseUrl}
+      onBaseUrlChange={value => { if (value !== baseUrl) setApiKey(''); setBaseUrl(value); }}
       onOpenWorkspace={() => void chooseWorkspaceFolder('switch')}
+      onOpenMineruClientGuide={onOpenMineruClientGuide}
       onCreateWorkspace={() => void chooseWorkspaceFolder('create')}
       onMigrateWorkspace={() => void chooseWorkspaceFolder('migrate')}
       onOpenCurrentWorkspace={() => {
@@ -841,39 +814,17 @@ export function SettingsPanel({
       onCreateProfile={() => createProfile()}
       onMaxContextLengthChange={setMaxContextLength}
       onMaxOutputTokensChange={setMaxOutputTokens}
-      onModelChange={(value) => {
-        setModel(value);
-        // 手动输入/粘贴的模型 ID 命中已同步的模型目录时，自动回填上下文与输出参数；
-        // 用户手动改过的值（非默认）不覆盖。
-        const preset = modelPresets.find((item) => item.id === value.trim());
-        if (!preset) {
-          return;
-        }
-        const currentContext = maxContextLength.trim();
-        if (
-          preset.maxContextLength != null &&
-          (currentContext === '' || currentContext === '8192')
-        ) {
-          setMaxContextLength(String(preset.maxContextLength));
-        }
-        if (preset.maxOutputTokens != null && maxOutputTokens.trim() === '') {
-          setMaxOutputTokens(String(preset.maxOutputTokens));
-        }
-      }}
-      onModelPresetSelect={(value) => {
-        const preset = modelPresets.find((item) => item.id === value);
-        if (preset) {
-          applyModelPreset(preset);
-        }
-      }}
       onNameChange={setName}
+      onModelMetadataSelect={applyModelPreset}
+      onProviderMetadataSelect={applyProviderPreset}
       onNewProfile={newProfile}
       onParserEndpointChange={setCustomParserEndpoint}
       onParserApiKeyChange={setCustomParserApiKey}
       onReaderPreferencesChange={setDraftReaderPreferences}
       onProviderPresetSelect={(value) => {
         if (value === '__custom__') {
-          newProfile();
+          setName(''); setBaseUrl(''); setApiKey(''); setApiProtocol('openai_compatible');
+          applyModelPreset({ id: '' });
           return;
         }
         if (value.startsWith('__profile__')) {
@@ -888,7 +839,7 @@ export function SettingsPanel({
           applyProviderPreset(preset);
         }
       }}
-      onRefreshModels={() => void refreshModels()}
+      onRefreshModels={refreshModels}
       onRemoveCurrent={() => void removeCurrent()}
       onDeleteProfile={(profileId) => deleteProfile(profileId)}
       onSaveProfile={() => saveCurrentProfile()}
@@ -909,13 +860,9 @@ export function SettingsPanel({
       onTest={() => void test()}
       onTestProfile={(profile) => void testProfile(profile)}
       profileTestStates={profileTestStates}
-      onToggleProvidersExpanded={() => setProvidersExpanded((value) => !value)}
       onTopPChange={setTopP}
       onTranslationAutomationChange={saveTranslationAutomation}
-      providerLogo={(preset) => <ProviderLogo preset={preset} />}
       providerPreset={providerPreset}
-      providerPresets={visibleProviderPresets}
-      providersExpanded={providersExpanded}
       settings={settings}
       sidebarMode={sidebarMode}
       temperature={temperature}
@@ -1060,8 +1007,9 @@ function normalizeBaseUrl(value: string) {
 function mergeRemoteModelPreset(model: ProviderModelInfo, staticPresets: ModelPreset[]) {
   const fallback = staticPresets.find((preset) => preset.id === model.id);
   return {
+    ...model,
     id: model.id,
-    label: model.name && model.name !== model.id ? model.name : undefined,
+    label: model.name && model.name !== model.id ? model.name : model.label,
     maxContextLength: model.maxContextLength,
     maxOutputTokens: model.maxOutputTokens,
     metadataSource: model.metadataSource ?? fallback?.metadataSource ?? 'built_in',
@@ -1101,21 +1049,6 @@ function formatCacheTime(value: string) {
     return '未知时间';
   }
   return date.toLocaleString();
-}
-
-function ProviderLogo({ preset }: { preset: ProviderPreset }) {
-  return (
-    <span
-      aria-hidden="true"
-      className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] text-[9px] font-semibold leading-none"
-      style={{
-        backgroundColor: preset.brand.background,
-        color: preset.brand.foreground
-      }}
-    >
-      {preset.brand.mark}
-    </span>
-  );
 }
 
 function equalJson<T>(left: T, right: T) { return JSON.stringify(left) === JSON.stringify(right); }

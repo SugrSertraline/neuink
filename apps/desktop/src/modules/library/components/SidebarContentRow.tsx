@@ -10,6 +10,7 @@ export function SidebarContentRow({
   meta,
   metaContent,
   details,
+  guideId,
   preview,
   multiline = false,
   density = 'default',
@@ -28,6 +29,7 @@ export function SidebarContentRow({
   meta: string;
   metaContent?: ReactNode;
   details?: ReactNode;
+  guideId?: string;
   preview?: ReactNode;
   multiline?: boolean;
   density?: 'default' | 'compact';
@@ -56,6 +58,7 @@ export function SidebarContentRow({
   </button>;
   return (
     <div
+      data-guide={guideId}
       data-material="content-row"
       data-active={active}
       data-interactive={!labelContent && !disabled}

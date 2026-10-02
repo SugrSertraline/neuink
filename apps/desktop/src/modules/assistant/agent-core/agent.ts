@@ -1,5 +1,7 @@
 /** Provider-independent, sequential agent loop. Business writes remain in tools. */
 export class AgentStoppedError extends Error {}
+/** Only host guards BEFORE an effect may use this error; never infer it from remote text. */
+export class AgentToolNotExecutedError extends Error {}
 
 export class RunBudget {
   turns = 0;
@@ -36,7 +38,7 @@ export class RunBudget {
 export type AgentToolCall = { id: string; name: string; input: unknown; error?: string };
 export type AgentTurn<M> = { text: string; messages: M[]; calls: AgentToolCall[] };
 export type AgentDriver<M> = {
-  turn(messages: readonly M[], signal?: AbortSignal): Promise<AgentTurn<M>>;
+  turn(messages: readonly M[], signal?: AbortSignal, options?: { finalTurn: boolean }): Promise<AgentTurn<M>>;
   result(call: AgentToolCall, output: unknown, failed: boolean): M;
   instruction(text: string): M;
 };
@@ -97,6 +99,8 @@ export class Agent<M> {
     budget: RunBudget;
     signal?: AbortSignal;
     maxTurns?: number;
+    /** A delegated reader must leave its parent one model turn, including compaction. */
+    reserveParentTurn?: boolean;
     beforeTurn?: () => void;
     /** Return an instruction to continue the SAME transcript under the SAME budget. */
     verify?: (text: string) => string | undefined;
@@ -151,13 +155,21 @@ export class Agent<M> {
         o.signal?.throwIfAborted();
         if (!this.pending) {
           this.messages.push(...this.steering.splice(0));
+          if (o.reserveParentTurn && o.budget.turns >= o.budget.maxTurns - 1) {
+            throw new AgentStoppedError('子任务模型预算已到，剩余轮次留给主助手总结。');
+          }
           o.budget.turn();
           this.turns++;
           o.beforeTurn?.();
           await this.save(); // Reserve the attempt before network I/O, including interrupted requests.
           await this.emit({ type: 'turn_start' });
-          const response = await abortable(o.driver.turn(this.messages, o.signal), o.signal);
+          const finalTurn = this.turns >= (o.maxTurns ?? 12) || o.budget.turns >= o.budget.maxTurns - (o.reserveParentTurn ? 1 : 0)
+            || o.budget.toolCalls >= o.budget.maxToolCalls;
+          const response = await abortable(o.driver.turn(this.messages, o.signal, { finalTurn }), o.signal);
           o.signal?.throwIfAborted();
+          if (finalTurn && response.calls.length) {
+            throw new AgentStoppedError('已到最终总结轮次，但模型仍返回工具调用；未执行这些操作。请缩小任务范围后重试。');
+          }
           this.messages.push(...response.messages);
           this.pending = { response, next: 0, started: false };
           await this.save(); // Never execute a model's tool batch until it is durable.
@@ -169,11 +181,16 @@ export class Agent<M> {
           if (this.pending.started && !o.canReplayTool?.(call.name)) {
             throw new AgentStoppedError(`工具 ${call.name} 的执行结果尚未确认。为避免重复操作，已停止自动恢复；请先核对目标数据或外部服务。`);
           }
-          if (!this.pending.started) o.budget.tool();
           let output: unknown;
           let failed = false;
           let invoked = false;
           try {
+            if (!this.pending.started) {
+              if (o.budget.toolCalls >= o.budget.maxToolCalls) {
+                throw new AgentToolNotExecutedError('TOOL_LIMIT_REACHED：工具预算已用完，本次未执行。请整理已有结果并说明限制。');
+              }
+              o.budget.tool();
+            }
             if (call.error) throw new Error(call.error);
             let execute = o.tools[call.name];
             if (!execute) throw new Error(`Tool is not available: ${call.name}`);
@@ -186,7 +203,7 @@ export class Agent<M> {
             output = await abortable(execute(call.input, { id: call.id, signal: o.signal }), o.signal);
           } catch (error) {
             if (o.signal?.aborted || error instanceof AgentStoppedError || o.isFatal?.(error)) throw error;
-            if (invoked && o.saveCheckpoint && !o.canReplayTool?.(call.name)) {
+            if (invoked && o.saveCheckpoint && !o.canReplayTool?.(call.name) && !(error instanceof AgentToolNotExecutedError)) {
               throw new AgentStoppedError(`工具 ${call.name} 返回错误，但无法确认是否已产生修改。已停止自动重试，请先核对目标数据或外部服务。`);
             }
             failed = true;

@@ -3,8 +3,7 @@ import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { TabsContent } from '@/components/ui/tabs';
-import { cn } from '@/lib/utils';
+import { SettingsGroup, SettingsPage } from './SettingsPrimitives';
 import { TaskModelSetting } from './TaskModelSetting';
 import { ModelProfileEditor } from './ModelProfileEditor';
 import type { SettingsPanelLayoutProps } from './SettingsPanelLayout';
@@ -15,31 +14,23 @@ export function ModelSettingsSection({ props }: { props: SettingsPanelLayoutProp
     useState<SettingsPanelLayoutProps['editingProfile']>(null);
   const { busy, settings, profileTestStates, formatContextLength, onNewProfile,
     onProviderPresetSelect, onTestProfile, onDeleteProfile } = props;
-  const settingsContentClassName =
-    'settings-content';
-  const settingsContentInnerClassName = (className: string) =>
-    cn('settings-panel-content-inner', className);
 
   return (
-            <TabsContent forceMount value="models" className={settingsContentClassName}>
-              <div className={settingsContentInnerClassName('grid gap-5')}>
-                <div data-setting-id="models-connections" tabIndex={-1} className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-base font-semibold">模型连接</h2>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                      应用配置 · 维护连接与凭据；在下方指定对话模型，翻译模型位于“翻译”。
-                    </p>
-                  </div>
+            <SettingsPage tab="models" title="模型与助手" description="选择助手使用的模型，管理服务商连接。">
+                <SettingsGroup title="默认模型">
+                  <TaskModelSetting props={props} task="assistant" />
+                  <Button size="sm" variant="ghost" onClick={() => props.onSetActiveSettingsTab('translation')}>设置阅读翻译模型 →</Button>
+                </SettingsGroup>
+                <SettingsGroup id="models-connections" title="模型连接" action={
                   <Button disabled={props.modelsUnavailable || taskBusy(props)} size="sm" type="button" variant="outline" onClick={() => {
                     onNewProfile();
                     setProfileEditorOpen(true);
                   }}>
                     <Plus />
                     新增配置
-                  </Button>
-                </div>
+                  </Button>}>
     
-                <div className="settings-model-list" role="list" aria-label="模型连接列表">
+                <div data-setting-id="models-advanced" tabIndex={-1} className="settings-model-list" role="list" aria-label="模型连接列表">
                   {!props.modelsUnavailable && settings.profiles.length === 0 && <p className="py-6 text-sm text-muted-foreground">还没有模型连接，点击“新增配置”开始。</p>}
                   {settings.profiles.map(profile => {
                     const testState = profileTestStates[profile.id];
@@ -75,10 +66,7 @@ export function ModelSettingsSection({ props }: { props: SettingsPanelLayoutProp
                   })}
                 </div>
 
-                <TaskModelSetting props={props} task="assistant" />
-                <details data-setting-id="models-advanced" tabIndex={-1} className="settings-advanced"><summary>模型高级参数</summary>
-                  <p className="text-xs leading-5 text-muted-foreground">点击需要调整的模型的“编辑”，展开“高级参数”可设置上下文窗口、最大输出、Temperature 与 Top P。</p>
-                </details>
+                </SettingsGroup>
                 <ModelProfileEditor props={props} open={profileEditorOpen} onOpenChange={setProfileEditorOpen} />
     
                 <Dialog open={Boolean(deleteConfirmProfile)} onOpenChange={(open) => {
@@ -116,8 +104,7 @@ export function ModelSettingsSection({ props }: { props: SettingsPanelLayoutProp
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
-              </div>
-            </TabsContent>
+            </SettingsPage>
   );
 }
 

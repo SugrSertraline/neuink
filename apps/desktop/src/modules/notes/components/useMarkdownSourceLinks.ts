@@ -57,6 +57,7 @@ export function useMarkdownSourceLinks({
   pasteSourceLinkHandlerRef,
   setNoteLinks,
   sourceLinkToInsert,
+  runInsertionOnce,
   workspaceRoot
 }: {
   canEdit: boolean;
@@ -77,6 +78,7 @@ export function useMarkdownSourceLinks({
   pasteSourceLinkHandlerRef: { current: SourceLinkPasteHandler };
   setNoteLinks: Dispatch<SetStateAction<SourceLink[]>>;
   sourceLinkToInsert?: SourceLink | null;
+  runInsertionOnce?: (id: string, insert: () => void) => boolean;
   workspaceRoot?: string | null;
 }) {
   const [sourcePanelFilter, setSourcePanelFilter] = useState('all');
@@ -102,16 +104,15 @@ export function useMarkdownSourceLinks({
       if (targetEditor.isDestroyed || !targetEditor.isEditable) return;
       const linkToInsert =
         findExistingSourceLinkForSameSource(noteLinksRef.current, link) ?? link;
-      insertSourceLinkNode(targetEditor, linkToInsert, workspaceRoot);
-      setNoteLinks((current) => {
-        const next = current.some(
+      const current = noteLinksRef.current;
+      const next = current.some(
           (currentLink) => currentLink.link_id === linkToInsert.link_id
         )
           ? current
           : [...current, linkToInsert];
-        noteLinksRef.current = next;
-        return next;
-      });
+      noteLinksRef.current = next;
+      setNoteLinks(next);
+      insertSourceLinkNode(targetEditor, linkToInsert, workspaceRoot);
       markEditorDirtyRef.current();
       revealInsertedSourceLink(editorScrollRef.current, linkToInsert.anchor_id);
       notify({
@@ -212,10 +213,11 @@ export function useMarkdownSourceLinks({
     queueMicrotask(() => {
       if (cancelled || editor.isDestroyed || !editor.isEditable) return;
       handledSourceLinkIdRef.current = sourceLinkToInsert.link_id;
-      insertSourceLink(editor, sourceLinkToInsert);
+      if (runInsertionOnce) runInsertionOnce(`source:${sourceLinkToInsert.link_id}`, () => insertSourceLink(editor, sourceLinkToInsert));
+      else insertSourceLink(editor, sourceLinkToInsert);
     });
     return () => { cancelled = true; };
-  }, [canEdit, editor, insertSourceLink, loadFailed, loading, sourceLinkToInsert]);
+  }, [canEdit, editor, insertSourceLink, loadFailed, loading, sourceLinkToInsert, runInsertionOnce]);
 
   const locateSourceLink = useCallback(
     (anchorId: string) => {

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import type { Annotation, SegmentBlockNote, SourceSegment } from '@/shared/types/domain';
@@ -13,8 +13,11 @@ const annotation: Annotation = { annotation_id: 'a', segment_uid: 'annotation', 
 const segments = [segment('bookmark', 0), segment('note', 1), segment('annotation', 2), segment('plain', 3)];
 const notes = new Map([['bookmark', note('bookmark', '', true)], ['note', note('note', 'My note')], ['plain', note('plain')]]);
 const annotations = new Map([['annotation', [annotation]], ['plain', []]]);
-beforeEach(() => vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }));
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+beforeEach(() => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('PointerEvent', MouseEvent);
+});
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 function props() {
   return { activeSegmentUid: null, flashSegmentUid: null, selectedSegmentUid: null, notesBySegmentUid: notes, annotationsBySegmentUid: annotations,
@@ -70,7 +73,7 @@ describe('marked reading positions', () => {
     const onJumpToSegment = vi.fn();
     render(<SegmentRailMarker activeSegmentUid="plain" selectedSegmentUid={null} flashSegmentUid={null}
       item={{ segment: segments[3], segments: [segments[3], segments[0]], top: 50, isHeading: false, headingLevel: null }}
-      {...buildSegmentRailMarks(notes, new Map())} pointerY={null} railHeight={500} railWidth={36}
+      {...buildSegmentRailMarks(notes, new Map())} open={false} pointerY={null} railHeight={500} railWidth={36}
       onJumpToSegment={onJumpToSegment} onHoverOpenChange={vi.fn()} onOpenOutline={vi.fn()} onPointerFocus={vi.fn()} />, { wrapper });
     const marker = screen.getByRole('button', { name: '2 个相邻片段，第 1 页，收藏 1 处' });
     expect(marker.getAttribute('aria-current')).toBe('location');
@@ -87,5 +90,48 @@ describe('marked reading positions', () => {
     const previewItem = await screen.findByRole('button', { name: '第 2 页 · 段落 s1' });
     fireEvent.click(previewItem);
     expect(input.onJumpToSegment).toHaveBeenCalledExactlyOnceWith('s1');
+  });
+
+  it('keeps only the latest preview during rapid movement and ignores an older close timer', () => {
+    vi.useFakeTimers();
+    render(<SegmentRail {...props()} />, { wrapper });
+    const first = screen.getByRole('button', { name: '段落，第 1 页，收藏 1 处' });
+    const second = screen.getByRole('button', { name: '段落，第 2 页，笔记 1 处' });
+    const third = screen.getByRole('button', { name: '段落，第 3 页，批注 1 处' });
+    const previews = () => document.querySelectorAll('[data-slot="hover-card-content"]');
+
+    fireEvent.pointerMove(first, { pointerType: 'mouse' });
+    expect(previews()).toHaveLength(1);
+    expect(previews()[0].textContent).toContain('bookmark');
+    fireEvent.pointerLeave(first, { pointerType: 'mouse' });
+    fireEvent.pointerMove(second, { pointerType: 'mouse' });
+    fireEvent.pointerLeave(second, { pointerType: 'mouse' });
+    fireEvent.pointerMove(third, { pointerType: 'mouse' });
+    expect(previews()).toHaveLength(1);
+    expect(previews()[0].textContent).toContain('annotation');
+
+    act(() => vi.advanceTimersByTime(200));
+    expect(previews()).toHaveLength(1);
+    expect(previews()[0].textContent).toContain('annotation');
+    fireEvent.keyDown(third, { key: 'Escape' });
+    expect(previews()).toHaveLength(0);
+    fireEvent.pointerMove(first, { pointerType: 'mouse' });
+    expect(previews()).toHaveLength(1);
+    fireEvent.scroll(document);
+    expect(previews()).toHaveLength(0);
+  });
+
+  it('replaces the current preview when keyboard focus moves to another marker', async () => {
+    render(<SegmentRail {...props()} />, { wrapper });
+    const first = screen.getByRole('button', { name: '段落，第 1 页，收藏 1 处' });
+    const second = screen.getByRole('button', { name: '段落，第 2 页，笔记 1 处' });
+    fireEvent.focus(first);
+    await screen.findByText('bookmark');
+    fireEvent.blur(first);
+    fireEvent.focus(second);
+    await screen.findByText('note');
+    const previews = document.querySelectorAll('[data-slot="hover-card-content"]');
+    expect(previews).toHaveLength(1);
+    expect(previews[0].textContent).toContain('note');
   });
 });

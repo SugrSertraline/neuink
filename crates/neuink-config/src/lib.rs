@@ -19,9 +19,33 @@ pub struct AppSettings {
     #[serde(default)]
     pub sciverse: SciverseSettings,
     #[serde(default)]
+    pub research: ResearchSettings,
+    #[serde(default)]
     pub recent_workspaces: Vec<RecentWorkspace>,
     pub autosave_interval_ms: Option<u64>,
     pub theme: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ResearchSettings {
+    #[serde(default = "research_enabled")]
+    pub papers_enabled: bool,
+    #[serde(default = "research_enabled")]
+    pub web_enabled: bool,
+    #[serde(default)]
+    pub use_tavily: bool,
+}
+fn research_enabled() -> bool {
+    true
+}
+impl Default for ResearchSettings {
+    fn default() -> Self {
+        Self {
+            papers_enabled: true,
+            web_enabled: true,
+            use_tavily: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

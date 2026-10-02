@@ -9,12 +9,12 @@ import {
   Save,
   Trash2
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Switch } from '@/components/ui/switch';
-import { useToast } from '@/shared/hooks/useToast';
+import { SettingsDisclosure, SettingSwitch } from '@/modules/settings/components/SettingsPrimitives';
+import { registerSegmentEditorCloseHandler, setSegmentEditorDirty } from '@/modules/reader/components/segmentEditorDirtyRegistry';
 
 import {
   getSciverseSettings,
@@ -34,7 +34,12 @@ type SciverseSettingsSectionProps = {
 type BusyAction = 'clear' | 'load' | 'reveal' | 'save' | 'test' | 'toggle' | null;
 
 export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps) {
-  const { notify } = useToast();
+  const owner = useId();
+  const mounted = useRef(true), visible = useRef(active);
+  const revealEpoch = useRef(0);
+  visible.current = active;
+  const [notice, setNotice] = useState<{ tone: string; title: string; description?: string } | null>(null);
+  const notify = (value: { tone: string; title: string; description?: string }) => { if (mounted.current) setNotice(value); };
   const [settings, setSettings] = useState<SciverseSettingsState | null>(null);
   const [tokenDraft, setTokenDraft] = useState('');
   const [revealedToken, setRevealedToken] = useState<string | null>(null);
@@ -47,6 +52,23 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
   const [loaded, setLoaded] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [confirmingClear, setConfirmingClear] = useState(false);
+  const latest = useRef({ tokenDraft, busy });
+  latest.current = { tokenDraft, busy };
+  const writing = busy === 'save' || busy === 'toggle' || busy === 'clear';
+  useEffect(() => {
+    mounted.current = true;
+    const unregister = registerSegmentEditorCloseHandler('settings', owner, {
+      isDirty: () => Boolean(latest.current.tokenDraft || ['save', 'toggle', 'clear'].includes(latest.current.busy ?? '')),
+      save: async () => {
+        if (!latest.current.tokenDraft && !['save', 'toggle', 'clear'].includes(latest.current.busy ?? '')) return true;
+        notify({ tone: 'danger', title: '请先保存或放弃 Sciverse Token，再关闭设置。' }); return false;
+      },
+      discard: () => { setTokenDraft(''); setEditingToken(false); setShowToken(false); setRevealedToken(null); latest.current.tokenDraft = ''; },
+    });
+    return () => { mounted.current = false; unregister(); setSegmentEditorDirty('settings', owner, false); };
+  }, [owner]);
+  useEffect(() => { setSegmentEditorDirty('settings', owner, Boolean(tokenDraft || writing)); }, [owner, tokenDraft, writing]);
+  useEffect(() => { if (!active) { revealEpoch.current++; setShowToken(false); setRevealedToken(null); } }, [active]);
 
   useEffect(() => {
     if (!active || loaded) return undefined;
@@ -72,6 +94,7 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
   }, [active, loadAttempt]);
 
   const applySettings = (next: SciverseSettingsState) => {
+    if (!mounted.current) return;
     setSettings(next);
     setTokenDraft('');
     setRevealedToken(null);
@@ -81,6 +104,7 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
   };
 
   const resetConnection = () => {
+    setNotice(null);
     setConnection(null);
     setConnectionError(null);
   };
@@ -168,12 +192,11 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
     resetConnection();
     try {
       const result = await testSciverseConnection();
+      if (!mounted.current) return;
       setConnection(result);
-      notify({ tone: 'success', title: 'Sciverse 连接成功' });
     } catch (caught) {
       const message = errorMessage(caught);
-      setConnectionError(message);
-      notifyFailure('Sciverse 连接失败', caught);
+      if (mounted.current) setConnectionError(message);
     } finally {
       setBusy(null);
     }
@@ -182,6 +205,7 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
   const toggleTokenVisibility = async () => {
     if (showToken) {
       setShowToken(false);
+      setRevealedToken(null);
       return;
     }
     if (editingToken || !settings?.has_api_token) {
@@ -195,8 +219,10 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
     }
 
     setBusy('reveal');
+    const epoch = revealEpoch.current;
     try {
       const token = await revealSciverseApiToken();
+      if (!mounted.current || !visible.current || epoch !== revealEpoch.current) return;
       setRevealedToken(token);
       setShowToken(true);
     } catch (caught) {
@@ -226,6 +252,7 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
   };
 
   const cancelTokenReplacement = () => {
+    resetConnection();
     setEditingToken(false);
     setTokenDraft('');
     setRevealedToken(null);
@@ -273,43 +300,12 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
       : '';
 
   return (
-    <section className="sciverse-settings min-w-0 overflow-hidden rounded-lg border bg-card">
-      <div className="flex flex-wrap items-start justify-between gap-4 p-4">
-        <div className="flex min-w-0 items-start gap-3">
-          <div className="grid size-9 shrink-0 place-items-center rounded-md border bg-muted/35 text-primary">
-            <PlugZap size={17} aria-hidden="true" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-sm font-semibold">Sciverse</h3>
-              <span
-                className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
-                  settings?.enabled
-                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
-                    : 'text-muted-foreground'
-                }`}
-              >
-                {settings?.enabled ? '已启用' : '已停用'}
-              </span>
-            </div>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">
-              为助手提供外部科学文献检索和远程全文读取。
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">允许助手调用</span>
-          <Switch
-            aria-label="允许助手调用 Sciverse"
-            checked={settings?.enabled ?? false}
-            disabled={pending || !settings || editingToken || Boolean(tokenDraft.trim())}
-            onCheckedChange={(checked) => void toggleEnabled(checked)}
-          />
-        </div>
-      </div>
-
-      <div className="grid gap-4 border-t bg-background/55 p-4">
+    <SettingsDisclosure id="tools-services" title="Sciverse" description="科学文献检索与远程全文读取，需服务 Token。"
+      onToggle={open => { if (!open) { revealEpoch.current++; setShowToken(false); setRevealedToken(null); } }}
+      status={writing ? '保存中…' : tokenDraft ? '未保存' : notice?.tone === 'danger' || connectionError ? '操作失败' : busy === 'load' ? '读取中…' : loadError ? '读取失败' : !settings ? '未就绪' : settings.enabled ? '已启用' : hasToken ? '未启用' : '未配置'}>
+      <div className="sciverse-settings grid min-w-0 gap-3">
+        {notice && <p role={notice.tone === 'danger' ? 'alert' : 'status'} className={`text-xs [overflow-wrap:anywhere] ${notice.tone === 'danger' ? 'text-destructive' : 'text-muted-foreground'}`}>{notice.title}{notice.description ? `：${notice.description}` : ''}</p>}
+        {writing && <p role="status" className="text-xs text-muted-foreground">保存中…</p>}
         {busy === 'load' ? (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Loader2 className="animate-spin" size={14} />
@@ -325,6 +321,10 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
           </div>
         ) : settings ? (
           <>
+            <SettingSwitch label="允许助手调用 Sciverse" checked={settings.enabled}
+              disabled={pending || editingToken || Boolean(tokenDraft) || (!hasToken && !settings.enabled)}
+              description={hasToken ? '开关自动保存；密钥需单独保存。' : '先保存 Token，再开启服务。'}
+              onCheckedChange={checked => void toggleEnabled(checked)} />
             <div className="grid gap-1 text-xs">
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                 <span className="text-muted-foreground">服务地址</span>
@@ -356,7 +356,7 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
                   <Input
                     id="sciverse-api-token"
                     aria-label="Sciverse API Token"
-                    className="sciverse-token-input h-9 pl-9 pr-16 font-mono text-xs"
+                    className="sciverse-token-input pl-9 pr-16"
                     disabled={pending}
                     placeholder={
                       environmentManaged
@@ -373,19 +373,19 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
                       resetConnection();
                     }}
                   />
-                  <button
+                  <Button size="icon-sm" variant="ghost"
                     aria-label="复制当前显示的 Token"
-                    className="absolute right-8 top-1/2 grid size-7 -translate-y-1/2 place-items-center text-muted-foreground hover:text-foreground disabled:opacity-40"
+                    className="absolute right-8 top-1/2 -translate-y-1/2 text-muted-foreground"
                     disabled={pending || !showToken || !(editingTokenValue ? tokenDraft : revealedToken)}
                     title="复制当前显示的 Token"
                     type="button"
                     onClick={() => void copyVisibleToken()}
                   >
                     <Copy size={14} />
-                  </button>
-                  <button
+                  </Button>
+                  <Button size="icon-sm" variant="ghost"
                     aria-label={showToken ? '隐藏 Sciverse Token' : '显示 Sciverse Token'}
-                    className="absolute right-1 top-1/2 grid size-7 -translate-y-1/2 place-items-center text-muted-foreground hover:text-foreground disabled:opacity-40"
+                    className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground"
                     disabled={pending || (!hasToken && !tokenDraft)}
                     title={showToken ? '隐藏 Sciverse Token' : '显示 Sciverse Token'}
                     type="button"
@@ -398,7 +398,7 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
                     ) : (
                       <Eye size={15} />
                     )}
-                  </button>
+                  </Button>
                 </div>
 
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -424,7 +424,7 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
                         {busy === 'save' ? <Loader2 className="animate-spin" /> : <Save />}
                         {hasToken ? '保存新 Token' : '保存 Token'}
                       </Button>
-                      {hasToken && editingToken ? (
+                      {editingToken || tokenDraft ? (
                         <Button
                           disabled={pending}
                           size="sm"
@@ -432,7 +432,7 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
                           variant="ghost"
                           onClick={cancelTokenReplacement}
                         >
-                          取消替换
+                          {hasToken ? '取消替换' : '放弃输入'}
                         </Button>
                       ) : null}
                     </>
@@ -452,7 +452,7 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
                   {settings.token_source === 'credential_store' ? (
                     <Button
                       aria-label="清除 Sciverse Token"
-                      disabled={pending}
+                      disabled={pending || editingToken || Boolean(tokenDraft)}
                       size="sm"
                       type="button"
                       variant="ghost"
@@ -466,7 +466,7 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
               </div>
               {editingToken || tokenDraft.trim() ? (
                 <p className="text-[11px] leading-5 text-muted-foreground">
-                  正在替换 Token。连接测试不会自动保存或覆盖当前输入。
+                  未保存。保存后才能测试连接。
                 </p>
               ) : null}
             </div>
@@ -478,10 +478,10 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
                   <div className="mt-1 text-muted-foreground">清除后会同时停用 Sciverse。</div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button size="sm" type="button" variant="ghost" onClick={() => setConfirmingClear(false)}>
+                  <Button size="sm" type="button" disabled={pending} variant="ghost" onClick={() => setConfirmingClear(false)}>
                     取消
                   </Button>
-                  <Button size="sm" type="button" variant="destructive" onClick={() => void clearCredential()}>
+                  <Button size="sm" type="button" disabled={pending} variant="destructive" onClick={() => void clearCredential()}>
                     确认清除
                   </Button>
                 </div>
@@ -489,12 +489,12 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
             ) : null}
 
             {connection?.ok ? (
-              <div className="flex items-center gap-2 rounded-md border border-emerald-500/25 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400">
+              <div role="status" className="flex items-center gap-2 text-xs text-success">
                 <CheckCircle2 size={14} aria-hidden="true" />
                 连接正常，服务返回 {connection.field_count} 个可用元数据字段。
               </div>
             ) : connectionError ? (
-              <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs">
+              <div role="alert" className="text-xs">
                 <div className="font-medium text-destructive">连接失败</div>
                 <div className="mt-1 break-words text-muted-foreground">{connectionError}</div>
               </div>
@@ -502,7 +502,7 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
           </>
         ) : null}
       </div>
-    </section>
+    </SettingsDisclosure>
   );
 }
 

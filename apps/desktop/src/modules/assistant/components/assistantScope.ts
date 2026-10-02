@@ -46,7 +46,7 @@ export function buildAssistantScope({
 
   const scopedEntries = activeEntry
     ? [activeEntry]
-    : entries.filter((entry) => entry.status === 'Parsed');
+    : entries;
   return {
     tag_ids: [],
     tag_names: [],
@@ -97,13 +97,14 @@ export function buildConversationMentionScope({
   const tagIds = mentions.flatMap((mention) =>
     mention.kind === 'tag' && mention.tagId ? [mention.tagId] : []
   );
-  const tagScope = buildAssistantScope({
+  // No historical Tag mention means no additional scope, not the whole library.
+  const tagScope = tagIds.length ? buildAssistantScope({
     activeEntry: null,
     activeTag: null,
     entries,
     selectedTagIds: tagIds,
     tags
-  });
+  }) : { entry_ids: [], entry_titles: [], tag_ids: [], tag_names: [] };
   const explicitEntryScope: ScopeSnapshot = {
     entry_ids: [], entry_titles: [], tag_ids: [], tag_names: []
   };

@@ -217,7 +217,10 @@ fn source_links_are_portable_and_unused_and_code_only_links_are_not_materialized
     .unwrap();
     let target = fixture.base.join("references.txt");
     let catalog = reading::inspect(&fixture.workspace, &fixture.id, Some(id.as_str())).unwrap();
-    assert!(catalog.items.iter().any(|item| item.warnings.iter().any(|warning| warning.contains("原文内容已变化"))));
+    assert!(catalog.items.iter().any(|item| item
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("原文内容已变化"))));
     export(
         &fixture,
         &selected(&fixture, Some(&id)),

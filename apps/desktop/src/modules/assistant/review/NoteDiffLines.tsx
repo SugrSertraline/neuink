@@ -1,39 +1,44 @@
 import type { NoteReviewBlock } from './noteReviewDiff';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { SourceSnapshotPreview } from '@/shared/components/SourceSnapshotPreview';
+import { useAssistantReading } from '../components/AssistantReplyActionsContext';
 
 type Change = Extract<NoteReviewBlock, { kind: 'change' }>;
 export const noteChangeKind = (block: Change) => !block.beforeCount ? '新增' : !block.afterCount ? '删除' : '修改';
 
-/** Unified diff: signs and old/new line numbers remain readable without relying on color. */
-export function NoteDiffLines({ block }: { block: Change }) {
-  return <div className="min-w-0 font-mono text-xs leading-5" aria-label={`${noteChangeKind(block)}内容对比`}>
+export function NoteRenderedContent({ text, entryId }: { text: string; entryId?: string }) {
+  const reading = useAssistantReading();
+  return <div className="min-w-0 px-3 py-2 text-sm leading-relaxed [overflow-wrap:anywhere]">
+    {text.trim() ? <SourceSnapshotPreview markdown={text} sourceEntryId={entryId} workspaceRoot={reading?.root} normalization="none" renderedOnly flush />
+      : <p className="text-xs text-muted-foreground">空白内容</p>}
+  </div>;
+}
+
+/** Signs describe the change; content is rendered just as it is when read. */
+export function NoteDiffLines({ block, entryId }: { block: Change; entryId?: string }) {
+  return <div className="min-w-0" aria-label={`${noteChangeKind(block)}内容对比`}>
     {(['before', 'after'] as const).map(side => {
       const count = side === 'before' ? block.beforeCount : block.afterCount;
       if (!count) return null;
       const removed = side === 'before';
-      return <div key={side} className={removed ? 'bg-destructive/10' : 'bg-success/10'}>
-        {block[side].split('\n').map((line, index) => <div key={index} data-diff-line={removed ? 'removed' : 'added'}
-          className="grid min-w-0 grid-cols-[2.5rem_2.5rem_1.25rem_minmax(0,1fr)]">
-          <span aria-hidden="true" className="select-none border-r border-border/50 px-1 text-right text-muted-foreground">{removed ? block.beforeLine + index : ''}</span>
-          <span aria-hidden="true" className="select-none border-r border-border/50 px-1 text-right text-muted-foreground">{removed ? '' : block.afterLine + index}</span>
-          <span className={`select-none text-center font-semibold ${removed ? 'text-destructive' : 'text-success'}`} aria-label={removed ? '删除' : '新增'}>{removed ? '−' : '+'}</span>
-          <pre className="min-w-0 whitespace-pre-wrap px-2 font-mono [overflow-wrap:anywhere]">{line || ' '}</pre>
-        </div>)}
+      return <div key={side} data-diff-line={removed ? 'removed' : 'added'} className={removed ? 'border-l-2 border-destructive bg-destructive/5' : 'border-l-2 border-success bg-success/5'}>
+        <div className={`px-3 pt-2 text-xs font-medium ${removed ? 'text-destructive' : 'text-success'}`}>
+          {removed ? '− 修改前' : '+ 修改后'} · {noteChangeKind(block)}
+        </div>
+        <NoteRenderedContent text={block[side]} entryId={entryId} />
       </div>;
     })}
   </div>;
 }
 
-export function NoteDiffContext({ text }: { text: string }) {
+export function NoteDiffContext({ text, entryId }: { text: string; entryId?: string }) {
   const [expanded, setExpanded] = useState(false);
   const lines = text.split('\n');
   const long = lines.length > 8;
-  const content = (value: string) => <pre className="my-1 min-w-0 whitespace-pre-wrap px-2 font-mono text-xs leading-5 text-muted-foreground [overflow-wrap:anywhere]">{value}</pre>;
   return <div className="min-w-0">
-    {content(long && !expanded ? lines.slice(0, 3).join('\n') : text)}
     {long ? <Button variant="ghost" size="xs" className="h-auto w-full whitespace-normal py-1 text-muted-foreground" aria-expanded={expanded}
-      onClick={() => setExpanded(value => !value)}>{expanded ? '收起未修改内容' : `展开 ${lines.length - 6} 行未修改内容`}</Button> : null}
-    {long && !expanded ? content(lines.slice(-3).join('\n')) : null}
+      onClick={() => setExpanded(value => !value)}>{expanded ? '收起未修改内容' : '展开未修改内容'}</Button> : null}
+    {!long || expanded ? <NoteRenderedContent text={text} entryId={entryId} /> : null}
   </div>;
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useReadingViewSession } from '../navigation/ReadingViewSession';
 
 import { translateEntrySegment } from "@/shared/ipc/workspaceApi";
 import { useToast } from "@/shared/hooks/useToast";
@@ -31,6 +32,11 @@ type UsePdfTranslationControllerOptions = {
   workspaceRoot: string | null;
 };
 
+export function pdfTranslationDisplay(mode: 'original' | 'replace' | null | undefined) {
+  // The visible flag enables hover previews; only replace masks the PDF page.
+  return { translationMode: mode === 'replace' ? 'replace' as const : 'hover' as const, visible: true };
+}
+
 export function usePdfTranslationController({
   entryId,
   entryTitle,
@@ -40,14 +46,18 @@ export function usePdfTranslationController({
   workspaceRoot,
 }: UsePdfTranslationControllerOptions) {
   const { dismiss, notify } = useToast();
+  const view = useReadingViewSession();
   const [taskOpen, setTaskOpen] = useState(false);
-  const [visible, setVisible] = useState(false);
   const [translatingSegmentUid, setTranslatingSegmentUid] = useState<string | null>(null);
   const handledJobKeyRef = useRef<string | null>(null);
   const {
     activeJob,
     currentJobKey,
     pauseTranslation: pauseTask,
+    cancelTranslation: cancelTask,
+    resumeTranslation: resumeTask,
+    translationPaused,
+    stopPending,
     startTranslation: startTask,
     translation,
     translationBusy,
@@ -68,10 +78,6 @@ export function usePdfTranslationController({
       ),
     [translation],
   );
-  const canResume =
-    translation?.status === "failed" ||
-    translation?.status === "partial" ||
-    translation?.status === "running";
   useEffect(() => {
     handledJobKeyRef.current = null;
   }, [entryId]);
@@ -84,6 +90,7 @@ export function usePdfTranslationController({
       return;
     }
     if (activeJob.status === "processing" || activeJob.status === "queued") {
+      handledJobKeyRef.current = null;
       return;
     }
 
@@ -98,10 +105,10 @@ export function usePdfTranslationController({
       });
       return;
     }
-    if (activeJob.status === "canceled") {
+    if (activeJob.status === "canceled" || activeJob.status === "paused") {
       notify({
-        title: "已暂停翻译",
-        description: "已保留当前翻译进度，可稍后继续。",
+        title: activeJob.status === "paused" ? "已暂停翻译" : "已取消翻译任务",
+        description: activeJob.status === "paused" ? "任务已保留，点击“继续翻译”接着处理剩余内容。" : "未完成部分已取消，已有译文保留。",
       });
       return;
     }
@@ -125,15 +132,6 @@ export function usePdfTranslationController({
     });
   }, [activeJob, currentJobKey, notify, translation]);
 
-  useEffect(() => {
-    if (
-      loadReady &&
-      translation?.segments.some((segment) => segment.status === "translated")
-    ) {
-      setVisible(true);
-    }
-  }, [loadReady, translation]);
-
   const translateSegment = async (segment: SourceSegment) => {
     if (!workspaceRoot || translatingSegmentUid) {
       return;
@@ -147,7 +145,6 @@ export function usePdfTranslationController({
     try {
       await translateEntrySegment(workspaceRoot, entryId, segment.uid);
       await reloadTranslation();
-      setVisible(true);
       dismiss(toastId);
       notify({
         tone: "success",
@@ -175,7 +172,6 @@ export function usePdfTranslationController({
       return;
     }
     try {
-      setVisible(true);
       await startTask(strategy, options);
     } catch (caught) {
       notify({
@@ -233,11 +229,20 @@ export function usePdfTranslationController({
 
   return {
     bySegmentUid,
-    canResume,
+    translationPaused,
+    resume: async () => {
+      try { await resumeTask(); }
+      catch (error) { notify({ tone: "danger", title: "继续翻译失败", description: String(error) }); }
+    },
     exportTranslation,
     pause,
+    cancel: async () => {
+      if (!translationBusy && !translationPaused) return;
+      try { await cancelTask(); }
+      catch { notify({ tone: "danger", title: "取消翻译失败", description: "暂时无法取消翻译，请重试。" }); }
+    },
+    stopPending,
     setTaskOpen,
-    setVisible,
     start,
     taskOpen,
     translateSegment,
@@ -247,7 +252,6 @@ export function usePdfTranslationController({
     translationDetail,
     translationJobProgress: activeJob?.progress ?? null,
     translationMessage,
-    translationMode: "hover" as const,
-    visible,
+    ...pdfTranslationDisplay(view?.mode),
   };
 }

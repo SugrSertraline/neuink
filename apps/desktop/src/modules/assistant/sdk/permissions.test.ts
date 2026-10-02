@@ -33,7 +33,8 @@ describe('capability boundaries', () => {
       onCreateEntry: vi.fn(), applicationActions: createApplicationActions('standard', vi.fn()),
       onNoteProposal: vi.fn(), onEntryMetaProposal: vi.fn(), onTagProposal: vi.fn()
     });
-    expect(Object.keys(runtime.tools)).toEqual([]);
+    expect(Object.keys(runtime.tools)).toEqual(['present_diagram']);
+    expect(runtime.tools.present_diagram.needsApproval).not.toBe(true);
   });
   it('does not grant proposal callbacks in a read-only invocation', async () => {
     const runtime = await createAssistantTools({
@@ -41,7 +42,7 @@ describe('capability boundaries', () => {
       invocationPlan: { enabledToolIds: ['note.propose_create', 'entry.propose_meta_patch', 'tag.propose_change'], writePolicy: 'chat_only' } as never,
       onNoteProposal: vi.fn(), onEntryMetaProposal: vi.fn(), onTagProposal: vi.fn()
     });
-    expect(Object.keys(runtime.tools)).toEqual([]);
+    expect(Object.keys(runtime.tools)).toEqual(['present_diagram']);
   });
   it('requires all MCP grants including an approved package', () => {
     const settings = structuredClone(DEFAULT_AGENT_RUNTIME_SETTINGS);

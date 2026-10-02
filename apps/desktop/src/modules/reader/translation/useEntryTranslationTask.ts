@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   pauseEntryTranslation,
+  cancelTranslationTask,
+  resumeEntryTranslation,
   listJobs,
   readEntryTranslation,
   runEntryTranslation,
@@ -13,6 +15,8 @@ import {
 } from '@/shared/ipc/workspaceApi';
 
 export type TranslationRunStrategy = 'restart' | 'resume';
+export type TranslationStopAction = 'pause' | 'cancel';
+export type TranslationTaskAction = TranslationStopAction | 'resume';
 export type TranslationStartOptions = {
   force?: boolean;
   segmentUids?: string[];
@@ -39,6 +43,10 @@ function isTerminalJobStatus(status: Job['status']) {
 }
 
 const RECEIVED_CHARS_PATTERN = /已接收\s*(\d+)\s*字/;
+
+// Single-segment translation has no job event. Share its refreshed snapshot
+// with other mounted PDF/reflow views of the same entry in this window.
+const translationRefreshListeners = new Set<(root: string, entryId: string, value: EntryTranslation | null) => void>();
 
 /** Keep the running action stable while retaining the latest stream receipt count. */
 export function normalizeTranslationJobMessage(
@@ -75,15 +83,58 @@ export function useEntryTranslationTask({
   const [translationDetail, setTranslationDetail] = useState<string | null>(null);
   const [translationMessage, setTranslationMessage] = useState<string | null>(null);
   const activeJobIdRef = useRef<string | null>(null);
+  const jobRef = useRef<Job | null>(null);
+  const revisionRef = useRef(0);
+  const scopeRef = useRef<object>({});
+  const stopRef = useRef<TranslationTaskAction | null>(null);
+  const [stopPending, setStopPending] = useState<TranslationTaskAction | null>(null);
+
+  useEffect(() => {
+    const receive = (root: string, id: string, value: EntryTranslation | null) => {
+      if (root !== workspaceRoot || id !== entryId) return;
+      revisionRef.current += 1;
+      setTranslation(value);
+      setTranslationDetail(value?.error ?? null);
+    };
+    translationRefreshListeners.add(receive);
+    return () => { translationRefreshListeners.delete(receive); };
+  }, [entryId, workspaceRoot]);
+
+  const acceptJob = useCallback((job: Job) => {
+    const previous = jobRef.current;
+    if (previous && previous.id === job.id && (
+      (isTerminalJobStatus(previous.status) && !isTerminalJobStatus(job.status)) ||
+      (previous.status === 'paused' && (job.status === 'processing' || job.status === 'queued') && job.updated_at <= previous.updated_at) ||
+      previous.updated_at > job.updated_at
+    )) return false;
+    if (previous && previous.id !== job.id && previous.created_at > job.created_at) return false;
+    revisionRef.current += 1;
+    jobRef.current = job;
+    activeJobIdRef.current = job.id;
+    setActiveJob(job);
+    setTranslationBusy(job.status === 'queued' || job.status === 'processing');
+    if (isTerminalJobStatus(job.status) || job.status === 'paused' || (stopRef.current === 'resume' && job.status === 'processing')) {
+      stopRef.current = null;
+      setStopPending(null);
+    }
+    setTranslationMessage((previousMessage) => normalizeTranslationJobMessage(job.status, job.message, previousMessage));
+    return true;
+  }, []);
 
   useEffect(() => {
     activeJobIdRef.current = null;
+    jobRef.current = null;
+    revisionRef.current += 1;
+    scopeRef.current = {};
+    stopRef.current = null;
+    setStopPending(null);
     setActiveJob(null);
     setTranslation(null);
     setTranslationBusy(false);
     setTranslationDetail(null);
     setTranslationMessage(null);
-  }, [entryId]);
+    return () => { scopeRef.current = {}; };
+  }, [entryId, workspaceRoot]);
 
   useEffect(() => {
     if (!workspaceRoot) {
@@ -93,31 +144,30 @@ export function useEntryTranslationTask({
     }
 
     let cancelled = false;
+    const initialRevision = revisionRef.current;
     void readEntryTranslation(workspaceRoot, entryId)
       .then((response) => {
-        if (cancelled) {
+        if (cancelled || revisionRef.current !== initialRevision) {
           return;
         }
         setTranslation(response.translation);
         void listJobs()
           .then((jobs) => {
-            if (cancelled) return;
+            if (cancelled || revisionRef.current !== initialRevision) return;
             const runningJob = jobs.find((job) =>
               isTranslationJobForEntry(job, workspaceRoot, entryId) && !isTerminalJobStatus(job.status)
             );
             if (runningJob) {
-              activeJobIdRef.current = runningJob.id;
-              setActiveJob(runningJob);
-              setTranslationMessage(normalizeTranslationJobMessage(runningJob.status, runningJob.message));
+              acceptJob(runningJob);
             }
-            setTranslationBusy(Boolean(runningJob));
+            setTranslationBusy(runningJob?.status === 'queued' || runningJob?.status === 'processing');
           })
           .catch(() => {
-            if (!cancelled) setTranslationBusy(false);
+            if (!cancelled && revisionRef.current === initialRevision) setTranslationBusy(false);
           });
       })
       .catch(() => {
-        if (cancelled) {
+        if (cancelled || revisionRef.current !== initialRevision) {
           return;
         }
         setTranslation(null);
@@ -127,7 +177,7 @@ export function useEntryTranslationTask({
     return () => {
       cancelled = true;
     };
-  }, [entryId, workspaceRoot]);
+  }, [acceptJob, entryId, workspaceRoot]);
 
   useEffect(() => {
     if (!workspaceRoot) {
@@ -144,11 +194,8 @@ export function useEntryTranslationTask({
         return;
       }
 
-      activeJobIdRef.current = nextEvent.job.id;
-      setActiveJob(nextEvent.job);
-      setTranslationMessage((previous) =>
-        normalizeTranslationJobMessage(nextEvent.job.status, nextEvent.job.message, previous)
-      );
+      if (!acceptJob(nextEvent.job)) return;
+      const revision = revisionRef.current;
 
       const payloadTranslation = translationFromPayload(nextEvent.payload);
       if (payloadTranslation) {
@@ -158,29 +205,36 @@ export function useEntryTranslationTask({
         setTranslationDetail(nextEvent.job.error);
       }
 
-      if (isTerminalJobStatus(nextEvent.job.status)) {
+      if (isTerminalJobStatus(nextEvent.job.status) || nextEvent.job.status === 'paused') {
         setTranslationBusy(false);
-        if (!payloadTranslation) {
+        if (!payloadTranslation || nextEvent.job.status === 'succeeded') {
           void readEntryTranslation(workspaceRoot, entryId)
             .then((response) => {
-              if (!disposed) {
-                setTranslation(response.translation);
-                setTranslationDetail(response.translation?.error ?? null);
+              if (!disposed && revisionRef.current === revision) {
+                if (response.translation) {
+                  setTranslation(response.translation);
+                  setTranslationDetail(response.translation.error ?? null);
+                }
               }
             })
-            .catch(() => undefined);
+            .catch(() => {
+              if (!disposed && revisionRef.current === revision) setTranslationDetail('译文已完成，但刷新失败；请重新打开此条目以重试读取。');
+            });
         }
         return;
       }
 
       setTranslationBusy(true);
+    }).catch(() => {
+      if (!disposed) setTranslationDetail('无法接收翻译任务状态，请重新打开此条目。');
+      return () => undefined;
     });
 
     return () => {
       disposed = true;
-      void unlistenPromise.then((unlisten) => unlisten());
+      void unlistenPromise.then((unlisten) => unlisten()).catch(() => undefined);
     };
-  }, [entryId, workspaceRoot]);
+  }, [acceptJob, entryId, workspaceRoot]);
 
   const startTranslation = useCallback(
     async (
@@ -191,6 +245,10 @@ export function useEntryTranslationTask({
         throw new Error('Workspace not available');
       }
 
+      const scope = scopeRef.current;
+      const revision = ++revisionRef.current;
+      stopRef.current = null;
+      setStopPending(null);
       setTranslationBusy(true);
       setTranslationDetail(null);
       setTranslationMessage('正在翻译');
@@ -202,36 +260,82 @@ export function useEntryTranslationTask({
           strategy,
           targetLanguage: 'zh-CN',
         });
-        activeJobIdRef.current = response.job.id;
-        setActiveJob(response.job);
-        setTranslation(response.translation);
+        if (scopeRef.current === scope && revisionRef.current === revision && acceptJob(response.job)) {
+          setTranslation(response.translation);
+        }
         return response;
       } catch (error) {
-        setTranslationBusy(false);
+        if (scopeRef.current === scope && revisionRef.current === revision) setTranslationBusy(false);
         throw error;
       }
     },
-    [entryId, workspaceRoot]
+    [acceptJob, entryId, workspaceRoot]
   );
 
-  const pauseTranslation = useCallback(async () => {
-    const jobId = activeJobIdRef.current;
+  const stopTranslation = useCallback(async (action: TranslationStopAction) => {
+    const jobId = translation?.task?.job_id ?? activeJobIdRef.current;
+    if (stopRef.current) return null;
     if (!jobId) {
       throw new Error('No active translation job');
     }
 
-    setTranslationMessage('正在暂停全文翻译');
-    const job = await pauseEntryTranslation(jobId);
-    if (job) {
-      setActiveJob(job);
+    const scope = scopeRef.current;
+    stopRef.current = action;
+    setStopPending(action);
+    try {
+      if (!workspaceRoot) throw new Error('Workspace not available');
+      const response = action === 'cancel' ? await cancelTranslationTask(workspaceRoot, entryId, jobId) : null;
+      const job = action === 'pause' ? await pauseEntryTranslation(jobId) : response?.job;
+      if (!job) throw new Error('翻译任务不存在，请重新打开翻译任务。');
+      // A queued response must never overwrite a newer terminal event.
+      if (scopeRef.current === scope && (activeJobIdRef.current === jobId || !activeJobIdRef.current) && (isTerminalJobStatus(job.status) || job.status === 'paused') && acceptJob(job)) {
+        const revision = revisionRef.current;
+        const saved = response ?? await readEntryTranslation(workspaceRoot, entryId);
+        if (scopeRef.current === scope && revisionRef.current === revision) {
+          setTranslation(saved.translation);
+          setTranslationDetail(saved.translation?.error ?? null);
+        }
+      }
+      return job;
+    } catch (error) {
+      if (scopeRef.current === scope && activeJobIdRef.current === jobId) {
+        stopRef.current = null;
+        setStopPending(null);
+      }
+      throw error;
     }
-    return job;
-  }, []);
+  }, [acceptJob, entryId, workspaceRoot, translation?.task?.job_id]);
+  const pauseTranslation = useCallback(() => stopTranslation('pause'), [stopTranslation]);
+  const cancelTranslation = useCallback(() => stopTranslation('cancel'), [stopTranslation]);
+
+  const resumeTranslation = useCallback(async () => {
+    if (stopRef.current) return;
+    const jobId = translation?.task?.job_id;
+    if (!workspaceRoot || !jobId || translation?.status !== 'paused') throw new Error('没有可继续的翻译任务。');
+    const scope = scopeRef.current;
+    const revision = revisionRef.current;
+    stopRef.current = 'resume';
+    setStopPending('resume');
+    try {
+      const response = await resumeEntryTranslation(workspaceRoot, entryId, jobId);
+      if (scopeRef.current === scope && revisionRef.current === revision && acceptJob(response.job)) setTranslation(response.translation);
+      return response;
+    } finally {
+      if (scopeRef.current === scope && stopRef.current === 'resume') {
+        stopRef.current = null;
+        setStopPending(null);
+      }
+    }
+  }, [acceptJob, entryId, workspaceRoot, translation]);
 
   const reloadTranslation = useCallback(async () => {
     if (!workspaceRoot) return null;
+    const scope = scopeRef.current;
+    const revision = revisionRef.current;
     const response = await readEntryTranslation(workspaceRoot, entryId);
-    setTranslation(response.translation);
+    if (scopeRef.current === scope && revisionRef.current === revision) {
+      translationRefreshListeners.forEach(receive => receive(workspaceRoot, entryId, response.translation));
+    }
     return response.translation;
   }, [entryId, workspaceRoot]);
 
@@ -246,11 +350,15 @@ export function useEntryTranslationTask({
     activeJob,
     currentJobKey,
     pauseTranslation,
+    cancelTranslation,
+    resumeTranslation,
+    translationPaused: !translationBusy && translation?.status === 'paused' && Boolean(translation.task),
+    stopPending,
     startTranslation,
     reloadTranslation,
     translation,
     translationBusy,
     translationDetail,
-    translationMessage
+    translationMessage: stopPending ? (stopPending === 'resume' ? '正在继续翻译…' : stopPending === 'pause' ? '正在暂停翻译…' : '正在取消翻译…') : translationMessage
   };
 }

@@ -327,9 +327,9 @@ function shouldTranslateSegment(segment: SourceSegment) {
   if (text.length < 2) {
     return false;
   }
+  // Display preservation does not prohibit generating a saved translation.
+  if (['code', 'table', 'figure', 'math'].includes(segment.segment_type)) return true;
   if (
-    segment.segment_type === 'figure' ||
-    segment.segment_type === 'math' ||
     segment.segment_type === 'page_header' ||
     segment.segment_type === 'page_footer' ||
     segment.segment_type === 'page_number' ||

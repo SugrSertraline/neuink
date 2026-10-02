@@ -5,9 +5,33 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { EntryPdfActions } from './EntryPdfActions';
 import type { LibraryEntry } from './LibrarySidebar';
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
+vi.mock('@/shared/hooks/useToast', () => ({ useToast: () => ({ notify: vi.fn() }) }));
 afterEach(cleanup);
 beforeEach(() => vi.clearAllMocks());
 const entry: LibraryEntry = { id: 'pdf-entry', title: '旧论文', tags: [], tagIds: [], fields: {}, contents: [], pdfFileName: 'old.pdf', status: 'Parsed', progress: 100, createdAt: '', updatedAt: '', parseMessage: null, parseEndpoint: null };
+
+it('requires confirmation for reparsing and preserves retry after failure', async () => {
+  const onReparsePdf = vi.fn().mockRejectedValueOnce(new Error('队列不可用')).mockResolvedValueOnce(undefined);
+  const view = render(<EntryPdfActions entry={entry} onReparsePdf={onReparsePdf} />);
+  fireEvent.click(view.getByRole('button', { name: '重新解析 PDF' }));
+  expect(onReparsePdf).not.toHaveBeenCalled();
+  fireEvent.click(view.getByRole('button', { name: '取消' }));
+  expect(onReparsePdf).not.toHaveBeenCalled();
+  fireEvent.click(view.getByRole('button', { name: '重新解析 PDF' }));
+  fireEvent.click(view.getByRole('button', { name: '确认重新解析' }));
+  await waitFor(() => expect(view.getByRole('alert').textContent).toBe('队列不可用'));
+  expect(onReparsePdf).toHaveBeenCalledWith(entry.id);
+  fireEvent.click(view.getByRole('button', { name: '确认重新解析' }));
+  await waitFor(() => expect(view.queryByRole('dialog')).toBeNull());
+  expect(onReparsePdf).toHaveBeenCalledTimes(2);
+});
+
+it('hides reparse when the entry has no parsed PDF', () => {
+  const view = render(<EntryPdfActions entry={{ ...entry, status: 'Parsing' }} onReparsePdf={vi.fn()} />);
+  expect(view.queryByRole('button', { name: '重新解析 PDF' })).toBeNull();
+  view.rerender(<EntryPdfActions entry={{ ...entry, pdfFileName: null }} onReparsePdf={vi.fn()} />);
+  expect(view.queryByRole('button', { name: '重新解析 PDF' })).toBeNull();
+});
 
 it('creates a version for an existing PDF instead of attaching over the original', async () => {
   vi.mocked(open).mockResolvedValue('C:/papers/new.pdf');

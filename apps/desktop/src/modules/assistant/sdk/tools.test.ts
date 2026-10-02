@@ -68,6 +68,22 @@ describe('scopedEnabledToolIds', () => {
 });
 
 describe('model-driven side-effect tools', () => {
+  it('always offers the host diagram presenter to the main agent and persists its artifact', async () => {
+    const runtime = await createAssistantTools({
+      activeExecution: { agent: DEFAULT_AGENT_RUNTIME_SETTINGS.mainAssistant },
+      invocationPlan: { enabledToolIds: [], mainAssistantId: 'main-assistant', missing: [],
+        mode: 'agent_execute', rationale: '', subagentTasks: [], writePolicy: 'chat_only' },
+      root: 'C:/workspace', scope, runtimeSettings: DEFAULT_AGENT_RUNTIME_SETTINGS
+    });
+    expect(runtime.toolNames).toContain('present_diagram');
+    await (runtime.tools.present_diagram.execute as NonNullable<typeof runtime.tools.present_diagram.execute>)(
+      { kind: 'mindmap', title: '整理', nodes: [{ id: 'root', label: '论文整理' }] },
+      { toolCallId: 'diagram-1', messages: [] } as never
+    );
+    expect(runtime.events).toContainEqual(expect.objectContaining({ id: 'diagram-1', status: 'done',
+      diagram: expect.objectContaining({ code: 'mindmap\n  n0["论文整理"]' }) }));
+    expect(runtime.snapshot().events[0].diagram?.title).toBe('整理');
+  });
   it('creates an Entry from model-chosen arguments and replays idempotently', async () => {
     const create = vi.fn(async (title: string) => ({
       description: '', id: 'entry-1', title, updatedAt: '2026-07-15T00:00:00Z'

@@ -43,7 +43,8 @@ export function useSettingsNavigation(activeTab: SettingsTab, onChange: (tab: Se
       if (viewport) {
         const rect = viewport.getBoundingClientRect();
         const scale = viewport.clientHeight ? rect.height / viewport.clientHeight : 1;
-        viewport.scrollTop += (element.getBoundingClientRect().top - rect.top) / (scale || 1) - 12;
+        const clearance = Number.parseFloat(getComputedStyle(element).scrollMarginTop) || 24;
+        viewport.scrollTop += (element.getBoundingClientRect().top - rect.top) / (scale || 1) - clearance;
       }
       const focus = element.querySelector<HTMLElement>('input:not(:disabled),button:not(:disabled),select:not(:disabled),summary') ?? element;
       focus.focus({ preventScroll: true });
@@ -51,7 +52,7 @@ export function useSettingsNavigation(activeTab: SettingsTab, onChange: (tab: Se
     const timer = window.setTimeout(() => { if (element) delete element.dataset.settingHighlight; }, 3000);
     return () => { cancelAnimationFrame(frame); window.clearTimeout(timer); if (element) delete element.dataset.settingHighlight; };
   }, [pending, activeTab, query]);
-  return { rootRef, query, setQuery, navigate, results: searchSettings(query) };
+  return { rootRef, query, setQuery, navigate, pending, results: searchSettings(query) };
 }
 
 export function SettingsCategoryNavigation({ activeTab, onChange }: { activeTab: SettingsTab; onChange: (tab: SettingsTab) => void }) {

@@ -1,7 +1,9 @@
 pub mod annotation;
 pub mod assistant;
-pub mod assistant_routing;
 pub mod assistant_proposal;
+pub mod assistant_routing;
+pub mod browser;
+mod browser_isolation;
 pub mod conversation;
 pub mod embedding;
 pub mod embedding_resources;
@@ -9,14 +11,20 @@ pub mod entry;
 pub mod export;
 pub mod job;
 mod llm_http;
+pub mod note_catalog;
+pub mod onboarding;
+pub mod pdf_parse_queue;
+#[cfg(test)]
+mod pdf_parse_queue_tests;
 pub mod pdf_reader;
+pub mod pdf_text;
+pub mod research;
 pub mod sciverse;
 pub mod search;
 pub mod settings;
 pub mod tag;
-pub mod tag_reading;
 pub mod tag_note;
-pub mod note_catalog;
+pub mod tag_reading;
 #[cfg(test)]
 mod tag_tests;
 pub mod translation;

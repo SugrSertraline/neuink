@@ -1,6 +1,7 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  --guide-backdrop: rgb(0 0 0 / 0.72);
   --reader-desk: var(--muted);
   --reader-desk-weave: transparent;
   --reader-paper: #fffefb;

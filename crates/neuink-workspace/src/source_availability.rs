@@ -6,7 +6,14 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum SourceStatus { Available, EntryTrashed, EntryDeleted, SegmentMissing, ContentChanged, Unavailable }
+pub enum SourceStatus {
+    Available,
+    EntryTrashed,
+    EntryDeleted,
+    SegmentMissing,
+    ContentChanged,
+    Unavailable,
+}
 
 #[derive(Clone, Debug, Serialize)]
 pub struct SourceAvailability {
@@ -18,56 +25,109 @@ pub struct SourceAvailability {
     pub can_locate: bool,
 }
 
-enum EntrySource { Segments(Vec<SourceSegment>), Missing(SourceStatus) }
+enum EntrySource {
+    Segments(Vec<SourceSegment>),
+    Missing(SourceStatus),
+}
 
 impl Workspace {
     pub fn inspect_sources(&self, sources: &[SegmentRef]) -> Vec<SourceAvailability> {
         let mut cache = BTreeMap::new();
-        sources.iter().map(|source| {
-            let entry = cache.entry(source.entry_id.clone()).or_insert_with(|| {
-                if crate::tag_reading::validate_id(source.entry_id.as_str()).is_err() {
-                    return EntrySource::Missing(SourceStatus::Unavailable);
-                }
-                let path = self.layout().entry_dir(&source.entry_id);
-                if self.validate_note_workspace_path(&path).is_err() {
-                    return EntrySource::Missing(SourceStatus::Unavailable);
-                }
-                if !path.exists() {
-                    return EntrySource::Missing(if self.layout().trashed_entry_dir(&source.entry_id).exists() {
-                        SourceStatus::EntryTrashed
-                    } else { SourceStatus::EntryDeleted });
-                }
-                if self.read_entry(&source.entry_id).is_err() {
-                    return EntrySource::Missing(SourceStatus::Unavailable);
-                }
-                match self.read_segments(&source.entry_id) {
-                    Ok(segments) => EntrySource::Segments(segments),
-                    Err(_) => EntrySource::Missing(SourceStatus::Unavailable),
-                }
-            });
-            let status = match entry {
-                EntrySource::Missing(status) => status.clone(),
-                EntrySource::Segments(segments) => match segments.iter().find(|segment|
-                    segment.uid == source.segment_uid || segment.continuation_group_id.as_deref() == Some(source.segment_uid.as_str())) {
-                    None => SourceStatus::SegmentMissing,
-                    Some(segment) => {
-                        let text = segment.markdown.as_deref().filter(|text| !text.trim().is_empty()).unwrap_or(&segment.text);
-                        if !source.quote_hash.is_empty() && blake3::hash(text.as_bytes()).to_hex().as_str() != source.quote_hash {
-                            SourceStatus::ContentChanged
-                        } else { SourceStatus::Available }
+        let mut pdf_revisions = BTreeMap::new();
+        sources
+            .iter()
+            .map(|source| {
+                let entry = cache.entry(source.entry_id.clone()).or_insert_with(|| {
+                    if crate::tag_reading::validate_id(source.entry_id.as_str()).is_err() {
+                        return EntrySource::Missing(SourceStatus::Unavailable);
                     }
+                    let path = self.layout().entry_dir(&source.entry_id);
+                    if self.validate_note_workspace_path(&path).is_err() {
+                        return EntrySource::Missing(SourceStatus::Unavailable);
+                    }
+                    if !path.exists() {
+                        return EntrySource::Missing(
+                            if self.layout().trashed_entry_dir(&source.entry_id).exists() {
+                                SourceStatus::EntryTrashed
+                            } else {
+                                SourceStatus::EntryDeleted
+                            },
+                        );
+                    }
+                    if self.read_entry(&source.entry_id).is_err() {
+                        return EntrySource::Missing(SourceStatus::Unavailable);
+                    }
+                    match self.read_segments(&source.entry_id) {
+                        Ok(segments) => EntrySource::Segments(segments),
+                        Err(_) => EntrySource::Missing(SourceStatus::Unavailable),
+                    }
+                });
+                let status = match entry {
+                    EntrySource::Missing(status) => status.clone(),
+                    EntrySource::Segments(_)
+                        if source
+                            .segment_uid
+                            .as_str()
+                            .starts_with(crate::pdf_text::PDF_TEXT_PREFIX) =>
+                    {
+                        match crate::pdf_text::pdf_text_anchor(source.segment_uid.as_str()) {
+                            Some((revision, page_idx)) if source.page == page_idx + 1 => {
+                                let current = pdf_revisions
+                                    .entry(source.entry_id.clone())
+                                    .or_insert_with(|| {
+                                        self.read_assistant_pdf_bytes(&source.entry_id, None)
+                                            .map(|bytes| blake3::hash(&bytes).to_hex().to_string())
+                                    });
+                                match current {
+                                    Ok(current) if current == revision => SourceStatus::Available,
+                                    Ok(_) => SourceStatus::ContentChanged,
+                                    Err(_) => SourceStatus::Unavailable,
+                                }
+                            }
+                            _ => SourceStatus::Unavailable,
+                        }
+                    }
+                    EntrySource::Segments(segments) => match segments.iter().find(|segment| {
+                        segment.uid == source.segment_uid
+                            || segment.continuation_group_id.as_deref()
+                                == Some(source.segment_uid.as_str())
+                    }) {
+                        None => SourceStatus::SegmentMissing,
+                        Some(segment) => {
+                            let text = segment
+                                .markdown
+                                .as_deref()
+                                .filter(|text| !text.trim().is_empty())
+                                .unwrap_or(&segment.text);
+                            if !source.quote_hash.is_empty()
+                                && blake3::hash(text.as_bytes()).to_hex().as_str()
+                                    != source.quote_hash
+                            {
+                                SourceStatus::ContentChanged
+                            } else {
+                                SourceStatus::Available
+                            }
+                        }
+                    },
+                };
+                let message = match status {
+                    SourceStatus::Available => "原文可用",
+                    SourceStatus::EntryTrashed => "原论文已移入回收站",
+                    SourceStatus::EntryDeleted => "原论文已删除",
+                    SourceStatus::SegmentMissing => "原文段落已不存在",
+                    SourceStatus::ContentChanged => "原文内容已变化，保留引用时的快照",
+                    SourceStatus::Unavailable => "原论文暂时无法读取",
                 }
-            };
-            let message = match status {
-                SourceStatus::Available => "原文可用",
-                SourceStatus::EntryTrashed => "原论文已移入回收站",
-                SourceStatus::EntryDeleted => "原论文已删除",
-                SourceStatus::SegmentMissing => "原文段落已不存在",
-                SourceStatus::ContentChanged => "原文内容已变化，保留引用时的快照",
-                SourceStatus::Unavailable => "原论文暂时无法读取",
-            }.to_owned();
-            SourceAvailability { entry_id: source.entry_id.clone(), segment_uid: source.segment_uid.to_string(),
-                quote_hash: source.quote_hash.clone(), can_locate: status == SourceStatus::Available, status, message }
-        }).collect()
+                .to_owned();
+                SourceAvailability {
+                    entry_id: source.entry_id.clone(),
+                    segment_uid: source.segment_uid.to_string(),
+                    quote_hash: source.quote_hash.clone(),
+                    can_locate: status == SourceStatus::Available,
+                    status,
+                    message,
+                }
+            })
+            .collect()
     }
 }

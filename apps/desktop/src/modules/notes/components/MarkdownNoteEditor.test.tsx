@@ -1,16 +1,35 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { ToastContext } from '@/shared/hooks/useToast';
+import type { SourceLink } from '@/shared/types/domain';
 
 import { MarkdownNoteEditor } from './MarkdownNoteEditor';
 import { discardSegmentEditorsBeforeClose, hasUnsavedSegmentEditors, saveSegmentEditorsBeforeClose } from '@/modules/reader/components/segmentEditorDirtyRegistry';
 
 afterEach(cleanup);
+beforeAll(() => {
+  Object.defineProperty(Range.prototype, 'getClientRects', { configurable: true, value: () => [] });
+  Object.defineProperty(Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => new DOMRect() });
+});
 
 describe('MarkdownNoteEditor dirty state', () => {
+  it('inserts one queued source link into a shared note, including its metadata, not once per view', async () => {
+    const link = { anchor_id: 'sl-split', created_at: '', display_text: 'p.1', link_id: 'split-link',
+      owner: { entry_id: 'shared-source', kind: 'note' as const, note_id: 'n' },
+      sources: [{ entry_id: 'paper', page: 1, quote_hash: '', segment_uid: 's', snapshot_text: 'Evidence' }] };
+    const save = vi.fn(async (title: string, markdown: string, links: SourceLink[]) => ({ note_id: 'n', title, markdown, links, revision: '2' }));
+    const props = { entryId: 'shared-source', noteId: 'n', fallbackTitle: 'Sources', sourceLinkToInsert: link,
+      onLoadNote: async () => ({ note_id: 'n', title: 'Sources', markdown: 'Body', links: [], revision: '1' }), onSaveNote: save };
+    const result = render(<ToastContext.Provider value={{ dismiss: vi.fn(), notify: vi.fn(() => 'toast') }}><MarkdownNoteEditor {...props} /><MarkdownNoteEditor {...props} /></ToastContext.Provider>);
+    await waitFor(() => expect(result.container.querySelectorAll('.tiptap[contenteditable="true"]')).toHaveLength(2));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 1100)); });
+    expect(save).toHaveBeenCalledOnce();
+    expect(save.mock.calls[0][2]).toEqual([link]);
+    expect(save.mock.calls[0][1].match(/\[\^sl-split\]/g)).toHaveLength(1);
+  });
   it('includes embedded note drafts in parent close protection and truly discards a failed draft', async () => {
     const save = vi.fn().mockRejectedValue(new Error('disk unavailable'));
     const result = render(<ToastContext.Provider value={{ dismiss: vi.fn(), notify: vi.fn(() => 'toast') }}><MarkdownNoteEditor
@@ -31,14 +50,14 @@ describe('MarkdownNoteEditor dirty state', () => {
     expect(save).toHaveBeenCalledOnce();
   });
 
-  it('reports a second view as read-only and never grants it an insertion target', async () => {
+  it('allows both views of the same note to edit the shared document', async () => {
     const writableA = vi.fn(), writableB = vi.fn();
     const props = { entryId: 'shared-parallel', noteId: 'shared', fallbackTitle: 'Shared',
       onLoadNote: async () => ({ note_id: 'shared', title: 'Shared', markdown: 'Body', links: [], revision: '1' }), onSaveNote: vi.fn() };
     const result = render(<ToastContext.Provider value={{ dismiss: vi.fn(), notify: vi.fn(() => 'toast') }}><MarkdownNoteEditor {...props} onWritableChange={writableA} /><MarkdownNoteEditor {...props} editorScopeKey="tag-reading:other/note:shared" onWritableChange={writableB} /></ToastContext.Provider>);
     await waitFor(() => expect(writableA).toHaveBeenLastCalledWith(true));
-    expect(writableB).not.toHaveBeenCalledWith(true);
-    expect(result.container.querySelectorAll('.tiptap[contenteditable="true"]')).toHaveLength(1);
+    await waitFor(() => expect(writableB).toHaveBeenLastCalledWith(true));
+    expect(result.container.querySelectorAll('.tiptap[contenteditable="true"]')).toHaveLength(2);
     expect(hasUnsavedSegmentEditors('tag-reading:other')).toBe(false);
   });
   it('does not mark a freshly loaded normalized Markdown document as unsaved', async () => {

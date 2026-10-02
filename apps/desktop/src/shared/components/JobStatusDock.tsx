@@ -118,6 +118,7 @@ export function JobStatusDock({
 function summarizeJobs(jobs: Job[], activeCount: number) {
   const hasFailed = jobs.some((job) => job.status === 'failed');
   const hasCanceled = jobs.some((job) => job.status === 'canceled');
+  const pausedCount = jobs.filter((job) => job.status === 'paused').length;
   const latest = jobs[0] ?? null;
 
   if (activeCount > 0) {
@@ -140,12 +141,15 @@ function summarizeJobs(jobs: Job[], activeCount: number) {
     };
   }
 
+  if (pausedCount > 0) {
+    return { description: '打开对应论文的翻译任务，可继续或取消。', icon: Clock3, iconClass: 'text-warning', title: `${pausedCount} 个任务已暂停` };
+  }
   if (hasCanceled) {
     return {
       description: latest?.message || '最近任务包含已取消项',
       icon: Clock3,
       iconClass: 'text-warning',
-      title: '最近任务已暂停'
+      title: '最近任务已取消'
     };
   }
 
@@ -181,6 +185,7 @@ function jobTitle(job: Job) {
 function jobStatusLabel(job: Job) {
   const labelByStatus: Record<Job['status'], string> = {
     canceled: '已取消',
+    paused: '已暂停',
     failed: '失败',
     processing: '进行中',
     queued: '排队中',

@@ -123,11 +123,13 @@ impl Workspace {
     }
 
     pub fn list_tag_notes(&self, tag_id: &TagId) -> Result<Vec<TagNoteSummary>, WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         self.ensure_note_tag(tag_id)?;
         let directory = self.tag_notes_dir(tag_id)?;
         if !directory.exists() {
             return Ok(Vec::new());
         }
+        self.recover_tag_note_purges(&directory)?;
         let mut notes = Vec::new();
         for item in fs::read_dir(directory)? {
             let path = item?.path();
@@ -242,6 +244,73 @@ impl Workspace {
         header.deleted_at = if deleted { Some(Utc::now()) } else { None };
         header.updated_at = Utc::now();
         self.write_tag_note_file(&header, &markdown)
+    }
+
+    pub fn purge_tag_note(
+        &self,
+        tag_id: &TagId,
+        note_id: &NoteId,
+        expected_revision: &str,
+    ) -> Result<(), WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
+        self.ensure_note_tag(tag_id)?;
+        let directory = self.tag_notes_dir(tag_id)?;
+        self.recover_tag_note_purges(&directory)?;
+        let (header, _, revision) = self.read_tag_note_file(tag_id, note_id)?;
+        if header.deleted_at.is_none() {
+            return Err(invalid("请先将笔记移入回收站"));
+        }
+        if revision != expected_revision {
+            return Err(WorkspaceError::NoteRevisionConflict(note_id.to_string()));
+        }
+        let staged = directory.join(format!(".purging-{}", note_id.as_str()));
+        fs::create_dir(&staged)?;
+        self.validate_note_workspace_path(&staged)?;
+        let note = self.tag_note_file(tag_id, note_id)?;
+        fs::rename(&note, staged.join(format!("{note_id}.md")))?;
+        let assets = directory.join(format!("{note_id}.assets"));
+        if assets.exists() {
+            if let Err(error) = fs::rename(&assets, staged.join(format!("{note_id}.assets"))) {
+                fs::rename(staged.join(format!("{note_id}.md")), &note)?;
+                fs::remove_dir(&staged)?;
+                return Err(error.into());
+            }
+        }
+        atomic_write(staged.join(".committed"), b"")?;
+        fs::remove_dir_all(staged)?;
+        Ok(())
+    }
+
+    fn recover_tag_note_purges(&self, directory: &Path) -> Result<(), WorkspaceError> {
+        for item in fs::read_dir(directory)? {
+            let path = item?.path();
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            let Some(id) = name.strip_prefix(".purging-") else {
+                continue;
+            };
+            validate_id(id)?;
+            self.validate_note_workspace_path(&path)?;
+            if path.join(".committed").exists() {
+                fs::remove_dir_all(path)?;
+                continue;
+            }
+            for staged_item in fs::read_dir(&path)? {
+                let source = staged_item?.path();
+                let target = directory.join(
+                    source
+                        .file_name()
+                        .ok_or_else(|| invalid("笔记暂存项目无效"))?,
+                );
+                if target.exists() {
+                    return Err(invalid("笔记恢复位置已存在"));
+                }
+                fs::rename(source, target)?;
+            }
+            fs::remove_dir(path)?;
+        }
+        Ok(())
     }
 
     fn write_tag_note_file(

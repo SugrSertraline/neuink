@@ -1,6 +1,7 @@
 import type { EntryReadingState, TagMeta } from '@/shared/types/domain';
 import type { LibraryEntry, LibraryView } from '../../library/components/LibrarySidebar';
 import { getReadingProgress, getReadingTimestamp } from './libraryReading';
+import { isUnparsedPdf } from '../../library/utils/libraryView';
 
 export function buildTagBreadcrumb(tags: TagMeta[], activeTag: string | null) {
   if (!activeTag) {
@@ -34,6 +35,9 @@ export function filterEntries(
     }
     if (libraryView === 'parsed') {
       return item.status === 'Parsed';
+    }
+    if (libraryView === 'unparsed') {
+      return isUnparsedPdf(item);
     }
     if (libraryView === 'parsing') {
       return ['Queued', 'Uploading', 'Parsing'].includes(item.status);

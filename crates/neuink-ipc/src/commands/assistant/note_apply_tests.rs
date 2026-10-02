@@ -176,6 +176,15 @@ fn applied_note_id(response: ApplyNoteProposalResponse) -> neuink_domain::NoteId
 
 #[test]
 fn note_citations_stay_in_content_and_patch_payloads() {
+    check_inline_citations(false);
+}
+
+#[test]
+fn unparsed_pdf_citations_survive_confirmed_note_creation_and_patch() {
+    check_inline_citations(true);
+}
+
+fn check_inline_citations(unparsed_pdf: bool) {
     use super::note_apply_store::{MarkdownPatchOperation, ProposalSource};
     let root = std::env::temp_dir().join(format!(
         "neuink-inline-citations-{}-{}",
@@ -187,12 +196,35 @@ fn note_citations_stay_in_content_and_patch_payloads() {
     ));
     let workspace = Workspace::create(&root).expect("workspace");
     let entry = workspace.create_entry("Paper").expect("entry");
-    let segment = neuink_domain::SourceSegment::new(
+    let mut segment = neuink_domain::SourceSegment::new(
         neuink_domain::SegmentType::Paragraph,
         2,
         Some([1.0, 2.0, 3.0, 4.0]),
         "Grounded evidence".to_string(),
     );
+    if unparsed_pdf {
+        fs::write(
+            workspace.layout().entry_pdf_file(&entry.id),
+            b"%PDF-1.7\nfixture",
+        )
+        .unwrap();
+        let info = workspace.inspect_pdf_text(&entry.id, 3, 1).unwrap();
+        workspace
+            .cache_pdf_text(
+                &entry.id,
+                &info.revision,
+                3,
+                vec![neuink_workspace::pdf_text::PdfTextPage {
+                    page_idx: 2,
+                    text: "Grounded evidence".to_string(),
+                    truncated: false,
+                }],
+            )
+            .unwrap();
+        segment.uid =
+            neuink_domain::SegmentUid::from_string(format!("pdf-text-v1:{}:2", info.revision));
+        assert!(workspace.read_segments(&entry.id).unwrap().is_empty());
+    }
     let source = ProposalSource {
         entry_id: entry.id.to_string(),
         entry_title: "Paper".to_string(),
@@ -201,9 +233,11 @@ fn note_citations_stay_in_content_and_patch_payloads() {
         quote: "Grounded evidence".to_string(),
         segment_uid: segment.uid.to_string(),
     };
-    workspace
-        .write_segments(&entry.id, &[segment])
-        .expect("segments");
+    if !unparsed_pdf {
+        workspace
+            .write_segments(&entry.id, &[segment])
+            .expect("segments");
+    }
     let mut proposal = VerifiedNoteProposal {
         action: "create".to_string(),
         base_content_hash: Some(stable_hash("")),
@@ -253,7 +287,14 @@ fn note_citations_stay_in_content_and_patch_payloads() {
     assert_eq!(links.len(), 1, "aliases for one segment share a snapshot");
     assert_eq!(links[0].sources[0].snapshot_text, "Grounded evidence");
     assert_eq!(links[0].sources[0].page, 3);
-    assert_eq!(links[0].sources[0].bbox, Some([1.0, 2.0, 3.0, 4.0]));
+    assert_eq!(
+        links[0].sources[0].bbox,
+        if unparsed_pdf {
+            None
+        } else {
+            Some([1.0, 2.0, 3.0, 4.0])
+        }
+    );
     let anchor = format!("[^{}]", links[0].anchor_id);
     let current = workspace.read_note(&entry.id, &note_id).expect("note");
     assert_eq!(

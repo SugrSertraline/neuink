@@ -187,7 +187,7 @@ export function EntryLibraryView({
   const pageSummary = [
     activeTagMeta && libraryView !== 'all' ? viewTitle : null,
     status === 'loading' ? '正在加载…' : status === 'error' ? '加载失败' : isTrashView
-      ? `${trashItems.length} 个项目`
+      ? '条目、标签与笔记'
       : `${query.trim() ? '搜索结果：' : ''}${filteredEntries.length} 个条目`,
     !isTrashView && !activeTag && rootScope === 'unclassified' ? '未分类' : null,
     activeTagMeta

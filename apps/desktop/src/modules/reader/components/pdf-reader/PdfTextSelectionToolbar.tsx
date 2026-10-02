@@ -1,19 +1,12 @@
 import {
   Check,
   ClipboardCopy,
-  Highlighter,
-  Info,
-  Languages,
   Loader2,
-  MessageSquareText,
   Send,
-  Star,
-  X
+  Star
 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Button } from '@/components/ui/button';
 import { useReaderSelectionPriority } from '@/components/ui/hover-interactions';
 
 import { cn } from '@/lib/utils';
@@ -26,6 +19,7 @@ import type {
 } from '@/shared/types/domain';
 
 import { describeTranslationFailure } from '../../translation/translationErrorMessage';
+import { ReadingSelectionToolbarControls } from './ReadingSelectionToolbarControls';
 
 const HIGHLIGHT_COLORS: Array<{
   color: AnnotationHighlightColor;
@@ -277,58 +271,13 @@ export function PdfTextSelectionToolbar({
       onClick={(event) => event.stopPropagation()}
       onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose(); } }}
     >
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-foreground">
-          <Highlighter size={14} aria-hidden="true" />
-          <span className="truncate">已选 {pending.selection.text.length} 个字符</span>
-        </div>
-        <Button size="icon-xs" variant="ghost"
-          title="关闭选区工具"
-          type="button"
-          onClick={onClose}
-        >
-          <X size={14} aria-hidden="true" />
-        </Button>
-      </div>
-
-      <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t pt-2">
-        <ActionButton
-          disabled={saving || translating || !onTranslate}
-          icon={translating ? <Loader2 className="animate-spin" size={13} /> : <Languages size={13} />}
-          label={translationError ? '重试翻译' : '翻译'}
-          selected={panel === 'translation'}
-          onClick={() => void translate()}
-        />
-        {onAsk ? <>
-          <ActionButton disabled={busy} icon={<MessageSquareText size={13} />} label="提问"
-            onClick={() => onAsk({ segment: pending.segment, text: pending.selection.text }, 'ask')} />
-          <ActionButton disabled={busy} icon={<Info size={13} />} label="解释"
-            onClick={() => onAsk({ segment: pending.segment, text: pending.selection.text }, 'explain')} />
-        </> : null}
-        {onApply ? <><ActionButton
-          disabled={busy}
-          icon={<Highlighter size={13} />}
-          label="仅高亮"
-          onClick={() => void apply('')}
-        />
-        <ActionButton
-          disabled={busy}
-          icon={<MessageSquareText size={13} />}
-          label="高亮并批注"
-          selected={panel === 'annotation'}
-          onClick={() => setPanel((current) => current === 'annotation' ? null : 'annotation')}
-        /></> : null}
-        <button
-          aria-label="复制选中文字"
-          className="grid size-8 place-items-center rounded border hover:bg-muted disabled:opacity-50"
-          disabled={busy}
-          title="复制选中文字"
-          type="button"
-          onClick={() => void copy(pending.selection.text.replace(/\n+/g, ' '), '选中文字已复制')}
-        >
-          <ClipboardCopy size={14} aria-hidden="true" />
-        </button>
-      </div>
+      <ReadingSelectionToolbarControls text={pending.selection.text} saving={saving} translating={translating}
+        translationFailed={Boolean(translationError)} panel={panel} onClose={onClose}
+        onTranslate={onTranslate ? () => void translate() : undefined}
+        onAsk={onAsk ? intent => onAsk({ segment:pending.segment, text:pending.selection.text }, intent) : undefined}
+        onHighlight={onApply ? () => void apply('') : undefined}
+        onAnnotate={onApply ? () => setPanel(current => current === 'annotation' ? null : 'annotation') : undefined}
+        onCopy={() => void copy(pending.selection.text.replace(/\n+/g, ' '), '选中文字已复制')} />
 
       {translating && panel !== 'translation' ? (
         <div className="mt-2 inline-flex w-full items-center gap-2 rounded-md bg-muted/50 px-2 py-1.5 text-[11px] text-muted-foreground">
@@ -502,33 +451,4 @@ export function calculateFloatingToolbarLayout({
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(Math.max(value, minimum), maximum);
-}
-
-function ActionButton({
-  disabled,
-  icon,
-  label,
-  onClick,
-  selected = false
-}: {
-  disabled: boolean;
-  icon: ReactNode;
-  label: string;
-  onClick: () => void;
-  selected?: boolean;
-}) {
-  return (
-    <Button variant="outline" size="sm"
-      aria-pressed={selected}
-      className={cn(
-        selected && 'border-primary/40 bg-primary/10 text-primary'
-      )}
-      disabled={disabled}
-      type="button"
-      onClick={onClick}
-    >
-      {icon}
-      {label}
-    </Button>
-  );
 }

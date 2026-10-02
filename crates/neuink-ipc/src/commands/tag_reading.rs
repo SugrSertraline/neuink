@@ -27,6 +27,12 @@ pub struct RestoreTagArchiveRequest {
     pub archive_id: TagId,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PurgeTagArchiveRequest {
+    pub root: PathBuf,
+    pub archive_id: TagId,
+}
+
 #[derive(Debug, Serialize)]
 pub struct RestoreTagArchiveResponse {
     pub tags: Vec<TagMeta>,
@@ -63,6 +69,16 @@ pub async fn save_tag_reading(
 pub async fn list_tag_archives(request: TagArchivesRequest) -> Result<Vec<TagArchive>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         Workspace::open_existing(request.root)?.list_tag_archives()
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn purge_tag_archive(request: PurgeTagArchiveRequest) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        Workspace::open_existing(request.root)?.purge_tag_archive(&request.archive_id)
     })
     .await
     .map_err(|e| e.to_string())?

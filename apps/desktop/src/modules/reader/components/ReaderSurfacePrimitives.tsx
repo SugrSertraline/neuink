@@ -115,17 +115,19 @@ export function ReaderSection({
   actions,
   children,
   className,
+  guideId,
   description,
   title
 }: {
   actions?: ReactNode;
   children: ReactNode;
   className?: string;
+  guideId?: string;
   description?: ReactNode;
   title: ReactNode;
 }) {
   return (
-    <section className={cn('overflow-hidden rounded-lg border bg-card', className)}>
+    <section data-guide={guideId} className={cn('overflow-hidden rounded-lg border bg-card', className)}>
       <div className="flex min-w-0 items-start justify-between gap-3 border-b px-4 py-3">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-foreground">{title}</div>

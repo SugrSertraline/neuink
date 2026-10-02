@@ -7,7 +7,12 @@ export function capturePdfReadingPosition(container: HTMLDivElement | null): Rea
     .find(page => { const rect = page.getBoundingClientRect(); return rect.height > 0 && rect.bottom > top + 1; });
   if (!page) return null;
   const rect = page.getBoundingClientRect();
-  return { pageIdx: Number(page.dataset.pdfPageIndex), offset: (top - rect.top) / rect.height, left: container.scrollLeft };
+  const segment = [...page.querySelectorAll<HTMLElement>('[data-segment-uid]')].find(node => {
+    const bounds = node.getBoundingClientRect(); return bounds.height > 0 && bounds.top <= top + 24 && bounds.bottom > top;
+  });
+  const bounds = segment?.getBoundingClientRect();
+  return { pageIdx: Number(page.dataset.pdfPageIndex), offset: (top - rect.top) / rect.height, left: container.scrollLeft,
+    ...(segment && bounds ? { segmentUid: segment.dataset.segmentUid, segmentOffset: (top - bounds.top) / bounds.height } : {}) };
 }
 
 export function restorePdfReadingPosition(container: HTMLDivElement, position: ReadingPosition) {
@@ -17,6 +22,9 @@ export function restorePdfReadingPosition(container: HTMLDivElement, position: R
   const rect = page.getBoundingClientRect(), bounds = container.getBoundingClientRect();
   if (rect.height <= 0 || bounds.width <= 0) return;
   const scale = bounds.width / (container.offsetWidth || bounds.width) || 1;
-  container.scrollTo({ top: container.scrollTop + (rect.top - bounds.top + position.offset * rect.height) / scale,
+  const segment = position.segmentUid ? [...page.querySelectorAll<HTMLElement>('[data-segment-uid]')].find(node => node.dataset.segmentUid === position.segmentUid) : undefined;
+  const segmentRect = segment?.getBoundingClientRect();
+  const offset = segmentRect && position.segmentOffset !== undefined ? segmentRect.top - bounds.top + position.segmentOffset * segmentRect.height : rect.top - bounds.top + position.offset * rect.height;
+  container.scrollTo({ top: container.scrollTop + offset / scale,
     left: position.left, behavior: 'auto' });
 }

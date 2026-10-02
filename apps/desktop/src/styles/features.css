@@ -604,11 +604,11 @@
 }
 
 .workspace-tabsbar-panes.is-split .workspace-tab-pane:last-child {
-  padding-right: 32px;
+  padding-right: 64px;
 }
 
 .workspace-tabsbar.has-pair-status .workspace-tab-pane:last-child {
-  padding-right: 86px;
+  padding-right: 118px;
 }
 
 .workspace-tabsbar:not(.is-split) .workspace-tab-pane {
@@ -743,7 +743,19 @@
   box-shadow: 0 1px 3px color-mix(in srgb, #000 12%, transparent);
 }
 
+.workspace-surface-tab.is-pinned {
+  border-left-color: var(--primary);
+}
+
+.workspace-tab-pin {
+  flex: 0 0 auto;
+  margin-right: 5px;
+  color: var(--muted-foreground);
+}
+
 .workspace-surface-tab > button:first-child {
+  display: inline-flex;
+  align-items: center;
   min-width: 0;
   flex: 1;
   justify-content: flex-start;
@@ -904,10 +916,42 @@
 .pdf-reader-toolbar {
   container-name: pdf-reader-toolbar;
   container-type: inline-size;
+  font-family: var(--font-sans);
+}
+
+.pdf-reader-toolbar :is(button, input),
+[data-reader-compact-toolbar] :is(button, input) {
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  line-height: 1.25rem;
+}
+
+.pdf-segment-preview .source-snapshot-preview {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.translation-replacement-preview .source-snapshot-preview,
+.translation-replacement-preview .source-snapshot-preview :is(h1, h2, h3, h4, h5, h6, p, li) {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.translation-replacement-preview .source-snapshot-preview :is(h1, h2, h3, h4, h5, h6) {
+  margin: 0;
 }
 
 .pdf-reader-toolbar-overflow {
   display: none;
+}
+
+.pdf-reader-toolbar .entry-content-header-actions {
+  max-width: 100%;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 
 .pdf-reader-translation-status {
@@ -1030,7 +1074,9 @@
   .pdf-reader-toolbar .entry-content-header-actions {
     flex-wrap: nowrap;
     justify-content: flex-start;
-    overflow: hidden;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
   }
 }
 
@@ -1213,4 +1259,27 @@
       0 0 0 2px color-mix(in srgb, var(--primary) 88%, transparent),
       0 0 0 6px color-mix(in srgb, var(--primary) 18%, transparent);
   }
+}
+@keyframes guide-demo-block-reveal {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes guide-demo-selection-reveal {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+.guide-demo-block { animation: guide-demo-block-reveal 650ms ease-out both; }
+.guide-demo-selection {
+  background: color-mix(in srgb, var(--primary) 35%, transparent);
+  transform-origin: left center;
+  animation: guide-demo-selection-reveal 1s ease-out both;
+}
+.guide-demo-selection-toolbar {
+  animation: guide-demo-block-reveal 180ms ease-out 1s both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guide-demo-block, .guide-demo-selection, .guide-demo-selection-toolbar { animation: none; }
 }

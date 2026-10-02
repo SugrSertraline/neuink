@@ -30,6 +30,7 @@ import {
   PdfCanvasPage,
   PdfTextSelectionHighlightLayer
 } from './PdfCanvasPage';
+import { schedulePdfRenderJob } from './pdfRenderQueue';
 
 afterEach(() => {
   cleanup();
@@ -40,6 +41,164 @@ afterEach(() => {
 });
 
 describe('PdfCanvasPage', () => {
+  it('masks the whole page except original visual blocks without rerasterizing when translation changes', async () => {
+    const fixture = createPdfFixture(Promise.resolve());
+    mockCanvasContexts(fixture.drawImage);
+    const page = (windows: readonly (readonly [number, number, number, number])[] | null, width = 600) => (
+      <PdfCanvasPage pageIdx={0} pageWidth={width} pdfDocument={fixture.document}
+        renderEnabled renderPriority="visible" originalContentWindows={windows} />
+    );
+    const view = render(page(null));
+    await waitFor(() => expect(fixture.drawImage).toHaveBeenCalledOnce());
+    view.rerender(page([[100, 200, 400, 500], [300, 400, 600, 700]]));
+    const mask = view.container.querySelector('[data-pdf-translation-page-mask]')!;
+    expect(mask.getAttribute('preserveAspectRatio')).toBe('none');
+    const openings = mask.querySelectorAll('mask rect[fill="black"]');
+    expect(openings).toHaveLength(2);
+    expect(openings[0].getAttribute('width')).toBe('300');
+    expect(fixture.render).toHaveBeenCalledOnce();
+
+    view.rerender(page([], 800));
+    expect(view.container.querySelector('[data-pdf-translation-page-mask]')).toBeTruthy();
+    expect(view.container.querySelectorAll('mask rect[fill="black"]')).toHaveLength(0);
+    view.rerender(page(null, 800));
+    expect(view.container.querySelector('[data-pdf-translation-page-mask]')).toBeNull();
+  });
+
+  it('waits for a positive layout width and recovers when the pane becomes visible', async () => {
+    const fixture = createPdfFixture(Promise.resolve());
+    mockCanvasContexts(fixture.drawImage);
+    const page = (width: number) => <PdfCanvasPage pageIdx={0} pageWidth={width}
+      pdfDocument={fixture.document} renderEnabled renderPriority="visible" />;
+    const view = render(page(0));
+    await act(async () => {});
+    expect(fixture.render).not.toHaveBeenCalled();
+    view.rerender(page(600));
+    await waitFor(() => expect(fixture.drawImage).toHaveBeenCalledOnce());
+  });
+
+  it('allocates at least one physical pixel for a fractional layout size', async () => {
+    const fixture = createPdfFixture(Promise.resolve());
+    mockCanvasContexts(fixture.drawImage);
+    fixture.render.mockImplementationOnce((...args: unknown[]) => {
+      const { canvas } = args[0] as { canvas: HTMLCanvasElement };
+      expect(canvas.width).toBeGreaterThan(0);
+      expect(canvas.height).toBeGreaterThan(0);
+      return { promise: Promise.resolve(), cancel: vi.fn() } as unknown as RenderTask;
+    });
+    const view = render(<PdfCanvasPage pageIdx={0} pageWidth={0.1}
+      pdfDocument={fixture.document} renderEnabled renderPriority="visible" />);
+    await waitFor(() => expect(fixture.drawImage).toHaveBeenCalledOnce());
+    expect(view.container.querySelector('canvas')?.width).toBe(1);
+  });
+
+  it('does not cancel a completed task after its temporary bitmap has been released', async () => {
+    const fixture = createPdfFixture(Promise.resolve());
+    mockCanvasContexts(fixture.drawImage);
+    const task = fixture.render();
+    let raster!: HTMLCanvasElement;
+    vi.mocked(task.cancel).mockImplementation(() => {
+      if (!raster.width || !raster.height) throw new Error('drawImage: zero-sized source canvas');
+    });
+    fixture.render.mockImplementation((...args: unknown[]) => {
+      raster = (args[0] as { canvas: HTMLCanvasElement }).canvas;
+      return task;
+    });
+    fixture.render.mockClear();
+    const view = renderPage(fixture.document);
+    await waitFor(() => expect(fixture.drawImage).toHaveBeenCalledOnce());
+    view.unmount();
+    expect(task.cancel).not.toHaveBeenCalled();
+  });
+
+  it('retries preempted rendering with a fresh bitmap and never commits the aborted result', async () => {
+    const pending = deferred<void>();
+    const fixture = createPdfFixture(Promise.resolve());
+    mockCanvasContexts(fixture.drawImage);
+    let firstRaster!: HTMLCanvasElement;
+    const cancel = vi.fn(() => pending.resolve());
+    fixture.render.mockImplementationOnce((...args: unknown[]) => {
+      firstRaster = (args[0] as { canvas: HTMLCanvasElement }).canvas;
+      return { promise: pending.promise, cancel } as unknown as RenderTask;
+    });
+    const view = render(<PdfCanvasPage pageIdx={0} pageWidth={600}
+      pdfDocument={fixture.document} renderEnabled renderPriority="preload" />);
+    await waitFor(() => expect(fixture.render).toHaveBeenCalledOnce());
+    await act(async () => {
+      schedulePdfRenderJob({ kind: 'visible-raster', run: async () => {} });
+    });
+    await waitFor(() => expect(fixture.drawImage).toHaveBeenCalledOnce());
+    expect(fixture.render).toHaveBeenCalledTimes(2);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(firstRaster.width).toBe(0);
+    expect(fixture.drawImage.mock.calls[0][0]).not.toBe(firstRaster);
+    view.unmount();
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('reports invalid PDF geometry without attempting rasterization', async () => {
+    const fixture = createPdfFixture(Promise.resolve());
+    const pdfPage = await fixture.document.getPage(1);
+    vi.spyOn(pdfPage, 'getViewport').mockReturnValue({ width: 0, height: 900 } as never);
+    mockCanvasContexts(fixture.drawImage);
+    const view = renderPage(fixture.document);
+    await waitFor(() => expect(view.getByText('PDF 页面尺寸无效，无法绘制。')).toBeTruthy());
+    expect(fixture.render).not.toHaveBeenCalled();
+    expect(fixture.drawImage).not.toHaveBeenCalled();
+  });
+
+  it('rejects an empty result before drawImage and allows an explicit retry', async () => {
+    const fixture = createPdfFixture(Promise.resolve());
+    mockCanvasContexts(fixture.drawImage);
+    fixture.render.mockImplementationOnce((...args: unknown[]) => {
+      (args[0] as { canvas: HTMLCanvasElement }).canvas.width = 0;
+      return { promise: Promise.resolve(), cancel: vi.fn() } as unknown as RenderTask;
+    });
+    const view = renderPage(fixture.document);
+    await waitFor(() => expect(view.getByText('PDF 页面画布不可用，请重试此页。')).toBeTruthy());
+    expect(fixture.drawImage).not.toHaveBeenCalled();
+    fireEvent.click(view.getByRole('button', { name: '重试此页' }));
+    await waitFor(() => expect(fixture.drawImage).toHaveBeenCalledOnce());
+  });
+
+  it('cancels once and releases the bitmap only when pending rendering has settled', async () => {
+    const pending = deferred<void>();
+    const fixture = createPdfFixture(pending.promise);
+    mockCanvasContexts(fixture.drawImage);
+    const cancel = vi.fn();
+    let raster!: HTMLCanvasElement;
+    fixture.render.mockImplementationOnce((...args: unknown[]) => {
+      raster = (args[0] as { canvas: HTMLCanvasElement }).canvas;
+      return { promise: pending.promise, cancel } as unknown as RenderTask;
+    });
+    const view = renderPage(fixture.document);
+    await waitFor(() => expect(fixture.render).toHaveBeenCalledOnce());
+    view.unmount();
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(raster.width).toBeGreaterThan(0);
+    await act(async () => pending.resolve());
+    expect(raster.width).toBe(0);
+    expect(raster.height).toBe(0);
+    expect(fixture.drawImage).not.toHaveBeenCalled();
+  });
+
+  it('releases failed render bitmaps without hiding the error or cancelling the settled task', async () => {
+    const fixture = createPdfFixture(Promise.resolve());
+    mockCanvasContexts(fixture.drawImage);
+    const cancel = vi.fn();
+    let raster!: HTMLCanvasElement;
+    fixture.render.mockImplementationOnce((...args: unknown[]) => {
+      raster = (args[0] as { canvas: HTMLCanvasElement }).canvas;
+      return { promise: Promise.reject(new Error('raster failed')), cancel } as unknown as RenderTask;
+    });
+    const view = renderPage(fixture.document);
+    await waitFor(() => expect(view.getByText('raster failed')).toBeTruthy());
+    expect(raster.width).toBe(0);
+    expect(raster.height).toBe(0);
+    view.unmount();
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
   it('resizes offscreen placeholders without loading or rasterizing PDF pages', () => {
     const fixture = createPdfFixture(Promise.resolve());
     const page = (pageWidth: number) => (
@@ -323,6 +482,7 @@ describe('PdfCanvasPage', () => {
     const page = view.container.querySelector('canvas')?.parentElement;
     expect(page?.style.width).toBe('300px');
     expect(page?.style.height).toBe('450px');
+    await act(async () => pendingRender.resolve());
   });
 });
 

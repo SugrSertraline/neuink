@@ -417,12 +417,7 @@ fn enrich_caption_bboxes(document: &mut NeuinkDocument, middle: &Value) {
                 && segment.bbox.is_some()
                 && !is_caption_segment(segment)
         })
-        .filter_map(|segment| {
-            segment
-                .visual_group_id
-                .clone()
-                .zip(segment.bbox)
-        })
+        .filter_map(|segment| segment.visual_group_id.clone().zip(segment.bbox))
         .collect();
 
     for segment in document.segments.iter_mut() {
@@ -467,11 +462,7 @@ fn enrich_caption_bboxes(document: &mut NeuinkDocument, middle: &Value) {
             });
 
         if let Some((candidate, _)) = best {
-            segment.bbox = Some(normalized_bbox(
-                candidate.bbox,
-                candidate.page_size,
-                true,
-            ));
+            segment.bbox = Some(normalized_bbox(candidate.bbox, candidate.page_size, true));
         }
     }
 }
@@ -542,10 +533,7 @@ fn expected_caption_block_types(segment: &SourceSegment) -> Vec<String> {
         "algorithm" => &["algorithm"],
         _ => return Vec::new(),
     };
-    bases
-        .iter()
-        .map(|base| format!("{base}_{role}"))
-        .collect()
+    bases.iter().map(|base| format!("{base}_{role}")).collect()
 }
 
 fn text_match_score(target: &str, candidate: &str) -> Option<usize> {

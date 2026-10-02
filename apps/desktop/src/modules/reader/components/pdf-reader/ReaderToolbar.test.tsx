@@ -5,9 +5,11 @@ import type { ReactElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { TooltipProvider } from '@/components/ui/tooltip';
+import type { EntryTranslation } from '@/shared/ipc/workspaceApi';
 
 import { ReaderToolbar } from './ReaderToolbar';
 import { ReadingSessionContext } from '../../parallel-reading/ReadingSessionContext';
+import { ReadingViewSession } from '../navigation/ReadingViewSession';
 
 describe('ReaderToolbar', () => {
   afterEach(() => cleanup());
@@ -76,6 +78,7 @@ describe('ReaderToolbar', () => {
     const onReaderPreferencesChange = vi.fn();
     const onExportPaper = vi.fn();
     const onPauseTranslation = vi.fn();
+    const onCancelTranslation = vi.fn();
     const onOpenTranslationTask = vi.fn();
     const { container } = renderWithTooltipProvider(
       <ReadingSessionContext.Provider value={{ active: true, onReady: vi.fn() }}>
@@ -85,7 +88,7 @@ describe('ReaderToolbar', () => {
           searchQuery="alpha" searchStatus="ready" searchMatchCount={3} searchActiveMatchNumber={1}
           onApplyRecommendedTags={vi.fn()} onDismissRecommendedTags={vi.fn()} onRecommendedTagToggle={vi.fn()}
           onTagSuggestionsOpenChange={vi.fn()} onExportTranslation={vi.fn()} onExportPaper={onExportPaper}
-          onPauseTranslation={onPauseTranslation} onOpenTranslationTask={onOpenTranslationTask}
+          onPauseTranslation={onPauseTranslation} onCancelTranslation={onCancelTranslation} onOpenTranslationTask={onOpenTranslationTask}
           onZoomIn={onZoomIn} onZoomOut={vi.fn()} onCurrentPageChange={onCurrentPageChange}
           onReaderPreferencesChange={onReaderPreferencesChange} onSearchQueryChange={onSearchQueryChange} onSearchNext={onSearchNext} />
       </ReadingSessionContext.Provider>
@@ -121,8 +124,32 @@ describe('ReaderToolbar', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: '暂停翻译' }));
     expect(onPauseTranslation).toHaveBeenCalledOnce();
     openTools();
+    fireEvent.click(screen.getByRole('menuitem', { name: '取消翻译' }));
+    expect(onCancelTranslation).toHaveBeenCalledOnce();
+    openTools();
     fireEvent.click(screen.getByRole('menuitem', { name: '查看翻译任务' }));
     expect(onOpenTranslationTask).toHaveBeenCalledOnce();
+  });
+
+  it.each([false, true])('offers resume and cancel for a paused task (compact: %s)', (compact) => {
+    const onResume = vi.fn();
+    const onCancel = vi.fn();
+    const paused: EntryTranslation = { schema_version: 1, entry_id: 'entry-1', source_language: 'en', target_language: 'zh-CN',
+      status: 'paused', segments: [], progress: { total: 2, translated: 1, skipped: 0, failed: 0 }, paper_context: null, model: 'test', error: null, created_at: '', updated_at: '',
+      task: { job_id: 'j1', profile_id: 'model', force: true, source_hashes: { s1: 'h1', s2: 'h2' }, remaining_segment_uids: ['s2'], created_at: '' } };
+    const content = <ReaderToolbar entry={buildEntry()} pageCount={12} segmentCount={2} readerPreferences={buildPreferences()} zoom={1}
+      recommendedTags={[]} selectedRecommendedTagPaths={[]} tagSuggestionBusy={false} tagSuggestionsOpen={false}
+      translation={paused} translationBusy={false} onResumeTranslation={onResume} onCancelTranslation={onCancel}
+      onApplyRecommendedTags={vi.fn()} onDismissRecommendedTags={vi.fn()} onRecommendedTagToggle={vi.fn()} onTagSuggestionsOpenChange={vi.fn()}
+      onExportTranslation={vi.fn()} onPauseTranslation={vi.fn()} onOpenTranslationTask={vi.fn()} onReaderPreferencesChange={vi.fn()} onZoomIn={vi.fn()} onZoomOut={vi.fn()} />;
+    renderWithTooltipProvider(compact ? <ReadingSessionContext.Provider value={{ active: true, onReady: vi.fn() }}>{content}</ReadingSessionContext.Provider> : content);
+    if (compact) fireEvent.keyDown(screen.getByRole('button', { name: '更多 PDF 操作' }), { key: 'Enter' });
+    fireEvent.click(screen.getByRole(compact ? 'menuitem' : 'button', { name: '继续翻译' }));
+    expect(onResume).toHaveBeenCalledOnce();
+    if (compact) fireEvent.keyDown(screen.getByRole('button', { name: '更多 PDF 操作' }), { key: 'Enter' });
+    fireEvent.click(screen.getByRole(compact ? 'menuitem' : 'button', { name: '取消翻译' }));
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: '暂停翻译' })).toBeNull();
   });
 
   it('keeps the content title with compact reader metadata', () => {
@@ -242,9 +269,8 @@ describe('ReaderToolbar', () => {
 
   it('keeps low-frequency PDF actions available from the compact overflow menu', () => {
     const onOpenTranslationTask = vi.fn();
-    const onReparsePdf = vi.fn();
     renderWithTooltipProvider(
-      <ReaderToolbar
+      <ReadingViewSession workspaceRoot="test" active surface={{ kind: 'pdf', entryId: 'entry-1' }}><ReaderToolbar
         entry={buildEntry()}
         pageCount={12}
         readerPreferences={buildPreferences()}
@@ -263,13 +289,17 @@ describe('ReaderToolbar', () => {
         onPauseTranslation={() => {}}
         onReaderPreferencesChange={() => {}}
         onRecommendedTagToggle={() => {}}
-        onReparsePdf={onReparsePdf}
         onTagSuggestionsOpenChange={() => {}}
         onZoomIn={() => {}}
         onZoomOut={() => {}}
-      />
+      /></ReadingViewSession>
     );
 
+    const mode = screen.getByRole('button', { name: '译文' });
+    expect(mode.closest('.entry-content-header-actions')).toBeTruthy();
+    expect(screen.queryByLabelText('阅读视图设置')).toBeNull();
+    fireEvent.click(mode);
+    expect(mode.getAttribute('aria-pressed')).toBe('true');
     fireEvent.keyDown(screen.getByRole('button', { name: '更多 PDF 操作' }), {
       key: 'Enter'
     });
@@ -279,11 +309,11 @@ describe('ReaderToolbar', () => {
     fireEvent.keyDown(screen.getByRole('button', { name: '更多 PDF 操作' }), {
       key: 'Enter'
     });
-    fireEvent.click(screen.getByRole('menuitem', { name: '重新解析 PDF' }));
-    expect(onReparsePdf).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('menuitem', { name: '重新解析 PDF' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '重新解析 PDF' })).toBeNull();
   });
 
-  it('supports page navigation, in-document search, and non-blocking queued parsing', () => {
+  it('supports page navigation, in-document search, and starting an unparsed downloaded PDF', () => {
     const onCurrentPageChange = vi.fn();
     const onSearchNext = vi.fn();
     const onSearchPrevious = vi.fn();
@@ -292,7 +322,7 @@ describe('ReaderToolbar', () => {
     renderWithTooltipProvider(
       <ReaderToolbar
         currentPage={5}
-        entry={{ ...buildEntry(), progress: 0, status: 'Queued' }}
+        entry={{ ...buildEntry(), progress: 0, status: 'Not started' }}
         pageCount={12}
         readerPreferences={buildPreferences()}
         recommendedTags={[]}

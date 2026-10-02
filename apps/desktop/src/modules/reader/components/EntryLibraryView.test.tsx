@@ -212,7 +212,7 @@ describe('EntryLibraryView context heading and toolbar', () => {
   });
 
   it.each([
-    ['all', '全部条目'], ['recent', '最近阅读'], ['parsed', '已解析 PDF'],
+    ['all', '全部条目'], ['recent', '最近阅读'], ['unparsed', '未解析 PDF'], ['parsed', '已解析 PDF'],
     ['parsing', '解析中'], ['failed', '解析失败'], ['no_pdf', '无 PDF'], ['trash', '回收站']
   ] as const)('names the %s view consistently with its navigation', (libraryView, title) => {
     renderLibrary({ libraryView });

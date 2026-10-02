@@ -76,6 +76,19 @@ function renderSidebar(props: Partial<ComponentProps<typeof LibrarySidebar>> = {
 }
 
 describe('LibrarySidebar tag drop', () => {
+  it('shows an unparsed category with a matching count, selection, and navigation', () => {
+    const onSelectView = vi.fn();
+    const statuses = ['Not started', 'Canceled', 'Queued', 'Uploading', 'Parsing', 'Parsed', 'Failed', 'No PDF'] as const;
+    const view = renderSidebar({ activeView: 'unparsed', onSelectView,
+      entries: statuses.map(status => ({ ...entry, id: status, status, pdfFileName: status === 'No PDF' ? null : 'paper.pdf' })) });
+    const button = view.getByRole('button', { name: '未解析 PDF 2' });
+    expect(button.getAttribute('aria-current')).toBe('page');
+    button.focus(); expect(document.activeElement).toBe(button);
+    fireEvent.click(button); expect(onSelectView).toHaveBeenCalledWith('unparsed');
+    expect(view.getByRole('button', { name: '解析中 3' })).toBeTruthy();
+    expect(view.getByRole('button', { name: '解析失败 1' })).toBeTruthy();
+    expect(view.getByRole('button', { name: '无 PDF 1' })).toBeTruthy();
+  });
   it('keeps library navigation visible when a paper is open but details were not selected', () => {
     const view = renderSidebar({ selectedEntry: entry, activeContentId: 'pdf', entryExplorerOpen: false });
     expect(view.getByText('条目库')).toBeTruthy();

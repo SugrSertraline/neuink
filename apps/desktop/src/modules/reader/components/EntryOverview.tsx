@@ -40,6 +40,7 @@ export function EntryOverview({
   onAttachPdf,
   onCreatePdfVersion,
   onImportMineruClientResult,
+  onReparsePdf,
   onApplyEntryTagPaths,
   onOpenContent
 }: {
@@ -187,7 +188,7 @@ export function EntryOverview({
         ) : null}
 
         <ReaderSection className="entry-overview-section" title="文件与时间">
-          <div className="mb-4"><EntryPdfActions key={`${workspaceRoot}:${entry.id}`} entry={entry} onAttachPdf={onAttachPdf} onCreatePdfVersion={onCreatePdfVersion} onImportMineruClientResult={onImportMineruClientResult} /></div>
+          <div className="mb-4"><EntryPdfActions key={`${workspaceRoot}:${entry.id}`} entry={entry} onAttachPdf={onAttachPdf} onCreatePdfVersion={onCreatePdfVersion} onImportMineruClientResult={onImportMineruClientResult} onReparsePdf={onReparsePdf} /></div>
           <dl className="entry-overview-fields grid gap-x-8 gap-y-4">
             <OverviewField label="原始 PDF" value={entry.pdfFileName ?? '未导入'} />
             <OverviewField label="创建时间" value={formatOverviewDate(entry.createdAt)} />

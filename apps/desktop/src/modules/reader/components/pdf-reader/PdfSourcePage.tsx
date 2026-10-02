@@ -39,6 +39,8 @@ import { SegmentRegion } from "./SegmentRegion";
 import { logicalSegmentUid } from "./readerUtils";
 import type { PageSegments } from "./types";
 import { PdfAnnotationTabs } from './PdfAnnotationTabs';
+import { layoutTranslatedParagraphs } from './translationLayout';
+import { pdfOriginalContentWindows } from './PdfTranslationPageMask';
 
 const EMPTY_ANNOTATIONS: Annotation[] = [];
 
@@ -57,7 +59,7 @@ function PdfSourcePageImpl({
   hoverPreviewShowTranslation,
   annotationsBySegmentUid,
   notesBySegmentUid,
-  page,
+  page: sourcePage,
   pageWidth,
   pdfDocument,
   renderPriority,
@@ -144,6 +146,22 @@ function PdfSourcePageImpl({
   onToggleSegment: (segment: SourceSegment) => void;
   altClickOpensNote?: boolean;
 }) {
+  const originalContentWindows = useMemo(
+    () => translationVisible && translationMode === 'replace' && sourcePage.regions.length > 0
+      ? pdfOriginalContentWindows(sourcePage)
+      : null,
+    [sourcePage, translationMode, translationVisible],
+  );
+  const translationLayout = useMemo(() => translationVisible && translationMode === 'replace'
+    ? layoutTranslatedParagraphs(sourcePage, translationBySegmentUid) : new Map(),
+    [sourcePage, translationBySegmentUid, translationMode, translationVisible]);
+  const page = useMemo(() => translationLayout.size ? { ...sourcePage,
+    regions: sourcePage.regions.map(region => ({ ...region, bbox: translationLayout.get(region.id)?.bbox ?? region.bbox }))
+  } : sourcePage, [sourcePage, translationLayout]);
+  // Zoom and split resizing pause segment interactions, but the translated page
+  // is reading content and must remain visible throughout the size change.
+  const renderSegmentLayer = !suppressRegions ||
+    (renderEnabled && translationVisible && translationMode === 'replace');
   const pointerDownRef = useRef<{
     selectingText: boolean;
     startedOnTextLayer: boolean;
@@ -383,6 +401,11 @@ function PdfSourcePageImpl({
 
     const nextGroupUid = region?.hoverGroupUid ?? null;
     const nextRegionId = region?.id ?? null;
+    if (!region && previewRegionIdRef.current !== null && buttons === 0) {
+      // Keep the existing card while crossing the small gap to its scroll area.
+      clearListPreviewAfterPointerExit();
+      return;
+    }
     const nextPreviewPosition = region && buttons === 0
       ? {
           x: hitLayerRect.left + (region.bbox[0] / 1000) * hitLayerRect.width,
@@ -413,6 +436,7 @@ function PdfSourcePageImpl({
   };
 
   const updateHoveredSegment = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if ((event.target as Element).closest('[data-hover-surface]')) return;
     updateHoveredSegmentAtPoint(
       event.currentTarget,
       event.clientX,
@@ -731,19 +755,15 @@ function PdfSourcePageImpl({
             pendingHoverSampleRef.current = null;
           }
           pointerDownRef.current = null;
-          const isListPreview = page.regions.some(
-            (region) =>
-              region.id === previewRegionId &&
-              region.sourceSegment.segment_type === "list",
-          );
-          if (isListPreview) {
+          if (previewRegionId !== null) {
             clearListPreviewAfterPointerExit();
             return;
           }
           clearHoveredRegion();
         }}
         onPointerMoveCapture={(event) => {
-          if ((event.target as Element).closest('[data-paper-reference], [data-hover-surface]')) { clearHoveredRegion(); return; }
+          if ((event.target as Element).closest('[data-hover-surface]')) return;
+          if ((event.target as Element).closest('[data-paper-reference]')) { clearHoveredRegion(); return; }
           const pointerDown = pointerDownRef.current;
           if (pointerDown?.startedOnTextLayer && (event.buttons & 1) === 1) {
             const moved = Math.hypot(
@@ -777,17 +797,19 @@ function PdfSourcePageImpl({
           pageIdx={page.pageIdx}
           renderPriority={renderPriority}
           renderEnabled={renderEnabled}
+          originalContentWindows={originalContentWindows}
           searchActive={searchActive}
           searchQuery={searchQuery}
         />
 
         <PdfTextSelectionHighlightLayer highlights={pageTextSelectionHighlights} />
 
-        {!suppressRegions ? (
+        {renderSegmentLayer ? (
           <div className="pointer-events-none absolute inset-0 z-[2]">
             {page.regions.map((region) => {
               return (
 	                <SegmentRegion
+	                  interactionSuppressed={suppressRegions}
 	                  active={previewRegionId === region.id}
 	                  flashed={flashSegmentUid === region.sourceSegment.uid}
                   hasAnnotation={
@@ -856,6 +878,7 @@ function PdfSourcePageImpl({
                   }
                   translationStatus={translationStatus}
                   translationMode={translationMode}
+                  replacementFontSize={pageWidth * 9 / 595}
                   translationVisible={translationVisible}
                   workspaceRoot={workspaceRoot}
                   onAddSourceLink={
@@ -866,6 +889,11 @@ function PdfSourcePageImpl({
                   onPreviewPointerEnter={() => {
                     previewPointerInsideRef.current = true;
                     cancelListPreviewClear();
+                    if (hoverAnimationFrameRef.current !== null) {
+                      window.cancelAnimationFrame(hoverAnimationFrameRef.current);
+                      hoverAnimationFrameRef.current = null;
+                    }
+                    pendingHoverSampleRef.current = null;
                   }}
                   onPreviewPointerLeave={() => {
                     previewPointerInsideRef.current = false;

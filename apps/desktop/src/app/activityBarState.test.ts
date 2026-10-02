@@ -62,14 +62,14 @@ describe('resolveActiveActivityPanel', () => {
     ).toBe('library');
   });
 
-  it('lets settings override an open side drawer', () => {
+  it('keeps the open side tool highlighted independently of the settings tab', () => {
     expect(
       resolveActiveActivityPanel({
         focusedSurfaceKind: 'settings',
         sidebarOpen: true,
         sidePanel: 'assistant'
       })
-    ).toBeNull();
+    ).toBe('assistant');
   });
 
   it('falls back to library only when its drawer is collapsed on the library surface', () => {

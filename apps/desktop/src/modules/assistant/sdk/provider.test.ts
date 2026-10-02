@@ -22,7 +22,7 @@ describe('provider model metadata', () => {
     expect(metadata.modelContextLength).toBe(1_048_576);
   });
 
-  it('keeps a lower OpenRouter provider limit visible without replacing model context', () => {
+  it('uses the serving limit while preserving the larger nominal model context as reference', () => {
     const metadata = providerModelInfoFromApiItem(
       {
         context_length: 163_840,
@@ -35,7 +35,7 @@ describe('provider model metadata', () => {
       'provider'
     );
 
-    expect(metadata.maxContextLength).toBe(163_840);
+    expect(metadata.maxContextLength).toBe(64_000);
     expect(metadata.modelContextLength).toBe(163_840);
     expect(metadata.providerContextLength).toBe(64_000);
   });

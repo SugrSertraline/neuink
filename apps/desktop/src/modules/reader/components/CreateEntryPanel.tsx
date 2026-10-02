@@ -92,31 +92,22 @@ export function CreateEntryPanel({
   };
 
   const handleDroppedPaths = (paths: string[]) => {
-    if (creationMode === 'mineru') {
-      const zip = paths.find((path) => /\.zip$/i.test(path));
-      if (zip) {
-        setMineruZipPath(zip);
-        setPdfPath('');
-        setTitle((current) => current || titleFromFileName(fileNameFromPath(zip)));
-        setCreateState('ready');
-        return;
-      }
-      notify({ title: '无法导入文件', description: '请拖入 MinerU 客户端导出的 ZIP 压缩包。', tone: 'danger' });
+    const zip = paths.find((path) => /\.zip$/i.test(path));
+    if (zip) {
+      setMineruZipPath(zip);
+      setPdfPath('');
+      setTitle((current) => current || titleFromFileName(fileNameFromPath(zip)));
+      setCreateState('ready');
       return;
     }
-    const pdf = paths.find((path) => /\.pdf$/i.test(path));
-    if (!pdf) {
-      notify({
-        title: '无法添加文件',
-        description: '请拖入 PDF 文件。',
-        tone: 'danger'
-      });
-      return;
-    }
-    usePdfPath(pdf);
+    if (paths.some((path) => /\.pdf$/i.test(path))) return;
+    notify({ title: '无法导入文件', description: '请拖入 MinerU 客户端导出的 ZIP 压缩包。', tone: 'danger' });
   };
 
   useEffect(() => {
+    // PDF drops belong to the app-wide automatic import; only the ZIP source
+    // keeps a local drop target that populates this form.
+    if (creationMode !== 'mineru') return;
     let cancelled = false;
     const unlistenPromise = getCurrentWebview().onDragDropEvent((event) => {
       if (cancelled || createState === 'creating') {
@@ -295,7 +286,7 @@ export function CreateEntryPanel({
       : '创建条目';
 
   return (
-    <div className="mx-auto h-full w-full max-w-4xl p-3">
+    <div data-guide="create-entry" className="mx-auto h-full w-full max-w-4xl p-3">
       <Card className="h-full min-h-0 gap-0 overflow-hidden py-0">
         <CardHeader className="shrink-0 border-b py-4">
           <CardTitle>创建条目</CardTitle>
@@ -341,7 +332,7 @@ export function CreateEntryPanel({
                     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-stretch gap-2">
                       <button
                         ref={(node) => { pdfDropZoneRef.current = node; }}
-                        aria-label="选择或拖入 PDF"
+                        aria-label="选择 PDF"
                         className={cn(
                           'flex min-h-24 min-w-0 items-center gap-3 rounded-lg border border-dashed px-4 text-left transition-colors',
                           pdfDragActive
@@ -361,14 +352,12 @@ export function CreateEntryPanel({
                         </div>
                         <span className="min-w-0 flex-1">
                           <span className="block truncate font-medium">
-                            {pdfPath ? pdfName : '选择或拖入 PDF'}
+                            {pdfPath ? pdfName : '选择 PDF'}
                           </span>
                           <span className="mt-0.5 block text-xs text-muted-foreground">
-                            {pdfDragActive
-                              ? '松开后添加这个 PDF。'
-                              : pdfPath
-                                ? '点击可重新选择；创建后可直接阅读，解析是可选增强。'
-                                : 'PDF 为可选，不上传也能创建空条目。'}
+                            {pdfPath
+                              ? '点击可重新选择；创建后可直接阅读，解析是可选增强。'
+                              : 'PDF 可选；也可直接拖入窗口，按文件名自动创建条目。'}
                           </span>
                         </span>
                       </button>
@@ -387,6 +376,7 @@ export function CreateEntryPanel({
                 ) : (
                   <div
                     ref={(node) => { pdfDropZoneRef.current = node; }}
+                    data-native-file-drop-zone
                     className={cn(
                       'grid gap-3 rounded-lg border border-dashed p-4 text-left transition-colors',
                       pdfDragActive ? 'border-primary bg-primary/10 ring-2 ring-primary/20' : 'bg-muted/20'

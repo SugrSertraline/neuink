@@ -15,11 +15,12 @@ export function useNoteAction(scope: string, root: string | null) {
     return () => { context.current.live = false; off(); setSegmentEditorDirty(scope, 'note-action', false); };
   }, [scope]);
   const run = (action: (isCurrent: () => boolean) => Promise<void>) => {
-    if (!root || operation.current) return;
+    if (!root || operation.current) return Promise.resolve(false);
     const current = () => context.current.live && context.current.root === root;
     setBusy(true); setError(null); setSegmentEditorDirty(scope, 'note-action', true);
     operation.current = action(current).then(() => true).catch((caught) => { if (current()) setError(String(caught)); return false; })
       .finally(() => { operation.current = null; setSegmentEditorDirty(scope, 'note-action', false); if (current()) setBusy(false); });
+    return operation.current;
   };
   return { busy, error, run };
 }

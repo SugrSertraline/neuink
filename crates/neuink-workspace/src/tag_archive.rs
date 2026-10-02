@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use neuink_domain::{EntryId, EntryMeta, TagId, TagMeta};
 use serde::{Deserialize, Serialize};
+use std::fs;
 
 use crate::{
     tag_reading::validate_id, tag_transaction::TagTransactionTarget,
@@ -26,7 +27,110 @@ pub struct TagArchive {
 impl Workspace {
     pub fn list_tag_archives(&self) -> Result<Vec<TagArchive>, WorkspaceError> {
         let _guard = self.begin_tag_safe_mutation()?;
+        self.recover_tag_archive_purges()?;
         Ok(self.read_workspace_file()?.tag_archives)
+    }
+
+    pub fn purge_tag_archive(&self, archive_id: &TagId) -> Result<(), WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
+        validate_id(archive_id.as_str())?;
+        self.recover_tag_archive_purges()?;
+        let mut file = self.read_workspace_file()?;
+        let archive = file
+            .tag_archives
+            .iter()
+            .find(|item| item.archive_id == *archive_id)
+            .cloned()
+            .ok_or_else(|| WorkspaceError::TrashItemMissing(archive_id.to_string()))?;
+        let reading_root = self.layout().root().join("tag-reading");
+        let staged = reading_root.join(format!(".purging-{}", archive_id.as_str()));
+        self.validate_note_workspace_path(&staged)?;
+        fs::create_dir_all(&staged)?;
+        let result = (|| {
+            for tag in &archive.tags {
+                let source = reading_root.join(tag.id.as_str());
+                if source.exists() {
+                    self.validate_note_workspace_path(&source)?;
+                    fs::rename(source, staged.join(tag.id.as_str()))?;
+                }
+            }
+            file.tag_archives
+                .retain(|item| item.archive_id != *archive_id);
+            self.write_workspace_file(&file)
+        })();
+        if let Err(error) = result {
+            if let Err(recovery_error) = self.recover_tag_archive_purge_dir(&staged, true) {
+                return Err(WorkspaceError::TagReading(format!(
+                    "标签彻底删除失败：{error}；暂存资料尚未完全恢复，已保留，请解决恢复错误后重试：{recovery_error}"
+                )));
+            }
+            return Err(error);
+        }
+        fs::remove_dir_all(staged)?;
+        Ok(())
+    }
+
+    fn recover_tag_archive_purges(&self) -> Result<(), WorkspaceError> {
+        let reading_root = self.layout().root().join("tag-reading");
+        if !reading_root.exists() {
+            return Ok(());
+        }
+        let file = self.read_workspace_file()?;
+        for item in fs::read_dir(&reading_root)? {
+            let path = item?.path();
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            let Some(id) = name.strip_prefix(".purging-") else {
+                continue;
+            };
+            validate_id(id)?;
+            self.validate_note_workspace_path(&path)?;
+            let archive_exists = file
+                .tag_archives
+                .iter()
+                .any(|archive| archive.archive_id.as_str() == id);
+            // Older versions could restore metadata before recovering these files.
+            // An active tag still owns its staged data even without an archive.
+            let active_tag_exists = file
+                .tags
+                .iter()
+                .any(|tag| path.join(tag.id.as_str()).exists());
+            self.recover_tag_archive_purge_dir(&path, archive_exists || active_tag_exists)?;
+        }
+        Ok(())
+    }
+
+    fn recover_tag_archive_purge_dir(
+        &self,
+        staged: &std::path::Path,
+        restore: bool,
+    ) -> Result<(), WorkspaceError> {
+        if !staged.exists() {
+            return Ok(());
+        }
+        if restore {
+            let reading_root = staged
+                .parent()
+                .ok_or_else(|| WorkspaceError::TagReading("标签暂存路径无效".into()))?;
+            for item in fs::read_dir(staged)? {
+                let source = item?.path();
+                let id = source
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .ok_or_else(|| WorkspaceError::TagReading("标签暂存项目无效".into()))?;
+                validate_id(id)?;
+                let target = reading_root.join(id);
+                if target.exists() {
+                    return Err(WorkspaceError::TagReading(
+                        "标签阅读资料恢复位置已存在".into(),
+                    ));
+                }
+                fs::rename(source, target)?;
+            }
+        }
+        fs::remove_dir_all(staged)?;
+        Ok(())
     }
 
     pub fn delete_tag(&self, tag_id: &TagId) -> Result<(), WorkspaceError> {
@@ -83,6 +187,9 @@ impl Workspace {
 
     pub fn restore_tag_archive(&self, archive_id: &TagId) -> Result<usize, WorkspaceError> {
         let _guard = self.begin_tag_safe_mutation()?;
+        // Keep the archive as recovery evidence until every staged file is back.
+        // A failed/partial recovery must not turn the next cleanup into a purge.
+        self.recover_tag_archive_purges()?;
         let mut file = self.read_workspace_file()?;
         let archive = file
             .tag_archives
@@ -160,3 +267,7 @@ impl Workspace {
             .collect())
     }
 }
+
+#[cfg(test)]
+#[path = "tag_archive_tests.rs"]
+mod tests;

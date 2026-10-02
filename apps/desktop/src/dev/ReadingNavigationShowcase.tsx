@@ -14,6 +14,7 @@ import { ReflowEntryReader } from '@/modules/reader/components/reflow/ReflowEntr
 import { SegmentBookmarksProvider } from '@/modules/reader/components/SegmentBookmarks';
 import { WorkspaceSurfaceDeck } from '@/modules/reader/components/WorkspaceSurfaceDeck';
 import { ReadingStateRetention, useRetainedReadingSnapshot } from '@/modules/reader/components/navigation/ReadingStateRetention';
+import { ReadingViewSession } from '@/modules/reader/components/navigation/ReadingViewSession';
 import type { WorkspaceSurfaceLayout } from '@/app/workspaceSurface';
 import { readerPdfFixture } from './readerPdfFixture';
 import '../styles/globals.css';
@@ -21,6 +22,7 @@ import '../styles/globals.css';
 const noop = () => undefined;
 const unavailable = async (): Promise<never> => { throw new Error('此检查页不操作工作区文件'); };
 const emptyRecords = async () => [];
+const duplicateViews = new URLSearchParams(window.location.search).has('duplicateViews');
 const twoColumnReferences = new URLSearchParams(window.location.search).has('twoColumns');
 const translatedReferences = twoColumnReferences && new URLSearchParams(window.location.search).has('translatedReferences');
 const denseRail = new URLSearchParams(window.location.search).has('denseRail');
@@ -31,7 +33,7 @@ mockIPC(async command => {
   if (command === 'read_pdf_bytes') return Array.from(bytes);
   if (command === 'list_jobs') return [];
   if (command === 'read_paragraph_translations') return {};
-  if (command === 'read_entry_translation') return { translation: translatedReferences ? referenceTranslation : null };
+  if (command === 'read_entry_translation') return { translation: duplicateViews || translatedReferences ? referenceTranslation : null };
   return null;
 }, { shouldMockEvents: true });
 const entry: LibraryEntry = { id: 'navigation-fixture', title: '文内预览与笔记定位', contents: [], tagIds: [], tags: [], fields: {},
@@ -64,6 +66,15 @@ const referenceTranslation: EntryTranslation = {
     source_text: segments[segments.length - 1].text, status: 'translated', updated_at: '',
     translated_text: '[1] 左栏文献译文。Smith 2024。\n[12] 右栏文献译文。Lee 2026。' }],
 };
+if (duplicateViews) {
+  segments.splice(1, 1,
+    paragraph('short-block', 'Evidence from multiple sources can be compared in a shared research note.', 0, [80, 211, 925, 300]),
+    paragraph('long-block', 'Keep the original document readable while navigating between papers.', 0, [80, 306, 925, 605]));
+  referenceTranslation.segments = segments.filter(s => s.page_idx === 0 && s.segment_type === 'paragraph').map((s, index) => ({
+    segment_uid: s.uid, source_hash: 'fixture', source_text: s.text, translated_text: index === 0 ? '综合多篇文献的证据，形成有溯源的研究笔记。' : '保留原始文献，方便在多篇论文之间导航与对照。通过共享片段标识，两侧可以找到对应的原文、译文和批注。'.repeat(9),
+    status: 'translated', page_idx: 0, segment_type: 'paragraph', error: null, updated_at: ''
+  }));
+}
 if (longNotes) {
   segments[1] = { ...segments[1], text: Array.from({ length: 45 }, (_, i) => `Source paragraph ${i + 1}. Evidence from multiple papers needs enough context to verify the original claim.`).join('\n\n') };
 }
@@ -101,11 +112,11 @@ function Showcase() {
   const saveBookmark = useCallback((uid: string, bookmarked: boolean) => update(uid, { bookmarked }), [update]);
   const saveNote = useCallback((_entry: string, uid: string, text: string) => update(uid, { text }), [update]);
   const common = { entry, recordReloadKey: reload, pairedMarkdownNoteTarget: null, readerPreferences: preferences, onReaderPreferencesChange: setPreferences,
-    sourceBacklinksBySegmentUid: {}, workspaceRoot: translatedReferences ? 'navigation-fixture' : null, onReadPdfReader: read, onSaveSegmentNote: saveNote,
+    sourceBacklinksBySegmentUid: {}, workspaceRoot: duplicateViews || translatedReferences ? 'navigation-fixture' : null, onReadPdfReader: read, onSaveSegmentNote: saveNote,
     onCreateMarkdownSourceLink: unavailable, onQueuePendingSourceLinkInsertion: noop, onOpenSourceBacklink: noop,
     onOpenSegmentNotesSurface: noop, onOpenAnnotationsSurface: noop, onExportTranslationNote: async () => undefined,
     onSaveAnnotation: emptyRecords, onDeleteAnnotation: emptyRecords };
-  const pdf = { kind: 'pdf' as const, entryId: entry.id }, reflow = { kind: 'reflow' as const, entryId: entry.id };
+  const pdf = { kind: 'pdf' as const, entryId: entry.id }, reflow = { kind: duplicateViews ? 'pdf' as const : 'reflow' as const, entryId: entry.id, ...(duplicateViews ? { viewId: 'duplicate' } : {}) };
   const first = swapped ? reflow : pdf, second = swapped ? pdf : reflow;
   const layout: WorkspaceSurfaceLayout = mode === 'split'
     ? { focusedPane: 'left', left: first, leftTabs: [first], right: second, rightTabs: [second] }
@@ -124,13 +135,13 @@ function Showcase() {
         {message ? <span role="status" className="text-xs text-destructive">{message}</span> : null}
       </div>
       <div className="workspace-split min-h-0 flex-1 overflow-hidden" style={{ gridTemplateColumns: mode === 'split' ? 'minmax(0,1fr) 8px minmax(0,1fr)' : 'minmax(0,1fr)', width: narrow ? 320 : '100%', maxHeight: short ? 320 : undefined }}>
-        <WorkspaceSurfaceDeck layout={layout} onFocus={noop} renderSurface={(surface, _sibling, _pane, active) => <ReadingStateRetention><SnapshotProbe kind={surface.kind} report={setMessage} />{active || !releaseInactive ? surface.kind === 'pdf' ? <SegmentBookmarksProvider save={saveBookmark}><MineruPdfReader {...common} editorScopeKey="fixture-pdf"
+        <WorkspaceSurfaceDeck layout={layout} onFocus={noop} renderSurface={(surface, _sibling, _pane, active) => <ReadingStateRetention><ReadingViewSession surface={surface} workspaceRoot={common.workspaceRoot} active={active}><SnapshotProbe kind={surface.kind} report={setMessage} />{active || !releaseInactive ? surface.kind === 'pdf' ? <SegmentBookmarksProvider save={saveBookmark}><MineruPdfReader {...common} editorScopeKey="fixture-pdf"
           markdownNoteRefreshById={{}} jumpRequest={null} reloadKey={0} sharedSegmentNoteDrafts={{}} pendingSourceLinkInsertion={null} pendingNoteImageInsertion={null}
           sidePane={{ pinned: false, requestKey: 0, target: null }} sidePaneEntry={null} onApplyEntryTagPaths={noop}
           onImportMarkdownNoteSegmentAsset={unavailable} onReadMarkdownNote={unavailable} onRetryPdfParse={noop} onStartPdfParse={noop} onCloseSidePane={noop}
           onOpenSourceLink={noop} onConsumePendingSourceLinkInsertion={noop} onConsumePendingNoteImageInsertion={noop} onSharedSegmentNoteDraftChange={noop}
           onQueuePendingNoteImageInsertion={noop} onToggleSidePanePinned={noop} onSaveMarkdownNote={unavailable} /></SegmentBookmarksProvider>
-          : <SegmentBookmarksProvider save={saveBookmark}><ReflowEntryReader {...common} editorScopeKey="fixture-reflow" /></SegmentBookmarksProvider> : null}</ReadingStateRetention>} />
+          : <SegmentBookmarksProvider save={saveBookmark}><ReflowEntryReader {...common} editorScopeKey="fixture-reflow" /></SegmentBookmarksProvider> : null}</ReadingViewSession></ReadingStateRetention>} />
       </div>
     </main>
   </ToastContext.Provider>;

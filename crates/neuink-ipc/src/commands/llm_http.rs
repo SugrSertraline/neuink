@@ -80,7 +80,10 @@ pub(crate) fn build_chat_request(
             if let Some(value) = max_tokens {
                 generation_config["maxOutputTokens"] = json!(value);
             }
-            if generation_config.as_object().is_some_and(|map| !map.is_empty()) {
+            if generation_config
+                .as_object()
+                .is_some_and(|map| !map.is_empty())
+            {
                 body["generationConfig"] = generation_config;
             }
             Ok((url, headers, body))
@@ -129,12 +132,7 @@ pub(crate) fn parse_chat_response(protocol: LlmApiProtocol, body: &str) -> Resul
             payload
                 .content
                 .into_iter()
-                .filter(|block| {
-                    block
-                        .r#type
-                        .as_deref()
-                        .map_or(true, |kind| kind == "text")
-                })
+                .filter(|block| block.r#type.as_deref().map_or(true, |kind| kind == "text"))
                 .filter_map(|block| block.text)
                 .collect::<Vec<_>>()
                 .join("\n")
@@ -157,9 +155,7 @@ pub(crate) fn parse_chat_response(protocol: LlmApiProtocol, body: &str) -> Resul
     };
     let trimmed = content.trim().to_string();
     (!trimmed.is_empty()).then_some(trimmed).ok_or_else(|| {
-        format!(
-            "LLM response did not contain message content (protocol {protocol:?})."
-        )
+        format!("LLM response did not contain message content (protocol {protocol:?}).")
     })
 }
 
@@ -174,9 +170,7 @@ pub(crate) fn build_chat_stream_request(
     let (url, headers, mut body) = build_chat_request(profile, system, user, fallbacks)?;
     match profile.api_protocol {
         LlmApiProtocol::Google => {
-            let url = url
-                .trim_end_matches(":generateContent")
-                .to_string();
+            let url = url.trim_end_matches(":generateContent").to_string();
             Ok((
                 format!("{url}:streamGenerateContent?alt=sse"),
                 headers,
@@ -356,7 +350,10 @@ mod tests {
 
     fn assert_approx(actual: Option<f64>, expected: f64) {
         let actual = actual.expect("expected a numeric value");
-        assert!((actual - expected).abs() < 1e-6, "expected {expected}, got {actual}");
+        assert!(
+            (actual - expected).abs() < 1e-6,
+            "expected {expected}, got {actual}"
+        );
     }
 
     #[test]
@@ -421,9 +418,13 @@ mod tests {
         .unwrap();
         assert_eq!(url, "https://example.test/v1/messages");
         assert_eq!(
-            headers.get("x-api-key").and_then(|v| v.to_str().ok()), Some("secret-key"));
+            headers.get("x-api-key").and_then(|v| v.to_str().ok()),
+            Some("secret-key")
+        );
         assert_eq!(
-            headers.get("anthropic-version").and_then(|v| v.to_str().ok()),
+            headers
+                .get("anthropic-version")
+                .and_then(|v| v.to_str().ok()),
             Some("2023-06-01")
         );
         assert!(headers.get("authorization").is_none());
@@ -437,8 +438,7 @@ mod tests {
     fn anthropic_request_omits_empty_system_and_keeps_max_tokens() {
         let mut profile = profile(LlmApiProtocol::Anthropic);
         profile.max_output_tokens = Some(512);
-        let (_, _, body) =
-            build_chat_request(&profile, "", "usr", empty_fallbacks()).unwrap();
+        let (_, _, body) = build_chat_request(&profile, "", "usr", empty_fallbacks()).unwrap();
         assert!(body.get("system").is_none());
         assert_eq!(body["max_tokens"], 512);
     }
@@ -475,9 +475,11 @@ mod tests {
     fn google_request_with_models_base_and_no_params() {
         let mut profile = profile(LlmApiProtocol::Google);
         profile.base_url = "https://example.test/v1beta/models".to_string();
-        let (url, _, body) =
-            build_chat_request(&profile, "", "usr", empty_fallbacks()).unwrap();
-        assert_eq!(url, "https://example.test/v1beta/models/test-model:generateContent");
+        let (url, _, body) = build_chat_request(&profile, "", "usr", empty_fallbacks()).unwrap();
+        assert_eq!(
+            url,
+            "https://example.test/v1beta/models/test-model:generateContent"
+        );
         assert!(body.get("systemInstruction").is_none());
         assert!(body.get("generationConfig").is_none());
     }
@@ -556,8 +558,10 @@ mod tests {
             &mut acc,
         )
         .unwrap();
-        super::append_chat_stream_delta(LlmApiProtocol::OpenaiCompatible, "[DONE]", &mut acc).unwrap();
-        super::append_chat_stream_delta(LlmApiProtocol::OpenaiCompatible, ": keepalive", &mut acc).unwrap();
+        super::append_chat_stream_delta(LlmApiProtocol::OpenaiCompatible, "[DONE]", &mut acc)
+            .unwrap();
+        super::append_chat_stream_delta(LlmApiProtocol::OpenaiCompatible, ": keepalive", &mut acc)
+            .unwrap();
         assert_eq!(acc, "你好");
 
         let mut acc = String::new();
@@ -589,15 +593,7 @@ mod tests {
     fn errors_on_empty_content() {
         let body = r#"{"choices":[{"message":{"content":"  "}}]}"#;
         assert!(parse_chat_response(LlmApiProtocol::OpenaiCompatible, body).is_err());
-        assert!(parse_chat_response(
-            LlmApiProtocol::Anthropic,
-            r#"{"content":[]}"#
-        )
-        .is_err());
-        assert!(parse_chat_response(
-            LlmApiProtocol::Google,
-            r#"{"candidates":[]}"#
-        )
-        .is_err());
+        assert!(parse_chat_response(LlmApiProtocol::Anthropic, r#"{"content":[]}"#).is_err());
+        assert!(parse_chat_response(LlmApiProtocol::Google, r#"{"candidates":[]}"#).is_err());
     }
 }

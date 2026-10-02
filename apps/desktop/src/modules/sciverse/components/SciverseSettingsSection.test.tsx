@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SciverseSettingsSection } from './SciverseSettingsSection';
+import { hasUnsavedSegmentEditors } from '@/modules/reader/components/segmentEditorDirtyRegistry';
 
 const apiMocks = vi.hoisted(() => ({
   getSciverseSettings: vi.fn(),
@@ -154,12 +155,40 @@ describe('SciverseSettingsSection', () => {
     fireEvent.change(input, { target: { value: 'unpersisted-token' } });
     fireEvent.click(view.getByRole('button', { name: '保存 Token' }));
 
-    await waitFor(() => {
-      expect(notify).toHaveBeenCalledWith(expect.objectContaining({
-        tone: 'danger',
-        title: '保存 Sciverse Token 失败'
-      }));
-    });
+    expect((await view.findByRole('alert')).textContent).toContain('保存 Sciverse Token 失败');
+    expect(notify).not.toHaveBeenCalled();
     expect(input.value).toBe('unpersisted-token');
+  });
+
+  it('keeps a replacement draft through category changes and releases the close guard on discard or unmount', async () => {
+    apiMocks.getSciverseSettings.mockResolvedValue(configuredSettings);
+    const view = render(<SciverseSettingsSection active />);
+    fireEvent.click(await view.findByRole('button', { name: '替换 Token' }));
+    fireEvent.change(view.getByLabelText('Sciverse API Token'), { target: { value: 'draft-only' } });
+    expect(hasUnsavedSegmentEditors('settings')).toBe(true);
+    expect((view.getByRole('button', { name: '清除 Sciverse Token' }) as HTMLButtonElement).disabled).toBe(true);
+    view.rerender(<SciverseSettingsSection active={false} />);
+    view.rerender(<SciverseSettingsSection active />);
+    expect((view.getByLabelText('Sciverse API Token') as HTMLInputElement).value).toBe('draft-only');
+    fireEvent.click(view.getByRole('button', { name: '取消替换' }));
+    expect(hasUnsavedSegmentEditors('settings')).toBe(false);
+    view.unmount();
+    expect(hasUnsavedSegmentEditors('settings')).toBe(false);
+  });
+
+  it('keeps environment credentials read-only and requires confirmation before clearing saved credentials', async () => {
+    apiMocks.getSciverseSettings.mockResolvedValue({ ...configuredSettings, token_source: 'environment' });
+    const view = render(<SciverseSettingsSection active />);
+    expect((await view.findByLabelText('Sciverse API Token') as HTMLInputElement).readOnly).toBe(true);
+    expect(view.queryByRole('button', { name: '替换 Token' })).toBeNull();
+    expect(view.queryByRole('button', { name: '清除 Sciverse Token' })).toBeNull();
+    view.unmount();
+    apiMocks.getSciverseSettings.mockResolvedValue(configuredSettings);
+    apiMocks.saveSciverseSettings.mockResolvedValue(emptySettings);
+    const clear = render(<SciverseSettingsSection active />);
+    fireEvent.click(await clear.findByRole('button', { name: '清除 Sciverse Token' }));
+    expect(apiMocks.saveSciverseSettings).not.toHaveBeenCalled();
+    fireEvent.click(clear.getByRole('button', { name: '确认清除' }));
+    await waitFor(() => expect(apiMocks.saveSciverseSettings).toHaveBeenCalledWith({ baseUrl: configuredSettings.base_url, clearApiToken: true, enabled: false }));
   });
 });

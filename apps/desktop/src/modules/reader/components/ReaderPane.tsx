@@ -1,5 +1,10 @@
 import { ReadingStateRetention } from './navigation/ReadingStateRetention';
+import { ReadingViewSession } from './navigation/ReadingViewSession';
+import { BrowserSurface } from '@/modules/browser/BrowserSurface';
+import { AssistantReplyReader } from '@/modules/assistant/components/AssistantReplyReader';
 import {
+  lazy,
+  Suspense,
   useEffect,
   useRef,
   useState,
@@ -58,11 +63,9 @@ import type { ReaderPreferences } from '@/shared/lib/readerPreferences';
 
 import type { LibraryEntry, LibraryView } from '../../library/components/LibrarySidebar';
 import { TagEditorPage } from '../../library/components/TagEditorPage';
-import { SettingsPanel } from '../../settings/components/SettingsPanel';
 import { CreateEntryPanel } from './CreateEntryPanel';
 import { MineruClientImportGuide } from './MineruClientImportGuide';
 import { EntryLibraryView } from './EntryLibraryView';
-import { EntryWorkspaceView } from './EntryWorkspaceView';
 import type { EntryPdfHandlers } from '@/modules/library/components/EntryPdfActions';
 import { SourceLinksSurface } from './SourceLinksSurface';
 import { isHeavyReaderSurface } from './readerRetention';
@@ -71,7 +74,13 @@ import { hasUnsavedSegmentEditors } from './segmentEditorDirtyRegistry';
 import { useSourceBacklinks } from './useSourceBacklinks';
 import { setSegmentNoteBookmark } from '@/shared/ipc/workspaceApi';
 
+const SettingsPanel = lazy(() => import('../../settings/components/SettingsPanel')
+  .then((module) => ({ default: module.SettingsPanel })));
+const EntryWorkspaceView = lazy(() => import('./EntryWorkspaceView')
+  .then((module) => ({ default: module.EntryWorkspaceView })));
+
 type ReaderPaneProps = EntryPdfHandlers & {
+  onUpdateBrowser?: (id: string, url: string, title: string) => void;
   librarySection: 'papers' | 'notes';
   onLibrarySectionChange: (section: 'papers' | 'notes') => void;
   onOpenTagLibrary: (tagId: string, section?: 'papers' | 'notes') => void;
@@ -198,6 +207,7 @@ type LinkedReaderSegment = {
 };
 
 export function ReaderPane({
+  onUpdateBrowser,
   onUpdateTagDescription,
   onOpenTrash,
   onRestoreTagArchive,
@@ -312,6 +322,12 @@ export function ReaderPane({
   const [segmentNoteDraftsByEntryId, setSegmentNoteDraftsByEntryId] = useState<
     Record<string, Record<string, string>>
   >({});
+  const segmentDraftsRef = useRef(segmentNoteDraftsByEntryId);
+  const savedSegmentTextRef = useRef(new Map<string, string>());
+  const segmentWritesRef = useRef(new Map<string, Promise<unknown>>());
+  useEffect(() => {
+    segmentDraftsRef.current = {}; setSegmentNoteDraftsByEntryId({}); savedSegmentTextRef.current.clear();
+  }, [workspaceRoot]);
   const linkedRequestKeyRef = useRef(0);
   const previousPdfJumpByEntryIdRef = useRef(pdfJumpByEntryId);
   const noteCatalog = useWorkspaceNotes();
@@ -350,7 +366,20 @@ export function ReaderPane({
   };
 
   const saveLinkedSegmentNote = async (entryId: string, segmentUid: string, text: string) => {
-    const notes = await onSaveSegmentNote(entryId, segmentUid, text);
+    const key = JSON.stringify([workspaceRoot, entryId, segmentUid]);
+    const previous = segmentWritesRef.current.get(key);
+    const operation = (async () => {
+      if (previous) await previous.catch(() => undefined);
+      const live = segmentDraftsRef.current[entryId]?.[segmentUid];
+      if (live !== undefined && live !== text) throw new Error('另一侧已更新片段草稿，请确认最新内容后重新保存。');
+      const result = await onSaveSegmentNote(entryId, segmentUid, text);
+      savedSegmentTextRef.current.set(key, text);
+      return result;
+    })();
+    segmentWritesRef.current.set(key, operation);
+    let notes: Awaited<ReturnType<typeof onSaveSegmentNote>>;
+    try { notes = await operation; }
+    finally { if (segmentWritesRef.current.get(key) === operation) segmentWritesRef.current.delete(key); }
     setSegmentNoteReloadByEntryId((current) => ({
       ...current,
       [entryId]: (current[entryId] ?? 0) + 1
@@ -359,7 +388,18 @@ export function ReaderPane({
   };
 
   const deleteLinkedSegmentNote = async (entryId: string, segmentUid: string) => {
-    const notes = await onDeleteSegmentNote(entryId, segmentUid);
+    const key = JSON.stringify([workspaceRoot, entryId, segmentUid]);
+    const previous = segmentWritesRef.current.get(key);
+    const operation = (async () => {
+      if (previous) await previous.catch(() => undefined);
+      const notes = await onDeleteSegmentNote(entryId, segmentUid);
+      savedSegmentTextRef.current.set(key, '');
+      return notes;
+    })();
+    segmentWritesRef.current.set(key, operation);
+    let notes: Awaited<ReturnType<typeof onDeleteSegmentNote>>;
+    try { notes = await operation; }
+    finally { if (segmentWritesRef.current.get(key) === operation) segmentWritesRef.current.delete(key); }
     setSegmentNoteReloadByEntryId((current) => ({
       ...current,
       [entryId]: (current[entryId] ?? 0) + 1
@@ -390,15 +430,18 @@ export function ReaderPane({
     segmentUid: string,
     text: string | null
   ) => {
-    setSegmentNoteDraftsByEntryId((current) => {
+    const nextText = text ?? savedSegmentTextRef.current.get(JSON.stringify([workspaceRoot, entryId, segmentUid])) ?? null;
+    const update = (current: typeof segmentNoteDraftsByEntryId) => {
       const entryDrafts = { ...(current[entryId] ?? {}) };
-      if (text === null) {
+      if (nextText === null) {
         delete entryDrafts[segmentUid];
       } else {
-        entryDrafts[segmentUid] = text;
+        entryDrafts[segmentUid] = nextText;
       }
       return { ...current, [entryId]: entryDrafts };
-    });
+    };
+    segmentDraftsRef.current = update(segmentDraftsRef.current);
+    setSegmentNoteDraftsByEntryId(segmentDraftsRef.current);
   };
 
   useEffect(() => {
@@ -700,6 +743,7 @@ export function ReaderPane({
     const externalPdfJump = pdfJumpByEntryId[parsed.entryId] ?? null;
 
     return (
+      <Suspense fallback={<div className="grid h-full min-h-0 place-items-center text-sm text-muted-foreground" role="status">正在载入阅读器…</div>}>
       <EntryWorkspaceView
         activeContentId={parsed.contentId}
         entry={openEntry}
@@ -880,6 +924,7 @@ export function ReaderPane({
         onRestoreEntry={onRestoreEntry}
         onRestoreTrashItem={onRestoreTrashItem}
       />
+      </Suspense>
     );
   };
   const renderCreateEntryPanel = () => (
@@ -907,6 +952,7 @@ export function ReaderPane({
   const renderSettingsPanel = (surface: Extract<WorkspaceSurface, { kind: 'settings' }>) => (
     <SettingsPanel
       navigationTarget={surface.target}
+      onOpenMineruClientGuide={onOpenMineruClientGuide}
       parserEndpoint={parserEndpoint}
       parserApiKey={parserApiKey}
       readerPreferences={readerPreferences}
@@ -926,6 +972,11 @@ export function ReaderPane({
     />
   );
   const renderSurface = (surface: WorkspaceSurface, sibling: WorkspaceSurface | null, pane: WorkspacePaneId) => {
+    if (surface.kind === 'assistant-reply') return <AssistantReplyReader message={surface.message} />;
+    if (surface.kind === 'browser') return <BrowserSurface id={surface.id} initialUrl={surface.url}
+      active={surfaceLayout[pane]?.kind === 'browser' && surfaceKey(surfaceLayout[pane]!) === surfaceKey(surface)}
+      onFocus={() => onFocusSurface(pane)}
+      onChange={(url, title) => onUpdateBrowser?.(surface.id, url, title)} />;
     if (surface.kind === 'note-review') return <NoteReviewPage key={surface.proposalId} proposalId={surface.proposalId} onOpenNote={onOpenEntryNote} />;
     if (surface.kind === 'tag-details') return <TagDetailsView key={`${workspaceRoot}:${surface.tagId}`} root={workspaceRoot} tagId={surface.tagId} tags={tags} entries={entries} initialView={surface.view}
       onDescription={onUpdateTagDescription} onOpenNote={(target, label) => onOpenSurface(noteSurface(target, label), pane)}
@@ -1008,7 +1059,8 @@ export function ReaderPane({
         'segmentUid' in surface ? surface.segmentUid : undefined,
         surface.kind === 'segment-notes'
             ? surface.mode ?? 'note'
-            : 'note'
+            : 'note',
+        surfaceKey(surface)
       );
       const entry = entries.find((entry) => entry.id === surface.entryId);
       if (!entry || !['pdf', 'reflow', 'entry-overview'].includes(surface.kind)) return reader;
@@ -1036,11 +1088,16 @@ export function ReaderPane({
       case 'library':
         return renderLibraryView(true);
       case 'settings':
-        return <div className="h-full min-h-0 overflow-hidden">{renderSettingsPanel(surface)}</div>;
+        return <div className="h-full min-h-0 overflow-hidden">
+          <Suspense fallback={<div className="px-4 py-3 text-sm text-muted-foreground" role="status">正在载入设置…</div>}>
+            {renderSettingsPanel(surface)}
+          </Suspense>
+        </div>;
       case 'create-entry':
         return <div className="h-full min-h-0 overflow-hidden">{renderCreateEntryPanel()}</div>;
       case 'mineru-client-guide':
-        return <div className="h-full min-h-0 overflow-y-auto"><MineruClientImportGuide /></div>;
+        return <div data-guide="mineru-tutorial" role="region" aria-label="MinerU 客户端导入教程" tabIndex={0}
+          className="h-full min-h-0 overflow-y-auto overscroll-contain"><MineruClientImportGuide /></div>;
       case 'tag-editor':
         return <TagEditorPage standalone workspaceRoot={workspaceRoot} onOpenTrash={onOpenTrash} onRestoreTagArchive={onRestoreTagArchive} activeTag={activeTag} entries={entries} tags={tags} onCreateTagPath={onCreateTagPath} onDeleteTag={onDeleteTag} onRenameTag={onRenameTag} onSelectTag={(id) => { if (id) onOpenTagLibrary(id); else onSelectTag(null); }} />;
       default:
@@ -1059,7 +1116,9 @@ export function ReaderPane({
     return (
         <RelationReturnFrame visible={hasRelationsPage && relationOrigins.has(key)} onReturn={() => onOpenSurface({ kind: 'relations' })}>
           <ReadingStateRetention key={workspaceRoot}>
+            <ReadingViewSession surface={surface} workspaceRoot={workspaceRoot} active={activeSurface}>
             {shouldMount ? renderSurface(surface, sibling, pane) : null}
+            </ReadingViewSession>
           </ReadingStateRetention>
         </RelationReturnFrame>
     );

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConversationMessage } from '@/shared/ipc/assistantApi';
 
 import { ChatMessage } from './ChatMessage';
+import { AssistantReplyActionsContext } from './AssistantReplyActionsContext';
 
 const originalResizeObserver = globalThis.ResizeObserver;
 
@@ -15,12 +16,16 @@ afterEach(() => {
 });
 
 describe('ChatMessage performance boundaries', () => {
-  it('enlarges completed replies in a read-only preview and leaves plain questions as text', () => {
-    const ui = render(<ChatMessage message={{ ...createMessage(), content: '## 请问\n\n是否整理 WireWay？' }} streaming={false} onOpenSource={vi.fn()} />);
+  it('opens completed replies through workspace navigation rather than a dialog', () => {
+    const openReply = vi.fn();
+    const ui = render(<AssistantReplyActionsContext.Provider value={{ root: 'root', openReply, openSource: vi.fn(), addSciverseSource: vi.fn() }}>
+      <ChatMessage message={{ ...createMessage(), content: '## 请问\n\n是否整理 WireWay？' }} streaming={false} onOpenSource={vi.fn()} />
+    </AssistantReplyActionsContext.Provider>);
     expect(ui.container.querySelector('.assistant-chat-message')?.className).toContain('text-sm');
     fireEvent.click(ui.getByRole('button', { name: '展开阅读' }));
-    expect(ui.getByRole('dialog')).toBeTruthy();
-    expect(ui.getAllByText('是否整理 WireWay？')).toHaveLength(2);
+    expect(ui.queryByRole('dialog')).toBeNull();
+    expect(openReply).toHaveBeenCalledWith(expect.objectContaining({ content: '## 请问\n\n是否整理 WireWay？' }));
+    expect(ui.getAllByText('是否整理 WireWay？')).toHaveLength(1);
     expect(ui.queryByRole('button', { name: '确认执行' })).toBeNull();
   });
 
@@ -179,6 +184,8 @@ describe('ChatMessage performance boundaries', () => {
       <ChatMessage message={message} streaming={false} onOpenSource={() => undefined} />,
     );
 
+    expect(queryByRole('button', { name: 'S10 · p.10' })).toBeNull();
+    fireEvent.click(getByRole('button', { name: '查看来源 · 12 处引用' }));
     expect(getByRole('button', { name: 'S10 · p.10' })).toBeTruthy();
     expect(queryByRole('button', { name: 'S11 · p.11' })).toBeNull();
 
@@ -236,16 +243,23 @@ describe('ChatMessage performance boundaries', () => {
       />,
     );
 
-    expect(getByText('引用来源 2 · 检索论文 1')).toBeTruthy();
+    fireEvent.click(getByRole('button', { name: '查看来源 · 2 处引用' }));
+    expect(getByText('Sciverse 检索记录 · 1 组（含未引用候选及不同版本）')).toBeTruthy();
     expect(getByRole('button', { name: 'S1 · p.1' })).toBeTruthy();
     expect(getByRole('button', { name: 'S2 · p.2' })).toBeTruthy();
     expect(getAllByRole('button', { name: '一键加入文库' })).toHaveLength(1);
 
     fireEvent.click(getByRole('button', { name: '一键加入文库' }));
+    expect(onAddSciverseSource).not.toHaveBeenCalled();
+    fireEvent.click(getByRole('button', { name: '确认添加' }));
 
     await waitFor(() => expect(getByRole('button', { name: '已加入并解析' })).toBeTruthy());
     expect(onAddSciverseSource).toHaveBeenCalledTimes(1);
     expect(onAddSciverseSource).toHaveBeenCalledWith(message.source_links[0]);
+    fireEvent.click(getByRole('button', { name: '查看来源 · 2 处引用' }));
+    fireEvent.click(getByRole('button', { name: '查看来源 · 2 处引用' }));
+    expect(getByRole('button', { name: '已加入并解析' })).toBeTruthy();
+    expect(onAddSciverseSource).toHaveBeenCalledTimes(1);
   });
 
   it('opens the requested source once when the same Sciverse citation is repeated', () => {
@@ -273,6 +287,29 @@ describe('ChatMessage performance boundaries', () => {
     expect(onOpenSource).toHaveBeenCalledWith(message.source_links[0]);
   });
 
+  it('keeps source data intact but hides raw excerpts, identifiers and ambiguous pages from the answer', () => {
+    const message = createMessage();
+    message.content = '整理后的结论 [S1]。';
+    message.source_links = [{ provider: 'sciverse', doc_id: 'internal-document', chunk_id: 'internal-chunk',
+      offset: 0, page_no: 0, title: 'Paper', quote: 'Raw OCR ![](image.jpg)', authors: ['Author', 'author'] }];
+    const open = vi.fn();
+    const { getByRole, queryByText, queryByRole, rerender, getByText } = render(
+      <ChatMessage message={message} streaming={false} onOpenSource={open} />);
+    fireEvent.click(getByRole('button', { name: '来源 S1：Paper，Sciverse 来源' }));
+    expect(open).toHaveBeenCalledWith(message.source_links[0]);
+    expect(queryByRole('button', { name: 'S1 · Sciverse 来源' })).toBeNull();
+    rerender(<ChatMessage message={{ ...message, content: '继续汇总 [S1]。' }} streaming onOpenSource={open} />);
+    expect(getByRole('button', { name: '查看来源 · 1 处引用' }).getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(getByRole('button', { name: '查看来源 · 1 处引用' }));
+    expect(getByRole('button', { name: 'S1 · Sciverse 来源' })).toBeTruthy();
+    expect(getByText('author')).toBeTruthy();
+    for (const text of ['p.0', 'doc_id:', 'Raw OCR', 'internal-document', 'internal-chunk', 'offset 0']) {
+      expect(queryByText(new RegExp(text))).toBeNull();
+    }
+    fireEvent.click(getByRole('button', { name: '查看来源 · 1 处引用' }));
+    expect(queryByRole('button', { name: 'S1 · Sciverse 来源' })).toBeNull();
+  });
+
   it('keeps uncited agentic-search papers available as an import list', () => {
     const message = createMessage();
     message.content = '正文只引用第一篇 [S1]。';
@@ -298,7 +335,7 @@ describe('ChatMessage performance boundaries', () => {
       type: 'tool-result'
     }];
 
-    const { getAllByRole, getByText } = render(
+    const { getAllByRole, getByRole, getByText, queryByText } = render(
       <ChatMessage
         message={message}
         streaming={false}
@@ -307,8 +344,10 @@ describe('ChatMessage performance boundaries', () => {
       />,
     );
 
-    expect(getByText('引用来源 1 · 检索论文 2')).toBeTruthy();
-    expect(getByText('Uncited search result')).toBeTruthy();
+    expect(queryByText('Uncited search result')).toBeTruthy();
+    fireEvent.click(getByRole('button', { name: '查看来源 · 1 处引用' }));
+    expect(getByText('Sciverse 检索记录 · 2 组（含未引用候选及不同版本）')).toBeTruthy();
+    expect(getAllByRole('button', { name: 'Uncited search result' })).toHaveLength(2); // Candidate row and evidence detail.
     expect(getAllByRole('button', { name: '一键加入文库' })).toHaveLength(2);
   });
 });

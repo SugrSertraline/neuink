@@ -31,3 +31,9 @@ export const listTagArchives = (root: string) =>
   invoke<TagArchive[]>('list_tag_archives', { request: { root } });
 export const restoreTagArchive = (root: string, archiveId: string) =>
   invoke<{ tags: TagMeta[]; entries: EntryMeta[]; missing_entries: number }>('restore_tag_archive', { request: { root, archive_id: archiveId } });
+export const purgeTagArchive = (root: string, archiveId: string) =>
+  invoke<void>('purge_tag_archive', { request: { root, archive_id: archiveId } });
+export const TAG_ARCHIVES_CHANGED = 'neuink:tag-archives-changed';
+export const notifyTagArchivesChanged = (root: string) => {
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(TAG_ARCHIVES_CHANGED, { detail: root }));
+};

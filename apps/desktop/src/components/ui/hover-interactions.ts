@@ -46,6 +46,11 @@ function emit(event: DismissEvent) {
   return dismissed;
 }
 
+/** Clear existing previews and pending opens when another interaction boundary takes over. */
+export function dismissHoverInteractions() {
+  emit({ type:'interaction-boundary-change' });
+}
+
 /** One document subscription shared by all mounted hover triggers, including pending timers. */
 function listen(listener: Listener) {
   listeners.add(listener);

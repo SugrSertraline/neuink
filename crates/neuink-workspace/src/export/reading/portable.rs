@@ -38,7 +38,13 @@ pub(super) fn source_label(workspace: &Workspace, entry_id: &EntryId, page: Opti
         workspace
             .read_entry(entry_id)
             .map(|entry| entry_label(&entry))
-            .unwrap_or_else(|_| if workspace.layout().trashed_entry_dir(entry_id).exists() { "原论文已移入回收站".into() } else { "原论文已删除".into() })
+            .unwrap_or_else(|_| {
+                if workspace.layout().trashed_entry_dir(entry_id).exists() {
+                    "原论文已移入回收站".into()
+                } else {
+                    "原论文已删除".into()
+                }
+            })
     } else {
         "来源条目标识无效".into()
     };
@@ -86,9 +92,13 @@ pub(super) fn note_body(
                     warnings.push(format!("来源 {number} 没有引用快照"));
                 }
                 for source in &link.sources {
-                    if let Some(status) = workspace.inspect_sources(std::slice::from_ref(source)).first() {
+                    if let Some(status) = workspace
+                        .inspect_sources(std::slice::from_ref(source))
+                        .first()
+                    {
                         if !status.can_locate {
-                            warnings.push(format!("来源 {number}：{}，已保留引用快照", status.message));
+                            warnings
+                                .push(format!("来源 {number}：{}，已保留引用快照", status.message));
                             sources.push_str(&format!("{}\n\n", status.message));
                         }
                     }

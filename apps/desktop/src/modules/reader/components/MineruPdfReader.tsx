@@ -6,7 +6,7 @@ import { usePdfReadingNavigation } from './navigation/usePdfReadingNavigation';
 import { readingAssistantContext } from './readingAssistantContext';
 import { buildSegmentNoteLookup } from './pdf-reader/segmentNoteLookup';
 import { useReadingSession } from '../parallel-reading/ReadingSessionContext';
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -17,15 +17,8 @@ import {
   type PdfReaderResponse,
 } from "@/shared/ipc/workspaceApi";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { useToast } from "@/shared/hooks/useToast";
+import { useAppearance } from '@/shared/components/AppearanceProvider';
 import type { ReaderPreferences } from "@/shared/lib/readerPreferences";
 import type {
   Annotation,
@@ -56,6 +49,7 @@ import type {
 import { GlobalMarkdownNotePane } from "./pdf-reader/GlobalMarkdownNotePane";
 import { FloatingSegmentPanel } from "./pdf-reader/FloatingSegmentPanel";
 import { PdfReaderDocumentPane } from "./pdf-reader/PdfReaderDocumentPane";
+import { effectivePdfBookMode } from './pdf-reader/pdfReadingMode';
 import { ReaderMessage } from "./pdf-reader/ReaderMessage";
 import {
   findSegmentByLogicalOrRealUid,
@@ -286,6 +280,8 @@ function MineruPdfReaderBody({
     reloadKey,
   });
   const readingSession = useReadingSession();
+  const { appearance } = useAppearance();
+  const bookMode = effectivePdfBookMode(appearance, readerPreferences);
   const jumpRequest = readingSession?.jump ?? externalJumpRequest;
   const [hoveredSegmentUid, setHoveredSegmentUid] = useState<string | null>(
     null,
@@ -305,7 +301,6 @@ function MineruPdfReaderBody({
     "segment",
   );
   const [parseRetryBusy, setParseRetryBusy] = useState(false);
-  const [reparseConfirmOpen, setReparseConfirmOpen] = useState(false);
   const [visiblePageIndexes, setVisiblePageIndexes] = useState<number[]>([]);
   const parseStatusToastRef = useRef<{ key: string; id: string } | null>(null);
   const resumedReadingStateKeyRef = useRef<string | null>(null);
@@ -450,6 +445,10 @@ function MineruPdfReaderBody({
     bySegmentUid: translationBySegmentUid,
     exportTranslation,
     pause: pauseTranslation,
+    cancel: cancelTranslation,
+    resume: resumeTranslation,
+    translationPaused,
+    stopPending: translationStopPending,
     setTaskOpen: setTranslationTaskOpen,
     start: startTranslation,
     taskOpen: translationTaskOpen,
@@ -475,7 +474,7 @@ function MineruPdfReaderBody({
       notePaneOpen: globalNotePaneOpen,
       segments,
     });
-  const effectivePageDisplayMode = readerPreferences.pageTurningMode === 'book' && pdfViewportWidth < 860
+  const effectivePageDisplayMode = bookMode && pdfViewportWidth < 860
     ? 'single' : readerPreferences.pageDisplayMode;
   const {
     handleCtrlWheelZoom,
@@ -1044,8 +1043,8 @@ function MineruPdfReaderBody({
     try {
       await onRetryPdfParse(entry.id);
       notify({
-        title: "已重新提交解析",
-        description: "PDF 解析任务已重新提交，请等待解析服务返回结果。",
+        title: "已加入解析队列",
+        description: "可在左侧条目库的解析队列中查看进度、调整等待顺序。",
       });
     } catch (caught) {
       notify({
@@ -1063,7 +1062,7 @@ function MineruPdfReaderBody({
     setParseRetryBusy(true);
     try {
       await onStartPdfParse(entry.id);
-      notify({ title: '已开始解析', description: 'PDF 已提交给自定义 MinerU 服务。' });
+      notify({ title: '已加入解析队列', description: '可在左侧条目库的解析队列中查看进度、调整等待顺序。' });
     } catch (caught) {
       notify({ tone: 'danger', title: '开始解析失败', description: caught instanceof Error ? caught.message : String(caught) });
     } finally {
@@ -1071,10 +1070,6 @@ function MineruPdfReaderBody({
     }
   };
 
-  const confirmReparsePdf = async () => {
-    setReparseConfirmOpen(false);
-    await retryPdfParse();
-  };
 
   if (!entry.pdfFileName) {
     return (
@@ -1138,10 +1133,12 @@ function MineruPdfReaderBody({
         onDismissRecommendedTags={dismissTagSuggestions}
         onRecommendedTagToggle={toggleRecommendedTag}
         onPauseTranslation={() => void pauseTranslation()}
+        onCancelTranslation={() => void cancelTranslation()}
+        onResumeTranslation={() => void resumeTranslation()}
+        translationStopPending={translationStopPending}
         onOpenTranslationTask={() => setTranslationTaskOpen(true)}
         onOpenPdf={pdfPath ? () => void openOriginalPdf() : undefined}
         onReaderPreferencesChange={onReaderPreferencesChange}
-        onReparsePdf={() => setReparseConfirmOpen(true)}
         onRetryPdfParse={() => void retryPdfParse()}
         onRevealPdf={pdfPath ? () => void revealOriginalPdf() : undefined}
         onSearchNext={pdfTextSearch.nextMatch}
@@ -1167,6 +1164,10 @@ function MineruPdfReaderBody({
         onCreateTranslationNote={!translationBusy && translation ? exportTranslation : undefined}
       />
       <TranslationTaskDialog
+        stopPending={translationStopPending}
+        onPause={translationBusy ? () => void pauseTranslation() : undefined}
+        onCancel={translationBusy || translationPaused ? () => void cancelTranslation() : undefined}
+        onResume={translationPaused ? () => void resumeTranslation() : undefined}
         exportContext={{ entryId: entry.id, entryTitle: entry.title, workspaceRoot }}
         busy={translationBusy || translatingSegmentUid !== null}
         detail={translationDetail}
@@ -1184,38 +1185,6 @@ function MineruPdfReaderBody({
         }}
       />
 
-      <Dialog open={reparseConfirmOpen} onOpenChange={setReparseConfirmOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <AlertTriangle size={16} aria-hidden="true" />
-              确认重新解析
-            </DialogTitle>
-            <DialogDescription>
-              将重新调用解析服务处理当前 PDF，并覆盖现有解析结果。已有的解析正文、片段和相关内容可能发生变化。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              disabled={parseRetryBusy}
-              type="button"
-              variant="outline"
-              onClick={() => setReparseConfirmOpen(false)}
-            >
-              取消
-            </Button>
-            <Button
-              disabled={parseRetryBusy}
-              type="button"
-              variant="destructive"
-              onClick={() => void confirmReparsePdf()}
-            >
-              {parseRetryBusy ? <Loader2 className="animate-spin" size={14} aria-hidden="true" /> : null}
-              确认重新解析
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <UnsavedSegmentChangesDialog
         busy={segmentCloseBusy}
@@ -1335,7 +1304,7 @@ function MineruPdfReaderBody({
             searchMatchCountsByPage={pdfTextSearch.matchCountsByPage}
             searchQuery={pdfTextSearch.query}
             pageWidth={pageWidth}
-            bookMode={readerPreferences.pageTurningMode === 'book'}
+            bookMode={bookMode}
             zoom={zoom}
             resumePageIdx={resumeBookmarkRef.current?.page}
             leftInset={PDF_RAIL_WIDTH}

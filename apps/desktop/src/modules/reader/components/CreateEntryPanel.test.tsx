@@ -80,7 +80,7 @@ describe('CreateEntryPanel', () => {
     await waitFor(() => expect(view.getByText('mineru-result.zip')).toBeTruthy());
 
     fireEvent.click(view.getByRole('tab', { name: '上传 PDF' }));
-    fireEvent.click(view.getByRole('button', { name: '选择或拖入 PDF' }));
+    fireEvent.click(view.getByRole('button', { name: '选择 PDF' }));
     await waitFor(() => expect(view.getByText('paper.pdf')).toBeTruthy());
     fireEvent.click(view.getByRole('button', { name: '创建并添加 PDF' }));
 
@@ -112,7 +112,7 @@ describe('CreateEntryPanel', () => {
       />
     );
 
-    fireEvent.click(view.getByRole('button', { name: '选择或拖入 PDF' }));
+    fireEvent.click(view.getByRole('button', { name: '选择 PDF' }));
     await waitFor(() => expect(view.getByText('offline-paper.pdf')).toBeTruthy());
     expect(view.getByText(/仍可创建并直接阅读原 PDF/)).toBeTruthy();
 

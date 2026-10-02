@@ -78,7 +78,7 @@ it('disables decisions for another or running conversation and invalid compariso
 it('folds only unchanged context and can reveal every line', () => {
   const { container } = render(<NoteDiffContext text={Array.from({ length: 20 }, (_, i) => `line ${i}`).join('\n')} />);
   expect(container.textContent).not.toContain('line 10');
-  fireEvent.click(screen.getByRole('button', { name: '展开 14 行未修改内容' }));
+  fireEvent.click(screen.getByRole('button', { name: '展开未修改内容' }));
   expect(container.textContent).toContain('line 10');
   fireEvent.click(screen.getByRole('button', { name: '收起未修改内容' }));
   expect(container.textContent).not.toContain('line 10');

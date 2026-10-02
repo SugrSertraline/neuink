@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render as renderDom, waitFor } from '@testing-libra
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LibraryEntry } from '@/modules/library/components/LibrarySidebar';
-import { createOwnedNote, setTagNoteDeleted } from '@/shared/ipc/noteOwnerApi';
+import { createOwnedNote, purgeTagNote, setTagNoteDeleted } from '@/shared/ipc/noteOwnerApi';
 import type { CatalogNote } from '@/shared/ipc/noteCatalogApi';
 import type { TagMeta } from '@/shared/types/domain';
 import { useWorkspaceNotes } from '../WorkspaceNotesContext';
@@ -13,7 +13,7 @@ import { CreateTagNoteButton } from './CreateTagNoteButton';
 
 vi.mock('../WorkspaceNotesContext', () => ({ useWorkspaceNotes: vi.fn() }));
 const render = (ui: Parameters<typeof renderDom>[0]) => renderDom(ui, { wrapper: TooltipProvider });
-vi.mock('@/shared/ipc/noteOwnerApi', () => ({ createOwnedNote: vi.fn(), setTagNoteDeleted: vi.fn(), readOwnedNote: vi.fn() }));
+vi.mock('@/shared/ipc/noteOwnerApi', () => ({ createOwnedNote: vi.fn(), purgeTagNote: vi.fn(), setTagNoteDeleted: vi.fn(), readOwnedNote: vi.fn() }));
 const entry: LibraryEntry = { id: 'paper', title: '论文 A', tagIds: ['child'], tags: ['软件工程/需求'], contents: [], fields: {},
   createdAt: '', updatedAt: '', pdfFileName: null, parseMessage: null, parseEndpoint: null, status: 'No PDF', progress: 0 };
 const tags: TagMeta[] = [
@@ -133,10 +133,41 @@ describe('flat tag notes in entry details', () => {
     vi.mocked(useWorkspaceNotes).mockReturnValue(current);
     const view = render(<TagNotesList deletedOnly embedded scope="library/trash-tag-notes" />);
     expect(view.queryByText('跨论文比较')).toBeNull();
-    expect((view.getByRole('button', { name: /回收站中的笔记/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(view.getByText('回收站中的笔记')).toBeTruthy();
     expect(view.queryByRole('button', { name: '新建笔记' })).toBeNull();
-    fireEvent.click(view.getByRole('button', { name: '恢复' }));
+    fireEvent.click(view.getByRole('button', { name: '恢复标签笔记 回收站中的笔记' }));
     await waitFor(() => expect(setTagNoteDeleted).toHaveBeenCalledWith('workspace', 'software', '回收站中的笔记', false, '1'));
+  });
+
+  it('keeps deleted note rows visible while the catalog refreshes and uses the shared trash search', () => {
+    const current = model();
+    current.catalog.notes = [{ ...row('回收站中的笔记', 'software'), deleted_at: '2026-09-28T00:00:00Z' }];
+    vi.mocked(useWorkspaceNotes).mockReturnValue(current);
+    const view = render(<TagNotesList deletedOnly embedded scope="library/trash-tag-notes" searchQuery="回收站" />);
+    expect(view.getByText('回收站中的笔记')).toBeTruthy();
+    expect(view.queryByRole('textbox', { name: '搜索已删除标签笔记' })).toBeNull();
+    vi.mocked(useWorkspaceNotes).mockReturnValue({ ...current, loading: true });
+    view.rerender(<TagNotesList deletedOnly embedded scope="library/trash-tag-notes" searchQuery="回收站" />);
+    expect(view.getByText('回收站中的笔记')).toBeTruthy();
+    expect(view.queryByText('正在读取笔记…')).toBeNull();
+    view.rerender(<TagNotesList deletedOnly embedded scope="library/trash-tag-notes" searchQuery="不存在" />);
+    expect(view.queryByText('回收站中的笔记')).toBeNull();
+  });
+
+  it('requires confirmation before permanently deleting a tag note', async () => {
+    const current = model();
+    current.catalog.notes = [{ ...row('回收站中的笔记', 'software'), deleted_at: '2026-09-28T00:00:00Z' }];
+    vi.mocked(useWorkspaceNotes).mockReturnValue(current);
+    vi.mocked(purgeTagNote).mockResolvedValue(undefined);
+    const view = render(<TagNotesList deletedOnly embedded scope="library/trash-tag-notes" />);
+    fireEvent.click(view.getByRole('button', { name: '彻底删除标签笔记 回收站中的笔记' }));
+    expect(purgeTagNote).not.toHaveBeenCalled();
+    fireEvent.click(view.getByRole('button', { name: '取消' }));
+    expect(purgeTagNote).not.toHaveBeenCalled();
+    fireEvent.click(view.getByRole('button', { name: '彻底删除标签笔记 回收站中的笔记' }));
+    fireEvent.click(view.getByRole('button', { name: '彻底删除' }));
+    await waitFor(() => expect(purgeTagNote).toHaveBeenCalledWith('workspace', 'software', '回收站中的笔记', '1'));
+    expect(refresh).toHaveBeenCalled();
   });
 
   it('distinguishes loading, failure and empty states without enabling invalid creation', () => {

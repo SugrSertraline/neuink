@@ -17,6 +17,8 @@ import {
   type PdfRenderJobHandle
 } from './pdfRenderQueue';
 import { schedulePdfRenderContinuation } from './pdfRenderScheduler';
+import { PdfTranslationPageMask } from './PdfTranslationPageMask';
+import type { SegmentRegionItem } from './types';
 
 const DEFAULT_PAGE_ASPECT_RATIO = 1.414;
 const TEXT_LAYER_RENDER_DELAY_MS = 240;
@@ -34,6 +36,7 @@ function PdfCanvasPageImpl({
   pdfDocument,
   renderPriority,
   renderEnabled,
+  originalContentWindows = null,
   searchActive = false,
   searchQuery = ''
 }: {
@@ -42,6 +45,7 @@ function PdfCanvasPageImpl({
   pdfDocument: PDFDocumentProxy;
   renderPriority: 'preload' | 'visible';
   renderEnabled: boolean;
+  originalContentWindows?: readonly SegmentRegionItem['bbox'][] | null;
   searchActive?: boolean;
   searchQuery?: string;
 }) {
@@ -81,7 +85,7 @@ function PdfCanvasPageImpl({
   }, [renderPriority]);
 
   useEffect(() => {
-    if (!renderEnabled || !hasRenderedPageRef.current) return;
+    if (!renderEnabled || !hasRenderedPageRef.current || !isPositiveSize(pageWidth)) return;
     const nextSize = {
       width: pageWidth,
       height: pageWidth * pageAspectRatioRef.current
@@ -107,7 +111,7 @@ function PdfCanvasPageImpl({
   );
 
   useEffect(() => {
-    if (!renderEnabled) return undefined;
+    if (!renderEnabled || !isPositiveSize(pageWidth)) return undefined;
     const canvas = canvasRef.current;
     const textLayerElement = textLayerRef.current;
     if (!canvas || !textLayerElement) return undefined;
@@ -116,26 +120,26 @@ function PdfCanvasPageImpl({
     }
 
     let cancelled = false;
-    let renderTask: RenderTask | null = null;
-    let renderCanvas: HTMLCanvasElement | null = null;
-    let cancelRenderContinuation: (() => void) | null = null;
-
-    const releaseRenderCanvas = () => {
-      if (!renderCanvas) return;
-      renderCanvas.width = 0;
-      renderCanvas.height = 0;
-      renderCanvas = null;
-    };
+    let cancelActiveRender: (() => void) | null = null;
 
     const renderPage = async (signal: AbortSignal) => {
-      renderTask = null;
-      releaseRenderCanvas();
-      const abortRaster = () => {
-        renderTask?.cancel();
+      if (cancelled || signal.aborted) return;
+      // Each queue attempt owns its resources. Cancellation must not clear a
+      // canvas still used by PDF.js, or cancel an already settled render task.
+      let renderTask: RenderTask | null = null;
+      let renderCanvas: HTMLCanvasElement | null = null;
+      let cancelRenderContinuation: (() => void) | null = null;
+      const stopContinuation = () => {
         cancelRenderContinuation?.();
         cancelRenderContinuation = null;
-        releaseRenderCanvas();
       };
+      const abortRaster = () => {
+        stopContinuation();
+        const activeTask = renderTask;
+        renderTask = null;
+        activeTask?.cancel();
+      };
+      cancelActiveRender = abortRaster;
       signal.addEventListener('abort', abortRaster, { once: true });
 
       try {
@@ -145,10 +149,16 @@ function PdfCanvasPageImpl({
         pageRef.current = page;
 
         const baseViewport = page.getViewport({ scale: 1 });
+        if (!isPositiveSize(baseViewport.width) || !isPositiveSize(baseViewport.height)) {
+          throw new Error('PDF 页面尺寸无效，无法绘制。');
+        }
         const scale = pageWidth / baseViewport.width;
         const viewport = page.getViewport({ scale });
+        if (!isPositiveSize(viewport.width) || !isPositiveSize(viewport.height)) {
+          throw new Error('PDF 页面尺寸无效，无法绘制。');
+        }
         const nextSize = { width: viewport.width, height: viewport.height };
-        const outputScale = window.devicePixelRatio || 1;
+        const outputScale = isPositiveSize(window.devicePixelRatio) ? window.devicePixelRatio : 1;
         renderCanvas = document.createElement('canvas');
         const renderContext = renderCanvas.getContext('2d');
         const visibleContext = canvas.getContext('2d');
@@ -158,8 +168,8 @@ function PdfCanvasPageImpl({
         }
 
         applyTextLayerViewport(textLayerElement, nextSize, scale);
-        renderCanvas.width = Math.floor(viewport.width * outputScale);
-        renderCanvas.height = Math.floor(viewport.height * outputScale);
+        renderCanvas.width = Math.max(1, Math.floor(viewport.width * outputScale));
+        renderCanvas.height = Math.max(1, Math.floor(viewport.height * outputScale));
         renderTask = page.render({
           canvas: renderCanvas,
           canvasContext: renderContext,
@@ -169,15 +179,23 @@ function PdfCanvasPageImpl({
             : [outputScale, 0, 0, outputScale, 0, 0]
         });
         renderTask.onContinue = (continueRendering: () => void) => {
-          cancelRenderContinuation?.();
+          if (cancelled || signal.aborted) return;
+          stopContinuation();
           cancelRenderContinuation = schedulePdfRenderContinuation(
             continueRendering,
             renderPriorityRef.current
           );
         };
-        await renderTask.promise;
-        cancelRenderContinuation = null;
+        try {
+          await renderTask.promise;
+        } finally {
+          renderTask = null;
+        }
+        stopContinuation();
         if (cancelled || signal.aborted || !renderCanvas) return;
+        if (!renderCanvas.width || !renderCanvas.height) {
+          throw new Error('PDF 页面画布不可用，请重试此页。');
+        }
 
         canvas.width = renderCanvas.width;
         canvas.height = renderCanvas.height;
@@ -185,7 +203,6 @@ function PdfCanvasPageImpl({
         visibleContext.clearRect(0, 0, canvas.width, canvas.height);
         visibleContext.drawImage(renderCanvas, 0, 0);
         canvas.dataset.pdfRendered = 'true';
-        releaseRenderCanvas();
         pageAspectRatioRef.current = baseViewport.height / baseViewport.width;
         hasRenderedPageRef.current = true;
         renderedPageWidthRef.current = pageWidth;
@@ -198,6 +215,12 @@ function PdfCanvasPageImpl({
         }
       } finally {
         signal.removeEventListener('abort', abortRaster);
+        if (cancelActiveRender === abortRaster) cancelActiveRender = null;
+        stopContinuation();
+        if (renderCanvas) {
+          renderCanvas.width = 0;
+          renderCanvas.height = 0;
+        }
       }
     };
 
@@ -212,9 +235,7 @@ function PdfCanvasPageImpl({
       cancelled = true;
       job.cancel();
       if (rasterJobRef.current === job) rasterJobRef.current = null;
-      renderTask?.cancel();
-      cancelRenderContinuation?.();
-      releaseRenderCanvas();
+      cancelActiveRender?.();
     };
   }, [pageIdx, pageWidth, pdfDocument, renderAttempt, renderEnabled]);
 
@@ -302,6 +323,7 @@ function PdfCanvasPageImpl({
 
   return (
     <div
+      data-guide="pdf-page"
       className="relative z-[2] isolate bg-white"
       style={{
         height: `${pageWidth * displayAspectRatio}px`,
@@ -309,6 +331,9 @@ function PdfCanvasPageImpl({
       }}
     >
       <canvas ref={canvasRef} className="absolute inset-0 z-0 block bg-white" />
+      {renderEnabled && originalContentWindows !== null ? (
+        <PdfTranslationPageMask originalWindows={originalContentWindows} />
+      ) : null}
       <div
         ref={textLayerRef}
         className="pdf-text-layer absolute inset-0 z-[2]"
@@ -394,6 +419,10 @@ export function PdfTextSelectionHighlightLayer({
 
 function rasterJobKind(priority: 'preload' | 'visible') {
   return priority === 'visible' ? 'visible-raster' as const : 'preload-raster' as const;
+}
+
+function isPositiveSize(value: number) {
+  return Number.isFinite(value) && value > 0;
 }
 
 function applyTextLayerViewport(

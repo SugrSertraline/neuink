@@ -1,23 +1,28 @@
+pub mod agent_execution;
 pub mod annotation_index;
 pub mod atomic_write;
-pub mod agent_execution;
 pub mod entry_meta;
-pub mod export;
 pub mod error;
+pub mod export;
 pub mod layout;
 pub mod note;
-pub mod tag_note;
 pub mod note_catalog;
 #[cfg(test)]
 mod note_catalog_tests;
-pub mod source_availability;
-pub mod tag_details;
-pub mod reading_state;
+pub mod onboarding;
 pub mod paragraph_translation;
-pub mod tag_reading;
-pub mod tag_archive;
-mod tag_transaction;
+pub mod pdf_parse_queue;
+#[cfg(test)]
+mod pdf_parse_queue_tests;
+pub mod pdf_text;
+pub mod reading_state;
 pub mod search;
+pub mod source_availability;
+pub mod tag_archive;
+pub mod tag_details;
+pub mod tag_note;
+pub mod tag_reading;
+mod tag_transaction;
 pub mod trash;
 pub mod workspace;
 
@@ -31,5 +36,5 @@ pub use search::{WorkspaceSearchOptions, WorkspaceSearchRecord, WorkspaceSearchR
 pub use trash::{TrashItem, TrashItemKind};
 pub use workspace::{
     EntryTranslation, TranslatedSegment, TranslatedSegmentStatus, TranslationPaperContext,
-    TranslationProgress, TranslationStatus, TranslationTerm, Workspace,
+    TranslationProgress, TranslationStatus, TranslationTaskSnapshot, TranslationTerm, Workspace,
 };

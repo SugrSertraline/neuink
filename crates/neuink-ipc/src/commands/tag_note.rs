@@ -38,6 +38,10 @@ pub enum TagNoteAction {
         deleted: bool,
         expected_revision: String,
     },
+    Purge {
+        note_id: NoteId,
+        expected_revision: String,
+    },
     BuildSourceLink {
         note_id: NoteId,
         source_entry_id: EntryId,
@@ -89,6 +93,10 @@ fn execute(request: TagNoteRequest) -> Result<Value, String> {
             deleted,
             expected_revision,
         } => serialize(workspace.set_tag_note_deleted(tag, &note_id, deleted, &expected_revision)),
+        TagNoteAction::Purge {
+            note_id,
+            expected_revision,
+        } => serialize(workspace.purge_tag_note(tag, &note_id, &expected_revision)),
         TagNoteAction::BuildSourceLink {
             note_id,
             source_entry_id,

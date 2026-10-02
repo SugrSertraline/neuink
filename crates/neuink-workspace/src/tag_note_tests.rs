@@ -172,6 +172,49 @@ fn deletion_and_tag_archive_restore_markdown_and_assets() {
 }
 
 #[test]
+fn purge_requires_deleted_note_and_current_revision_and_removes_assets() {
+    let f = Fixture::new();
+    let ws = &f.workspace;
+    let note = ws.create_tag_note(&f.tag, "permanent".into()).unwrap();
+    let (_, asset) = ws
+        .write_tag_note_asset(&f.tag, &note.note_id, "png", b"image")
+        .unwrap();
+    assert!(ws
+        .purge_tag_note(&f.tag, &note.note_id, &note.revision)
+        .is_err());
+    ws.set_tag_note_deleted(&f.tag, &note.note_id, true, &note.revision)
+        .unwrap();
+    let deleted = ws.list_tag_notes(&f.tag).unwrap().remove(0);
+    assert!(ws
+        .purge_tag_note(&f.tag, &note.note_id, &note.revision)
+        .is_err());
+    ws.purge_tag_note(&f.tag, &note.note_id, &deleted.revision)
+        .unwrap();
+    assert!(ws.list_tag_notes(&f.tag).unwrap().is_empty());
+    assert!(!asset.exists());
+}
+
+#[test]
+fn interrupted_note_purge_restores_uncommitted_staging() {
+    let f = Fixture::new();
+    let ws = &f.workspace;
+    let note = ws.create_tag_note(&f.tag, "recover".into()).unwrap();
+    ws.set_tag_note_deleted(&f.tag, &note.note_id, true, &note.revision)
+        .unwrap();
+    let directory = ws.tag_notes_dir(&f.tag).unwrap();
+    let staged = directory.join(format!(".purging-{}", note.note_id));
+    fs::create_dir(&staged).unwrap();
+    fs::rename(
+        ws.tag_note_file(&f.tag, &note.note_id).unwrap(),
+        staged.join(format!("{}.md", note.note_id)),
+    )
+    .unwrap();
+    assert_eq!(ws.list_tag_notes(&f.tag).unwrap().len(), 1);
+    assert!(ws.tag_note_file(&f.tag, &note.note_id).unwrap().exists());
+    assert!(!staged.exists());
+}
+
+#[test]
 fn reject_invalid_paths_metadata_and_stale_concurrent_writers() {
     let f = Fixture::new();
     let ws = &f.workspace;

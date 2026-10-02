@@ -68,6 +68,7 @@ export type QueuedAssistantDraft = {
   contextItems: AssistantContextItem[];
   contextPlan: AssistantContextPlan | null;
   question: string;
+  scope: ScopeSnapshot;
   snapshot: AssistantComposerSnapshot;
 };
 

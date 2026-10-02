@@ -192,6 +192,56 @@ fn tag_archive_restores_tree_members_in_trash_and_task_state() {
 }
 
 #[test]
+fn purging_tag_archive_removes_its_reading_files_without_touching_other_tags() {
+    let f = Fixture::new();
+    let ws = &f.0;
+    let deleted = ws.create_tag("deleted", None).unwrap();
+    let kept = ws.create_tag("kept", None).unwrap();
+    let note = ws.create_tag_note(&deleted.id, "to purge".into()).unwrap();
+    let (_, asset) = ws
+        .write_tag_note_asset(&deleted.id, &note.note_id, "png", b"image")
+        .unwrap();
+    let kept_note = ws.create_tag_note(&kept.id, "keep".into()).unwrap();
+    ws.delete_tag(&deleted.id).unwrap();
+    let archive = ws.list_tag_archives().unwrap().remove(0);
+    ws.purge_tag_archive(&archive.archive_id).unwrap();
+    assert!(ws.list_tag_archives().unwrap().is_empty());
+    assert!(!asset.exists());
+    assert!(
+        ws.tag_note_file(&deleted.id, &note.note_id)
+            .unwrap()
+            .exists()
+            == false
+    );
+    assert!(ws
+        .tag_note_file(&kept.id, &kept_note.note_id)
+        .unwrap()
+        .exists());
+    assert!(ws.restore_tag_archive(&archive.archive_id).is_err());
+}
+
+#[test]
+fn interrupted_archive_purge_restores_staged_reading_files() {
+    let f = Fixture::new();
+    let ws = &f.0;
+    let tag = ws.create_tag("deleted", None).unwrap();
+    let note = ws.create_tag_note(&tag.id, "recover".into()).unwrap();
+    ws.delete_tag(&tag.id).unwrap();
+    let archive = ws.list_tag_archives().unwrap().remove(0);
+    let reading_root = ws.layout().root().join("tag-reading");
+    let staged = reading_root.join(format!(".purging-{}", archive.archive_id));
+    fs::create_dir(&staged).unwrap();
+    fs::rename(
+        reading_root.join(tag.id.as_str()),
+        staged.join(tag.id.as_str()),
+    )
+    .unwrap();
+    assert_eq!(ws.list_tag_archives().unwrap().len(), 1);
+    assert!(ws.tag_note_file(&tag.id, &note.note_id).unwrap().exists());
+    assert!(!staged.exists());
+}
+
+#[test]
 fn restore_conflict_does_not_overwrite_later_tags_or_metadata() {
     let f = Fixture::new();
     let ws = &f.0;

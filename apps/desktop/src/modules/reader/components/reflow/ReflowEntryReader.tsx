@@ -157,6 +157,10 @@ function ReflowEntryReaderBody({
     activeJob: translationJob,
     currentJobKey: translationJobKey,
     pauseTranslation: pauseTranslationTask,
+    cancelTranslation: cancelTranslationTask,
+    resumeTranslation: resumeTranslationTask,
+    translationPaused,
+    stopPending: translationStopPending,
     startTranslation: startTranslationTask,
     translation,
     translationBusy,
@@ -277,6 +281,7 @@ function ReflowEntryReaderBody({
       return;
     }
     if (translationJob.status === 'processing' || translationJob.status === 'queued') {
+      handledTranslationJobKeyRef.current = null;
       return;
     }
 
@@ -292,10 +297,10 @@ function ReflowEntryReaderBody({
       return;
     }
 
-    if (translationJob.status === 'canceled') {
+    if (translationJob.status === 'canceled' || translationJob.status === 'paused') {
       notify({
-        title: '已暂停翻译',
-        description: '已保留当前翻译进度，可稍后继续。'
+        title: translationJob.status === 'paused' ? '已暂停翻译' : '已取消翻译任务',
+        description: translationJob.status === 'paused' ? '任务已保留，点击“继续翻译”接着处理剩余内容。' : '未完成部分已取消，已有译文保留。'
       });
       return;
     }
@@ -403,6 +408,17 @@ function ReflowEntryReaderBody({
         description: '暂时无法暂停翻译，请稍后重试。'
       });
     }
+  };
+
+  const cancelTranslation = async () => {
+    if (!translationBusy && !translationPaused) return;
+    try { await cancelTranslationTask(); }
+    catch { notify({ tone: 'danger', title: '取消翻译失败', description: '暂时无法取消翻译，请重试。' }); }
+  };
+
+  const resumeTranslation = async () => {
+    try { await resumeTranslationTask(); }
+    catch (error) { notify({ tone: 'danger', title: '继续翻译失败', description: String(error) }); }
   };
 
   const updateReflowTranslationMode = (mode: ReaderPreferences['reflowTranslationMode']) => {
@@ -542,26 +558,26 @@ function ReflowEntryReaderBody({
 
   if (loadState.status === 'loading' || loadState.status === 'idle') {
     return (
-      <ReaderMessage
+      <div data-guide="reflow-reader" className="size-full"><ReaderMessage
         icon={<Loader2 className="animate-spin" size={22} aria-hidden="true" />}
         title="正在加载重排版"
         description="正在加载已解析的 MinerU 原文片段和片段笔记。"
-      />
+      /></div>
     );
   }
 
   if (loadState.status === 'error') {
     return (
-      <ReaderMessage
+      <div data-guide="reflow-reader" className="size-full"><ReaderMessage
         title="无法打开重排版"
         description={loadState.error}
         tone="danger"
-      />
+      /></div>
     );
   }
 
   return (
-    <div className="relative grid size-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-muted/30">
+    <div data-guide="reflow-reader" className="relative grid size-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-muted/30">
       <ReflowToolbar navigation={<ReadingNavigationControls segments={segments} entryId={entry.id} workspaceRoot={workspaceRoot} />} compact={Boolean(readingSession)} busy={translationBusy} entryTitle={entry.title}
         appearance={<ReflowAppearanceControls
           compact={Boolean(readingSession)}
@@ -586,10 +602,13 @@ function ReflowEntryReaderBody({
         />
 
         {translationBusy ? (
-          <Button size="sm" type="button" variant="outline" onClick={() => void pauseTranslation()}>
+          <Button disabled={Boolean(translationStopPending)} size="sm" type="button" variant="outline" onClick={() => void pauseTranslation()}>
             暂停
           </Button>
         ) : null}
+
+        {translationPaused ? <Button disabled={Boolean(translationStopPending)} size="sm" onClick={() => void resumeTranslation()}>继续翻译</Button> : null}
+        {translationBusy || translationPaused ? <Button disabled={Boolean(translationStopPending)} size="sm" type="button" variant="outline" onClick={() => void cancelTranslation()}>取消翻译</Button> : null}
 
         {segments.length > 0 ? (
           <Button aria-label="导出论文内容" size="sm" type="button" variant="outline" onClick={() => setPaperExportOpen(true)}>
@@ -744,6 +763,10 @@ function ReflowEntryReaderBody({
         onCreateTranslationNote={!translationBusy && hasExportableTranslation ? exportTranslation : undefined}
       />
       <TranslationTaskDialog
+        stopPending={translationStopPending}
+        onPause={translationBusy ? () => void pauseTranslation() : undefined}
+        onCancel={translationBusy || translationPaused ? () => void cancelTranslation() : undefined}
+        onResume={translationPaused ? () => void resumeTranslation() : undefined}
         exportContext={{ entryId: entry.id, entryTitle: entry.title, workspaceRoot }}
         busy={translationBusy || translatingSegmentUid !== null}
         detail={translationDetail}

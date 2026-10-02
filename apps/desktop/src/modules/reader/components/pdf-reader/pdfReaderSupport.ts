@@ -5,6 +5,8 @@ import { logicalSegmentUid } from "./readerUtils";
 
 export function formatPdfParseStatus(status: LibraryEntry["status"]) {
   switch (status) {
+    case "Not started":
+      return "Not started";
     case "Queued":
       return "Queued";
     case "Uploading":

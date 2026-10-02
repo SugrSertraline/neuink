@@ -38,6 +38,7 @@ import {
 import { useStoredCollapseState } from './useStoredCollapseState';
 import { ReadingExportButton } from '../../export/ReadingExportButton';
 import { logicalSegmentUid } from './readerUtils';
+import { applyRemoteMarkdown } from '@/modules/notes/editor/applyRemoteMarkdown';
 
 const SegmentMarkdownShortcuts = Extension.create({
   name: 'segmentMarkdownShortcuts',
@@ -156,10 +157,10 @@ export function SegmentNoteEditor({
       return;
     }
 
-    editor.commands.setContent(noteText, {
-      contentType: 'markdown',
-      emitUpdate: false
-    });
+    if (segmentChanged) editor.chain().setMeta('addToHistory', false).setContent(noteText, {
+      contentType: 'markdown', emitUpdate: false
+    }).run();
+    else applyRemoteMarkdown(editor, noteText);
     syncedSegmentUidRef.current = segmentUid;
     setVisibleNoteText(editor.getText());
   }, [editor, noteText, segment?.uid]);
@@ -172,7 +173,7 @@ export function SegmentNoteEditor({
   } = useStoredCollapseState('translationCollapsed');
 
   return (
-    <aside className={cn('grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden border-l bg-card', className)}>
+    <aside data-guide="segment-editor" className={cn('grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden border-l bg-card', className)}>
       <div className="min-w-0 border-b bg-muted/40 px-3 py-2">
         <div className="flex min-w-0 items-center justify-between gap-2">
           <div className="min-w-0">

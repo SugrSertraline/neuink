@@ -24,10 +24,11 @@ import { SidebarPanel } from './SidebarPanel';
 import { SidebarPanelGroup } from './SidebarPanelGroup';
 import { TagNavigation } from './TagNavigation';
 import { buildTagTree } from '../utils/tagTree';
-import { LIBRARY_VIEW_LABELS, type LibraryView } from '../utils/libraryView';
+import { isUnparsedPdf, LIBRARY_VIEW_LABELS, type LibraryView } from '../utils/libraryView';
 
 export type LibraryEntryStatus =
   | 'No PDF'
+  | 'Not started'
   | 'Queued'
   | 'Uploading'
   | 'Parsing'
@@ -54,6 +55,7 @@ export type LibraryEntry = {
 };
 
 type LibrarySidebarProps = {
+  parseQueue?: ReactNode;
   activeTag: string | null;
   activeView: LibraryView;
   entries: LibraryEntry[];
@@ -101,6 +103,7 @@ function readStoredSectionState(): Record<SectionKey, boolean> {
 }
 
 export function LibrarySidebar({
+  parseQueue,
   activeTag,
   activeView,
   activeContentId,
@@ -134,6 +137,7 @@ export function LibrarySidebar({
   const [openSections, setOpenSections] = useState<Record<SectionKey, boolean>>(readStoredSectionState);
   const tagTree = useMemo(() => buildTagTree(tags, entries), [entries, tags]);
   const parsedCount = entries.filter((entry) => entry.status === 'Parsed').length;
+  const unparsedCount = entries.filter(isUnparsedPdf).length;
   const parsingCount = entries.filter((entry) => ['Queued', 'Uploading', 'Parsing'].includes(entry.status)).length;
   const failedCount = entries.filter((entry) => entry.status === 'Failed').length;
   const noPdfCount = entries.filter((entry) => entry.status === 'No PDF').length;
@@ -237,6 +241,7 @@ export function LibrarySidebar({
             <SidebarRow active={activeView === 'trash'} icon={<Trash2 size={14} />} label={LIBRARY_VIEW_LABELS.trash} value={trashItemCount + deletedTagNoteCount} onClick={() => onSelectView('trash')} />
           </SidebarPanel>
           <SidebarPanel name="解析" label="解析" weight={1.25} open={openSections.parsing} onToggle={() => toggleSection('parsing')}>
+            <SidebarRow active={activeView === 'unparsed'} icon={<FileText size={14} />} label={LIBRARY_VIEW_LABELS.unparsed} value={unparsedCount} onClick={() => onSelectView('unparsed')} />
             <SidebarRow active={activeView === 'parsed'} icon={<FileText size={14} />} label={LIBRARY_VIEW_LABELS.parsed} value={parsedCount} onClick={() => onSelectView('parsed')} />
             <SidebarRow
               active={activeView === 'parsing'}
@@ -247,6 +252,7 @@ export function LibrarySidebar({
             />
             <SidebarRow active={activeView === 'failed'} danger={failedCount > 0} icon={<AlertTriangle size={14} />} label={LIBRARY_VIEW_LABELS.failed} value={failedCount} onClick={() => onSelectView('failed')} />
             <SidebarRow active={activeView === 'no_pdf'} icon={<FileText size={14} />} label={LIBRARY_VIEW_LABELS.no_pdf} value={noPdfCount} onClick={() => onSelectView('no_pdf')} />
+            {parseQueue}
           </SidebarPanel>
 
           <TagNavigation

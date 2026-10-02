@@ -38,6 +38,7 @@ impl Fixture {
             .write_entry_translation(
                 &self.id,
                 &EntryTranslation {
+                    task: None,
                     schema_version: 1,
                     entry_id: self.id.clone(),
                     source_language: "en".into(),

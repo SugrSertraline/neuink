@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 
 import type { SourceSegment } from '@/shared/types/domain';
+import type { TranslatedSegment } from '@/shared/ipc/workspaceApi';
 
 vi.mock('./PdfCanvasPage', () => ({
   PdfCanvasPage: ({ pageWidth }: { pageWidth: number }) => (
@@ -63,6 +64,35 @@ describe('PdfSourcePage performance boundaries', () => {
       result.rerender(cloneElement(page, { pageWidth }));
       expect(result.getByTestId('mock-pdf-canvas').style.width).toBe(`${pageWidth}px`);
     }
+  });
+
+  it('keeps the translated page visible while zoom temporarily suppresses region interactions', () => {
+    const translation: TranslatedSegment = {
+      error: null,
+      page_idx: 0,
+      segment_type: 'paragraph',
+      segment_uid: 'segment-0',
+      source_hash: 'source-hash',
+      source_text: 'region 0',
+      status: 'translated',
+      translated_text: '缩放后仍可阅读的译文',
+      updated_at: '2026-09-28T00:00:00Z',
+    };
+    const page = cloneElement(pdfSourcePage(createPage(1)), {
+      renderEnabled: true,
+      translationBySegmentUid: new Map([['segment-0', translation]]),
+      translationMode: 'replace',
+      translationVisible: true,
+    });
+    const result = render(page);
+    expect(result.getByText('缩放后仍可阅读的译文')).toBeTruthy();
+
+    result.rerender(cloneElement(page, { pageWidth: 960, suppressRegions: true }));
+    expect(result.getByText('缩放后仍可阅读的译文')).toBeTruthy();
+    expect(result.container.querySelector('[data-segment-uid="segment-0"]')?.getAttribute('role')).toBeNull();
+
+    result.rerender(cloneElement(page, { pageWidth: 960, suppressRegions: false }));
+    expect(result.getByText('缩放后仍可阅读的译文')).toBeTruthy();
   });
 
   it('does not attach per-region ResizeObservers in hover translation mode', () => {

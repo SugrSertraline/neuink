@@ -5,7 +5,9 @@ type Options = { width: number; min: number; max: number; enabled: boolean; onCo
   containerRef?: MutableRefObject<HTMLElement | null> };
 
 export function useSidebarResize({ width, min, max, enabled, onCommit, containerRef }: Options) {
-  const [previewWidth, setPreviewWidth] = useState<number | null>(null);
+  // Only the guide line moves during a drag. Updating App state here would render
+  // every reader, editor and assistant again for each pointer frame.
+  const previewRef = useRef<HTMLDivElement | null>(null);
   const [availableWidth, setAvailableWidth] = useState(max);
   const [container, setContainer] = useState<HTMLElement | null>(null);
   // A workspace-keyed provider can replace the shell without remounting this hook.
@@ -41,23 +43,34 @@ export function useSidebarResize({ width, min, max, enabled, onCommit, container
     event.preventDefault();
     const handle = event.currentTarget;
     const container = handle.parentElement;
+    const preview = previewRef.current;
     const layoutWidth = container?.offsetWidth ?? 0;
     const scale = layoutWidth ? (container!.getBoundingClientRect().width / layoutWidth) || 1 : 1;
     const startX = event.clientX;
     const pointerId = event.pointerId;
     const oldCursor = document.body.style.cursor, oldSelection = document.body.style.userSelect;
     let nextWidth = effectiveWidth;
+    let renderedWidth: number | null = null;
     let moved = false, finished = false, frame: number | null = null;
     handle.setPointerCapture?.(pointerId);
     const move = (next: globalThis.PointerEvent) => {
       if (next.pointerId !== pointerId) return;
       const distance = next.clientX - startX;
       if (!moved && Math.abs(distance) < 4) return;
-      moved = true;
-      document.body.style.cursor = 'col-resize';
-      document.body.style.userSelect = 'none';
+      if (!moved) {
+        moved = true;
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        container?.classList.add('is-sidebar-resizing');
+      }
       nextWidth = clamp(effectiveWidth + distance / scale);
-      if (frame === null) frame = requestAnimationFrame(() => { frame = null; setPreviewWidth(nextWidth); });
+      if (frame === null && nextWidth !== renderedWidth) frame = requestAnimationFrame(() => {
+        frame = null;
+        if (finished || !preview?.isConnected || nextWidth === renderedWidth) return;
+        preview.style.setProperty('--app-sidebar-preview-width', `${nextWidth}px`);
+        preview.hidden = false;
+        renderedWidth = nextWidth;
+      });
     };
     const finish = (save: boolean) => {
       if (finished) return;
@@ -73,7 +86,11 @@ export function useSidebarResize({ width, min, max, enabled, onCommit, container
       if (handle.hasPointerCapture?.(pointerId)) handle.releasePointerCapture(pointerId);
       document.body.style.cursor = oldCursor;
       document.body.style.userSelect = oldSelection;
-      setPreviewWidth(null);
+      container?.classList.remove('is-sidebar-resizing');
+      if (preview) {
+        preview.hidden = true;
+        preview.style.removeProperty('--app-sidebar-preview-width');
+      }
       if (save && moved) latest.current(nextWidth);
     };
     const up = (next: globalThis.PointerEvent) => { if (next.pointerId === pointerId) finish(true); };
@@ -96,5 +113,5 @@ export function useSidebarResize({ width, min, max, enabled, onCommit, container
     cancel.current?.();
     latest.current(clamp(effectiveWidth + (event.key === 'ArrowRight' ? 16 : -16)));
   };
-  return { previewWidth, onPointerDown, onKeyDown, effectiveWidth, maxWidth, observeContainer };
+  return { previewRef, onPointerDown, onKeyDown, effectiveWidth, maxWidth, observeContainer };
 }

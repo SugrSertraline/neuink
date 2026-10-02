@@ -26,6 +26,8 @@ if (params.has('longModels')) llm.profiles.push(
 );
 if (state === 'empty') llm = { ...llm, profiles: [], assistant_profile_id: null, translation_profile_id: null };
 let workspace = { root: 'settings-showcase', default_root: 'settings-showcase', recent_workspaces: [], translation_automation: { auto_translate_pdf: false, segment_types: ['paragraph', 'heading'] } };
+let research = { papers_enabled: true, web_enabled: true, use_tavily: false, has_web_key: false };
+let sciverse = { enabled: false, base_url: 'https://api.sciverse.space', has_api_token: false, token_source: 'none' };
 // Every IPC is intercepted. This page cannot read or write an actual library.
 mockIPC(async (command, payload) => {
   if (state === 'loading' && command.startsWith('get_')) return new Promise(() => undefined);
@@ -38,7 +40,19 @@ mockIPC(async (command, payload) => {
     workspace = { ...workspace, translation_automation: (payload as { request: typeof workspace.translation_automation }).request };
     return structuredClone(workspace);
   }
-  if (command === 'get_sciverse_settings') return { enabled: false, base_url: 'https://api.sciverse.space', has_api_token: false, token_source: 'none' };
+  if (command === 'get_sciverse_settings') return structuredClone(sciverse);
+  if (command === 'get_research_settings') return structuredClone(research);
+  if (command === 'save_research_settings') {
+    const request = (payload as { request: typeof research & { web_key?: string } }).request;
+    research = { papers_enabled: request.papers_enabled, web_enabled: request.web_enabled, use_tavily: request.use_tavily, has_web_key: research.has_web_key || Boolean(request.web_key) };
+    return structuredClone(research);
+  }
+  if (command === 'save_sciverse_settings') {
+    const request = (payload as { request: { enabled: boolean; api_token?: string; clear_api_token?: boolean } }).request;
+    sciverse = { ...sciverse, enabled: request.enabled, has_api_token: request.clear_api_token ? false : sciverse.has_api_token || Boolean(request.api_token), token_source: request.clear_api_token ? 'none' : 'credential_store' };
+    return structuredClone(sciverse);
+  }
+  if (command === 'test_sciverse_connection') return { ok: true, field_count: 12, base_url: sciverse.base_url };
   if (command === 'get_embedding_status') return { available: false, provider: 'showcase' };
   if (command === 'set_task_llm_profile') return structuredClone(llm);
   if (command === 'save_llm_settings') return structuredClone(llm);
@@ -53,7 +67,7 @@ function SettingsShowcase() {
   const [key, setKey] = useState('');
   const [search, setSearch] = useState(false);
   const [sidebar, setSidebar] = useState(false);
-  const [target, setTarget] = useState<SettingsNavigationTarget>();
+  const [target, setTarget] = useState<SettingsNavigationTarget | undefined>(params.has('tools') ? { id: 'tools-research', nonce: 1 } : undefined);
   const nonce = useRef(0);
   const navigate = (id: string) => setTarget({ id, nonce: ++nonce.current });
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
@@ -64,7 +78,7 @@ function SettingsShowcase() {
     <div style={{ display: 'flex', width: '100%', height: 'calc(100vh - 42px)' }}>
       {sidebar && <div style={{ width: 300, minWidth: 220 }}><SearchPanel root={null} status="ready" onOpenResult={() => undefined} onOpenSetting={navigate} /></div>}
       <div style={{ minWidth: 0, width: params.has('width') ? `min(100%, ${Number(params.get('width'))}px)` : '100%', height: `calc((100vh - 42px) / ${scale})`, zoom: scale }}>
-        <SettingsPanel navigationTarget={target} parserEndpoint={endpoint} parserApiKey={key} readerPreferences={reader} themePreset={theme} themePresets={APP_THEME_PRESETS} uiScale={scale}
+        <SettingsPanel navigationTarget={target} onOpenMineruClientGuide={() => undefined} parserEndpoint={endpoint} parserApiKey={key} readerPreferences={reader} themePreset={theme} themePresets={APP_THEME_PRESETS} uiScale={scale}
           onParserEndpointChange={setEndpoint} onParserApiKeyChange={setKey} onReaderPreferencesChange={setReader} onThemePresetChange={setTheme} onUiScaleChange={setScale} workspaceRoot="settings-showcase" />
       </div>
     </div>

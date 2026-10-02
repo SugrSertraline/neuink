@@ -6,7 +6,10 @@ import { useWorkspace } from './useWorkspace';
 const api = vi.hoisted(() => ({ openDevWorkspace: vi.fn(), switchWorkspaceRoot: vi.fn(),
   listAnnotations: vi.fn(), listTrashItems: vi.fn(), listEntries: vi.fn(), listTrashedEntries: vi.fn() }));
 vi.mock('../ipc/workspaceApi', async original => ({ ...await original<typeof import('../ipc/workspaceApi')>(), ...api }));
-vi.mock('../ipc/tagReadingApi', () => ({ listTagArchives: async () => [] }));
+vi.mock('../ipc/tagReadingApi', () => ({
+  listTagArchives: async () => [],
+  TAG_ARCHIVES_CHANGED: 'neuink:tag-archives-changed'
+}));
 vi.mock('./useWorkspaceResourceActions', () => ({ useWorkspaceResourceActions: () => ({}) }));
 
 function deferred<T>() {

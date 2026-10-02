@@ -72,3 +72,8 @@ src-tauri/.cargo/
 **/resources/embedding-models/default/*
 !**/resources/embedding-models/default/README.md
 **/resources/embedding-models/**/.cache/
+
+# Locally supplied tutorial paper assets; publication permission remains separate.
+apps/desktop/src-tauri/resources/onboarding/attention-is-all-you-need.pdf
+apps/desktop/src-tauri/resources/onboarding/segments.json
+apps/desktop/src-tauri/resources/onboarding/mineru.zip

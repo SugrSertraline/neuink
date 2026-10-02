@@ -1470,28 +1470,60 @@ fn segment_note_compare_and_write_is_atomic_and_preserves_bookmarks() {
     let root = std::env::temp_dir().join(format!("neuink_segment_cas_{}", unique_suffix()));
     let workspace = Workspace::create(&root).unwrap();
     let entry = workspace.create_entry("Concurrent note").unwrap();
-    let segment = neuink_domain::SourceSegment::new(neuink_domain::SegmentType::Paragraph, 0, None, "Source".into());
+    let segment = neuink_domain::SourceSegment::new(
+        neuink_domain::SegmentType::Paragraph,
+        0,
+        None,
+        "Source".into(),
+    );
     let uid = segment.uid.clone();
     workspace.write_segments(&entry.id, &[segment]).unwrap();
-    workspace.set_segment_note_bookmark(&entry.id, uid.clone(), true).unwrap();
+    workspace
+        .set_segment_note_bookmark(&entry.id, uid.clone(), true)
+        .unwrap();
     let barrier = Barrier::new(2);
     let results = std::thread::scope(|scope| {
-        let handles: Vec<_> = ["AI", "manual"].into_iter().map(|text| {
-            let (root, id, uid, barrier) = (&root, &entry.id, &uid, &barrier);
-            scope.spawn(move || {
-                let writer = Workspace::open(root).unwrap();
-                barrier.wait();
-                writer.upsert_segment_note_if_text(id, uid.clone(), text.into(), Some(""))
+        let handles: Vec<_> = ["AI", "manual"]
+            .into_iter()
+            .map(|text| {
+                let (root, id, uid, barrier) = (&root, &entry.id, &uid, &barrier);
+                scope.spawn(move || {
+                    let writer = Workspace::open(root).unwrap();
+                    barrier.wait();
+                    writer.upsert_segment_note_if_text(id, uid.clone(), text.into(), Some(""))
+                })
             })
-        }).collect();
-        handles.into_iter().map(|handle| handle.join().unwrap()).collect::<Vec<_>>()
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect::<Vec<_>>()
     });
     assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
-    assert_eq!(results.iter().filter(|r| matches!(r, Err(WorkspaceError::SegmentNoteConflict(_)))).count(), 1);
+    assert_eq!(
+        results
+            .iter()
+            .filter(|r| matches!(r, Err(WorkspaceError::SegmentNoteConflict(_))))
+            .count(),
+        1
+    );
     let notes = workspace.read_segment_notes(&entry.id).unwrap();
     assert!(notes[0].bookmarked);
-    workspace.upsert_segment_note(&entry.id, uid.clone(), "new manual edit".into()).unwrap();
-    assert!(matches!(workspace.upsert_segment_note_if_text(&entry.id, uid, "stale AI".into(), Some(&notes[0].text)), Err(WorkspaceError::SegmentNoteConflict(_))));
-    assert_eq!(workspace.read_segment_notes(&entry.id).unwrap()[0].text, "new manual edit");
+    workspace
+        .upsert_segment_note(&entry.id, uid.clone(), "new manual edit".into())
+        .unwrap();
+    assert!(matches!(
+        workspace.upsert_segment_note_if_text(
+            &entry.id,
+            uid,
+            "stale AI".into(),
+            Some(&notes[0].text)
+        ),
+        Err(WorkspaceError::SegmentNoteConflict(_))
+    ));
+    assert_eq!(
+        workspace.read_segment_notes(&entry.id).unwrap()[0].text,
+        "new manual edit"
+    );
     fs::remove_dir_all(root).unwrap();
 }

@@ -16,6 +16,7 @@ export function SegmentRailMarker({
   flashSegmentUid,
   item,
   noteSegmentUids,
+  open,
   pointerY,
   railHeight,
   railWidth,
@@ -31,6 +32,7 @@ export function SegmentRailMarker({
   flashSegmentUid: string | null;
   item: RailLayoutItem;
   noteSegmentUids: ReadonlySet<string>;
+  open: boolean;
   pointerY: number | null;
   railHeight: number;
   railWidth: number;
@@ -63,6 +65,7 @@ export function SegmentRailMarker({
   });
   return (
     <HoverCard
+      open={open}
       openDelay={HOVER_TIMING.reader}
       onOpenChange={onHoverOpenChange}
     >

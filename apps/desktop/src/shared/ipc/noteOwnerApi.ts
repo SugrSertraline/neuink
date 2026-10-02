@@ -26,6 +26,8 @@ export const saveOwnedNote = (root: string, target: NoteTarget, document: NoteDo
   : tagNote<NoteDocument>(root, target.owner.tag_id, { kind: 'save', document }));
 export const setTagNoteDeleted = (root: string, tagId: string, noteId: string, deleted: boolean, revision: string) =>
   noteMutation(root, tagNote<void>(root, tagId, { kind: 'set_deleted', note_id: noteId, deleted, expected_revision: revision }));
+export const purgeTagNote = (root: string, tagId: string, noteId: string, revision: string) =>
+  noteMutation(root, tagNote<void>(root, tagId, { kind: 'purge', note_id: noteId, expected_revision: revision }));
 export const buildOwnedNoteSourceLink = (root: string, target: NoteTarget, sourceEntryId: string, segmentUid: string) => target.owner.kind === 'entry'
   ? createNoteSourceLink(root, target.owner.entry_id, target.note_id, sourceEntryId, segmentUid)
   : tagNote<SourceLink>(root, target.owner.tag_id, { kind: 'build_source_link', note_id: target.note_id, source_entry_id: sourceEntryId, segment_uid: segmentUid });

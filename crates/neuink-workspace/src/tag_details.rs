@@ -15,10 +15,15 @@ impl Workspace {
             return Err(WorkspaceError::TagReading("标签描述不能超过 64 KB".into()));
         }
         let mut file = self.read_workspace_file()?;
-        let tag = file.tags.iter_mut().find(|tag| &tag.id == tag_id)
+        let tag = file
+            .tags
+            .iter_mut()
+            .find(|tag| &tag.id == tag_id)
             .ok_or_else(|| WorkspaceError::TagMissing(tag_id.to_string()))?;
         if tag.description != expected_description {
-            return Err(WorkspaceError::TagReading("标签描述已在其他位置修改，请保留草稿并重新加载".into()));
+            return Err(WorkspaceError::TagReading(
+                "标签描述已在其他位置修改，请保留草稿并重新加载".into(),
+            ));
         }
         tag.description = description;
         tag.updated_at = chrono::Utc::now();

@@ -10,14 +10,15 @@ import type { AssistantNoteProposal, AssistantTagProposal } from '@/shared/types
 import { NoteReviewProvider } from '../review/NoteReviewContext';
 import { NoteReviewPage } from '../review/NoteReviewPage';
 import type { LibraryEntry } from '@/modules/library/components/LibrarySidebar';
+import type { TagMeta } from '@/shared/types/domain';
 
 const mocks = vi.hoisted(() => ({ notify: vi.fn(), disks: new Map<string, Conversation>(), nextId: 0 }));
 vi.mock('@/shared/components/AppearanceProvider', () => ({ useAppearance: () => ({ appearance: 'standard', setAppearance: vi.fn() }) }));
 vi.mock('@/shared/hooks/useToast', () => ({ useToast: () => ({ notify: mocks.notify }) }));
 vi.mock('./ExecutionRecovery', () => ({ ExecutionRecovery: () => null }));
 vi.mock('./AssistantComposerEditor', () => ({
-  AssistantComposerEditor: ({ onChange, resetKey }: ComponentProps<typeof import('./AssistantComposerEditor').AssistantComposerEditor>) =>
-    <input key={resetKey} aria-label="输入问题" onChange={event => onChange({ text: event.target.value, mentions: [] }, [], { type: 'doc' })} />,
+  AssistantComposerEditor: ({ actions, onChange, resetKey }: ComponentProps<typeof import('./AssistantComposerEditor').AssistantComposerEditor>) =>
+    <div data-material="composer"><input key={resetKey} aria-label="输入问题" onChange={event => onChange({ text: event.target.value, mentions: [] }, [], { type: 'doc' })} />{actions}</div>,
 }));
 vi.mock('./useAssistantAutoScroll', () => ({ useAssistantAutoScroll: () => ({
   containerRef: { current: null }, contentRef: { current: null }, endRef: { current: null },
@@ -80,6 +81,7 @@ it('pins a selected excerpt to its paper across tab changes and freezes the queu
     segmentUid: 's', pageIdx: 3, text: 'Only the selected sentence', addedAt: '' };
   const ui = render(<AssistantPanel {...props} entries={[a, b]} activeEntry={b} assistantContext={{ items: [selected] }} />);
   await waitFor(() => expect(ui.getByRole('combobox', { name: '对话模型' }).textContent).toContain('test'));
+  expect(ui.container.querySelector('[data-material="composer"]')?.contains(ui.getByRole('button', { name: '发送' }))).toBe(true);
   expect(ui.getByRole('button', { name: '更换阅读对象：论文 A · 第 4 页选区' })).toBeTruthy();
   fireEvent.change(ui.getByLabelText('输入问题'), { target: { value: '解释选区' } });
   fireEvent.click(ui.getByRole('button', { name: '发送' }));
@@ -101,7 +103,8 @@ it('sends the chosen note instead of the visible paper and blocks a removed targ
   const ui = render(<AssistantPanel {...props} entries={[a, b]} activeEntry={b} />);
   await waitFor(() => expect(ui.getByRole('combobox', { name: '对话模型' }).textContent).toContain('test'));
   fireEvent.click(ui.getByRole('button', { name: '更换阅读对象：论文 B' }));
-  fireEvent.click(await ui.findByRole('button', { name: /A 的笔记/ }));
+  fireEvent.click(ui.getByRole('button', { name: '笔记' }));
+  fireEvent.click(await ui.findByRole('option', { name: /A 的笔记/ }));
   fireEvent.change(ui.getByLabelText('输入问题'), { target: { value: '整理我的笔记' } });
   fireEvent.click(ui.getByRole('button', { name: '发送' }));
   await waitFor(() => expect(pending.has('整理我的笔记')).toBe(true));
@@ -113,6 +116,29 @@ it('sends the chosen note instead of the visible paper and blocks a removed targ
   expect(ui.getByText('对象已不可用，请重新选择后发送。')).toBeTruthy();
   expect(ui.getByRole('button', { name: '发送' }).hasAttribute('disabled')).toBe(true);
   expect(pending.has('再整理一次')).toBe(false);
+});
+
+it('uses a fixed tag and its descendants as the reading scope instead of the visible paper', async () => {
+  const rootTag: TagMeta = { id: 'topic', name: '时间序列', parent_id: null, created_at: '', updated_at: '' };
+  const childTag: TagMeta = { id: 'forecast', name: '预测', parent_id: 'topic', created_at: '', updated_at: '' };
+  const a = { ...paper('A'), tagIds: ['forecast'] }, b = paper('B');
+  const ui = render(<AssistantPanel {...props} entries={[a, b]} tags={[rootTag, childTag]} activeEntry={b} />);
+  await waitFor(() => expect(ui.getByRole('combobox', { name: '对话模型' }).textContent).toContain('test'));
+  fireEvent.click(ui.getByRole('button', { name: '更换阅读对象：论文 B' }));
+  fireEvent.click(await ui.findByRole('option', { name: '时间序列 时间序列' }));
+  expect(ui.getByRole('button', { name: '更换阅读对象：标签 · 时间序列' })).toBeTruthy();
+  fireEvent.change(ui.getByLabelText('输入问题'), { target: { value: '整理标签论文' } });
+  fireEvent.click(ui.getByRole('button', { name: '发送' }));
+  await waitFor(() => expect(pending.has('整理标签论文')).toBe(true));
+  expect(pending.get('整理标签论文')!.options.currentEntry).toBeNull();
+  expect(pending.get('整理标签论文')!.options.mentionScope).toEqual({
+    tag_ids: ['topic', 'forecast'], tag_names: ['时间序列', '预测'], entry_ids: ['A'], entry_titles: ['论文 A']
+  });
+  await act(async () => pending.get('整理标签论文')!.finish({ answer: '完成', sources: [] }));
+  ui.rerender(<AssistantPanel {...props} entries={[a, b]} tags={[childTag]} activeEntry={b} />);
+  fireEvent.change(ui.getByLabelText('输入问题'), { target: { value: '继续整理' } });
+  expect(ui.getByText('对象已不可用，请重新选择后发送。')).toBeTruthy();
+  expect(ui.getByRole('button', { name: '发送' }).hasAttribute('disabled')).toBe(true);
 });
 
 it('confirms tags only once from the saved proposal and never returns to an old conversation on completion', async () => {

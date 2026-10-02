@@ -8,6 +8,8 @@ import { createNeuinkModel, generationSettings } from './provider';
 import type { RunBudget } from '../agent-core';
 import { createContextProjector } from './contextProjection';
 import type { RequestToolApproval } from '../runtime/toolApproval';
+import { availableTurnTools, toolCallError } from './toolAvailability';
+import { researchFailureMessage } from './researchRecovery';
 
 /** AI SDK is a single-turn provider adapter, never the owner of our agent loop. */
 export function createAgentDriver(options: {
@@ -25,11 +27,13 @@ export function createAgentDriver(options: {
   }));
   const project = createContextProjector(options.settings, options.budget);
   return {
-    async turn(messages, signal) {
+    async turn(messages, signal, turnOptions) {
+      const availability = availableTurnTools(declarations, messages, turnOptions?.finalTurn);
+      const system = [options.system, availability.instructions].filter(Boolean).join('\n\n');
       const maxChars = Math.max(4_000, (options.settings.max_context_length ?? 64_000) - (options.settings.max_output_tokens ?? 4_096)) * 2;
-      const available = maxChars - options.system.length - JSON.stringify(declarations).length;
+      const available = maxChars - system.length - JSON.stringify(availability.tools).length;
       if (available < 2000) throw new AgentStoppedError('System instructions and tools exceed the model context budget.');
-      const projected = await project(messages, available, signal);
+      const projected = await project(messages, available, signal, !availability.finish);
       const requestSignal = signal
         ? AbortSignal.any([signal, AbortSignal.timeout(120_000)])
         : AbortSignal.timeout(120_000);
@@ -37,9 +41,10 @@ export function createAgentDriver(options: {
       const response = streamText({
         model: createNeuinkModel(options.settings),
         ...generationSettings(options.settings),
-        system: options.system,
+        system,
         messages: projected,
-        tools: declarations,
+        tools: availability.tools,
+        toolChoice: availability.finish ? 'none' : 'auto',
         abortSignal: requestSignal,
         onError: () => undefined, // Never let SDK diagnostics log credentials or raw request bodies.
         maxRetries: 0
@@ -53,7 +58,7 @@ export function createAgentDriver(options: {
         if (part.type === 'error') throw part.error;
         if (part.type === 'tool-call') calls.push({
           id: part.toolCallId, name: part.toolName, input: part.input,
-          error: part.invalid ? 'Tool arguments are invalid. Correct them using the tool schema.' : undefined
+          error: part.invalid ? toolCallError(part.toolName, part.error, availability.tools) : undefined
         });
       }
       requestSignal.throwIfAborted();
@@ -61,6 +66,9 @@ export function createAgentDriver(options: {
       const result = await response.response;
       const usage = await response.usage;
       options.budget?.usage(usage.inputTokens, usage.outputTokens);
+      if (availability.finish && calls.length) {
+        throw new AgentStoppedError('模型在总结阶段仍尝试调用工具，已安全停止，未执行这些操作。');
+      }
       if (await response.finishReason === 'length') {
         for (const call of calls) call.error = 'Model output was truncated. Reissue a complete tool call; no action was executed.';
         if (!calls.length) throw new AgentStoppedError('模型输出达到长度上限，未把不完整回答标记为完成。');
@@ -72,7 +80,7 @@ export function createAgentDriver(options: {
       role: 'tool',
       content: [{ type: 'tool-result', toolCallId: call.id, toolName: call.name,
         output: failed
-          ? { type: 'error-text', value: String((output as { error: string }).error) }
+          ? { type: 'error-text', value: researchFailureMessage(call.name, String((output as { error: string }).error)) }
           : { type: 'json', value: JSON.parse(JSON.stringify(output ?? null)) }
       }]
     })
@@ -88,7 +96,11 @@ export function agentExecutors(tools: ToolSet, requestApproval?: RequestToolAppr
       const schema = await asSchema(definition.inputSchema).jsonSchema;
       if (JSON.stringify(schema).length > 65_536) throw new Error('Tool schema exceeds size limit.');
       const validator = schema.$schema?.includes('draft-07') ? draft7 : draft2020;
-      if (!validator.validate(schema, input)) throw new Error(`Invalid arguments for ${name}: ${validator.errorsText()}`);
+      if (!validator.validate(schema, input)) {
+        // Only schema diagnostics, never raw argument values (which may contain private content).
+        const fields = Object.keys(schema.properties ?? {}).join(', ');
+        throw new Error(`工具参数不符合声明（INVALID_TOOL_INPUT / Invalid arguments for ${name}）: ${validator.errorsText()}. Allowed fields: ${fields}. Use the declared types; no action was executed.`);
+      }
     };
     // Keep direct executor calls fail-closed too: only prepare returns the effectful closure.
     const execute: AgentTool = async (input, context) => {

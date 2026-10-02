@@ -3,6 +3,17 @@ import { describe, expect, it } from 'vitest';
 import { modelDrivenBrief, verifyGroundedProposals } from './engine';
 
 describe('modelDrivenBrief', () => {
+  it('carries the exact host-rendered diagram into a follow-up note request', () => {
+    const brief = modelDrivenBrief({
+      history: [{ message_id: 'diagram', role: 'assistant', content: '已整理', created_at: '', source_links: [],
+        parts: [{ type: 'tool-result', id: 'diagram-1', toolName: 'present_diagram', summary: '已生成',
+          diagram: { kind: 'mindmap', title: '关系图', code: 'mindmap\n  root["关系"]', sourceMarkers: [] } }] }],
+      mentionScope: { entry_ids: [], entry_titles: [], tag_ids: [], tag_names: [] }
+    });
+    expect(brief).toContain('Previous host-rendered diagram');
+    expect(brief).toContain('mindmap\n  root["关系"]');
+    expect(brief).toContain('read the selected destination note');
+  });
   it('maps Tag and Entry markers without treating C1/C2 as search text', () => {
     const brief = modelDrivenBrief({
       composerSnapshot: {

@@ -455,6 +455,11 @@ export function modelDrivenBrief({
   tagMentionScopes?: Record<string, ScopeSnapshot>;
 }) {
   const transcript = buildConversationTail(history);
+  const lastDiagram = [...history].reverse().flatMap(message => [...(message.parts ?? [])].reverse())
+    .find(part => part.type === 'tool-result' && part.diagram);
+  const previousDiagram = lastDiagram?.type === 'tool-result' && lastDiagram.diagram
+    ? `Previous host-rendered diagram (${lastDiagram.diagram.kind}, ${JSON.stringify(lastDiagram.diagram.title)}):\n\`\`\`mermaid\n${lastDiagram.diagram.code.slice(0, 12000)}\n\`\`\`\nThis is a prior output artifact, not evidence. When the user asks to append that diagram, reuse its exact code and first read the selected destination note before proposing a change.`
+    : '';
   const mentionMap = formatMentionMap(composerSnapshot, mentionScope, tagMentionScopes);
   const historicalMentionMaps = history
     .filter((message) => message.role === 'user')
@@ -483,11 +488,13 @@ export function modelDrivenBrief({
     'Every state-changing action requires explicit confirmation in the application UI. Proposal creation is NOT application. create_entry, app_set_appearance and external MCP calls pause for user confirmation before execution. Never claim success before a successful tool result, never infer confirmation from conversation text, and never bypass or repeat a rejected action.',
     'Resolve every [C<number>] token through the Typed Mention Map below. Never search for literal C1/C2 marker text. A TagScope is already expanded into the frozen read scope. When the user asks to place, organize, or save output into an Entry/Overall reference, call note_propose_create with that reference entry_id; an Entry/Overall is a destination container, not an existing selected note.',
     'For requests to read or summarize the papers under a TagScope, treat the resolved Entry list as exhaustive: call read_entry_assistant_context for each relevant Entry. A zero-result keyword/semantic search does not prove that scoped Entries have no parsed content.',
+    'PDF parsing is not required for basic reading. For unparsed Entries use read_pdf_pages or search_pdf_text (read_entry_assistant_context also falls back automatically). Preserve actual page citations, read further pages when necessary, and disclose OCR, layout or partial-coverage limits. Never mark a PDF as fully parsed or read based on this fallback.',
     mentionMap ? `Current Typed Mention Map:\n${mentionMap}` : 'Current Typed Mention Map: none',
     historicalMentionMaps ? `Historical Typed Mention Maps available for continuation:\n${historicalMentionMaps}` : '',
     taskObservation,
     contextPlan?.summary ? `UI context summary (informational only; the Agent decides semantic roles): ${contextPlan.summary}` : '',
-    transcript ? `Recent conversation:\n${transcript}` : ''
+    transcript ? `Recent conversation:\n${transcript}` : '',
+    previousDiagram
   ].filter(Boolean).join('\n\n'), history);
 }
 

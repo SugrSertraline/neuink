@@ -164,7 +164,7 @@ export function readStoredSidePanel(): SidePanel {
 export function readStoredLibraryView(): LibraryView {
   if (typeof window === 'undefined') return 'all';
   const value = window.localStorage.getItem(LIBRARY_VIEW_STORAGE_KEY);
-  return value === 'recent' || value === 'parsed' || value === 'parsing' || value === 'failed' || value === 'no_pdf' || value === 'trash' ? value : 'all';
+  return value === 'recent' || value === 'unparsed' || value === 'parsed' || value === 'parsing' || value === 'failed' || value === 'no_pdf' || value === 'trash' ? value : 'all';
 }
 
 export function readStoredRecentReading() {
@@ -222,9 +222,9 @@ export function toLibraryEntry(entry: EntryMeta, tagPathById: Map<string, string
             ? 'Uploading'
             : parseStatus === 'parsing'
               ? 'Parsing'
-              : entry.pdf
+              : parseStatus === 'queued'
                 ? 'Queued'
-                : 'No PDF';
+                : entry.pdf ? 'Not started' : 'No PDF';
   const tagIds = entry.tags ?? [];
 
   return {
@@ -240,7 +240,7 @@ export function toLibraryEntry(entry: EntryMeta, tagPathById: Map<string, string
     parseMessage: entry.pdf?.parse.message ?? null,
     parseEndpoint: entry.pdf?.parse.endpoint ?? null,
     status,
-    progress: status === 'Parsed' ? 100 : status === 'Queued' ? 32 : 0
+    progress: status === 'Parsed' ? 100 : 0
   };
 }
 

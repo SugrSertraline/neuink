@@ -9,7 +9,7 @@ export function EntryTagRecommendations({ entry, workspaceRoot, onApplyEntryTagP
   onApplyEntryTagPaths?: (entryId: string, paths: string[]) => Promise<unknown> | unknown;
 }) {
   const suggestions = useEntryTagSuggestions({ entry, workspaceRoot, onApplyEntryTagPaths: onApplyEntryTagPaths ?? (() => undefined) });
-  return <ReaderSection className="entry-overview-section" title="推荐标签"
+  return <ReaderSection guideId="entry-tags" className="entry-overview-section" title="推荐标签"
     description={suggestions.generatedAt ? '已保留本次生成结果。重新生成时才会替换；添加标签不会清除结果。' : '根据论文内容生成推荐，已有标签不影响生成。'}
     actions={<Button variant="outline" size="sm" disabled={suggestions.busy || Boolean(suggestions.disabledReason)} title={suggestions.disabledReason ?? undefined} onClick={() => void suggestions.generate()}>
       {suggestions.phase === 'generating' ? <Loader2 size={13} className="animate-spin" /> : suggestions.generatedAt ? <RefreshCw size={13} /> : null}

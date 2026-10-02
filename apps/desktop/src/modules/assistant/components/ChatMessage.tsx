@@ -1,9 +1,9 @@
 import {
   AlertCircle,
-  BookPlus,
   Brain,
   Check,
   CheckCircle2,
+  ChevronRight,
   Circle,
   FilePlus2,
   FileMinus2,
@@ -17,8 +17,13 @@ import {
   UserRound,
   X
 } from 'lucide-react';
-import { memo, useState } from 'react';
+import { memo, useId, useMemo, useState } from 'react';
+import { useAssistantReading } from './AssistantReplyActionsContext';
+import { PaperAnswerContent } from './PaperAnswerContent';
+import { SciverseImportButton } from './SciverseImportButton';
 import ReactMarkdown from 'react-markdown';
+import type { Components } from 'react-markdown';
+import { WorkspaceWebLink } from '@/shared/components/WorkspaceWebLink';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -47,10 +52,13 @@ import { buildNoteProposalPreview } from './noteProposalPreview';
 import { EntryMetaProposalCard } from './EntryMetaProposalCard';
 import { TagProposalList } from './TagProposalList';
 import { ExecutionDetails } from './ExecutionDetails';
-import { AssistantContentPreview } from './AssistantContentPreview';
 import { noteProposalElementId, useNoteReview } from '../review/NoteReviewContext';
+import { AssistantDiagramBlock } from './AssistantDiagramBlock';
+import { NoteDiffLines, NoteRenderedContent } from '../review/NoteDiffLines';
+import { buildRenderedNoteDiff } from '../review/renderedNoteDiff';
 
 type ChatMessageProps = {
+  reading?: boolean;
   awaitingApproval?: boolean;
   proposalsDisabled?: boolean;
   decidingProposalId?: string | null;
@@ -73,6 +81,7 @@ type ChatMessageProps = {
 };
 
 function ChatMessageComponent({
+  reading = false,
   awaitingApproval = false,
   proposalsDisabled = false,
   decidingProposalId,
@@ -91,10 +100,12 @@ function ChatMessageComponent({
   onRejectTagProposal,
   onRetryAgentRun
 }: ChatMessageProps) {
+  const readingActions = useAssistantReading();
   const messageParts = message.parts ?? [];
   const content = message.content || textFromParts(messageParts);
   const resolvedToolEvents =
     toolEvents.length > 0 ? toolEvents : toolEventsFromParts(messageParts);
+  const diagrams = resolvedToolEvents.filter(event => event.status === 'done' && event.diagram);
   const resolvedNoteProposals =
     noteProposals.length > 0 ? noteProposals : noteProposalsFromParts(messageParts);
   const resolvedPlan = planFromParts(messageParts);
@@ -109,6 +120,16 @@ function ChatMessageComponent({
   const sourceLinks =
     message.source_links.length > 0 ? message.source_links : sourceLinksFromParts(messageParts);
   const discoveredSciverseSources = sciverseSourcesFromToolParts(messageParts);
+  const answerContent = message.role === 'assistant'
+    ? <PaperAnswerContent message={message} content={content} sources={sourceLinks} discovered={discoveredSciverseSources}
+      streaming={streaming} onOpenSource={onOpenSource} onImport={onAddSciverseSource}
+      renderMarkdown={text => <MarkdownMessageContent content={text} sources={sourceLinks} streaming={streaming} onOpenSource={onOpenSource} />} />
+    : <MarkdownMessageContent content={content} sources={sourceLinks} streaming={streaming} onOpenSource={onOpenSource} />;
+  if (reading) return <div className="min-w-0 text-base leading-7 [overflow-wrap:anywhere]">
+    {answerContent}
+    {diagrams.map(event => <ToolDiagram key={event.id} event={event} onOpenSource={onOpenSource} />)}
+    {(sourceLinks.length > 0 || discoveredSciverseSources.length > 0) && <SourceLinkList discoveredSciverseSources={discoveredSciverseSources} sources={sourceLinks} onOpenSource={onOpenSource} />}
+  </div>;
 
   return (
     <article aria-label={message.role === 'user' ? '你的消息' : 'Neuink 的回复'}
@@ -145,15 +166,11 @@ function ChatMessageComponent({
         </ExecutionDetails>
       ) : null}
       {contextItems.length > 0 ? <ContextSummary items={contextItems} plan={contextPlan} /> : null}
-      {message.role === 'assistant' && content && !streaming ? <div className="mb-2"><AssistantContentPreview title="完整回复" label="展开阅读" description="放大查看完整回复；来源链接仍可点击。">
-        <MarkdownMessageContent content={content} sources={sourceLinks} streaming={false} onOpenSource={onOpenSource} />
-      </AssistantContentPreview></div> : null}
-      {content ? <MarkdownMessageContent
-        content={content}
-        sources={sourceLinks}
-        streaming={streaming}
-        onOpenSource={onOpenSource}
-      /> : null}
+      {message.role === 'assistant' && (content || diagrams.length > 0) && !streaming && readingActions ? <div className="mb-2">
+        <Button size="xs" variant="ghost" onClick={() => readingActions.openReply({ ...message, content, source_links: sourceLinks })}>展开阅读</Button>
+      </div> : null}
+      {answerContent}
+      {diagrams.map(event => <ToolDiagram key={event.id} event={event} onOpenSource={onOpenSource} />)}
       {message.role === 'assistant' && resolvedNoteProposals.length > 0 ? (
         <NoteProposalList
           proposals={resolvedNoteProposals}
@@ -190,7 +207,7 @@ function ChatMessageComponent({
         {sourceLinks.length > 0 || discoveredSciverseSources.length > 0 ? (
           <SourceLinkList
             discoveredSciverseSources={discoveredSciverseSources}
-            onAddSciverseSource={onAddSciverseSource}
+            onAddSciverseSource={undefined}
             onOpenSource={onOpenSource}
             sources={sourceLinks}
           />
@@ -201,6 +218,26 @@ function ChatMessageComponent({
 }
 
 export const ChatMessage = memo(ChatMessageComponent);
+
+function ToolDiagram({ event, onOpenSource }: {
+  event: AssistantToolTraceEvent;
+  onOpenSource: (source: ConversationSourceLink) => void;
+}) {
+  const diagram = event.diagram;
+  if (!diagram) return null;
+  return <section aria-label={diagram.kind === 'mindmap' ? '思维导图' : '流程图'} className="my-3 min-w-0 rounded-md border border-border bg-background p-2">
+    <div className="mb-1 text-sm font-medium">{diagram.title}</div>
+    <AssistantDiagramBlock code={diagram.code} streaming={false} />
+    {diagram.sourceMarkers.length > 0 ? <div className="flex flex-wrap gap-1 text-xs text-muted-foreground">
+      <span>依据</span>
+      {diagram.sourceMarkers.map((marker, index) => {
+        const source = event.sources?.[index];
+        return source ? <Button key={marker} size="xs" variant="outline" onClick={() => onOpenSource(source)}>[S{marker}]</Button> : null;
+      })}
+    </div> : null}
+  </section>;
+}
+
 
 const COLLAPSED_SOURCE_LIMIT = 10;
 
@@ -219,6 +256,9 @@ function SourceLinkList({
 }) {
   const [localExpanded, setLocalExpanded] = useState(false);
   const [paperExpanded, setPaperExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [opened, setOpened] = useState(false);
+  const sourcesId = useId();
   const numbered = sources.map((source, index) => ({ marker: index + 1, source }));
   const localSources = numbered.filter(({ source }) => !isSciverseConversationSource(source));
   const paperGroups = groupSciverseSources(numbered, discoveredSciverseSources);
@@ -230,12 +270,14 @@ function SourceLinkList({
 
   return (
     <section aria-label="回答来源" className="mt-2 grid gap-2 border-t pt-2">
-      <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-        <Library size={12} aria-hidden="true" />
-        引用来源 {sources.length}
-        {paperGroups.length > 0 ? ` · 检索论文 ${paperGroups.length}` : ''}
-        {localSources.length > 0 ? ` · 本地片段 ${localSources.length}` : ''}
-      </div>
+      <Button variant="ghost" size="xs" className="h-auto max-w-full justify-start whitespace-normal text-left text-muted-foreground"
+        aria-expanded={expanded} aria-controls={sourcesId} onClick={() => { setOpened(true); setExpanded(value => !value); }}>
+        <ChevronRight size={12} aria-hidden="true" className={expanded ? 'rotate-90 shrink-0' : 'shrink-0'} />
+        查看来源{sources.length ? ` · ${sources.length} 处引用` : ''}
+      </Button>
+      {/* Keep import state after first opening, so collapsing cannot enable a duplicate import. */}
+      {opened && <div id={sourcesId} hidden={!expanded} className={`${expanded ? 'grid' : 'hidden'} max-h-80 min-w-0 gap-2 overflow-y-auto overscroll-contain`}>
+      {paperGroups.length > 0 && <p className="text-xs text-muted-foreground">Sciverse 检索记录 · {paperGroups.length} 组（含未引用候选及不同版本）</p>}
       {visiblePaperGroups.length > 0 ? (
         <div className="grid gap-1.5">
           {visiblePaperGroups.map((group) => (
@@ -266,7 +308,7 @@ function SourceLinkList({
           <button
             className="rounded-md border px-1.5 py-0.5 text-[11px] text-primary hover:bg-muted"
             key={`${conversationSourceKey(source)}:${marker}`}
-            title={source.quote}
+            title="查看引用证据"
             type="button"
             onClick={() => onOpenSource(source)}
           >
@@ -289,6 +331,7 @@ function SourceLinkList({
             : `展开全部来源（+${localSources.length - COLLAPSED_SOURCE_LIMIT}）`}
         </Button>
       ) : null}
+      </div>}
     </section>
   );
 }
@@ -343,7 +386,7 @@ function SciversePaperSourceCard({
   const metadata = [
     representative.publication_year,
     representative.venue,
-    representative.authors?.slice(0, 2).join(', '),
+    [...new Map((representative.authors ?? []).map(author => [author.trim().toLowerCase(), author.trim()])).values()].slice(0, 2).join(', '),
     representative.citation_count != null ? `被引 ${representative.citation_count}` : null
   ].filter(Boolean);
 
@@ -377,87 +420,15 @@ function SciversePaperSourceCard({
           </button>
         ) : null)}
       </div>
-      {representative.quote ? (
-        <p className="mt-1.5 line-clamp-3 text-[11px] leading-4 text-muted-foreground">
-          {representative.quote}
-        </p>
-      ) : null}
       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
         {onAddSciverseSource ? (
           <SciverseImportButton source={representative} onImport={onAddSciverseSource} />
         ) : null}
-        <code className="min-w-0 flex-1 truncate text-[9px] text-muted-foreground" title={group.docId}>
-          doc_id: {group.docId}
-        </code>
       </div>
     </article>
   );
 }
 
-function SciverseImportButton({
-  onImport,
-  source
-}: {
-  onImport: (
-    source: Extract<ConversationSourceLink, { provider: 'sciverse' }>
-  ) => Promise<SciverseLibraryImportResult>;
-  source: Extract<ConversationSourceLink, { provider: 'sciverse' }>;
-}) {
-  const [state, setState] = useState<
-    | { status: 'idle' }
-    | { status: 'loading' }
-    | { status: 'done'; result: SciverseLibraryImportResult }
-    | { status: 'error'; message: string }
-  >({ status: 'idle' });
-  const label =
-    state.status === 'loading'
-      ? '正在加入…'
-      : state.status === 'done'
-        ? state.result.status === 'created_with_pdf'
-          ? '已加入并解析'
-          : state.result.status === 'created_with_remote_content'
-            ? '已保存远程全文'
-          : state.result.status === 'already_exists'
-            ? '已在文库'
-            : '已加入（元数据）'
-        : '一键加入文库';
-
-  return (
-    <div className="min-w-0">
-      <Button
-        className="h-6 px-2 text-[10px]"
-        disabled={state.status === 'loading' || state.status === 'done'}
-        size="xs"
-        title={state.status === 'error' ? state.message : undefined}
-        type="button"
-        variant="outline"
-        onClick={() => {
-          setState({ status: 'loading' });
-          void onImport(source)
-            .then((result) => setState({ result, status: 'done' }))
-            .catch((error) =>
-              setState({
-                message: error instanceof Error ? error.message : String(error),
-                status: 'error'
-              })
-            );
-        }}
-      >
-        {state.status === 'loading' ? (
-          <Loader2 className="animate-spin" size={11} aria-hidden="true" />
-        ) : (
-          <BookPlus size={11} aria-hidden="true" />
-        )}
-        {label}
-      </Button>
-      {state.status === 'error' ? (
-        <div className="mt-0.5 max-w-52 truncate text-[9px] text-destructive" title={state.message}>
-          {state.message}
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 function textFromParts(parts: AssistantMessagePart[]) {
   return parts
@@ -496,6 +467,7 @@ function toolEventsFromParts(parts: AssistantMessagePart[]): AssistantToolTraceE
         ...existing,
         id: part.id,
         sources: part.sourceLinks,
+        diagram: part.diagram,
         status: 'done',
         summary: part.summary,
         toolName: part.toolName
@@ -833,13 +805,10 @@ function sourceLocationLabel(source: ConversationSourceLink) {
   if (!isSciverseConversationSource(source)) {
     return `p.${source.page_idx + 1}`;
   }
-  if (source.page_no != null) {
+  if (source.page_no != null && Number.isInteger(source.page_no) && source.page_no > 0) {
     return `p.${source.page_no}`;
   }
-  if (source.offset != null) {
-    return `offset ${source.offset}`;
-  }
-  return source.chunk_id ? `chunk ${source.chunk_id.slice(0, 8)}` : 'Sciverse';
+  return 'Sciverse 来源';
 }
 
 function NoteProposalList({
@@ -977,17 +946,23 @@ function isProposalConflict(proposal: AssistantNoteProposal) {
 }
 
 function NoteProposalPreview({ proposal }: { proposal: AssistantNoteProposal }) {
-  const preview = buildNoteProposalPreview(proposal);
+  const result = useMemo(() => {
+    try { return { preview: buildNoteProposalPreview(proposal), error: null }; }
+    catch (error) { return { preview: null, error: error instanceof Error ? error.message : String(error) }; }
+  }, [proposal]);
+  if (!result.preview) return <p role="alert" className="mt-2 text-sm text-destructive">无法预览：{result.error}</p>;
+  const preview = result.preview;
   if (preview.kind === 'change') {
     return (
       <div className="mt-2 rounded-sm border bg-background p-1.5">
-        <DiffPane label={preview.label} text={preview.text} tone={preview.tone} />
+        <DiffPane label={preview.label} text={preview.text} tone={preview.tone} entryId={proposal.entryId} />
       </div>
     );
   }
   if (preview.kind === 'diff') {
     return (
       <NoteProposalDiff
+        entryId={proposal.entryId}
         afterMarkdown={preview.after}
         beforeMarkdown={preview.before}
       />
@@ -995,37 +970,36 @@ function NoteProposalPreview({ proposal }: { proposal: AssistantNoteProposal }) 
   }
 
   return (
-    <div className="assistant-markdown mt-2 max-h-40 overflow-auto rounded-sm border bg-background px-2 py-1.5">
-      <ReactMarkdown
-        rehypePlugins={[[rehypeKatex, { strict: false, throwOnError: false }]]}
-        remarkPlugins={[remarkGfm, remarkMath]}
-      >
-        {normalizeMathDelimiters(preview.text)}
-      </ReactMarkdown>
+    <div className="mt-2 min-w-0 rounded-sm border bg-background">
+      <NoteRenderedContent text={preview.text} entryId={proposal.entryId} />
     </div>
   );
 }
 
 function NoteProposalDiff({
+  entryId,
   afterMarkdown,
   beforeMarkdown
 }: {
+  entryId: string;
   afterMarkdown: string;
   beforeMarkdown: string;
 }) {
   return (
     <div className="mt-2 grid gap-1.5 rounded-sm border bg-background p-1.5">
-      <DiffPane label="Before" text={beforeMarkdown} tone="before" />
-      <DiffPane label="After" text={afterMarkdown} tone="after" />
+      {buildRenderedNoteDiff(beforeMarkdown, afterMarkdown).map((block, index) => block.kind === 'change'
+        ? <NoteDiffLines key={index} block={block} entryId={entryId} /> : null)}
     </div>
   );
 }
 
 function DiffPane({
+  entryId,
   label,
   text,
   tone
 }: {
+  entryId: string;
   label: string;
   text: string;
   tone: 'after' | 'before';
@@ -1037,11 +1011,9 @@ function DiffPane({
           tone === 'after' ? 'text-primary' : 'text-muted-foreground'
         }`}
       >
-        {label}
+        {label === 'Added' ? '+ 新增内容' : label === 'Removed' ? '− 删除内容' : label}
       </div>
-      <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words px-2 py-1.5 font-mono text-[11px] leading-4">
-        {text || '(empty)'}
-      </pre>
+      <NoteRenderedContent text={text} entryId={entryId} />
     </div>
   );
 }
@@ -1143,6 +1115,8 @@ function ToolTraceIcon({ event }: { event: AssistantToolTraceEvent }) {
 }
 
 function toolLabel(toolName: string) {
+  if (toolName === 'read_pdf_pages') return '读取 PDF 文字';
+  if (toolName === 'search_pdf_text') return '搜索 PDF 文字';
   if (toolName === 'agent.route') {
     return '自动分流';
   }
@@ -1207,6 +1181,16 @@ export const MarkdownMessageContent = memo(function MarkdownMessageContent({
   streaming: boolean;
 }) {
   const markdown = normalizeMathDelimiters(content);
+  const renderPre = useMemo<NonNullable<Components['pre']>>(() => ({ children, node }) => {
+    const code = node?.children[0];
+    if (code?.type === 'element' && code.tagName === 'code'
+      && Array.isArray(code.properties.className)
+      && code.properties.className.includes('language-mermaid')) {
+      const text = code.children.map(child => child.type === 'text' ? child.value : '').join('').replace(/\n$/, '');
+      return <AssistantDiagramBlock code={text} streaming={streaming} />;
+    }
+    return <pre>{children}</pre>;
+  }, [streaming]);
 
   return (
     <div
@@ -1232,15 +1216,15 @@ export const MarkdownMessageContent = memo(function MarkdownMessageContent({
               );
             }
             return (
-              <a href={href} rel="noreferrer" target="_blank">
+              <WorkspaceWebLink href={href}>
                 {children}
-              </a>
+              </WorkspaceWebLink>
             );
           },
           code: ({ children, className }) => (
             <code className={className}>{children}</code>
           ),
-          pre: ({ children }) => <pre>{children}</pre>
+          pre: renderPre
         }}
         rehypePlugins={[[rehypeKatex, { strict: false, throwOnError: false }]]}
         remarkPlugins={[remarkGfm, remarkMath, remarkSourceCitations]}

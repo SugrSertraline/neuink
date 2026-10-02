@@ -74,7 +74,13 @@ pub struct UpdateTagDescriptionRequest {
 #[tauri::command]
 pub fn update_tag_description(request: UpdateTagDescriptionRequest) -> Result<TagMeta, String> {
     neuink_workspace::Workspace::open_existing(request.root)
-        .and_then(|workspace| workspace.update_tag_description(&request.tag_id, request.description, &request.expected_description))
+        .and_then(|workspace| {
+            workspace.update_tag_description(
+                &request.tag_id,
+                request.description,
+                &request.expected_description,
+            )
+        })
         .map_err(|error| error.to_string())
 }
 
@@ -160,7 +166,8 @@ fn apply_entry_tag_change(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let (tag_id, _) = resolve_tag(workspace, request)?;
-    workspace.apply_entry_tag_membership(&request.entry_ids, &tag_id, request.action == "attach")
+    workspace
+        .apply_entry_tag_membership(&request.entry_ids, &tag_id, request.action == "attach")
         .map_err(|error| error.to_string())
 }
 
@@ -170,17 +177,33 @@ fn resolve_tag(
 ) -> Result<(TagId, Option<TagId>), String> {
     let tags = workspace.list_tags().map_err(|error| error.to_string())?;
     if let Some(id) = &request.tag_id {
-        let tag = tags.iter().find(|tag| tag.id == *id)
+        let tag = tags
+            .iter()
+            .find(|tag| tag.id == *id)
             .ok_or_else(|| "指定的标签已不存在，未按名称替换目标。".to_string())?;
-        if request.name.as_ref().is_some_and(|name| !tag.name.eq_ignore_ascii_case(name) && !full_tag_path(tag, &tags).eq_ignore_ascii_case(name)) {
+        if request.name.as_ref().is_some_and(|name| {
+            !tag.name.eq_ignore_ascii_case(name)
+                && !full_tag_path(tag, &tags).eq_ignore_ascii_case(name)
+        }) {
             return Err("标签名称与指定 ID 不一致，请重新确认目标。".into());
         }
         return Ok((tag.id.clone(), None));
     }
-    let matched_tags: Vec<_> = tags.iter().filter(|tag| request.name.as_ref().is_some_and(|name| if name.contains('/') {
-        full_tag_path(tag, &tags).eq_ignore_ascii_case(name)
-    } else { tag.name.eq_ignore_ascii_case(name) })).collect();
-    if matched_tags.len() > 1 { return Err("存在同名标签，请使用明确的标签 ID 后重新确认。".into()); }
+    let matched_tags: Vec<_> = tags
+        .iter()
+        .filter(|tag| {
+            request.name.as_ref().is_some_and(|name| {
+                if name.contains('/') {
+                    full_tag_path(tag, &tags).eq_ignore_ascii_case(name)
+                } else {
+                    tag.name.eq_ignore_ascii_case(name)
+                }
+            })
+        })
+        .collect();
+    if matched_tags.len() > 1 {
+        return Err("存在同名标签，请使用明确的标签 ID 后重新确认。".into());
+    }
     let matched = matched_tags.first().copied();
     match (matched, request.action.as_str()) {
         (Some(tag), _) => Ok((tag.id.clone(), None)),
@@ -226,7 +249,9 @@ fn full_tag_path(tag: &TagMeta, tags: &[TagMeta]) -> String {
     let mut names = vec![tag.name.as_str()];
     let mut parent = tag.parent_id.as_ref();
     for _ in 0..tags.len() {
-        let Some(value) = parent.and_then(|id| tags.iter().find(|tag| tag.id == *id)) else { break; };
+        let Some(value) = parent.and_then(|id| tags.iter().find(|tag| tag.id == *id)) else {
+            break;
+        };
         names.push(value.name.as_str());
         parent = value.parent_id.as_ref();
     }

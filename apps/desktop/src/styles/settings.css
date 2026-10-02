@@ -36,7 +36,6 @@
 .settings-model-editor [data-slot="dialog-footer"] { flex-direction: row; }
 .settings-agent-columns { grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); }
 .settings-fields-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); }
-.settings-skill-list { grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }
 .settings-agent-master-detail { grid-template-columns: minmax(0, 1fr); }
 .settings-agent-columns > *, .settings-fields-grid > *, .settings-agent-master-detail > * { min-width: 0; }
 @container settings-panel (min-width: 1040px) {
@@ -45,6 +44,9 @@
 }
 .settings-group { width: 100%; max-width: 720px; padding-block: 12px; }
 .settings-group + .settings-group { border-top: 1px solid var(--border); }
+.settings-service + .settings-service { border-top: 1px solid var(--border); }
+.settings-service .settings-row { grid-template-columns: minmax(0,1fr) auto; }
+.settings-service summary:hover { background: var(--muted); }
 .settings-row { display: grid; width: 100%; max-width: 720px; grid-template-columns: minmax(0, 420px) auto; align-items: center; justify-content: start; gap: 16px; padding-block: 10px; border-bottom: 1px solid var(--border); }
 .settings-row:last-child { border-bottom: 0; }
 .settings-row-control { flex-shrink: 0; max-width: 100%; }
@@ -58,7 +60,18 @@
   .sciverse-token-controls > :first-child { flex-basis: 240px; }
 }
 .settings-advanced > summary { cursor: pointer; padding-block: 4px; font-size: 13px; font-weight: 500; }
-.settings-panel-shell [data-setting-highlight="true"] { background: var(--accent); outline: 2px solid var(--ring); outline-offset: 2px; }
+.settings-panel-shell [data-setting-id] { scroll-margin-block: 24px; }
+.settings-panel-shell [data-setting-highlight="true"] { position: relative; isolation: isolate; }
+.settings-panel-shell [data-setting-highlight="true"]::before {
+  content: "";
+  position: absolute;
+  inset: -8px -12px;
+  z-index: -1;
+  pointer-events: none;
+  border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border));
+  border-radius: calc(var(--radius) + 2px);
+  background: color-mix(in srgb, var(--accent) 50%, var(--card));
+}
 .settings-feedback { padding: 8px 16px; border-top: 1px solid var(--border); background: var(--card); font-size: 12px; }
 .settings-feedback > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 @container settings-panel (max-width: 640px) {

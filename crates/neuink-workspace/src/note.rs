@@ -7,8 +7,8 @@ use std::{
 
 use chrono::Utc;
 use neuink_domain::{
-    ContentItem, EntryId, EntryMeta, LinkOwner, NoteId, SegmentRef, SegmentUid,
-    SourceLink, SourceSegment,
+    ContentItem, EntryId, EntryMeta, LinkOwner, NoteId, SegmentRef, SegmentUid, SourceLink,
+    SourceSegment,
 };
 use serde::{Deserialize, Serialize};
 

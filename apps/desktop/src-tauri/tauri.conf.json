@@ -5,7 +5,7 @@
   "identifier": "com.neuink.workspace",
   "build": {
     "beforeDevCommand": "npm run dev:frontend",
-    "beforeBuildCommand": "npm run build:frontend",
+    "beforeBuildCommand": "npm run check:onboarding-resources && npm run build:frontend",
     "devUrl": "http://127.0.0.1:1420",
     "frontendDist": "../dist"
   },
@@ -49,7 +49,12 @@
     "active": true,
     "targets": "all",
     "resources": [
-      "resources/embedding-models/default/**/*"
+      "resources/embedding-models/default/**/*",
+      "resources/onboarding/demo.json",
+      "resources/onboarding/attention-is-all-you-need.pdf",
+      "resources/onboarding/segments.json",
+      "resources/onboarding/mineru.zip",
+      "resources/onboarding/NOTICE.txt"
     ],
     "icon": [
       "icons/32x32.png",

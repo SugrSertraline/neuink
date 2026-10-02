@@ -427,6 +427,7 @@ export function EntryWorkspaceView({
                 sourceBacklinksBySegmentUid={sourceBacklinksBySegmentUid}
                 tags={tags}
                 workspaceRoot={workspaceRoot}
+                onReparsePdf={onRetryPdfParse}
                 onAttachPdf={onAttachPdf}
                 onCreatePdfVersion={onCreatePdfVersion}
                 onImportMineruClientResult={onImportMineruClientResult}
@@ -813,7 +814,7 @@ function SegmentNotesOverview({
 
   const discardDraft = () => {
     if (selectedLogicalUid) {
-      onSharedDraftChange(selectedLogicalUid, null);
+      onSharedDraftChange(selectedLogicalUid, baseline);
     }
     setDraft(baseline);
   };

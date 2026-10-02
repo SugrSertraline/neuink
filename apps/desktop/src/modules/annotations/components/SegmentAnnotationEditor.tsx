@@ -341,7 +341,7 @@ export function SegmentAnnotationEditor({
   };
 
   return (
-    <aside className={cn(
+    <aside data-guide={segment ? 'annotation-editor' : undefined} className={cn(
       "grid min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden border-l bg-white",
       className,
     )}>

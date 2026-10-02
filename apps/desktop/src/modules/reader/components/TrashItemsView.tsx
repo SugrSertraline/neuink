@@ -24,6 +24,7 @@ import type { TrashItem, TrashItemKind } from '@/shared/types/domain';
 
 type TrashItemsViewProps = {
   items: TrashItem[];
+  searchQuery?: string;
   fixedHeight?: boolean;
   showEntry?: boolean;
   onEmpty?: () => Promise<void> | void;
@@ -35,6 +36,7 @@ type TrashItemsViewProps = {
 
 export function TrashItemsView({
   items,
+  searchQuery,
   fixedHeight = false,
   showEntry = true,
   onEmpty,
@@ -45,28 +47,33 @@ export function TrashItemsView({
 }: TrashItemsViewProps) {
   const [filter, setFilter] = useState<'all' | TrashItemKind>('all');
   const [query, setQuery] = useState('');
+  const effectiveQuery = searchQuery ?? query;
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [pendingPurge, setPendingPurge] = useState<TrashItem | null>(null);
   const [emptyConfirmOpen, setEmptyConfirmOpen] = useState(false);
   const headCellClass = 'h-7 border-r border-border bg-muted/45 px-2 text-center text-[11px] font-semibold last:border-r-0';
   const bodyCellClass = 'h-9 border-r border-border px-2 py-1 align-middle last:border-r-0';
   const visibleItems = useMemo(() => {
-    const normalized = query.trim().toLocaleLowerCase();
+    const normalized = effectiveQuery.trim().toLocaleLowerCase();
     return items.filter((item) => {
       if (filter !== 'all' && item.kind !== filter) return false;
       if (!normalized) return true;
       return [item.title, item.preview, item.entry_title, trashKindLabel(item.kind)]
         .some((value) => value.toLocaleLowerCase().includes(normalized));
     });
-  }, [filter, items, query]);
+  }, [effectiveQuery, filter, items]);
 
   const run = async (id: string, action: () => Promise<void> | void) => {
-    if (busyId) return;
+    if (busyId) return false;
     setBusyId(id);
+    setActionError(null);
     try {
       await action();
-    } catch {
-      // The workspace hook owns the user-facing error state.
+      return true;
+    } catch (caught) {
+      setActionError(String(caught));
+      return false;
     } finally {
       setBusyId(null);
     }
@@ -76,12 +83,12 @@ export function TrashItemsView({
     <>
     <div className="grid min-h-0 min-w-0 gap-2">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <Input
+        {searchQuery === undefined ? <Input
           className="h-8 min-w-56 flex-1 text-xs"
           placeholder="搜索名称、内容或所属条目"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-        />
+        /> : null}
         <Select value={filter} onValueChange={(value) => setFilter(value as 'all' | TrashItemKind)}>
           <SelectTrigger className="h-8 w-40 text-xs">
             <SelectValue />
@@ -102,7 +109,7 @@ export function TrashItemsView({
             size="sm"
             type="button"
             variant="destructive"
-            onClick={() => setEmptyConfirmOpen(true)}
+            onClick={() => { setActionError(null); setEmptyConfirmOpen(true); }}
           >
             <Trash2 size={13} aria-hidden="true" />
             清空此条目回收站
@@ -110,14 +117,14 @@ export function TrashItemsView({
         ) : null}
       </div>
 
-      <div className={`entry-library-table-shell min-w-0 overflow-y-auto overflow-x-hidden border border-border ${fixedHeight ? 'max-h-[min(60vh,34rem)]' : ''}`}>
-        <Table className="table-fixed border-collapse">
+      <div className={`entry-library-table-shell min-w-0 overflow-auto border border-border ${fixedHeight ? 'max-h-[min(60vh,34rem)]' : ''}`}>
+        <Table className="min-w-[650px] table-fixed border-collapse">
           <colgroup>
             <col className="w-[14%]" />
-            <col className={showEntry ? 'w-[40%]' : 'w-[54%]'} />
+            <col className={showEntry ? 'w-[36%]' : 'w-[56%]'} />
             {showEntry ? <col className="w-[20%]" /> : null}
             <col className="w-[16%]" />
-            <col className="w-[10%]" />
+            <col className="w-[14%]" />
           </colgroup>
           <TableHeader>
             <TableRow>
@@ -172,6 +179,7 @@ export function TrashItemsView({
                         disabled={itemBusy}
                         size="icon-xs"
                         title={item.restorable ? '恢复' : '恢复所属条目'}
+                        aria-label={`恢复 ${item.title}`}
                         type="button"
                         variant="outline"
                         onClick={() => void run(item.trash_id, () =>
@@ -193,9 +201,10 @@ export function TrashItemsView({
                           disabled={itemBusy}
                           size="icon-xs"
                           title="彻底删除"
+                          aria-label={`彻底删除 ${item.title}`}
                           type="button"
                           variant="destructive"
-                          onClick={() => setPendingPurge(item)}
+                          onClick={() => { setActionError(null); setPendingPurge(item); }}
                         >
                           <Trash2 size={13} aria-hidden="true" />
                         </Button>
@@ -229,6 +238,7 @@ export function TrashItemsView({
             {pendingPurge.title}
           </div>
         ) : null}
+        {actionError ? <p role="alert" className="text-xs text-destructive">{actionError}</p> : null}
         <DialogFooter>
           <Button disabled={Boolean(busyId)} type="button" variant="outline" onClick={() => setPendingPurge(null)}>
             取消
@@ -244,7 +254,7 @@ export function TrashItemsView({
                 item.kind === 'entry'
                   ? onPurgeEntry(item.entry_id)
                   : onPurgeItem(item.entry_id, item.trash_id)
-              ).then(() => setPendingPurge(null));
+              ).then((ok) => { if (ok) setPendingPurge(null); });
             }}
           >
             彻底删除
@@ -252,7 +262,7 @@ export function TrashItemsView({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-    <Dialog open={emptyConfirmOpen} onOpenChange={setEmptyConfirmOpen}>
+    <Dialog open={emptyConfirmOpen} onOpenChange={(open) => { if (!busyId) setEmptyConfirmOpen(open); }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -263,13 +273,16 @@ export function TrashItemsView({
             将永久删除当前条目回收站中的 {items.length} 个项目，此操作无法撤销。
           </DialogDescription>
         </DialogHeader>
+        {actionError ? <p role="alert" className="text-xs text-destructive">{actionError}</p> : null}
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => setEmptyConfirmOpen(false)}>取消</Button>
+          <Button type="button" variant="outline" disabled={Boolean(busyId)} onClick={() => setEmptyConfirmOpen(false)}>取消</Button>
           <Button
             type="button"
             variant="destructive"
+            disabled={Boolean(busyId) || !onEmpty}
             onClick={() => {
-              void Promise.resolve(onEmpty?.()).then(() => setEmptyConfirmOpen(false));
+              if (!onEmpty) return;
+              void run('empty', onEmpty).then((ok) => { if (ok) setEmptyConfirmOpen(false); });
             }}
           >
             清空回收站
