@@ -1,5 +1,5 @@
 import type { AgentLoopState } from './state';
-import { AgentToolNotExecutedError } from './agent';
+import { AgentLocalLimitError, AgentToolNotExecutedError } from './agent';
 
 const MAX_IDENTICAL_CALLS = 2;
 const MAX_IDENTICAL_FAILURES = 2;
@@ -11,17 +11,17 @@ export class AgentLoopGuard {
   startTurn() {
     this.state.turnCount += 1;
     if (this.state.turnCount > this.state.maxTurns) {
-      this.stop(`Agent stopped after ${this.state.maxTurns} turns without reaching a terminal response.`);
+      this.stopAtTurnLimit(`Agent stopped after ${this.state.maxTurns} turns without reaching a terminal response.`);
     }
   }
 
   beforeToolCall(toolName: string, input: unknown) {
     this.state.toolCallCount += 1;
     if (this.state.toolCallCount > this.state.maxToolCalls) {
-      throw new AgentToolNotExecutedError('TOOL_LIMIT_REACHED：工具调用上限已到，本次未执行。请总结已有结果。');
+      throw new AgentToolNotExecutedError('TOOL_LIMIT_REACHED：工具调用上限已到，本次未执行。请总结已有结果。', 'TOOL_LIMIT_REACHED');
     }
     if (this.state.noProgressCount >= 3) {
-      throw new AgentToolNotExecutedError('TOOL_LIMIT_REACHED：连续调用没有新信息，本次未执行。请总结已有结果与限制。');
+      throw new AgentToolNotExecutedError('TOOL_LIMIT_REACHED：连续调用没有新信息，本次未执行。请总结已有结果与限制。', 'TOOL_LIMIT_REACHED');
     }
 
     const fingerprint = toolFingerprint(toolName, input);
@@ -29,10 +29,10 @@ export class AgentLoopGuard {
       (candidate) => candidate === fingerprint
     ).length;
     if (identicalCalls >= MAX_IDENTICAL_CALLS) {
-      throw new AgentToolNotExecutedError(`TOOL_REPEAT_SKIPPED：${toolName} 已使用相同参数调用多次，本次未执行。请换方法或总结已有结果。`);
+      throw new AgentToolNotExecutedError(`TOOL_REPEAT_SKIPPED：${toolName} 已使用相同参数调用多次，本次未执行。请换方法或总结已有结果。`, 'TOOL_REPEAT_SKIPPED');
     }
     if ((this.state.failedToolFingerprints[fingerprint] ?? 0) >= MAX_IDENTICAL_FAILURES) {
-      throw new AgentToolNotExecutedError(`TOOL_REPEAT_SKIPPED：${toolName} 重复失败，本次未执行。请换方法或说明限制。`);
+      throw new AgentToolNotExecutedError(`TOOL_REPEAT_SKIPPED：${toolName} 重复失败，本次未执行。请换方法或说明限制。`, 'TOOL_REPEAT_SKIPPED');
     }
 
     this.state.recentToolFingerprints.push(fingerprint);
@@ -62,10 +62,10 @@ export class AgentLoopGuard {
     }
   }
 
-  private stop(reason: string): never {
+  private stopAtTurnLimit(reason: string): never {
     this.state.status = 'failed';
     this.state.stopReason = reason;
-    throw new AgentLoopGuardError(reason);
+    throw new AgentLocalLimitError('turn_limit', reason);
   }
 }
 

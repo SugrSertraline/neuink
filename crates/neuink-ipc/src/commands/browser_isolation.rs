@@ -4,12 +4,13 @@
 pub async fn isolate<R: tauri::Runtime>(
     view: &tauri::Webview<R>,
     on_focus: impl Fn() + Send + 'static,
+    on_zoom: impl Fn(f64) + Send + 'static,
 ) -> Result<(), String> {
-    use webview2_com::FocusChangedEventHandler;
     use webview2_com::Microsoft::Web::WebView2::Win32::{
         ICoreWebView2_22, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
         COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL,
     };
+    use webview2_com::{FocusChangedEventHandler, ZoomFactorChangedEventHandler};
     use windows_core::{Interface, HSTRING};
     let (sender, receiver) = tokio::sync::oneshot::channel();
     view.with_webview(move |platform| {
@@ -43,6 +44,20 @@ pub async fn isolate<R: tauri::Runtime>(
                     })),
                     &mut token,
                 )?;
+                // Only native controller events are trusted; remote page scripts cannot
+                // report a fake zoom value or access the privileged application IPC.
+                let mut zoom_token = 0;
+                platform.controller().add_ZoomFactorChanged(
+                    &ZoomFactorChangedEventHandler::create(Box::new(move |controller, _| {
+                        if let Some(controller) = controller {
+                            let mut factor = 1.0;
+                            controller.ZoomFactor(&mut factor)?;
+                            on_zoom(factor);
+                        }
+                        Ok(())
+                    })),
+                    &mut zoom_token,
+                )?;
                 Ok(())
             }
         })();
@@ -59,6 +74,7 @@ pub async fn isolate<R: tauri::Runtime>(
 pub async fn isolate<R: tauri::Runtime>(
     _view: &tauri::Webview<R>,
     _on_focus: impl Fn() + Send + 'static,
+    _on_zoom: impl Fn(f64) + Send + 'static,
 ) -> Result<(), String> {
     Err("当前平台尚未完成内置网页安全隔离，请使用外部浏览器。".into())
 }

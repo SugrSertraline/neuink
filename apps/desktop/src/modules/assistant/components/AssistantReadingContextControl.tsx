@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ChevronDown, FileText, X } from 'lucide-react';
+import { ChevronDown, FileText, Globe, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -68,7 +68,7 @@ export function AssistantReadingContextControl({ context, entries, tags, busy, c
       }}>
         <PopoverTrigger asChild><Button ref={trigger} size="xs" variant="ghost" className="min-w-0 flex-1 justify-start"
           aria-label={`更换阅读对象：${context.label}`} title={context.label}>
-          <FileText className="shrink-0" size={12} /><span className="truncate">{context.label}</span><ChevronDown className="ml-auto shrink-0" size={12} />
+          {context.surface.kind === 'browser' ? <Globe className="shrink-0" size={12} /> : <FileText className="shrink-0" size={12} />}<span className="truncate">{context.label}</span><ChevronDown className="ml-auto shrink-0" size={12} />
         </Button></PopoverTrigger>
         <PopoverContent viewportAligned align="start" side="top"
           className="w-80 max-w-[calc(100vw-2rem)] max-h-[var(--radix-popover-content-available-height)] gap-1 p-2">
@@ -118,7 +118,8 @@ export function AssistantReadingContextControl({ context, entries, tags, busy, c
     <p className={`mt-1 text-[11px] ${context.unavailable ? 'text-destructive' : 'text-muted-foreground'}`} role={context.unavailable ? 'alert' : undefined}>
       {context.unavailable ? '对象已不可用，请重新选择后发送。' : choice === 'none'
         ? '不跟随标签页；手动附加的资料和已有对话仍保留。'
-        : `${context.tag ? '标签范围' : context.note ? '笔记' : context.bound ? '已固定' : '跟随阅读'} · 发送后切换页面不影响本次任务`}
+        : context.surface.browserTab ? '跟随阅读 · 发送时固定网页，网页跳转后需重新提问'
+          : `${context.tag ? '标签范围' : context.note ? '笔记' : context.bound ? '已固定' : '跟随阅读'} · 发送后切换页面不影响本次任务`}
     </p>
     {context.notice && <p role="status" className="mt-1 text-xs leading-5 text-muted-foreground">{context.notice}</p>}
     {!context.unavailable && !context.note && context.entry?.pdfFileName && context.entry.status !== 'Parsed' &&

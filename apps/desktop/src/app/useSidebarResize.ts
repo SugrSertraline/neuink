@@ -2,11 +2,13 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type Poin
 import { WORKSPACE_SPLIT_STANDARD_MIN_WIDTH } from './workspaceSplit';
 
 type Options = { width: number; min: number; max: number; enabled: boolean; onCommit: (width: number) => void;
-  containerRef?: MutableRefObject<HTMLElement | null> };
+  containerRef?: MutableRefObject<HTMLElement | null>; liveResize?: boolean };
 
-export function useSidebarResize({ width, min, max, enabled, onCommit, containerRef }: Options) {
-  // Only the guide line moves during a drag. Updating App state here would render
-  // every reader, editor and assistant again for each pointer frame.
+const LIVE_WIDTH_PROPERTY = '--app-sidebar-live-width';
+
+export function useSidebarResize({ width, min, max, enabled, onCommit, containerRef, liveResize = false }: Options) {
+  // Readers normally use a guide-only drag. Visible native webpages also need
+  // actual layout changes, but neither path should update App state per frame.
   const previewRef = useRef<HTMLDivElement | null>(null);
   const [availableWidth, setAvailableWidth] = useState(max);
   const [container, setContainer] = useState<HTMLElement | null>(null);
@@ -36,7 +38,7 @@ export function useSidebarResize({ width, min, max, enabled, onCommit, container
   const cancel = useRef<(() => void) | null>(null);
   const latest = useRef(onCommit); latest.current = onCommit;
   useEffect(() => () => cancel.current?.(), []);
-  useEffect(() => { cancel.current?.(); }, [enabled, width, min, maxWidth, container]);
+  useEffect(() => { cancel.current?.(); }, [enabled, width, min, maxWidth, container, liveResize]);
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (!enabled || event.button !== 0 || event.isPrimary === false) return;
     cancel.current?.();
@@ -49,9 +51,11 @@ export function useSidebarResize({ width, min, max, enabled, onCommit, container
     const startX = event.clientX;
     const pointerId = event.pointerId;
     const oldCursor = document.body.style.cursor, oldSelection = document.body.style.userSelect;
+    const oldLiveWidth = container?.style.getPropertyValue(LIVE_WIDTH_PROPERTY) ?? '';
+    const oldLivePriority = container?.style.getPropertyPriority(LIVE_WIDTH_PROPERTY) ?? '';
     let nextWidth = effectiveWidth;
     let renderedWidth: number | null = null;
-    let moved = false, finished = false, frame: number | null = null;
+    let moved = false, finished = false, appliedLiveWidth = false, frame: number | null = null;
     handle.setPointerCapture?.(pointerId);
     const move = (next: globalThis.PointerEvent) => {
       if (next.pointerId !== pointerId) return;
@@ -69,6 +73,12 @@ export function useSidebarResize({ width, min, max, enabled, onCommit, container
         if (finished || !preview?.isConnected || nextWidth === renderedWidth) return;
         preview.style.setProperty('--app-sidebar-preview-width', `${nextWidth}px`);
         preview.hidden = false;
+        if (liveResize && container?.isConnected) {
+          // Separate from React's committed style, so unrelated renders cannot
+          // restore the old width before the pointer is released.
+          container.style.setProperty(LIVE_WIDTH_PROPERTY, `${nextWidth}px`);
+          appliedLiveWidth = true;
+        }
         renderedWidth = nextWidth;
       });
     };
@@ -87,6 +97,10 @@ export function useSidebarResize({ width, min, max, enabled, onCommit, container
       document.body.style.cursor = oldCursor;
       document.body.style.userSelect = oldSelection;
       container?.classList.remove('is-sidebar-resizing');
+      if (appliedLiveWidth && container) {
+        if (oldLiveWidth) container.style.setProperty(LIVE_WIDTH_PROPERTY, oldLiveWidth, oldLivePriority);
+        else container.style.removeProperty(LIVE_WIDTH_PROPERTY);
+      }
       if (preview) {
         preview.hidden = true;
         preview.style.removeProperty('--app-sidebar-preview-width');

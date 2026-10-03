@@ -37,7 +37,8 @@ describe('paper download preview', () => {
     const { view } = setup();
     await view.findByText(paper.title);
     fireEvent.click(view.getByText('确认下载 1 篇'));
-    await view.findByText('论文信息已变化');
+    await view.findByText('论文确认未完成，请拒绝本次操作后重新检索。');
+    expect(view.queryByText('论文信息已变化')).toBeNull();
     expect(getToolApprovals()).toHaveLength(1); expect(rememberResearchConsent).not.toHaveBeenCalled();
   });
   it('does not pass late consent to a stopped conversation', async () => {

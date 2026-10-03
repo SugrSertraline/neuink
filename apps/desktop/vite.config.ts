@@ -9,7 +9,8 @@ import { pdfJsAssetsPlugin } from './vite/pdfJsAssetsPlugin';
 export default defineConfig({
   test: {
     // Packaging uses Node's test runner, not Vitest.
-    exclude: [...configDefaults.exclude, '**/scripts/onboarding-resources.test.cjs']
+    // Packaging scripts use Node's test runner, not Vitest's browser-oriented collection.
+    exclude: [...configDefaults.exclude, '**/scripts/*.test.cjs']
   },
   plugins: [react(), tailwindcss(), pdfJsAssetsPlugin()],
   clearScreen: false,

@@ -7,8 +7,9 @@ import { NoteReviewProvider, useNoteReview } from './NoteReviewContext';
 import { NoteReviewPage } from './NoteReviewPage';
 import { useNoteReviewActions } from './useNoteReviewActions';
 import { NoteDiffContext } from './NoteDiffLines';
+import { setAssistantDebug } from '@/shared/lib/assistantDebug';
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); setAssistantDebug(false); });
 const proposal: AssistantNoteProposal = { id: 'p', entryId: 'e', entryTitle: 'Paper', noteId: 'n',
   title: 'Note', action: 'replace', beforeMarkdown: 'Old', markdown: 'New', sources: [], createdAt: '', status: 'pending' };
 function Fixture({ apply, reject, conversationId = 'c', disabled = false, invalid = false }: {
@@ -51,10 +52,15 @@ it('rejects without applying', async () => {
 });
 
 it('shows failures, releases the decision lock and allows retry', async () => {
-  const apply = vi.fn().mockRejectedValueOnce(new Error('请先保存草稿')).mockResolvedValueOnce(undefined);
+  const raw = '请先保存草稿 Timeout HTTP 504 Authorization: Bearer sk-private C:\\Users\\Alice\\private.md';
+  const apply = vi.fn().mockRejectedValueOnce(new Error(raw)).mockResolvedValueOnce(undefined);
   render(wrap({ apply, reject: vi.fn() }));
   fireEvent.click(screen.getByRole('button', { name: '确认应用' }));
-  await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('请先保存草稿'));
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('修改未确认完成，请先保存草稿并核对笔记，再返回对话重试。'));
+  act(() => setAssistantDebug(true));
+  expect(screen.getByRole('alert').textContent).toContain('调试：请求超时 · HTTP 504');
+  expect(screen.getByRole('alert').textContent).not.toContain('sk-private');
+  expect(screen.getByRole('alert').textContent).not.toContain('Alice');
   expect(screen.getByRole('button', { name: '确认应用' }).hasAttribute('disabled')).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: '确认应用' }));
   await waitFor(() => expect(screen.getByText(/已应用 · 历史修改快照/)).toBeTruthy());

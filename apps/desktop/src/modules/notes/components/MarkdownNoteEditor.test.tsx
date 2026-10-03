@@ -16,6 +16,44 @@ beforeAll(() => {
 });
 
 describe('MarkdownNoteEditor dirty state', () => {
+  it('navigates its outline without dirtying the shared note or scheduling an autosave', async () => {
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+    const save = vi.fn();
+    const result = render(<ToastContext.Provider value={{ dismiss: vi.fn(), notify: vi.fn(() => 'toast') }}>
+      <MarkdownNoteEditor entryId="outline-note" noteId="outline-note" fallbackTitle="Outline"
+        onLoadNote={async () => ({ note_id: 'outline-note', title: 'Outline', markdown: '## Target section\n\nBody', links: [], revision: '1' })}
+        onSaveNote={save} />
+    </ToastContext.Provider>);
+    try {
+      await waitFor(() => expect(result.getByRole('button', { name: '展开笔记目录' })).toHaveProperty('disabled', false));
+      const viewport = result.container.querySelector<HTMLElement>('.markdown-note-scroll')!;
+      const heading = result.container.querySelector('h2')!;
+      Object.defineProperties(viewport, {
+        clientHeight: { value: 400 }, offsetHeight: { value: 400 }, scrollHeight: { value: 1600 },
+      });
+      vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 100, 400, 400));
+      vi.spyOn(heading, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 600, 200, 30));
+      const editorNode = result.container.querySelector('.tiptap')!;
+      const before = editorNode.innerHTML;
+      const root = result.container.querySelector('.markdown-note-editor')!;
+      expect(root.firstElementChild?.classList.contains('markdown-note-outline-slot')).toBe(true);
+      expect(root.children[1].classList.contains('markdown-note-main')).toBe(true);
+      fireEvent.click(result.getByRole('button', { name: '展开笔记目录' }));
+      fireEvent.click(await result.findByRole('button', { name: '定位2 级标题：Target section' }));
+      expect(viewport.scrollTop).toBe(484);
+      expect(result.getByRole('navigation', { name: '笔记文内定位' })).toBeTruthy();
+      fireEvent.click(result.getByRole('button', { name: '收起笔记目录' }));
+      fireEvent.click(result.getByRole('button', { name: '展开笔记目录' }));
+      expect(result.container.querySelector('.tiptap')).toBe(editorNode);
+      expect(result.container.querySelector('.markdown-note-scroll')).toBe(viewport);
+      expect(viewport.scrollTop).toBe(484);
+      expect(result.container.querySelector('.tiptap')!.innerHTML).toBe(before);
+      expect(result.container.querySelector('[data-guide-note-save-state]')?.getAttribute('data-guide-note-save-state')).toBe('saved');
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 1100)); });
+      expect(save).not.toHaveBeenCalled();
+    } finally { vi.restoreAllMocks(); vi.unstubAllGlobals(); }
+  });
+
   it('inserts one queued source link into a shared note, including its metadata, not once per view', async () => {
     const link = { anchor_id: 'sl-split', created_at: '', display_text: 'p.1', link_id: 'split-link',
       owner: { entry_id: 'shared-source', kind: 'note' as const, note_id: 'n' },

@@ -48,6 +48,8 @@ export function onResearchLibraryChanged(root: string, onChange: () => void, onE
 // A UI-only, one-shot handoff. Never serialize consent into model input/checkpoints.
 const consents = new Map<string, { id: string; expires: number }>();
 const consentKey = (root: string, call: string) => JSON.stringify([root, call]);
+/** Raised only by the local consent preflight, before dispatching a native import. */
+export class ResearchImportNotApprovedError extends Error {}
 function prune() { for (const [key, value] of consents) if (value.expires <= Date.now()) consents.delete(key); }
 export function rememberResearchConsent(root: string, call: string, id: string) {
   prune();
@@ -60,7 +62,7 @@ function takeConsent(root: string, call: string) {
   const key = consentKey(root, call);
   const value = consents.get(key);
   consents.delete(key);
-  if (!value) throw new Error('请先预览并确认本次论文下载。');
+  if (!value) throw new ResearchImportNotApprovedError('请先预览并确认本次论文下载。');
   return value.id;
 }
 export async function runResearchTool(name: string, input: Record<string, unknown>, signal?: AbortSignal, toolCallId = '') {

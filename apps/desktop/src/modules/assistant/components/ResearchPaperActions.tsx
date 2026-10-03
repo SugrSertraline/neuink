@@ -5,6 +5,7 @@ import { useToast } from '@/shared/hooks/useToast';
 import { approveResearchImport, previewResearchImport, rememberResearchConsent, runResearchTool, type ResearchPaper } from '@/shared/ipc/researchApi';
 import { finishAssistantBackgroundRun, setAssistantBackgroundRun } from './assistantBackgroundRuns';
 import type { SciverseLibraryImportResult } from '@/shared/ipc/assistantApi';
+import { ASSISTANT_IMPORT_INCOMPLETE, formatAssistantError, readAssistantDebug, useAssistantDebug } from '@/shared/lib/assistantDebug';
 
 export type SciverseImportState = { status: 'idle' | 'confirm' | 'loading' }
   | { status: 'done'; result: SciverseLibraryImportResult } | { status: 'error'; message: string };
@@ -15,7 +16,7 @@ export function useSciverseImportState(id: string): [SciverseImportState, (state
   return shared ? [shared.states[id] ?? { status: 'idle' }, state => shared.update(id, state)] : [local, setLocal];
 }
 
-type State = { phase: 'preview' | 'confirm' | 'importing' | 'done' | 'error'; paper?: ResearchPaper; message?: string };
+type State = { phase: 'preview' | 'confirm' | 'importing' | 'done' | 'error'; paper?: ResearchPaper; message?: string; cancelled?: boolean };
 type Actions = { states: Record<string, State>; prepare: (id: string) => void; confirm: (id: string) => void; cancel: (id: string) => void };
 const Context = createContext<Actions | null>(null);
 
@@ -63,6 +64,7 @@ export function ResearchPaperActionsProvider({ root, children }: { root: string 
     const controller = new AbortController();
     const callId = crypto.randomUUID();
     setAssistantBackgroundRun({ abortController: controller, root, conversation: null, conversationId: null,
+      taskKind: 'paper-import', startedAt: Date.now(),
       question: `添加论文：${paper.title}`, error: null, streamingMessageId: null,
       noteProposalsByMessageId: {}, toolEventsByMessageId: {} });
     try {
@@ -81,8 +83,8 @@ export function ResearchPaperActionsProvider({ root, children }: { root: string 
       notify({ tone: 'success', title: '论文已在本地文库', description: `${paper.title}：${message}` });
     } catch (error) {
       const message = controller.signal.aborted ? '添加已停止，可能有文件已写入，请检查条目库后重试。' : String(error);
-      update(id, { phase: 'error', message });
-      notify({ tone: 'danger', title: '论文添加未完成', description: `${paper.title}：${message}` });
+      update(id, { phase: 'error', message, cancelled: controller.signal.aborted });
+      notify({ tone: 'danger', title: '论文添加未完成', description: formatAssistantError(message, { debug: readAssistantDebug(), fallback: controller.signal.aborted ? '论文添加已停止，请先核对条目库。' : ASSISTANT_IMPORT_INCOMPLETE }) });
     } finally { locks.current.delete(id); finishAssistantBackgroundRun(controller); }
   };
   return <SciverseContext.Provider value={{ states: sciverseStates, update: (id, state) => {
@@ -100,6 +102,7 @@ export function ResearchPaperActionsProvider({ root, children }: { root: string 
 }
 
 export function ResearchPaperAction({ paper, children }: { paper: ResearchPaper; children?: ReactNode }) {
+  const debug = useAssistantDebug();
   const actions = useContext(Context);
   const state = actions?.states[paper.id];
   return <article className="min-w-0 border-b py-3 text-sm [overflow-wrap:anywhere]">
@@ -124,6 +127,6 @@ export function ResearchPaperAction({ paper, children }: { paper: ResearchPaper;
       <div className="flex flex-wrap gap-2"><Button size="sm" variant="ghost" onClick={() => actions?.cancel(paper.id)}>取消</Button>
         <Button size="sm" onClick={() => actions?.confirm(paper.id)}>确认添加</Button></div>
     </div>}
-    {state?.message && <p role={state.phase === 'error' ? 'alert' : 'status'} className={state.phase === 'error' ? 'mt-1 text-destructive' : 'mt-1 text-muted-foreground'}>{state.message}</p>}
+    {state?.message && <p role={state.phase === 'error' ? 'alert' : 'status'} className={state.phase === 'error' ? 'mt-1 text-destructive' : 'mt-1 text-muted-foreground'}>{state.phase === 'error' ? formatAssistantError(state.message, { debug, fallback: state.cancelled ? '论文添加已停止，请先核对条目库。' : ASSISTANT_IMPORT_INCOMPLETE }) : state.message}</p>}
   </article>;
 }

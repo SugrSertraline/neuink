@@ -6,6 +6,32 @@ import { initialWorkspaceSurfaceLayout, surfaceKey, workspaceSurfaceReducer, typ
 import { WorkspaceSurfaceDeck } from './WorkspaceSurfaceDeck';
 
 afterEach(cleanup);
+it('retains the reader and library nodes when moving the last swapped tab merges the panes', () => {
+  const pdf: WorkspaceSurface = { kind: 'pdf', entryId: 'swapped', viewId: 'reading-copy' };
+  let layout = workspaceSurfaceReducer(initialWorkspaceSurfaceLayout, { type: 'open', pane: 'right', surface: pdf });
+  const view = () => <WorkspaceSurfaceDeck layout={layout} onFocus={() => {}}
+    renderSurface={surface => <div data-testid={surfaceKey(surface)}><input defaultValue="未保存的阅读草稿" /></div>} />;
+  const ui = render(view());
+  const reader = ui.getByTestId(surfaceKey(pdf));
+  const library = ui.getByTestId('library');
+  reader.scrollTop = 1460;
+  reader.scrollLeft = 25;
+  const draft = reader.querySelector('input')!;
+  fireEvent.change(draft, { target: { value: '继续保留这份草稿' } });
+  for (const action of [{ type: 'swap' as const }, { type: 'move' as const, key: surfaceKey(pdf), pane: 'right' as const }]) {
+    layout = workspaceSurfaceReducer(layout, action);
+    ui.rerender(view());
+    expect(ui.getAllByTestId('library')).toEqual([library]);
+    expect(ui.getByTestId(surfaceKey(pdf))).toBe(reader);
+    expect(reader.scrollTop).toBe(1460);
+    expect(reader.scrollLeft).toBe(25);
+    expect(reader.querySelector('input')).toBe(draft);
+    expect(draft.value).toBe('继续保留这份草稿');
+  }
+  expect(layout.right).toBeNull();
+  expect(ui.container.querySelectorAll('[data-workspace-drop-pane]')).toHaveLength(1);
+});
+
 it('retains the same reading and editing DOM through split, swap, cross-pane moves and merge', () => {
   const mounted = vi.fn(), unmounted = vi.fn(), focus = vi.fn();
   function Content({ surface }: { surface: WorkspaceSurface }) {

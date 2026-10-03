@@ -26,7 +26,7 @@ import type { AssistantContextAddOptions, AssistantContextInput } from '@/shared
 import type { Annotation, AnnotationId, AnnotationImportance, AnnotationTextSelection, SegmentBlockNote, SourceLink, SourceSegment } from '@/shared/types/domain';
 
 import type { LibraryEntry } from '../../../library/components/LibrarySidebar';
-import type { MarkdownNoteTarget, SourceBacklink, SourceBacklinksBySegmentUid } from '../../types';
+import type { MarkdownNoteTarget, PdfJumpRequest, SourceBacklink, SourceBacklinksBySegmentUid } from '../../types';
 import {
   useEntryTranslationTask,
   type TranslationRunStrategy,
@@ -89,6 +89,7 @@ function ReflowEntryReaderBody({
   onOpenAnnotationsSurface,
   syncSegmentUid: externalSyncSegmentUid,
   syncRequestKey: externalSyncRequestKey,
+  jumpRequest,
   onSegmentClick
   , suppressClickOverlay = false
 }: {
@@ -120,12 +121,14 @@ function ReflowEntryReaderBody({
   onOpenAnnotationsSurface: (segmentUid: string) => void;
   syncSegmentUid?: string | null;
   syncRequestKey?: number;
+  jumpRequest?: PdfJumpRequest | null;
   onSegmentClick?: (segment: SourceSegment) => void;
   suppressClickOverlay?: boolean;
 }) {
   const { notify } = useToast();
   const readingSession = useReadingSession();
-  const syncRequestKey = readingSession?.jump?.requestKey ?? externalSyncRequestKey;
+  const readingJump = jumpRequest ?? readingSession?.jump;
+  const syncRequestKey = readingJump?.requestKey ?? externalSyncRequestKey;
   const [paperExportOpen, setPaperExportOpen] = useState(false);
   const { annotations, loadState, segmentNotes, setAnnotations, setSegmentNotes } = usePdfReaderData({
     entry,
@@ -150,9 +153,7 @@ function ReflowEntryReaderBody({
   const handledTranslationJobKeyRef = useRef<string | null>(null);
 
   const segments = loadState.status === 'ready' ? loadState.data.segments : [];
-  const syncSegmentUid = readingSession?.jump ? (readingSession.jump.kind === 'page'
-    ? segments.find((segment) => segment.page_idx === readingSession.jump?.pageIdx)?.uid
-    : readingSession.jump.segmentUid) : externalSyncSegmentUid;
+  const syncSegmentUid = readingJump ? (readingJump.kind === 'page' ? undefined : readingJump.segmentUid) : externalSyncSegmentUid;
   const {
     activeJob: translationJob,
     currentJobKey: translationJobKey,
@@ -656,6 +657,8 @@ function ReflowEntryReaderBody({
           sourceLinkCountBySegmentUid={sourceLinkCountBySegmentUid}
           sourceBacklinksBySegmentUid={sourceBacklinksBySegmentUid}
           scrollRequestKey={syncRequestKey}
+          jumpRequest={readingJump}
+          localScrollRequest={Boolean(readingJump?.targetSurfaceKey)}
           scrollToSegmentUid={syncSegmentUid}
           translationBySegmentUid={translationBySegmentUid}
           workspaceRoot={workspaceRoot}
@@ -687,7 +690,7 @@ function ReflowEntryReaderBody({
           onOpenSourceBacklink={onOpenSourceBacklink}
           onAddAssistantContext={onAddAssistantContext ? (segment, options) =>
             onAddAssistantContext(readingAssistantContext(entry, segment, options), options) : undefined}
-          onTranslateTextSelection={({ segment, text }) => translateTextSelection({ entryTitle: entry.title, text, context: segment.markdown ?? segment.text })}
+          onTranslateTextSelection={({ segment, text }) => translateTextSelection({ root: workspaceRoot, entryId: entry.id, entryTitle: entry.title, text, context: segment.markdown ?? segment.text })}
           onTranslateSegment={!translationBusy ? translateSingleSegment : undefined}
         />
         {overlaySegment ? (

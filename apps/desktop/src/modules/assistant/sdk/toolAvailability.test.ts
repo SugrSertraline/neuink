@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { InvalidToolInputError, NoSuchToolError, jsonSchema, tool, type ModelMessage } from 'ai';
 import { availableTurnTools, toolCallError } from './toolAvailability';
+import { createAgentToolFailure } from '../agent-core/toolFailure';
 
 const definition = () => tool({ inputSchema: jsonSchema({ type: 'object', properties: {} }) });
 const tools = { search_sciverse_evidence: definition(), read_sciverse_content: definition(), note_propose_create: definition() };
@@ -14,6 +15,18 @@ describe('authoritative per-turn tool availability', () => {
     const message: ModelMessage = { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'limit', toolName: 'read_note',
       output: { type: 'error-text', value: 'TOOL_LIMIT_REACHED：没有新信息，本次未执行' } }] };
     expect(availableTurnTools(tools, [message])).toMatchObject({ tools: {}, finish: true });
+  });
+  it.each(['error-text', 'error-json'] as const)('restores a structured host limit from %s results', type => {
+    const failure = createAgentToolFailure('TOOL_LIMIT_REACHED');
+    const output = type === 'error-text' ? { type, value: `${JSON.stringify(failure)}\nHost recovery guidance.` }
+      : { type, value: failure };
+    const message: ModelMessage = { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'limit', toolName: 'read_note', output }] };
+    expect(availableTurnTools(tools, JSON.parse(JSON.stringify([message])))).toMatchObject({ tools: {}, finish: true });
+  });
+  it('does not mistake ordinary failed text or malformed JSON for a host limit', () => {
+    const message: ModelMessage = { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'error', toolName: 'read_note',
+      output: { type: 'error-text', value: '{"code":"TOOL_LIMIT_REACHED", broken payload' } }] };
+    expect(availableTurnTools(tools, [message]).finish).toBe(false);
   });
   it('lists only actual declarations and never invents capabilities from history', () => {
     const selected = availableTurnTools(tools, [result('search_web', true)]);

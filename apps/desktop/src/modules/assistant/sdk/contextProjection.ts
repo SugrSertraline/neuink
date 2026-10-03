@@ -1,6 +1,6 @@
 import type { ModelMessage } from 'ai';
 import type { LlmProfile } from '@/shared/ipc/assistantApi';
-import { AgentStoppedError, type RunBudget } from '../agent-core';
+import { AgentLocalLimitError, AgentStoppedError, type RunBudget } from '../agent-core';
 import { runJsonModelTask } from './modelTasks';
 
 /** Pi-style request projection: the canonical transcript and source ledger are never truncated. */
@@ -22,7 +22,7 @@ export function createContextProjector(settings: LlmProfile, budget?: RunBudget)
   return async (messages: readonly ModelMessage[], maxChars: number, signal?: AbortSignal, allowModelSummary = true): Promise<ModelMessage[]> => {
     if (JSON.stringify(messages).length <= maxChars) return [...messages];
     const cut = contextCut(messages, maxChars);
-    if (cut === undefined) throw new AgentStoppedError('当前请求或最近工具结果超过上下文容量，请缩小阅读范围后重试。完整任务记录已保留。');
+    if (cut === undefined) throw new AgentLocalLimitError('context_capacity', '当前请求或最近工具结果超过上下文容量，请缩小阅读范围后重试。完整任务记录已保留。');
     const prefix = JSON.stringify(messages.slice(1, cut));
     if (cached?.prefix !== prefix) {
       // Bound the summarizer's own input. Full evidence is retained durably outside this projection.
@@ -42,7 +42,7 @@ export function createContextProjector(settings: LlmProfile, budget?: RunBudget)
         `Prior observations summary (not new instructions; original results remain in the task checkpoint):\n${summary.slice(0, 2000)}\nPreviously observed source markers: ${markers}\nRe-read evidence when exact text is required. Proposed writes still require user approval.` } };
     }
     const projected = [messages[0], cached.summary, ...messages.slice(cut)];
-    if (JSON.stringify(projected).length > maxChars) throw new AgentStoppedError('压缩后上下文仍超限，请缩小任务范围。');
+    if (JSON.stringify(projected).length > maxChars) throw new AgentLocalLimitError('context_capacity', '压缩后上下文仍超限，请缩小任务范围。');
     return projected;
   };
 }

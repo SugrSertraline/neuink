@@ -1,13 +1,15 @@
 import type { SettingsNavigationTarget } from '@/modules/settings/settingsCatalog';
+import { resolveSourceLinkSurface } from './workspaceSourceNavigation';
 import type { ConversationMessage } from '@/shared/ipc/assistantApi';
 import type { LibraryEntry } from '@/modules/library/components/LibrarySidebar';
 import type { NoteTarget } from '@/shared/types/domain';
 import { noteTargetKey } from '@/shared/lib/noteOwner';
+import { MAX_BROWSER_OPEN_REQUESTS, planWorkspaceBrowserTab, type BrowserTabOpenAction } from './workspaceBrowserTabs';
 export type WorkspacePaneId = 'left' | 'right';
 
 export type WorkspaceSurface = { viewId?: string } & (
   | { kind: 'assistant-reply'; message: ConversationMessage }
-  | { kind: 'browser'; id: string; url?: string; title?: string }
+  | { kind: 'browser'; id: string; url?: string; title?: string; navigationId?: string; loading?: boolean; openRequestIds?: string[] }
   | { kind: 'note-review'; proposalId: string; label: string; entryId: string; noteId?: string | null }
   | { kind: 'library' }
   | { kind: 'relations' }
@@ -45,8 +47,9 @@ export const initialWorkspaceSurfaceLayout: WorkspaceSurfaceLayout = {
 };
 
 export type WorkspaceSurfaceAction =
+  | BrowserTabOpenAction
   | { type: 'duplicate'; key: string; pane: WorkspacePaneId; viewId: string }
-  | { type: 'updateBrowser'; id: string; url: string; title: string }
+  | { type: 'updateBrowser'; id: string; url: string; title: string; metadata?: { navigationId?: string; loading?: boolean } }
   | { type: 'reset' }
   | { type: 'focus'; pane: WorkspacePaneId }
   | { type: 'open'; pane?: WorkspacePaneId; surface: WorkspaceSurface }
@@ -66,6 +69,17 @@ export function workspaceSurfaceReducer(
   action: WorkspaceSurfaceAction
 ): WorkspaceSurfaceLayout {
   switch (action.type) {
+    case 'openBrowser': {
+      const result = planWorkspaceBrowserTab(state, action);
+      if (result.status !== 'open') return state;
+      const remember = (surface: WorkspaceSurface): WorkspaceSurface => action.source &&
+        surface.kind === 'browser' && surface.id === action.source.sourceId
+        ? { ...surface, openRequestIds: [...(surface.openRequestIds ?? []), action.source.requestId].slice(-MAX_BROWSER_OPEN_REQUESTS) } : surface;
+      const prepared = !action.source ? state : result.pane === 'left'
+        ? { ...state, left: remember(state.left), leftTabs: state.leftTabs.map(remember) }
+        : { ...state, right: state.right ? remember(state.right) : null, rightTabs: state.rightTabs.map(remember) };
+      return workspaceSurfaceReducer(prepared, { type: 'open', pane: result.pane, surface: result.surface });
+    }
     case 'duplicate': {
       const source = [...state.leftTabs, ...state.rightTabs].find(tab => surfaceKey(tab) === action.key);
       if (!source || !canDuplicateSurface(source) || !action.viewId) return state;
@@ -73,7 +87,8 @@ export function workspaceSurfaceReducer(
     }
     case 'updateBrowser': {
       const update = (surface: WorkspaceSurface): WorkspaceSurface => surface.kind === 'browser' && surface.id === action.id
-        ? { ...surface, url: action.url, title: action.title } : surface;
+        ? { ...surface, url: action.url, title: action.title,
+          navigationId: action.metadata?.navigationId, loading: action.metadata?.loading } : surface;
       return { ...state, left: update(state.left), right: state.right ? update(state.right) : null,
         leftTabs: state.leftTabs.map(update), rightTabs: state.rightTabs.map(update) };
     }
@@ -104,18 +119,15 @@ export function workspaceSurfaceReducer(
       return { ...state, focusedPane: 'left', left: action.surface, leftTabs: nextTabs };
     }
     case 'close': {
-      const tabs = (action.pane === 'left' ? state.leftTabs : state.rightTabs)
-        .filter((tab) => surfaceKey(tab) !== action.key);
-      if (action.pane === 'right') {
-        if (tabs.length === 0) {
-          return { ...state, focusedPane: 'left', right: null, rightTabs: [], pinnedTabKeys: retainPinnedKeys(state, state.leftTabs, []) };
-        }
-        const nextActive = state.right && surfaceKey(state.right) !== action.key ? state.right : tabs[tabs.length - 1];
-        return { ...state, right: nextActive, rightTabs: tabs, pinnedTabKeys: retainPinnedKeys(state, state.leftTabs, tabs) };
-      }
-      const nextTabs = tabs.length > 0 ? tabs : [{ kind: 'library' } as WorkspaceSurface];
-      const nextActive = surfaceKey(state.left) !== action.key ? state.left : nextTabs[nextTabs.length - 1];
-      return { ...state, left: nextActive, leftTabs: nextTabs, pinnedTabKeys: retainPinnedKeys(state, nextTabs, state.rightTabs) };
+      // A confirmed batch can collapse a pane before its remaining targets close.
+      // The view identity stays valid even when the original pane no longer does.
+      const pane = findSurfacePane(state, action.key);
+      if (!pane) return state;
+      const sourceTabs = pane === 'left' ? state.leftTabs : state.rightTabs;
+      const tabs = sourceTabs.filter(tab => surfaceKey(tab) !== action.key);
+      return pane === 'left'
+        ? withSurfaceTabs(state, tabs, state.rightTabs)
+        : withSurfaceTabs(state, state.leftTabs, tabs);
     }
     case 'setPinned': {
       const pane = findSurfacePane(state, action.key);
@@ -184,57 +196,14 @@ export function workspaceSurfaceReducer(
       const orderedDestinationTabs = insertSurface(nextDestinationTabs, surface, targetIndex);
 
       if (sourcePane === 'left') {
-        const leftTabs = nextSourceTabs.length > 0
-          ? nextSourceTabs
-          : [{ kind: 'library' } as WorkspaceSurface];
-        const left = surfaceKey(state.left) === action.key ? leftTabs[leftTabs.length - 1] : state.left;
-        return {
-          ...state,
-          focusedPane: 'right',
-          left,
-          leftTabs,
-          right: surface,
-          rightTabs: orderedDestinationTabs
-        };
+        return withSurfaceTabs({ ...state, focusedPane: 'right', right: surface }, nextSourceTabs, orderedDestinationTabs);
       }
-
-      const rightTabs = nextSourceTabs;
-      const right = rightTabs.length > 0
-        ? (state.right && surfaceKey(state.right) !== action.key ? state.right : rightTabs[rightTabs.length - 1])
-        : null;
-      return {
-        ...state,
-        focusedPane: 'left',
-        left: surface,
-        leftTabs: orderedDestinationTabs,
-        right,
-        rightTabs,
-        pinnedTabKeys: retainPinnedKeys(state, orderedDestinationTabs, rightTabs)
-      };
+      return withSurfaceTabs({ ...state, focusedPane: 'left', left: surface }, orderedDestinationTabs, nextSourceTabs);
     }
     case 'removeEntry': {
       const isOtherEntry = (surface: WorkspaceSurface) =>
         !('entryId' in surface) || surface.entryId !== action.entryId;
-      const remainingLeftTabs = state.leftTabs.filter(isOtherEntry);
-      const leftTabs = remainingLeftTabs.length > 0
-        ? remainingLeftTabs
-        : [{ kind: 'library' } as WorkspaceSurface];
-      const left = isOtherEntry(state.left) ? state.left : leftTabs[leftTabs.length - 1];
-      const rightTabs = state.rightTabs.filter(isOtherEntry);
-      const right = rightTabs.length === 0
-        ? null
-        : state.right && isOtherEntry(state.right)
-          ? state.right
-          : rightTabs[rightTabs.length - 1];
-      return {
-        ...state,
-        focusedPane: state.focusedPane === 'right' && !right ? 'left' : state.focusedPane,
-        left,
-        leftTabs,
-        right,
-        rightTabs,
-        pinnedTabKeys: retainPinnedKeys(state, leftTabs, rightTabs)
-      };
+      return withSurfaceTabs(state, state.leftTabs.filter(isOtherEntry), state.rightTabs.filter(isOtherEntry));
     }
     case 'closeOthers': {
       const tabs = action.pane === 'left' ? state.leftTabs : state.rightTabs;
@@ -247,34 +216,16 @@ export function workspaceSurfaceReducer(
     }
     case 'closePane':
       return action.pane === 'right'
-        ? { ...state, focusedPane: 'left', right: null, rightTabs: [], pinnedTabKeys: retainPinnedKeys(state, state.leftTabs, []) }
-        : { ...state, focusedPane: 'left', left: { kind: 'library' }, leftTabs: [{ kind: 'library' }], pinnedTabKeys: retainPinnedKeys(state, [{ kind: 'library' }], state.rightTabs) };
+        ? withSurfaceTabs(state, state.leftTabs, [])
+        : withSurfaceTabs({ ...state, focusedPane: 'left' }, [], state.rightTabs);
     case 'removeNote': {
       const isDeletedNote = (surface: WorkspaceSurface) =>
         surface.kind === 'note' && surface.entryId === action.entryId && surface.noteId === action.noteId;
-      const remainingLeftTabs = state.leftTabs.filter((surface) => !isDeletedNote(surface));
-      const leftTabs = remainingLeftTabs.length > 0
-        ? remainingLeftTabs
-        : [{ kind: 'library' } as WorkspaceSurface];
-      const left = isDeletedNote(state.left) ? leftTabs[leftTabs.length - 1] : state.left;
-      const rightTabs = state.rightTabs.filter((surface) => !isDeletedNote(surface));
-      const right = rightTabs.length === 0
-        ? null
-        : state.right && !isDeletedNote(state.right)
-          ? state.right
-          : rightTabs[rightTabs.length - 1];
-      return {
-        ...state,
-        focusedPane: state.focusedPane === 'right' && !right ? 'left' : state.focusedPane,
-        left,
-        leftTabs,
-        right,
-        rightTabs,
-        pinnedTabKeys: retainPinnedKeys(state, leftTabs, rightTabs)
-      };
+      return withSurfaceTabs(state, state.leftTabs.filter(surface => !isDeletedNote(surface)),
+        state.rightTabs.filter(surface => !isDeletedNote(surface)));
     }
     case 'closeRight':
-      return { ...state, focusedPane: 'left', right: null, rightTabs: [], pinnedTabKeys: retainPinnedKeys(state, state.leftTabs, []) };
+      return withSurfaceTabs(state, state.leftTabs, []);
     case 'swap':
       return state.right
         ? {
@@ -289,11 +240,27 @@ export function workspaceSurfaceReducer(
   }
 }
 
+/** Empty panes must not manufacture a second singleton library tab after a swap.
+ * Reuse the surviving pane and its view identities instead of remounting its contents. */
+function withSurfaceTabs(state: WorkspaceSurfaceLayout, leftTabs: WorkspaceSurface[], rightTabs: WorkspaceSurface[]): WorkspaceSurfaceLayout {
+  const activeTab = (tabs: WorkspaceSurface[], active: WorkspaceSurface | null) =>
+    (active ? tabs.find(tab => surfaceKey(tab) === surfaceKey(active)) : undefined) ?? tabs[tabs.length - 1];
+  if (!leftTabs.length && rightTabs.some(tab => tab.kind === 'library')) {
+    return { ...state, focusedPane: 'left', left: activeTab(rightTabs, state.right), leftTabs: rightTabs,
+      right: null, rightTabs: [], pinnedTabKeys: retainPinnedKeys(state, rightTabs, []) };
+  }
+  const remainingLeft: WorkspaceSurface[] = leftTabs.length ? leftTabs : [{ kind: 'library' }];
+  return { ...state, left: activeTab(remainingLeft, state.left), leftTabs: remainingLeft,
+    right: rightTabs.length ? activeTab(rightTabs, state.right) : null, rightTabs,
+    focusedPane: rightTabs.length ? state.focusedPane : 'left',
+    pinnedTabKeys: retainPinnedKeys(state, remainingLeft, rightTabs) };
+}
+
 /** Reveal cited evidence without replacing or moving the note that requested it. */
 export function sourceLinkSurfaceActions(state: WorkspaceSurfaceLayout, entryId: string, originPane = state.focusedPane): WorkspaceSurfaceAction[] {
-  const targetPane = originPane === 'right' ? 'left' : 'right';
+  const target = resolveSourceLinkSurface(state, entryId, originPane);
   return [
-    ...workspaceSurfaceOpenActions(state, { kind: 'pdf', entryId }, targetPane),
+    ...workspaceSurfaceOpenActions(state, target.surface, target.pane),
     { type: 'focus', pane: originPane }
   ];
 }

@@ -1,5 +1,6 @@
 import type { LibraryEntry } from '@/modules/library/components/LibrarySidebar';
 import type { AssistantActiveNote, AssistantActiveSegment, AssistantActiveSurfaceSnapshot } from '@/shared/types/assistant';
+import { normalizeBrowserUrl } from '@/modules/browser/browserUrl';
 import { surfaceKey, surfaceNoteTarget, type WorkspaceSurfaceLayout } from './workspaceSurface';
 
 /** Only the focused surface owns implicit context. A companion/hidden editor is never a target. */
@@ -16,5 +17,12 @@ export function assistantSurfaceContext(layout: WorkspaceSurfaceLayout, entries:
     && (!('segmentUid' in focused) || !focused.segmentUid || focused.segmentUid === selected.segmentUid) ? selected : null;
   const surface: AssistantActiveSurfaceSnapshot = { capturedAt: new Date().toISOString(), entryId, noteId,
     kind: focused.kind, pane, segmentUid: segment?.segmentUid ?? null, surfaceKey: surfaceKey(focused) };
+  if (focused.kind === 'browser' && focused.url && /^https?:\/\//i.test(focused.url) && focused.navigationId && !focused.loading) {
+    try {
+      const url = normalizeBrowserUrl(focused.url);
+      surface.browserTab = { id: focused.id, url, title: focused.title?.trim() || new URL(url).hostname,
+        navigationId: focused.navigationId };
+    } catch { /* Blank, local and unsupported pages never become implicit reading targets. */ }
+  }
   return { entry, note, segment, surface };
 }

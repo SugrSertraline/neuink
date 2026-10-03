@@ -34,6 +34,7 @@ export function OnboardingGuide(props: Props) {
   const { notify, dismiss } = useToast();
   const [progress, setProgress] = useState(() => readProgress(props.storageKey));
   const [open, setOpen] = useState(false);
+  const [openAttempt, setOpenAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
   const [preparedRoot, setPreparedRoot] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +56,7 @@ export function OnboardingGuide(props: Props) {
         save({ ...freshProgress(), seen:true });
       }
       setPreparedRoot(null); setError(null);
+      setOpenAttempt(value => value + 1);
       setOpen(true);
     };
     window.addEventListener(GUIDE_OPEN_EVENT, receive);
@@ -88,11 +90,11 @@ export function OnboardingGuide(props: Props) {
   useEffect(() => {
     if (!open) { sampleAttempt.current = null; return; }
     if (!props.ready || !props.root) return;
-    const key = props.root;
+    const key = JSON.stringify([props.root, openAttempt]);
     if (sampleAttempt.current === key) return;
     sampleAttempt.current = key;
     void sampleAction.current();
-  }, [open, props.root, props.ready]);
+  }, [open, openAttempt, props.root, props.ready]);
   const pause = () => {
     setOpen(false);
     const toastId = notify({ title:'新手引导已暂停', durationMs:7000,
@@ -333,7 +335,7 @@ function GuideOverlay({ progress, save, busy, error, signal, setSignal, onPause,
           </button></li>)}
         </ol> : <ol className="list-decimal space-y-2 pl-4">{step.instructions.map(text => <li key={text}>{text}</li>)}</ol>}
         {missing && <p className="mt-3 text-warning" role="status">{missing}</p>}
-        {!rect && <p className="mt-3 text-muted-foreground" role="status">{busy ? '正在准备示例论文，完成后自动打开。' : '已切换到本步页面；操作区域加载后会自动聚焦。若缺少论文或解析结果，可重试准备示例或跳过本步。'}</p>}
+        {!rect && !error && <p className="mt-3 text-muted-foreground" role="status">{busy ? '正在准备示例论文，完成后自动打开。' : '已切换到本步页面；操作区域加载后会自动聚焦。若缺少论文或解析结果，可重试准备示例或跳过本步。'}</p>}
         {error && <p className="mt-3 text-destructive" role="alert">{error}</p>}
         {step.signal && <p className="mt-3 text-xs text-muted-foreground" role="status">{step.practiceOptional
           ? actionObserved ? '已体验本步交互；实际保存、发送或任务结果仍以页面反馈为准。'

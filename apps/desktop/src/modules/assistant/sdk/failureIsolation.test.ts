@@ -4,15 +4,17 @@ import { createNeuinkModel } from './provider';
 import { answerWithGroundedAgent } from './qna';
 import { createAssistantTools } from './tools';
 import { DEFAULT_AGENT_RUNTIME_SETTINGS } from '@/shared/lib/agentRuntimeSettings';
-import { invokeAssistantTool, listTools, listMcpTools, loadPrompt, type LlmProfile } from '@/shared/ipc/assistantApi';
+import { invokeAssistantTool, invokeMcpTool, listTools, listMcpTools, loadPrompt, type LlmProfile } from '@/shared/ipc/assistantApi';
+import { ResearchImportNotApprovedError, runResearchTool } from '@/shared/ipc/researchApi';
 import { saveAgentExecution } from '@/shared/ipc/agentExecutionApi';
 import { DurableExecution } from '../runtime/durableExecution';
 import { buildDirectExecution } from '../runtime/executionPolicy';
-import { AgentPersistenceError, RunBudget, type AgentCheckpoint } from '../agent-core';
+import { AgentPersistenceError, AgentStoppedError, RunBudget, type AgentCheckpoint } from '../agent-core';
 
 vi.mock('./provider', () => ({ createNeuinkModel: vi.fn(), generationSettings: () => ({}) }));
 vi.mock('@/shared/ipc/assistantApi', async original => ({ ...await original<typeof import('@/shared/ipc/assistantApi')>(),
-  listTools: vi.fn(), listMcpTools: vi.fn(), invokeAssistantTool: vi.fn(), loadPrompt: vi.fn() }));
+  listTools: vi.fn(), listMcpTools: vi.fn(), invokeAssistantTool: vi.fn(), invokeMcpTool: vi.fn(), loadPrompt: vi.fn() }));
+vi.mock('@/shared/ipc/researchApi', async original => ({ ...await original<typeof import('@/shared/ipc/researchApi')>(), runResearchTool: vi.fn() }));
 vi.mock('@/shared/ipc/agentExecutionApi', () => ({ saveAgentExecution: vi.fn() }));
 const profile = { id: 'test', model: 'test', base_url: 'https://example.invalid', api_key: null } as LlmProfile;
 const scope = { entry_ids: ['entry'], entry_titles: ['Paper'], tag_ids: [], tag_names: [] };
@@ -23,17 +25,18 @@ const childCall = { name: 'task_run_subagent', args: { agent_id: 'evidence-agent
 const diagramCall = { name: 'present_diagram', args: { kind: 'mindmap', title: 'Example', nodes: [
   { id: 'root', label: 'Root' }, { id: 'child', label: 'Child', parent_id: 'root' }
 ] } };
-function model(turns: Array<{ text?: string; call?: typeof readCall | typeof childCall | { name: string; args: object }; error?: Error }>) {
+function model(turns: Array<{ text?: string; call?: typeof readCall | typeof childCall | { name: string; args: object }; error?: Error; truncated?: boolean; effect?: () => void }>) {
   let index = 0;
   const value = new MockLanguageModelV3({ doStream: async () => {
     const turn = turns[index++];
     if (!turn) throw new Error('Unexpected turn');
+    turn.effect?.();
     if (turn.error) throw turn.error;
     return { stream: simulateReadableStream({ chunks: [
       { type: 'stream-start', warnings: [] },
       ...(turn.call ? [{ type: 'tool-call' as const, toolCallId: `call-${index}`, toolName: turn.call.name, input: JSON.stringify(turn.call.args) }]
         : [{ type: 'text-start' as const, id: 't' }, { type: 'text-delta' as const, id: 't', delta: turn.text! }, { type: 'text-end' as const, id: 't' }]),
-      { type: 'finish', finishReason: { unified: turn.call ? 'tool-calls' : 'stop', raw: 'stop' },
+      { type: 'finish', finishReason: { unified: turn.truncated ? 'length' : turn.call ? 'tool-calls' : 'stop', raw: 'stop' },
         usage: { inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 10, text: 10, reasoning: 0 } } }
     ] }) };
   } });
@@ -66,9 +69,9 @@ describe('ordinary failures stay inside the tool boundary', () => {
     const result = await answerWithGroundedAgent(options());
     expect(result.agentLoopState?.status).toBe('completed');
     expect(provider.doStreamCalls).toHaveLength(3);
-    expect(JSON.stringify(provider.doStreamCalls[1].prompt)).toContain('Mind map needs one root and valid parents.');
+    expect(JSON.stringify(provider.doStreamCalls[1].prompt)).toContain('TOOL_EXECUTION_FAILED');
     expect(result.toolEvents).toContainEqual(expect.objectContaining({
-      id: 'call-1', toolName: 'present_diagram', status: 'error', error: 'Mind map needs one root and valid parents.'
+      id: 'call-1', toolName: 'present_diagram', status: 'error'
     }));
     expect(result.toolEvents).toContainEqual(expect.objectContaining({
       id: 'call-2', toolName: 'present_diagram', status: 'done', diagram: expect.objectContaining({ kind: 'mindmap' })
@@ -117,7 +120,7 @@ describe('ordinary failures stay inside the tool boundary', () => {
     expect(result.toolEvents).toContainEqual(expect.objectContaining({ toolName: 'task_run_subagent', status: 'error' }));
     expect(result.sources[0]).toMatchObject({ segment_uid: 's1' });
     const parentPrompt = JSON.stringify(provider.doStreamCalls[3].prompt);
-    expect(parentPrompt).toContain('子任务执行失败'); expect(parentPrompt).toContain('42 participants');
+    expect(parentPrompt).toContain('TOOL_EXECUTION_FAILED'); expect(parentPrompt).toContain('42 participants');
     expect(parentPrompt).not.toContain('secret diagnostic');
   });
   it('still stops the parent for child checkpoint persistence failure', async () => {
@@ -128,6 +131,61 @@ describe('ordinary failures stay inside the tool boundary', () => {
     });
     await expect(answerWithGroundedAgent(options())).rejects.toBeInstanceOf(AgentPersistenceError);
     expect(provider.doStreamCalls).toHaveLength(1);
+  });
+  it('returns child output truncation with acquired evidence for the reserved parent summary', async () => {
+    const provider = model([{ call: childCall }, { call: readCall }, { text: 'unfinished child answer', truncated: true },
+      { text: '子任务未完成，已有片段提到 42 participants [S1]。' }]);
+    const input = options(); const budget = new RunBudget(4);
+    input.budget = budget; input.execution = new DurableExecution('fixture', input.execution.record, budget);
+    const result = await answerWithGroundedAgent(input);
+    expect(result.agentLoopState?.status).toBe('completed');
+    expect(result.sources[0]).toMatchObject({ segment_uid: 's1' });
+    const parentPrompt = JSON.stringify(provider.doStreamCalls[3].prompt);
+    expect(parentPrompt).toContain('TOOL_EXECUTION_FAILED');
+    expect(parentPrompt).toContain('子任务输出达到长度上限');
+    expect(parentPrompt).toContain('42 participants');
+    expect(parentPrompt).not.toContain('unfinished child answer');
+    expect(budget.turns).toBe(4);
+    expect(result.toolEvents).toContainEqual(expect.objectContaining({ toolName: 'task_run_subagent', status: 'error' }));
+  });
+  it('lets the parent summarize when the child has insufficient local context capacity', async () => {
+    const provider = model([{ call: childCall }, { text: '子任务上下文不足，没有取得足够证据。' }]);
+    const input = options(); input.runtimeSettings.subagents[0].systemPrompt = 'Worker instructions. '.repeat(10_000);
+    const result = await answerWithGroundedAgent(input);
+    expect(result.agentLoopState?.status).toBe('completed');
+    expect(provider.doStreamCalls).toHaveLength(2);
+    expect(JSON.stringify(provider.doStreamCalls[1].prompt)).toContain('子任务上下文容量不足');
+    expect(invokeAssistantTool).not.toHaveBeenCalled();
+  });
+  it('returns a child local turn cap without consuming the parent summary opportunity', async () => {
+    const provider = model([{ call: childCall }, { call: readCall },
+      ...Array.from({ length: 7 }, () => ({ text: 'Unsupported marker [S999].' })),
+      { text: '子任务未能完成核验，已有片段提到 42 participants [S1]。' }]);
+    const result = await answerWithGroundedAgent(options());
+    expect(result.agentLoopState?.status).toBe('completed');
+    expect(provider.doStreamCalls).toHaveLength(10);
+    const parentPrompt = JSON.stringify(provider.doStreamCalls[9].prompt);
+    expect(parentPrompt).toContain('子任务局部轮次已用完');
+    expect(parentPrompt).toContain('42 participants');
+    expect(result.sources[0]).toMatchObject({ segment_uid: 's1' });
+  });
+  it('does not recover a local child limit once the shared token budget is exhausted', async () => {
+    const provider = model([{ call: childCall }, { text: 'unfinished', truncated: true }]);
+    const input = options(); const budget = new RunBudget(24, 48, 2, 40);
+    input.budget = budget; input.execution = new DurableExecution('fixture', input.execution.record, budget);
+    await expect(answerWithGroundedAgent(input)).rejects.toBeInstanceOf(AgentStoppedError);
+    expect(provider.doStreamCalls).toHaveLength(2);
+  });
+  it('keeps an unknown explicit child stop fatal instead of guessing from its text', async () => {
+    const provider = model([{ call: childCall }, { error: new AgentStoppedError('context length local limit words are not a typed reason') }]);
+    await expect(answerWithGroundedAgent(options())).rejects.toBeInstanceOf(AgentStoppedError);
+    expect(provider.doStreamCalls).toHaveLength(2);
+  });
+  it('still stops the parent when the user cancels during the child model request', async () => {
+    const controller = new AbortController();
+    const provider = model([{ call: childCall }, { text: 'unfinished', effect: () => controller.abort(new Error('User stopped child')) }]);
+    await expect(answerWithGroundedAgent({ ...options(), abortSignal: controller.signal })).rejects.toThrow('User stopped child');
+    expect(provider.doStreamCalls).toHaveLength(2);
   });
   it('preserves one shared model turn for the parent to synthesize after delegation', async () => {
     const provider = model([{ call: childCall }, { text: '没有足够证据。' }, { text: '资料不足，暂时不能确认。' }]);
@@ -222,5 +280,128 @@ describe('tool catalog failure isolation', () => {
     const restored = await createAssistantTools({ ...options(), restoredState: first.snapshot() });
     expect(restored.tools.read_segment_content).toBeUndefined();
     expect(restored.identityToolNames).toEqual(first.identityToolNames);
+  });
+});
+
+describe('SDK failure results reach the model through production wiring', () => {
+  it('keeps genuine keyword fallback evidence without leaking successful-search warnings', async () => {
+    vi.mocked(listTools).mockResolvedValue([{ name: 'search_segments', description: 'Search', parameters_schema: {
+      type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } }]);
+    vi.mocked(invokeAssistantTool).mockResolvedValue({ query: 'participants', mode: 'semantic_fallback_keyword',
+      index_generation: 1, total_hit_count: 1, warnings: ['Embedding unavailable at C:\\Private\\models\\secret-model.onnx; Authorization: Bearer secret-token'],
+      entries: [{ entry_id: 'entry', entry_title: 'Paper', hit_count: 1, max_score: 1, hits: [{
+        entry_id: 'entry', entry_title: 'Paper', target: { kind: 'segment', entry_id: 'entry', segment_uid: 's1', page_idx: 2 },
+        snippet: '42 participants.', score: 1
+      }] }]
+    });
+    const provider = model([{ call: { name: 'search_segments', args: { query: 'participants' } } },
+      { text: '关键词检索的片段显示 42 participants [S1]。' }]);
+    const result = await answerWithGroundedAgent(options());
+    expect(result.agentLoopState?.status).toBe('completed');
+    expect(result.toolEvents).toContainEqual(expect.objectContaining({ toolName: 'search_segments', status: 'done' }));
+    expect(result.sources[0]).toMatchObject({ segment_uid: 's1', quote: '42 participants.' });
+    expect(JSON.stringify(provider.doStreamCalls[1].prompt)).toContain('keyword fallback results');
+    expect(JSON.stringify(provider.doStreamCalls[1].prompt)).toContain('42 participants.');
+    expect(JSON.stringify([provider.doStreamCalls, result.toolEvents])).not.toMatch(/Private|secret-model|Authorization|secret-token/);
+  });
+
+  it('rejects a native error envelope before turning it into a successful read', async () => {
+    vi.mocked(invokeAssistantTool).mockResolvedValue({ ok: false, error: 'HTTP 403 Authorization: Bearer secret-value' });
+    const provider = model([{ call: readCall }, { text: '读取未完成，没有足够证据。' }]);
+    const result = await answerWithGroundedAgent(options());
+    expect(result.agentLoopState?.status).toBe('completed');
+    expect(result.toolEvents).toContainEqual(expect.objectContaining({ toolName: read.name, status: 'error' }));
+    const prompt = JSON.stringify(provider.doStreamCalls[1].prompt);
+    expect(prompt).toContain('TOOL_EXECUTION_FAILED');
+    expect(prompt).not.toContain('secret-value');
+    expect(result.sources).toEqual([]);
+  });
+
+  it.each(['returned error', 'thrown error'])('gates MCP writes after %s while allowing a local read', async mode => {
+    const input = options();
+    input.runtimeSettings.mainAssistant.allowedMcpServerIds = ['server'];
+    input.runtimeSettings.mcpServers = [{ id: 'server', name: 'Server', command: 'unused', enabled: true,
+      description: '', allowedToolNames: ['write'] }];
+    input.runtimeSettings.toolPackages = [{ id: 'external', name: 'External', description: '', enabled: true,
+      kind: 'mcp', mcpServerId: 'server', permissionMode: 'allow', allowedToolIds: ['mcp.server.write'] }];
+    Object.assign(input, buildDirectExecution(input.runtimeSettings, 'Read'));
+    vi.mocked(listMcpTools).mockResolvedValue({ tools: [{ name: 'write', inputSchema: { type: 'object', properties: {} } }] });
+    if (mode === 'returned error') {
+      vi.mocked(invokeMcpTool).mockResolvedValue({ output: { isError: true, content: [{ type: 'text', text: 'HTTP 403 secret-token remote body' }] } });
+    } else vi.mocked(invokeMcpTool).mockRejectedValue(new Error('HTTP 403 secret-token remote body'));
+    const call = { name: 'mcp_server_write', args: {} };
+    const provider = model([{ call }, { call: readCall }, { call }, { text: '外部操作结果不明；只读核对取得 42 participants [S1]。' }]);
+    const approval = vi.fn(async () => true);
+    const result = await answerWithGroundedAgent({ ...input, requestToolApproval: approval });
+    expect(result.agentLoopState?.status).toBe('completed');
+    expect(invokeMcpTool).toHaveBeenCalledOnce();
+    expect(invokeAssistantTool).toHaveBeenCalledOnce();
+    expect(approval).toHaveBeenCalledOnce();
+    expect(JSON.stringify(provider.doStreamCalls[1].prompt)).toContain('TOOL_OUTCOME_UNKNOWN');
+    expect(JSON.stringify(provider.doStreamCalls[1].prompt)).toContain('HTTP 403');
+    expect(provider.doStreamCalls[1].tools?.some(tool => tool.name === 'mcp_server_write')).toBe(false);
+    expect(provider.doStreamCalls[1].tools?.some(tool => tool.name === read.name)).toBe(true);
+    expect(input.budget.writesBlocked).toBe(true);
+    expect(JSON.stringify(provider.doStreamCalls[3].prompt)).toContain('TOOL_NOT_AVAILABLE');
+    expect(JSON.stringify(result.toolEvents)).not.toContain('secret-token');
+    expect(JSON.stringify(provider.doStreamCalls)).not.toContain('secret-token');
+  });
+
+  it('keeps partial paper import identities and tells the model not to retry the entire batch', async () => {
+    vi.mocked(listTools).mockResolvedValue([{ name: 'import_papers', description: 'Import', parameters_schema: {
+      type: 'object', properties: { paper_ids: { type: 'array', items: { type: 'string' } } }, required: ['paper_ids'] } }]);
+    vi.mocked(runResearchTool).mockResolvedValue({ results: [
+      { id: 'paper-1', entry_id: 'entry-new', status: 'imported' },
+      { id: 'paper-2', status: 'failed', error: 'HTTP 404 https://private.invalid/?token=secret-value' }
+    ] });
+    const provider = model([{ call: { name: 'import_papers', args: { paper_ids: ['paper-1', 'paper-2'] } } },
+      { text: '一篇已入库，另一篇未完成；请核对资料库。' }]);
+    const result = await answerWithGroundedAgent({ ...options(), requestToolApproval: async () => true });
+    expect(result.agentLoopState?.status).toBe('completed');
+    expect(result.toolEvents).toContainEqual(expect.objectContaining({ toolName: 'import_papers', status: 'error' }));
+    const prompt = JSON.stringify(provider.doStreamCalls[1].prompt);
+    expect(prompt).toContain('TOOL_PARTIAL_FAILURE');
+    expect(prompt).toContain('entry-new');
+    expect(prompt).toContain('不要自动重试整个批次');
+    expect(prompt).not.toContain('secret-value');
+    expect(runResearchTool).toHaveBeenCalledOnce();
+  });
+
+  it('marks missing native import consent as not executed and continues with reads', async () => {
+    vi.mocked(listTools).mockResolvedValue([read, { name: 'import_papers', description: 'Import', parameters_schema: {
+      type: 'object', properties: { paper_ids: { type: 'array', items: { type: 'string' } } }, required: ['paper_ids'] } }]);
+    vi.mocked(runResearchTool).mockRejectedValue(new ResearchImportNotApprovedError('本地确认已失效'));
+    const provider = model([{ call: { name: 'import_papers', args: { paper_ids: ['paper-1'] } } },
+      { call: readCall }, { text: '未执行导入；已有片段提到 42 participants [S1]。' }]);
+    const input = options();
+    const result = await answerWithGroundedAgent({ ...input, requestToolApproval: async () => true });
+    expect(result.agentLoopState?.status).toBe('completed');
+    expect(JSON.stringify(provider.doStreamCalls[1].prompt)).toContain('TOOL_APPROVAL_UNAVAILABLE');
+    expect(input.budget.writesBlocked).toBe(false);
+    expect(invokeAssistantTool).toHaveBeenCalledOnce();
+  });
+
+  it('returns a missing confirmation host as not executed without calling the tool', async () => {
+    vi.mocked(listTools).mockResolvedValue([{ name: 'import_papers', description: 'Import', parameters_schema: {
+      type: 'object', properties: { paper_ids: { type: 'array', items: { type: 'string' } } }, required: ['paper_ids'] } }]);
+    const provider = model([{ call: { name: 'import_papers', args: { paper_ids: ['paper-1'] } } },
+      { text: '当前入口无法取得确认，未执行导入。' }]);
+    const result = await answerWithGroundedAgent(options());
+    expect(result.agentLoopState?.status).toBe('completed');
+    expect(JSON.stringify(provider.doStreamCalls[1].prompt)).toContain('TOOL_APPROVAL_UNAVAILABLE');
+    expect(runResearchTool).not.toHaveBeenCalled();
+  });
+
+  it('lets the model correct a rejected title before any create operation was dispatched', async () => {
+    const provider = model([{ call: { name: 'create_entry', args: { title: '   ' } } },
+      { call: { name: 'create_entry', args: { title: 'Valid title' } } }, { text: '已创建条目 Valid title。' }]);
+    const create = vi.fn(async (title: string) => ({ id: 'created', title, description: '', updatedAt: '2026-10-03' }));
+    const input = options();
+    const result = await answerWithGroundedAgent({ ...input, onCreateEntry: create, requestToolApproval: async () => true });
+    expect(result.agentLoopState?.status).toBe('completed');
+    expect(create).toHaveBeenCalledExactlyOnceWith('Valid title');
+    expect(input.budget.writesBlocked).toBe(false);
+    expect(JSON.stringify(provider.doStreamCalls[1].prompt)).toContain('TOOL_INVALID_ARGUMENTS');
+    expect(JSON.stringify(provider.doStreamCalls[1].prompt)).not.toContain('TOOL_OUTCOME_UNKNOWN');
   });
 });

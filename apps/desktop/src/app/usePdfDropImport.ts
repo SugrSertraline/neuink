@@ -19,7 +19,7 @@ type PdfDropImportOptions = Pick<ToastContextValue, 'notify' | 'dismiss'> & {
   ) => Promise<CreateEntryResult | undefined>;
 };
 
-type ImportProgress = { completed: number; total: number };
+type ImportProgress = { id: string; root: string; startedAt: number; completed: number; total: number };
 
 export function droppedPdfFiles(paths: string[]) {
   const files: { path: string; title: string }[] = [];
@@ -82,10 +82,11 @@ export function usePdfDropImport(options: PdfDropImportOptions) {
 
       importingRef.current = true;
       const initialRoot = current.workspaceRoot;
+      const identity = { id: crypto.randomUUID(), root: initialRoot, startedAt: Date.now() };
       let completed = 0;
       let succeeded = 0;
       const failed: string[] = [];
-      setProgress({ completed, total: files.length });
+      setProgress({ ...identity, completed, total: files.length });
       const toastId = current.notify({
         title: `正在导入 ${files.length} 个 PDF`,
         description: '将按文件名创建条目，并按当前设置加入解析队列。',
@@ -110,7 +111,7 @@ export function usePdfDropImport(options: PdfDropImportOptions) {
             failed.push(file.title);
           }
           completed += 1;
-          if (!closed) setProgress({ completed, total: files.length });
+          if (!closed) setProgress({ ...identity, completed, total: files.length });
         }
       } finally {
         importingRef.current = false;

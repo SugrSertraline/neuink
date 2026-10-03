@@ -65,7 +65,7 @@ export function useReflowReadingNavigation(scrollRef: RefObject<HTMLDivElement>,
           : groups.findIndex(group => group.body.page_idx === target.pageIdx);
         if (index === undefined || index < 0) return false;
         virtualizer.scrollToIndex(index, { align: 'center' });
-        scrollRef.current?.focus({ preventScroll: true });
+        if (target.focus !== false) scrollRef.current?.focus({ preventScroll: true });
         setFlashUid(groups[index].body.uid); return true;
       }
     };
@@ -73,7 +73,7 @@ export function useReflowReadingNavigation(scrollRef: RefObject<HTMLDivElement>,
     const stopObserving = scrollRef.current ? observeReadingWidth(scrollRef.current, adapter) : undefined;
     return () => { stopObserving?.(); cancelAnimationFrame(frame); unregister?.(); };
   }, [groupIndex, groups, register, scrollRef, virtualizer]);
-  return { flashUid, remember: navigation?.remember, navigate: navigation?.navigate,
+  return { flashUid, remember: navigation?.remember, navigate: navigation?.navigate, beginUserNavigation: navigation?.beginUserNavigation,
     hasRetainedPosition: navigation?.hasRetainedPosition,
     isJumpHandled: navigation?.isJumpHandled, markJumpHandled: navigation?.markJumpHandled };
 }

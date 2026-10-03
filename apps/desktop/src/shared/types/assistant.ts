@@ -395,6 +395,8 @@ export type AssistantActiveSegment = {
 };
 
 export type AssistantActiveSurfaceSnapshot = {
+  /** Frozen host-selected document, read on demand; never includes page body. */
+  browserTab?: import('@/shared/ipc/browserApi').BrowserTabTarget;
   capturedAt: string;
   entryId: EntryId | null;
   kind:

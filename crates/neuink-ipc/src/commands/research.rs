@@ -1,6 +1,7 @@
 //! Application-owned research tools: no executable packages and no model-controlled paths.
 mod crossref;
 mod free_web;
+mod import_job;
 mod imports;
 pub(super) mod network;
 mod paper_search;
@@ -162,12 +163,36 @@ pub async fn run_research_tool<R: Runtime>(
         c.insert(request.call_id.clone(), tx);
     }
     let _guard = Call(request.call_id.clone());
-    tokio::select! {
-        _=rx=>Err("检索已停止；已入库的论文不会撤销，请核对条目库".into()),
-        result=tokio::time::timeout(Duration::from_secs(180),execute(app,request))=>result.map_err(|_|"检索超时；请核对已入库结果后重试".to_string())?,
+    let event_app = app.clone();
+    let mut import_job =
+        import_job::ImportJob::new(super::job::job_manager().clone(), move |event| {
+            super::job::emit_job_event(&event_app, event);
+        });
+    let result = tokio::select! {
+        _ = rx => {
+            import_job.cancel("论文下载已停止；已入库的论文会保留");
+            Err("检索已停止；已入库的论文不会撤销，请核对条目库".into())
+        },
+        result = tokio::time::timeout(Duration::from_secs(180), execute(app, request, &mut import_job)) => {
+            match result {
+                Ok(result) => result,
+                Err(_) => {
+                    import_job.fail("论文下载超时；请核对已入库结果后重试");
+                    Err("检索超时；请核对已入库结果后重试".into())
+                }
+            }
+        },
+    };
+    if let Err(error) = &result {
+        import_job.fail(error);
     }
+    result
 }
-async fn execute<R: Runtime>(app: AppHandle<R>, request: ResearchRequest) -> Result<Value, String> {
+async fn execute<R: Runtime>(
+    app: AppHandle<R>,
+    request: ResearchRequest,
+    import_job: &mut import_job::ImportJob,
+) -> Result<Value, String> {
     let root = canonical(&request.root)?;
     let settings = super::settings::read_settings(&app)?.research;
     match request.name.as_str() {
@@ -217,6 +242,7 @@ async fn execute<R: Runtime>(app: AppHandle<R>, request: ResearchRequest) -> Res
                     paper_ids: ids,
                 },
                 request.approval_id.as_deref().unwrap_or(""),
+                import_job,
             )
             .await
         }

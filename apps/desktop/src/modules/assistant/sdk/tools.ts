@@ -3,6 +3,11 @@ import { PDF_TOOL_NAMES } from './pdfTools';
 import { loadAssistantToolCatalog } from './toolCatalog';
 import { assertResearchRetry } from './researchRecovery';
 import { buildDiagramArtifact } from './diagramArtifact';
+import { createBrowserTabTool } from './browserTabTool';
+import type { BrowserTabTarget } from '@/shared/ipc/browserApi';
+import { safeToolErrorEvent, toolPreflight, trackToolFailures, ToolPreconditionError } from './toolFailurePolicy';
+import { createAgentToolFailure, isAgentToolFailure } from '../agent-core/toolFailure';
+import { AgentLocalLimitError, AgentStoppedError } from '../agent-core/agent';
 
 import type {
   AssistantContextSnapshot,
@@ -154,6 +159,7 @@ type CreateAssistantToolsOptions = {
   availableEntries?: AssistantEntryMetaTarget[];
   assistantContext?: AssistantContext | null;
   contextSnapshot?: AssistantContextSnapshot | null;
+  browserTabTarget?: BrowserTabTarget | null;
   contextBudget?: number;
   conversationHistory?: ConversationMessage[];
   currentEntry?: {
@@ -224,6 +230,7 @@ export async function createAssistantTools({
   availableEntries = [],
   assistantContext,
   contextSnapshot,
+  browserTabTarget,
   contextBudget = assistantContextCharBudget(null),
   conversationHistory = [],
   currentEntry,
@@ -258,6 +265,7 @@ export async function createAssistantTools({
 
   const emit = (event: AssistantToolTraceEvent) => {
     if (abortSignal?.aborted) return;
+    event = safeToolErrorEvent(event);
     const index = events.findIndex((current) => current.id === event.id);
     const nextEvent =
       index >= 0
@@ -296,6 +304,14 @@ export async function createAssistantTools({
     runtimeSettings
   );
   const enabledToolIds = new Set<AgentToolId>(permissionAudit.allowedToolIds);
+
+  if (browserTabTarget && enabledToolIds.has('read_browser_tab') &&
+      activeExecution?.agent.kind === 'main_assistant' && executionDepth === 0) {
+    tools.read_browser_tab = createBrowserTabTool({
+      target: browserTabTarget, contextBudget, abortSignal, loopGuard, emit,
+      observe: output => observations.push({ output, toolName: 'read_browser_tab' })
+    });
+  }
 
   // Host-owned read-only presentation capability. It does not write to the workspace.
   if (!activeExecution || activeExecution.agent.kind === 'main_assistant') {
@@ -346,7 +362,7 @@ export async function createAssistantTools({
       }),
       execute: async (input, options) => {
         (options.abortSignal ?? abortSignal)?.throwIfAborted();
-        const appearance = requiredEnum(asObject(input).appearance, 'appearance', ['standard', 'atelier', 'liquid-glass'] as const);
+        const appearance = toolPreflight(() => requiredEnum(asObject(input).appearance, 'appearance', ['standard', 'atelier', 'liquid-glass'] as const));
         loopGuard?.beforeToolCall('app.set_appearance', input);
         const result = applicationActions.setAppearance(appearance);
         emit({ id: options.toolCallId, toolName: 'app.set_appearance', status: 'done',
@@ -383,7 +399,7 @@ export async function createAssistantTools({
       } as JSONSchema7),
       execute: async (input, options) => {
         const object = asObject(input);
-        const title = requiredString(object.title, 'title');
+        const title = toolPreflight(() => requiredString(object.title, 'title'));
         const cached = createdEntryByTitle.get(title);
         if (cached) {
           emit({
@@ -454,8 +470,8 @@ export async function createAssistantTools({
         let fingerprint: string | undefined;
 
         try {
-          const normalizedInput = normalizeToolInput(toolName, input, { root, scope });
-          assertToolPrerequisites(toolName, normalizedInput, observations);
+          const normalizedInput = toolPreflight(() => normalizeToolInput(toolName, input, { root, scope }));
+          toolPreflight(() => assertToolPrerequisites(toolName, normalizedInput, observations), 'TOOL_PREFLIGHT_FAILED');
           assertResearchRetry(toolName, normalizedInput, events);
           fingerprint = loopGuard?.beforeToolCall(toolName, normalizedInput);
           emit({
@@ -474,6 +490,10 @@ export async function createAssistantTools({
           });
           (options.abortSignal ?? abortSignal)?.throwIfAborted();
           observations.push({ output: output.modelOutput, toolName });
+          if (isAgentToolFailure(output.modelOutput)) {
+            if (fingerprint) loopGuard?.recordFailure(fingerprint);
+            return output.modelOutput;
+          }
           loopGuard?.recordSuccess(output.modelOutput);
 
           emit({
@@ -634,6 +654,8 @@ export async function createAssistantTools({
       execute: async (input, options) => {
         loopGuard?.beforeToolCall(toolName, input);
         const normalizedInput = proposalToolInput(toolName, input, plan);
+        const createdEntries = toolName === 'note.propose_create' &&
+          (!plan?.noteAction || plan.noteAction === 'create') ? [...createdEntryByTitle.values()] : [];
         const proposal = buildNoteProposal(normalizedInput, {
           assistantContext,
           availableEntries,
@@ -642,11 +664,14 @@ export async function createAssistantTools({
           currentNote,
           plan,
           readNoteSnapshots,
-          scope,
+          // An approved create_entry result authorizes drafting a new note there.
+          // It does not expand reads or permit edits to unrelated existing notes.
+          scope: { ...scope, entry_ids: [...scope.entry_ids, ...createdEntries.map(entry => entry.id)],
+            entry_titles: [...scope.entry_titles, ...createdEntries.map(entry => entry.title)] },
           sourceByMarker
         });
         if (sourceByMarker.size > 0 && proposal.markdown.trim() && proposal.sources.length === 0) {
-          throw new Error('A note drafted with available evidence must preserve valid inline source markers in the proposed content.');
+          throw new ToolPreconditionError('inline_citations_required');
         }
         onNoteProposal(proposal);
         loopGuard?.recordSuccess({ proposal_id: proposal.id });
@@ -820,6 +845,9 @@ export async function createAssistantTools({
             trace: result.trace
           };
         } catch (error) {
+          (options.abortSignal ?? abortSignal)?.throwIfAborted();
+          if ((error instanceof AgentStoppedError && !(error instanceof AgentLocalLimitError))
+            || (error instanceof Error && error.name === 'AbortError')) throw error;
           emit({
             error: errorMessage(error),
             id: toolCallId,
@@ -827,7 +855,15 @@ export async function createAssistantTools({
             status: 'error',
             toolName: 'task.run_subagent'
           });
-          throw error;
+          const failure = createAgentToolFailure('TOOL_EXECUTION_FAILED');
+          if (error instanceof AgentLocalLimitError) failure.diagnostic = {
+            output_length: '子任务输出达到长度上限，未完成结论。',
+            context_capacity: '子任务上下文容量不足，未完成结论。',
+            turn_limit: '子任务局部轮次已用完，交由主助手总结。'
+          }[error.reason];
+          return { ...failure, evidence: [...sourceByMarker].slice(-8).map(([marker, source]) => ({
+            marker: `[S${marker}]`, quote: source.quote?.slice(0, 600)
+          })) };
         }
       }
     }) as ToolSet[string];
@@ -839,6 +875,7 @@ export async function createAssistantTools({
     for (const name of Object.keys(tools)) if (!frozen.has(name)) delete tools[name];
   }
   const toolNames = Object.keys(tools);
+  trackToolFailures(tools, emit, abortSignal);
   const identityToolNames = restoredState?.toolNames ? [...restoredState.toolNames] : toolNames;
   return {
     availabilityNotes,
@@ -875,8 +912,6 @@ function assertToolPrerequisites(
   );
   const docId = requiredString(input.doc_id, 'doc_id');
   if (!searchedDocIds.has(docId)) {
-    throw new Error(
-      'read_sciverse_content requires a doc_id returned by search_sciverse_evidence earlier in this run.'
-    );
+    throw new ToolPreconditionError('source_search_required');
   }
 }

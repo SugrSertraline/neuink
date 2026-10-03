@@ -29,7 +29,7 @@ it('reports browser-preview limitations instead of showing a blocked or fake ifr
   fireEvent.change(screen.getByRole('textbox', { name: '网页地址' }), { target: { value: 'example.org' } });
   fireEvent.click(screen.getByRole('button', { name: '访问' }));
   await waitFor(() => expect(screen.getByRole('link', { name: '在外部浏览器打开' }).getAttribute('href')).toBe('https://example.org/'));
-  expect(change).toHaveBeenCalledWith('https://example.org/', 'example.org');
+  expect(change).toHaveBeenCalledWith('https://example.org/', 'example.org', { navigationId: undefined, loading: false });
   fireEvent.change(screen.getByRole('textbox', { name: '网页地址' }), { target: { value: 'file:///C:/secret' } });
   fireEvent.click(screen.getByRole('button', { name: '访问' }));
   expect(screen.getByRole('alert').textContent).toContain('HTTP(S)');

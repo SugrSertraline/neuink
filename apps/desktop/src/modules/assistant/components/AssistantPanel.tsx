@@ -20,6 +20,7 @@ import {
   Square,
   Settings
 } from 'lucide-react';
+import { ASSISTANT_ACTION_INCOMPLETE, ASSISTANT_TOOL_PENDING, formatAssistantError, readAssistantDebug, useAssistantDebug } from '@/shared/lib/assistantDebug';
 import {
   useCallback,
   useEffect,
@@ -97,7 +98,9 @@ import {
   subscribeAssistantBackgroundRun,
   type QueuedAssistantDraft
 } from './assistantRunController';
-import { findAssistantBackgroundRun, getAssistantBackgroundRuns, guardAssistantView, queueAssistantBackgroundRun, stopAssistantBackgroundRun, type AssistantBackgroundRunSnapshot } from './assistantBackgroundRuns';
+import { findAssistantBackgroundRun, getAssistantBackgroundRuns, getAssistantMessageQueues, guardAssistantView, queueAssistantBackgroundRun, stopAssistantBackgroundRun, syncAssistantMessageQueueConversation, type AssistantBackgroundRunSnapshot, type AssistantMessageQueueSnapshot } from './assistantBackgroundRuns';
+import { subscribeAssistantConversationNavigation } from './assistantConversationNavigation';
+import { AssistantMessageQueue } from './AssistantMessageQueue';
 import { AssistantBackgroundTasks } from './AssistantBackgroundTasks';
 import {
   AssistantComposerEditor,
@@ -220,11 +223,12 @@ export function AssistantPanel({
       : { mentions: [], text: '' }
   );
   const [composerPrefill, setComposerPrefill] = useState<string | null>(null);
-  const [queuedDraft, setQueuedDraft] = useState<QueuedAssistantDraft | null>(null);
+  const [messageQueues, setMessageQueues] = useState<AssistantMessageQueueSnapshot[]>([]);
   const [busy, setBusy] = useState(false);
   const [decidingProposal, setDecidingProposal] = useState<string | null>(null);
   const proposalDecisionLock = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  const debug = useAssistantDebug();
   const [optimisticMessages, setOptimisticMessages] = useState<ConversationMessage[]>([]);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [toolEventsByMessageId, setToolEventsByMessageId] = useState<
@@ -236,6 +240,7 @@ export function AssistantPanel({
   const runAbortControllerRef = useRef<AbortController | null>(null);
   const viewRef = useRef({ generation: 0, conversationId: null as string | null });
   const [backgroundRuns, setBackgroundRuns] = useState<AssistantBackgroundRunSnapshot[]>([]);
+  const messageQueue = messageQueues.find(queue => queue.root === root && queue.conversationId !== null && queue.conversationId === conversation?.id) ?? null;
   const previousRootRef = useRef(root);
   const currentRootRef = useRef(root);
   currentRootRef.current = root;
@@ -372,7 +377,7 @@ export function AssistantPanel({
       setConversation(null);
       setBusy(false);
       setError(null);
-      setQueuedDraft(null);
+      setMessageQueues([]);
       setOptimisticMessages([]);
       setStreamingMessageId(null);
       setToolEventsByMessageId({});
@@ -381,7 +386,7 @@ export function AssistantPanel({
     const syncBackgroundRun = (finished?: AssistantBackgroundRunSnapshot) => {
       if (finished && finished.root === root) {
         if (finished.conversationId !== viewRef.current.conversationId &&
-            (!finished.queuedDraft || finished.error || finished.abortController.signal.aborted)) {
+            (!getAssistantMessageQueues(root).some(queue => queue.conversationId === finished.conversationId && !queue.paused) || finished.error || finished.abortController.signal.aborted)) {
           notify({ title: finished.abortController.signal.aborted ? '后台对话已停止' : finished.error ? '后台对话运行失败' : '后台对话已完成',
             description: finished.conversation?.title ?? finished.question,
             tone: finished.error && !finished.abortController.signal.aborted ? 'danger' : 'success' });
@@ -390,13 +395,13 @@ export function AssistantPanel({
           .catch(() => { if (mounted) setHistoryError('聊天历史刷新失败，请重新打开历史记录。'); });
       }
       setBackgroundRuns(root ? getAssistantBackgroundRuns(root) : []);
+      setMessageQueues(root ? getAssistantMessageQueues(root) : []);
       const run = root && viewRef.current.conversationId
         ? findAssistantBackgroundRun(root, viewRef.current.conversationId)
         : runAbortControllerRef.current ? getAssistantBackgroundRun(runAbortControllerRef.current) : null;
       if (!run) {
         if (runAbortControllerRef.current) {
           setBusy(false);
-          setQueuedDraft(null);
           setStreamingMessageId(null);
           runAbortControllerRef.current = null;
         }
@@ -407,7 +412,6 @@ export function AssistantPanel({
       }
       setBusy(true);
       setError(run.error);
-      setQueuedDraft(run.queuedDraft ?? null);
       viewRef.current.conversationId = run.conversationId;
       setConversation(run.conversation);
       setOptimisticMessages([]);
@@ -457,7 +461,10 @@ export function AssistantPanel({
       return;
     }
     if (!queued && !resumeExecutionId && readingContext.unavailable) return;
-    if (busy && !queued) {
+    const currentRun = conversation ? findAssistantBackgroundRun(root, conversation.id)
+      : runAbortControllerRef.current ? getAssistantBackgroundRun(runAbortControllerRef.current) : null;
+    if (!queued && !currentRun && (busy || messageQueue?.items.length)) return;
+    if (currentRun && !queued) {
       const snapshot: AssistantComposerSnapshot = {
         mentions: composerSnapshot.mentions.map((mention) => ({ ...mention })),
         text: composerSnapshot.text
@@ -478,12 +485,11 @@ export function AssistantPanel({
         scope: structuredClone(scope),
         snapshot
       };
-      const controller = runAbortControllerRef.current;
+      const controller = currentRun.abortController;
       const queuedGeneration = viewRef.current.generation;
-      if (!controller || !queueAssistantBackgroundRun(controller, draft, latest => {
-        void send(draft, undefined, latest, queuedGeneration);
-      })) return;
-      setQueuedDraft(draft);
+      if (!queueAssistantBackgroundRun(controller, draft, (latest, frozenDraft) =>
+        send(frozenDraft, undefined, latest, queuedGeneration))) return;
+      setComposerSnapshot({ mentions: [], text: '' });
       setComposerResetKey((key) => key + 1);
       return;
     }
@@ -608,7 +614,6 @@ export function AssistantPanel({
     const generation = ++viewRef.current.generation;
     viewRef.current.conversationId = conversationId;
     runAbortControllerRef.current = null;
-    setQueuedDraft(null);
     setConversation(null);
     setBusy(true);
     setError(null);
@@ -621,12 +626,13 @@ export function AssistantPanel({
       const loaded = running?.conversation ?? await loadConversation(root, conversationId);
       if (viewRef.current.generation !== generation) return false;
       const latest = findAssistantBackgroundRun(root, conversationId);
+      if (!latest) syncAssistantMessageQueueConversation(root, loaded);
       setConversation(latest?.conversation ?? loaded);
       setStreamingMessageId(latest?.streamingMessageId ?? null);
       setToolEventsByMessageId(latest?.toolEventsByMessageId ?? {});
       setNoteProposalsByMessageId(latest?.noteProposalsByMessageId ?? {});
       setError(latest?.error ?? null);
-      setQueuedDraft(latest?.queuedDraft ?? null);
+      setMessageQueues(getAssistantMessageQueues(root));
       runAbortControllerRef.current = latest?.abortController ?? null;
       setHistoryOpen(false);
       return true;
@@ -637,6 +643,10 @@ export function AssistantPanel({
       if (viewRef.current.generation === generation) setBusy(Boolean(findAssistantBackgroundRun(root, conversationId)));
     }
   };
+
+  const navigateConversation = useStableEvent((id: string) => { void openConversation(id); });
+  useEffect(() => root ? subscribeAssistantConversationNavigation(root, request => navigateConversation(request.conversationId)) : undefined,
+    [root, navigateConversation]);
 
   const toggleConversationHistory = async () => {
     if (historyOpen) {
@@ -665,7 +675,7 @@ export function AssistantPanel({
   };
 
   const deleteConversationHistory = async (item: ConversationMeta) => {
-    if (!root || busy || findAssistantBackgroundRun(root, item.id)) {
+    if (!root || busy || findAssistantBackgroundRun(root, item.id) || getAssistantMessageQueues(root).some(queue => queue.conversationId === item.id)) {
       return;
     }
 
@@ -698,7 +708,7 @@ export function AssistantPanel({
       const message = caught instanceof Error ? caught.message : String(caught);
       setError(message);
       notify({
-        description: message,
+        description: formatAssistantError(message, { debug: readAssistantDebug(), fallback: ASSISTANT_ACTION_INCOMPLETE }),
         title: '删除失败',
         tone: 'danger'
       });
@@ -709,7 +719,7 @@ export function AssistantPanel({
   };
 
   const renameConversationHistory = async (item: ConversationMeta, nextTitle: string) => {
-    if (!root || busy || findAssistantBackgroundRun(root, item.id)) {
+    if (!root || busy || findAssistantBackgroundRun(root, item.id) || getAssistantMessageQueues(root).some(queue => queue.conversationId === item.id)) {
       return;
     }
 
@@ -736,7 +746,7 @@ export function AssistantPanel({
       const message = caught instanceof Error ? caught.message : String(caught);
       setError(message);
       notify({
-        description: message,
+        description: formatAssistantError(message, { debug: readAssistantDebug(), fallback: ASSISTANT_ACTION_INCOMPLETE }),
         title: '重命名失败',
         tone: 'danger'
       });
@@ -747,7 +757,7 @@ export function AssistantPanel({
   };
 
   const exportConversationHistory = async (item: ConversationMeta) => {
-    if (!root || busy || findAssistantBackgroundRun(root, item.id)) {
+    if (!root || busy || findAssistantBackgroundRun(root, item.id) || getAssistantMessageQueues(root).some(queue => queue.conversationId === item.id)) {
       return;
     }
 
@@ -766,7 +776,7 @@ export function AssistantPanel({
       const message = caught instanceof Error ? caught.message : String(caught);
       setError(message);
       notify({
-        description: message,
+        description: formatAssistantError(message, { debug: readAssistantDebug(), fallback: ASSISTANT_ACTION_INCOMPLETE }),
         title: '导出失败',
         tone: 'danger'
       });
@@ -793,7 +803,7 @@ export function AssistantPanel({
       const message = caught instanceof Error ? caught.message : String(caught);
       setError(message);
       notify({
-        description: message,
+        description: formatAssistantError(message, { debug: readAssistantDebug(), fallback: ASSISTANT_ACTION_INCOMPLETE }),
         title: '导出失败',
         tone: 'danger'
       });
@@ -808,7 +818,6 @@ export function AssistantPanel({
     runAbortControllerRef.current = null;
     setBusy(false);
     setError(null);
-    setQueuedDraft(null);
     setComposerResetKey(key => key + 1);
     setConversation(null);
     setOptimisticMessages([]);
@@ -859,12 +868,15 @@ export function AssistantPanel({
     try {
       await decideStoredProposal({ root, conversationId, proposal, decision,
         apply: confirmation => 'action' in proposal ? onApplyTagProposal(proposal, confirmation) : onApplyEntryMetaProposal(proposal, confirmation),
-        onConversation: saved => setConversation(current => currentRootRef.current === root && current?.id === saved.id ? saved : current)
+        onConversation: saved => {
+          syncAssistantMessageQueueConversation(root, saved);
+          setConversation(current => currentRootRef.current === root && current?.id === saved.id ? saved : current);
+        }
       });
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : String(caught);
       if (currentRootRef.current === root && viewRef.current.conversationId === conversationId) setError(message);
-      notify({ title: '修改未确认完成', description: `${message} 请核对目标数据；系统不会自动重试。`, tone: 'danger' });
+      notify({ title: '修改未确认完成', description: formatAssistantError(message, { debug: readAssistantDebug(), fallback: '请核对目标数据；系统不会自动重试。' }), tone: 'danger' });
     } finally {
       proposalDecisionLock.current = false;
       setDecidingProposal(null);
@@ -937,6 +949,7 @@ export function AssistantPanel({
           tool_events: updated.message.tool_events ?? []
         }
       );
+      syncAssistantMessageQueueConversation(root, conversationState);
       setConversation((current) =>
         current?.id === conversationState.id ? conversationState : current
       );
@@ -945,7 +958,7 @@ export function AssistantPanel({
       const message = caught instanceof Error ? caught.message : String(caught);
       setError(message);
       notify({
-        description: message,
+        description: formatAssistantError(message, { debug: readAssistantDebug(), fallback: ASSISTANT_ACTION_INCOMPLETE }),
         title: '无法保存对话状态',
         tone: 'danger'
       });
@@ -993,7 +1006,7 @@ export function AssistantPanel({
         <AssistantRunStatus
           busy={busy}
           error={error}
-          queued={Boolean(queuedDraft)}
+          queued={Boolean(messageQueue?.items.length)}
           streaming={Boolean(streamingMessageId)}
           toolEvents={runStatusToolEvents}
         />
@@ -1065,7 +1078,7 @@ export function AssistantPanel({
 
           {error ? (
             <div className="mt-2 rounded-md border border-destructive/25 bg-destructive/5 p-2 text-xs leading-5 text-destructive">
-              {error}
+              {formatAssistantError(error, { debug, fallback: busy ? ASSISTANT_TOOL_PENDING : '助手未完成本次操作，请核对结果后再继续。' })}
             </div>
           ) : null}
 
@@ -1080,7 +1093,8 @@ export function AssistantPanel({
 
           <AssistantConversationHistory
             busy={busy}
-            runningConversationIds={backgroundRuns.flatMap(run => run.conversationId ? [run.conversationId] : [])}
+            runningConversationIds={[...backgroundRuns.flatMap(run => run.conversationId ? [run.conversationId] : []),
+              ...messageQueues.flatMap(queue => queue.conversationId ? [queue.conversationId] : [])]}
             conversationId={conversation?.id ?? null}
             error={historyError}
             items={visibleConversations}
@@ -1149,6 +1163,7 @@ export function AssistantPanel({
         </div>
 
         <div className="min-w-0 border-t p-2" data-material="sidebar-toolbar">
+          <AssistantMessageQueue queue={messageQueue} running={busy} />
           <ToolApprovalPanel root={root} conversationId={conversation?.id ?? null} onOpen={id => void openConversation(id)} />
           <UserInputPanel root={root} conversationId={conversation?.id ?? null} onOpen={id => void openConversation(id)} onOpenSource={onOpenSource} />
           <div hidden={awaitingUserInput}>
@@ -1206,17 +1221,17 @@ export function AssistantPanel({
                 停止
               </Button>
               <Button
-                disabled={!selectedProfile || !question.trim() || Boolean(queuedDraft) || readingContext.unavailable}
+                disabled={!selectedProfile || !question.trim() || readingContext.unavailable || !conversation || Boolean(runAbortControllerRef.current?.signal.aborted)}
                 size="sm"
                 type="button"
                 onClick={() => void send()}
               >
                 <Send />
-                {queuedDraft ? '已排队' : '排队发送'}
+                排队发送
               </Button>
             </> : <Button
               data-guide="assistant-send"
-              disabled={!selectedProfile || !question.trim() || readingContext.unavailable}
+              disabled={!selectedProfile || !question.trim() || readingContext.unavailable || Boolean(messageQueue?.items.length)}
               size="sm"
               type="button"
               onClick={() => void send()}

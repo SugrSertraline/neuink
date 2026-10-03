@@ -2,11 +2,13 @@ import { useState } from 'react';
 import { Check, Loader2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useNoteReview } from './NoteReviewContext';
+import { formatAssistantError, useAssistantDebug } from '@/shared/lib/assistantDebug';
 
 export function NoteReviewDecisionBar({ proposalId, invalid }: { proposalId: string; invalid: boolean }) {
   const review = useNoteReview();
   const item = review?.items[proposalId];
   const [error, setError] = useState<string | null>(null);
+  const debug = useAssistantDebug();
   if (!review || !item || ['applied', 'rejected'].includes(item.proposal.status)) return null;
   const busy = review.deciding.length > 0 || item.proposal.status === 'applying';
   const connected = review.actionConversationId === item.conversationId;
@@ -25,6 +27,6 @@ export function NoteReviewDecisionBar({ proposalId, invalid }: { proposalId: str
         </Button>
       </div>
     </div>
-    {error ? <p role="alert" className="mt-1 break-words text-destructive">{error}</p> : null}
+    {error ? <p role="alert" className="mt-1 break-words text-destructive">{formatAssistantError(error, { debug, fallback: '修改未确认完成，请先保存草稿并核对笔记，再返回对话重试。' })}</p> : null}
   </footer>;
 }

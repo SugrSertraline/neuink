@@ -1,4 +1,4 @@
-export type PdfJumpRequest = {
+export type PdfJumpRequest = { targetSurfaceKey?: string } & ({
   kind: 'annotation';
   annotationId: string;
   segmentUid: string;
@@ -13,7 +13,7 @@ export type PdfJumpRequest = {
   kind: 'page';
   pageIdx: number;
   requestKey: number;
-};
+});
 
 export type SidePaneTarget = {
   kind: 'markdown-note';

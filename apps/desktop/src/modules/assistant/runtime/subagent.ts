@@ -5,7 +5,8 @@ import type {
 import type { AssistantActiveNote } from '@/shared/types/assistant';
 import type { AgentProfile, AgentRuntimeSettings } from '@/shared/types/agentRuntime';
 import { buildAgentSystemPrompt, resolveAllowedSubagents } from '@/shared/lib/agentRuntimeSettings';
-import { Agent, AgentLoopGuard, AgentLoopGuardError, AgentStoppedError, AgentPersistenceError, RunBudget, createAgentLoopState } from '../agent-core';
+import { assistantErrorDiagnostic } from '@/shared/lib/assistantDebug';
+import { Agent, AgentLocalLimitError, AgentLoopGuard, AgentLoopGuardError, AgentStoppedError, RunBudget, createAgentLoopState } from '../agent-core';
 import { createAssistantTools } from '../sdk/tools';
 import { createAgentDriver, agentExecutors } from '../sdk/agentDriver';
 import { SourceLedger } from './sourceLedger';
@@ -128,6 +129,7 @@ export async function runSubagentTask(options: RunSubagentTaskOptions): Promise<
     reserveParentTurn: true,
     beforeTurn: () => guard.startTurn(),
     isFatal: (error) => error instanceof AgentLoopGuardError,
+    toolErrorDiagnostic: assistantErrorDiagnostic,
     verify: (answer) => {
       if (!answer.trim()) return 'Return the result of your delegated task or a concrete blocker.';
       const invalid = [...answer.matchAll(/\[S(\d+)]/g)].some((match) => !ledger.sources.has(Number(match[1])));
@@ -138,12 +140,14 @@ export async function runSubagentTask(options: RunSubagentTaskOptions): Promise<
   try { answer = await executor.run(); }
   catch (error) {
     abortSignal?.throwIfAborted();
-    if (error instanceof AgentPersistenceError) throw error;
+    if ((error instanceof AgentStoppedError && !(error instanceof AgentLocalLimitError))
+      || (error instanceof Error && error.name === 'AbortError')) throw error;
     if (budget.turns >= budget.maxTurns || budget.inputTokens + budget.outputTokens >= budget.maxReportedTokens) {
       throw new AgentStoppedError('共享模型预算已耗尽，不能继续子任务或主助手请求。');
     }
     state.status = 'failed';
     state.stopReason = '子任务未能完成，已交还主助手处理。';
+    if (error instanceof AgentLocalLimitError) throw error;
     // Read-only child failures are observations, not parent failures. Never include raw
     // provider errors; retain bounded, genuinely acquired evidence as untrusted data.
     const evidence = [...ledger.sources].slice(-8).map(([marker, source]) => ({ marker: `[S${marker}]`, quote: source.quote?.slice(0, 600) }));

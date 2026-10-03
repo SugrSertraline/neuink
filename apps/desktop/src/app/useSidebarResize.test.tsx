@@ -13,10 +13,10 @@ const commit = vi.fn();
 const rendered = vi.fn();
 const frames = new Map<number, FrameRequestCallback>();
 let nextFrameId = 0;
-function Fixture({ enabled = true }: { enabled?: boolean }) {
+function Fixture({ enabled = true, liveResize = false }: { enabled?: boolean; liveResize?: boolean }) {
   rendered();
-  const { previewRef, onPointerDown, onKeyDown } = useSidebarResize({ width: 280, min: 220, max: 820, enabled, onCommit: commit });
-  return <div data-testid="shell" className="app-shell"><div role="separator" aria-label="侧栏" onPointerDown={onPointerDown} onKeyDown={onKeyDown} /><div data-testid="preview" ref={previewRef} hidden /></div>;
+  const { previewRef, onPointerDown, onKeyDown } = useSidebarResize({ width: 280, min: 220, max: 820, enabled, onCommit: commit, liveResize });
+  return <div data-testid="shell" className="app-shell" style={{ '--app-sidebar-width': '280px' } as React.CSSProperties}><div role="separator" aria-label="侧栏" onPointerDown={onPointerDown} onKeyDown={onKeyDown} /><div data-testid="preview" ref={previewRef} hidden /></div>;
 }
 beforeEach(() => {
   vi.stubGlobal('PointerEvent', TestPointerEvent);
@@ -39,6 +39,7 @@ const flushFrame = () => act(() => {
   const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach(callback => callback(0));
 });
 const preview = () => screen.getByTestId('preview') as HTMLDivElement;
+const liveWidth = () => screen.getByTestId('shell').style.getPropertyValue('--app-sidebar-live-width');
 describe('sidebar resize interaction', () => {
   it('ignores a click or a movement below the drag threshold', () => {
     render(<Fixture />); begin(); move(352); fireEvent.pointerUp(window, { pointerId: 1 });
@@ -96,6 +97,7 @@ describe('sidebar resize interaction', () => {
     move(650); flushFrame();
     expect(preview().style.getPropertyValue('--app-sidebar-preview-width')).toBe('520px');
     expect(rendered).toHaveBeenCalledTimes(initialRenders);
+    expect(liveWidth()).toBe('');
     // A repeated clamped/layout width needs no new visual frame.
     move(650);
     expect(frames.size).toBe(0);
@@ -104,6 +106,104 @@ describe('sidebar resize interaction', () => {
     expect(preview().hidden).toBe(true);
     expect(preview().style.getPropertyValue('--app-sidebar-preview-width')).toBe('');
     expect(rendered).toHaveBeenCalledTimes(initialRenders);
+  });
+  it('updates browser layout once per frame at 125% without rerendering or persisting intermediate widths', () => {
+    const view = render(<Fixture liveResize />);
+    const initialRenders = rendered.mock.calls.length;
+    begin(); move(352);
+    expect(frames.size).toBe(0);
+    expect(liveWidth()).toBe('');
+    move(); move(480); move(600);
+    expect(frames.size).toBe(1);
+    expect(liveWidth()).toBe('');
+    flushFrame();
+    expect(liveWidth()).toBe('480px');
+    expect(screen.getByTestId('shell').style.getPropertyValue('--app-sidebar-width')).toBe('280px');
+    expect(preview().style.getPropertyValue('--app-sidebar-preview-width')).toBe('480px');
+    expect(rendered).toHaveBeenCalledTimes(initialRenders);
+    expect(commit).not.toHaveBeenCalled();
+    view.rerender(<Fixture liveResize />);
+    expect(liveWidth()).toBe('480px');
+    move(650); flushFrame();
+    expect(liveWidth()).toBe('520px');
+    move(650);
+    expect(frames.size).toBe(0);
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(commit).toHaveBeenCalledExactlyOnceWith(520);
+    expect(liveWidth()).toBe('');
+    expect(preview().hidden).toBe(true);
+  });
+  it.each(['Escape', 'pointercancel', 'blur', 'capture loss', 'disable', 'mode change', 'unmount'])(
+    'restores live layout on %s and prevents late frames or pointer releases from committing', action => {
+      const view = render(<Fixture liveResize />);
+      const shell = screen.getByTestId('shell');
+      begin(); move(); flushFrame();
+      expect(liveWidth()).toBe('360px');
+      move(600);
+      const lateFrame = [...frames.values()][0];
+      if (action === 'Escape') fireEvent.keyDown(window, { key: 'Escape' });
+      else if (action === 'pointercancel') fireEvent.pointerCancel(window, { pointerId: 1 });
+      else if (action === 'blur') fireEvent.blur(window);
+      else if (action === 'capture loss') fireEvent(screen.getByRole('separator'), new TestPointerEvent('lostpointercapture', { pointerId: 1 }));
+      else if (action === 'disable') view.rerender(<Fixture liveResize enabled={false} />);
+      else if (action === 'mode change') view.rerender(<Fixture />);
+      else view.unmount();
+      expect(frames.size).toBe(0);
+      act(() => lateFrame(0));
+      expect(shell.style.getPropertyValue('--app-sidebar-live-width')).toBe('');
+      expect(shell.classList.contains('is-sidebar-resizing')).toBe(false);
+      expect(document.body.style.cursor).toBe('crosshair');
+      expect(document.body.style.userSelect).toBe('text');
+      fireEvent.pointerUp(window, { pointerId: 1 });
+      expect(commit).not.toHaveBeenCalled();
+    });
+  it.each(['Escape', 'pointerup'])('restores any existing live-width inline value and priority after %s', action => {
+    render(<Fixture liveResize />);
+    const shell = screen.getByTestId('shell');
+    shell.style.setProperty('--app-sidebar-live-width', '290px', 'important');
+    // This jsdom CSSOM drops custom-property priorities; represent the native
+    // value on read and assert that cleanup supplies it back to the setter.
+    vi.spyOn(shell.style, 'getPropertyPriority').mockReturnValue('important');
+    const setProperty = vi.spyOn(shell.style, 'setProperty');
+    begin(); move(); flushFrame();
+    expect(liveWidth()).toBe('360px');
+    if (action === 'Escape') fireEvent.keyDown(window, { key: 'Escape' });
+    else fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(liveWidth()).toBe('290px');
+    expect(setProperty).toHaveBeenLastCalledWith('--app-sidebar-live-width', '290px', 'important');
+  });
+  it('cancels a live drag before a keyboard adjustment and commits only the keyboard width', () => {
+    render(<Fixture liveResize />);
+    begin(); move(); flushFrame();
+    expect(liveWidth()).toBe('360px');
+    fireEvent.keyDown(screen.getByRole('separator'), { key: 'ArrowRight' });
+    expect(commit).toHaveBeenCalledExactlyOnceWith(296);
+    expect(liveWidth()).toBe('');
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(commit).toHaveBeenCalledTimes(1);
+  });
+  it('clears a live preview when the workspace shell is replaced', () => {
+    vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1200);
+    function WorkspaceFixture({ workspace }: { workspace: string }) {
+      const ref = useRef<HTMLDivElement>(null);
+      const resize = useSidebarResize({ width: 280, min: 220, max: 820, enabled: true, liveResize: true, onCommit: commit, containerRef: ref });
+      return <div key={workspace} data-testid="shell" ref={resize.observeContainer}><div role="separator" onPointerDown={resize.onPointerDown} /><div ref={resize.previewRef} hidden /></div>;
+    }
+    const view = render(<WorkspaceFixture workspace="first" />);
+    const oldShell = screen.getByTestId('shell');
+    begin(); move(); flushFrame();
+    expect(liveWidth()).toBe('360px');
+    view.rerender(<WorkspaceFixture workspace="next" />);
+    expect(oldShell.style.getPropertyValue('--app-sidebar-live-width')).toBe('');
+    expect(liveWidth()).toBe('');
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(commit).not.toHaveBeenCalled();
+    begin(); move(); flushFrame();
+    expect(liveWidth()).toBe('360px');
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(commit).toHaveBeenCalledExactlyOnceWith(360);
   });
   it.each([[3000, 820], [-350, 220]])('keeps a preview at pointer %s within its width limits', (x, expectedWidth) => {
     render(<Fixture />); begin(); move(x); flushFrame();

@@ -259,6 +259,26 @@ describe('onboarding interaction', () => {
     expect(screen.getByRole('heading', { name:/认识左侧导航/ })).toBeTruthy();
     expect(props.onImportSample).toHaveBeenCalledTimes(3);
   });
+  it('revalidates on every open request even with a previously prepared demo and an open guide', async () => {
+    stored('open-pdf', { entryId:'sample', root:'C:/tutorial' });
+    const props = defaults();
+    render(<OnboardingGuide {...props} entries={[entry]} />);
+    act(() => openOnboarding()); await prepared();
+    expect(props.onImportSample).toHaveBeenCalledTimes(1);
+    props.onImportSample.mockRejectedValueOnce(new Error('缺少演示数据，无法演示。请补齐演示素材。'));
+    props.onRoute.mockClear();
+    act(() => openOnboarding());
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('缺少演示数据，无法演示'));
+    expect(props.onImportSample).toHaveBeenCalledTimes(2);
+    expect(props.onRoute).not.toHaveBeenCalled();
+    expect((screen.getByText('完成并继续') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByText(/已切换到本步页面/)).toBeNull();
+    expect(JSON.parse(localStorage.getItem(GUIDE_STORAGE_KEY)!).current).toBe('open-pdf');
+    fireEvent.click(screen.getByText('暂停引导'));
+    act(() => openOnboarding()); await prepared();
+    expect(props.onImportSample).toHaveBeenCalledTimes(3);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
   it('prepares immediately on opening, exposes errors and only retries explicitly', async () => {
     const props = defaults(); props.onImportSample.mockRejectedValueOnce(new Error('本地示例不可用'));
     render(<OnboardingGuide {...props} />);

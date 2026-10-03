@@ -3,7 +3,7 @@ import type { ModelMessage } from 'ai';
 import type { LlmProfile } from '@/shared/ipc/assistantApi';
 import { contextCut, createContextProjector } from './contextProjection';
 import { runJsonModelTask } from './modelTasks';
-import { RunBudget } from '../agent-core';
+import { AgentLocalLimitError, AgentStoppedError, RunBudget } from '../agent-core';
 vi.mock('./modelTasks', () => ({ runJsonModelTask: vi.fn(async () => ({ summary: 'Read source [S1], no writes applied.' })) }));
 const messages: ModelMessage[] = [
   { role: 'user', content: 'Compare the papers and preserve citations.' },
@@ -40,7 +40,14 @@ describe('context projection', () => {
   });
   it('fails without deleting an oversized initial request or incomplete tool batch', async () => {
     const project = createContextProjector({} as LlmProfile);
-    await expect(project([{ role: 'user', content: 'x'.repeat(6000) }], 3000)).rejects.toThrow('上下文容量');
+    await expect(project([{ role: 'user', content: 'x'.repeat(6000) }], 3000)).rejects.toMatchObject({ reason: 'context_capacity' });
+    await expect(project([{ role: 'user', content: 'x'.repeat(6000) }], 3000)).rejects.toBeInstanceOf(AgentLocalLimitError);
     expect(runJsonModelTask).not.toHaveBeenCalled();
+  });
+  it('does not label an invalid compaction result as a recoverable local capacity limit', async () => {
+    vi.mocked(runJsonModelTask).mockResolvedValueOnce({});
+    const caught = await createContextProjector({} as LlmProfile)(messages, 5000).catch(error => error);
+    expect(caught).toBeInstanceOf(AgentStoppedError);
+    expect(caught).not.toBeInstanceOf(AgentLocalLimitError);
   });
 });

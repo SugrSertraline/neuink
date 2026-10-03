@@ -3,6 +3,8 @@ import type { AssistantContextAddOptions } from '@/shared/types/assistant';
 import { PdfTextSelectionToolbar } from '../pdf-reader/PdfTextSelectionToolbar';
 import { useReflowTextSelection } from './useReflowTextSelection';
 import { useReflowReadingNavigation } from '../navigation/useReflowReadingNavigation';
+import { reflowJumpTarget } from '../../sourceJump';
+import type { PdfJumpRequest } from '../../types';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
@@ -87,6 +89,8 @@ export function ReflowReader({
   sourceBacklinksBySegmentUid,
   scrollToSegmentUid,
   scrollRequestKey,
+  localScrollRequest = false,
+  jumpRequest,
   translationBySegmentUid,
   workspaceRoot,
   onActivateSegment,
@@ -126,6 +130,8 @@ export function ReflowReader({
   sourceBacklinksBySegmentUid: SourceBacklinksBySegmentUid;
   scrollToSegmentUid?: string | null;
   scrollRequestKey?: number;
+  localScrollRequest?: boolean;
+  jumpRequest?: PdfJumpRequest | null;
   translationBySegmentUid: Map<string, TranslatedSegment>;
   workspaceRoot: string | null;
   onActivateSegment: (
@@ -147,6 +153,8 @@ export function ReflowReader({
   onTranslateSegment?: (segment: SourceSegment) => void;
   onTranslateTextSelection?: (input: { segment: SourceSegment; text: string }) => Promise<string>;
 }) {
+  const { notify } = useToast();
+  const unavailableJumpRef = useRef<string | null>(null);
   const segmentGroups = useMemo(
     () => buildReflowSegmentGroups(segments),
     [segments],
@@ -223,7 +231,7 @@ export function ReflowReader({
     workspaceRoot,
   });
   useEffect(() => {
-    if (navigation.hasRetainedPosition || scrollToSegmentUid || !savedReadingState || savedReadingState.current_page_idx === null) {
+    if (navigation.hasRetainedPosition || jumpRequest || scrollToSegmentUid || !savedReadingState || savedReadingState.current_page_idx === null) {
       return;
     }
     const resumeKey = `${entryId}:${savedReadingState.document_hash ?? "none"}`;
@@ -237,18 +245,25 @@ export function ReflowReader({
       resumedReadingStateKeyRef.current = resumeKey;
       rowVirtualizer.scrollToIndex(groupIndex, { align: "start" });
     }
-  }, [entryId, navigation.hasRetainedPosition, scrollToSegmentUid, rowVirtualizer, savedReadingState, visibleSegmentGroups]);
+  }, [entryId, navigation.hasRetainedPosition, jumpRequest, scrollToSegmentUid, rowVirtualizer, savedReadingState, visibleSegmentGroups]);
   useEffect(() => {
-    if (!scrollToSegmentUid) return;
-    const jumpKey = `${entryId}:${scrollToSegmentUid}:${scrollRequestKey}`;
+    if (!jumpRequest && !scrollToSegmentUid) return;
+    const jumpKey = jumpRequest ? `${entryId}:source:${jumpRequest.requestKey}` : `${entryId}:${scrollToSegmentUid}:${scrollRequestKey}`;
     if (navigation.isJumpHandled?.(jumpKey)) return;
-    const groupIndex = groupIndexBySegmentUid.get(scrollToSegmentUid);
+    const target = jumpRequest ? reflowJumpTarget(visibleSegmentGroups, jumpRequest) : null;
+    const segmentUid = (jumpRequest ? target?.segmentUid : scrollToSegmentUid) ?? undefined;
+    const groupIndex = segmentUid ? groupIndexBySegmentUid.get(segmentUid) : undefined;
     if (groupIndex !== undefined) {
-      navigation.markJumpHandled?.(jumpKey);
-      if (navigation.navigate) navigation.navigate({ pageIdx: visibleSegmentGroups[groupIndex].body.page_idx, segmentUid: scrollToSegmentUid });
+      const localOnly = localScrollRequest || Boolean(jumpRequest?.targetSurfaceKey);
+      navigation.markJumpHandled?.(jumpKey, { localOnly });
+      if (navigation.navigate) navigation.navigate({ pageIdx: visibleSegmentGroups[groupIndex].body.page_idx, segmentUid, ...(localOnly ? { focus: false } : {}) }, { localOnly });
       else rowVirtualizer.scrollToIndex(groupIndex, { align: 'center' });
+    } else if (jumpRequest && unavailableJumpRef.current !== jumpKey) {
+      unavailableJumpRef.current = jumpKey;
+      notify({ tone: 'default', title: `第 ${jumpRequest.pageIdx + 1} 页没有可定位的重排内容`,
+        description: '该页内容可能已隐藏或未解析，请恢复隐藏内容后重新定位，或手动切换到 PDF 查看。' });
     }
-  }, [groupIndexBySegmentUid, rowVirtualizer, scrollRequestKey, scrollToSegmentUid]);
+  }, [entryId, groupIndexBySegmentUid, rowVirtualizer, scrollRequestKey, scrollToSegmentUid, localScrollRequest, jumpRequest, visibleSegmentGroups, notify]);
   const updatePreview = useCallback(
     (next: ReflowPreviewPointerState | null) => {
       if (!hoverPreviewEnabled || !next || hoverInteractionBlocked()) {
@@ -288,6 +303,7 @@ export function ReflowReader({
           onJumpToSegment={(segmentUid) => {
             const groupIndex = groupIndexBySegmentUid.get(segmentUid);
             if (groupIndex === undefined) return;
+            navigation.beginUserNavigation?.();
             navigation.remember?.();
             rowVirtualizer.scrollToIndex(groupIndex, { align: "start" });
           }}

@@ -67,7 +67,7 @@ it('imports dropped PDFs sequentially and reports partial failure', async () => 
   act(() => emit({ type: 'drop', position: { x: 10, y: 10 }, paths: ['a.pdf', 'b.PDF', 'c.pdf', 'note.txt'] }));
   expect(view.result.current.dragActive).toBe(false);
   expect(createEntry).toHaveBeenCalledTimes(1);
-  expect(view.result.current.progress).toEqual({ completed: 0, total: 3 });
+  expect(view.result.current.progress).toEqual({ completed: 0, total: 3, root: 'C:\\library', id: expect.any(String), startedAt: expect.any(Number) });
   await act(async () => { releaseFirst?.(); });
   await waitFor(() => expect(createEntry).toHaveBeenCalledTimes(3));
   await waitFor(() => expect(view.result.current.progress).toBeNull());

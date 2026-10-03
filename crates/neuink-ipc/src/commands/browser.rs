@@ -2,16 +2,30 @@
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager, Runtime, WebviewUrl};
 
+#[path = "browser_bounds.rs"]
+mod geometry;
+#[path = "browser_media.rs"]
+mod media;
+#[path = "browser_occlusion.rs"]
+mod occlusion;
+#[path = "browser_occlusion_geometry.rs"]
+mod occlusion_geometry;
+#[path = "browser_popup.rs"]
+mod popup;
+#[path = "browser_read.rs"]
+mod read;
+#[path = "browser_snapshot.rs"]
+mod snapshot;
+#[path = "browser_zoom.rs"]
+mod zoom;
+use geometry::bounds;
+pub use geometry::BrowserBounds;
+pub use read::ReadBrowserRequest;
+pub use snapshot::BrowserSnapshot;
+
 const PREFIX: &str = "browser-";
 // Concurrent creates must not race the child count or register the same label twice.
 static CREATE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-#[derive(Clone, Deserialize)]
-pub struct BrowserBounds {
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-}
 #[derive(Deserialize)]
 pub struct BrowserRequest {
     id: String,
@@ -19,10 +33,13 @@ pub struct BrowserRequest {
     url: Option<String>,
     bounds: Option<BrowserBounds>,
     visible: Option<bool>,
+    zoom: Option<f64>,
+    occlusions: Option<Vec<occlusion_geometry::Occlusion>>,
 }
 #[derive(Clone, Serialize)]
 struct BrowserEvent {
     id: String,
+    navigation_id: Option<String>,
     url: Option<String>,
     title: Option<String>,
     loading: Option<bool>,
@@ -67,6 +84,7 @@ fn publish<R: Runtime>(
         "neuink:browser-state",
         BrowserEvent {
             id: id.into(),
+            navigation_id: read::navigation_id(id),
             url,
             title,
             loading,
@@ -74,26 +92,6 @@ fn publish<R: Runtime>(
         },
     );
 }
-fn bounds(value: BrowserBounds) -> Result<tauri::Rect, String> {
-    if [value.x, value.y, value.width, value.height]
-        .iter()
-        .any(|v| !v.is_finite())
-        || value.x < 0.0
-        || value.y < 0.0
-        || value.width < 1.0
-        || value.height < 1.0
-        || [value.x, value.y, value.width, value.height]
-            .iter()
-            .any(|v| *v > 30000.0)
-    {
-        return Err("网页区域尺寸无效".into());
-    }
-    Ok(tauri::Rect {
-        position: tauri::LogicalPosition::new(value.x, value.y).into(),
-        size: tauri::LogicalSize::new(value.width, value.height).into(),
-    })
-}
-
 #[tauri::command]
 pub async fn browser_command<R: Runtime>(
     app: tauri::AppHandle<R>,
@@ -105,6 +103,7 @@ pub async fn browser_command<R: Runtime>(
     }
     let label = format!("{PREFIX}{}", request.id);
     if request.action == "close" {
+        read::forget(&request.id)?;
         if let Some(view) = app.get_webview(&label) {
             view.close().map_err(|_| "关闭网页失败")?;
         }
@@ -135,19 +134,27 @@ pub async fn browser_command<R: Runtime>(
         let title_id = request.id.clone();
         let popup_app = app.clone();
         let popup_id = request.id.clone();
+        let popup_requests = popup::PopupRequests::default();
         let download_app = app.clone();
         let download_id = request.id.clone();
+        let read_state = read::TabReadState::new();
+        let nav_read_state = read_state.clone();
+        let page_read_state = read_state.clone();
         let blank = tauri::Url::parse("about:blank").map_err(|_| "无法初始化空白页")?;
         let builder = tauri::webview::WebviewBuilder::new(&label, WebviewUrl::External(blank))
             .incognito(true)
             .focused(false)
             .use_https_scheme(false)
             .disable_drag_drop_handler()
+            .zoom_hotkeys_enabled(true)
             .on_navigation(move |url| {
                 if url.as_str() == "about:blank" {
                     return true;
                 }
                 let allowed = remote_url(url.as_str()).is_ok();
+                if allowed {
+                    nav_read_state.navigate();
+                }
                 publish(
                     &nav_app,
                     &nav_id,
@@ -160,6 +167,11 @@ pub async fn browser_command<R: Runtime>(
             })
             .on_page_load(move |_, payload| {
                 if remote_url(payload.url().as_str()).is_ok() {
+                    if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+                        page_read_state.finish();
+                    } else {
+                        page_read_state.navigate();
+                    }
                     publish(
                         &page_app,
                         &page_id,
@@ -183,14 +195,17 @@ pub async fn browser_command<R: Runtime>(
                     None,
                 )
             })
-            .on_new_window(move |_, _| {
-                publish(
-                    &popup_app,
+            .on_new_window(move |url, _features| {
+                popup::forward_new_window(
+                    &popup_requests,
                     &popup_id,
-                    None,
-                    None,
-                    None,
-                    Some("网页请求打开新窗口；请复制链接，在新网页标签中打开。".into()),
+                    url.as_str(),
+                    |event| {
+                        popup_app
+                            .emit_to("main", "neuink:browser-open-tab", event)
+                            .map_err(|_| "无法打开新网页标签，请重试。".into())
+                    },
+                    |error| publish(&popup_app, &popup_id, None, None, None, Some(error)),
                 );
                 tauri::webview::NewWindowResponse::Deny
             })
@@ -215,21 +230,35 @@ pub async fn browser_command<R: Runtime>(
         }
         let focus_app = app.clone();
         let focus_id = request.id.clone();
-        if let Err(error) = super::browser_isolation::isolate(&view, move || {
-            let _ = focus_app.emit_to("main", "neuink:browser-focus", &focus_id);
-        })
+        let zoom_app = app.clone();
+        let zoom_id = request.id.clone();
+        if let Err(error) = super::browser_isolation::isolate(
+            &view,
+            move || {
+                let _ = focus_app.emit_to("main", "neuink:browser-focus", &focus_id);
+            },
+            move |factor| {
+                let _ = zoom::publish(&zoom_app, &zoom_id, factor);
+            },
+        )
         .await
         {
             let _ = view.close();
             return Err(error);
         }
+        read::remember(&request.id, read_state)?;
         if view.hide().is_err() || view.navigate(url).is_err() {
+            let _ = read::forget(&request.id);
             let _ = view.close();
             return Err("初始化网页失败".into());
         }
         return Ok(());
     }
     let view = app.get_webview(&label).ok_or("网页尚未打开")?;
+    if request.action == "zoom" {
+        let factor = zoom::validate(request.zoom)?;
+        return zoom::apply(&view, app, request.id, factor).await;
+    }
     let result = match request.action.as_str() {
         "navigate" => view.navigate(remote_url(request.url.as_deref().ok_or("请输入网址")?)?),
         "reload" => view.reload(),
@@ -238,8 +267,19 @@ pub async fn browser_command<R: Runtime>(
         "stop" => view.eval("window.stop()"),
         "layout" => {
             if request.visible == Some(true) {
-                view.set_bounds(bounds(request.bounds.ok_or("缺少网页区域")?)?)
+                let requested = request.bounds.ok_or("缺少网页区域")?;
+                let scale = view
+                    .window()
+                    .scale_factor()
+                    .map_err(|_| "无法读取网页区域比例")?;
+                let plan = occlusion_geometry::plan(
+                    &requested,
+                    request.occlusions.as_deref().unwrap_or_default(),
+                    scale,
+                )?;
+                view.set_bounds(bounds(requested)?)
                     .map_err(|_| "调整网页区域失败")?;
+                occlusion::apply(&app, &view, plan).await?;
                 view.show()
             } else {
                 view.hide()
@@ -248,6 +288,24 @@ pub async fn browser_command<R: Runtime>(
         _ => return Err("未知网页操作".into()),
     };
     result.map_err(|_| "网页操作失败，请重试".into())
+}
+
+#[tauri::command]
+pub async fn read_browser_tab<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    webview: tauri::Webview<R>,
+    request: ReadBrowserRequest,
+) -> Result<BrowserSnapshot, String> {
+    read::capture(&app, &webview, request).await
+}
+
+#[tauri::command]
+pub fn cancel_browser_read<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    webview: tauri::Webview<R>,
+    call_id: String,
+) -> Result<(), String> {
+    read::cancel(&app, &webview, &call_id)
 }
 
 #[cfg(test)]
@@ -271,23 +329,9 @@ mod tests {
         assert!(remote_url("https://arxiv.org/abs/2603.05085").is_ok());
     }
     #[test]
-    fn identities_and_geometry_are_bounded() {
+    fn identities_are_bounded() {
         assert!(valid_id("abc-123"));
         assert!(!valid_id("../main"));
         assert!(!valid_id(""));
-        assert!(bounds(BrowserBounds {
-            x: 0.0,
-            y: 60.0,
-            width: 600.0,
-            height: 400.0
-        })
-        .is_ok());
-        assert!(bounds(BrowserBounds {
-            x: f64::NAN,
-            y: 0.0,
-            width: 1.0,
-            height: 1.0
-        })
-        .is_err());
     }
 }

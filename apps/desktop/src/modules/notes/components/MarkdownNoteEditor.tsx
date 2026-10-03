@@ -42,6 +42,7 @@ import { MarkdownInsertMenu } from './MarkdownInsertMenu';
 import { MarkdownNoteConflictPanel } from './MarkdownNoteConflictPanel';
 import { MarkdownNoteHeader } from './MarkdownNoteHeader';
 import { MarkdownNoteToolbar } from './MarkdownNoteToolbar';
+import { NoteOutlineSidebar } from './NoteOutlineSidebar';
 import { SourceLinksPanel } from './SourceLinksPanel';
 import { NoteSourcesProvider } from '../NoteSourcesContext';
 import { useMarkdownBlockDrag } from './useMarkdownBlockDrag';
@@ -568,14 +569,15 @@ export function MarkdownNoteEditor({
     <div
       data-guide-note-save-state={loading ? 'loading' : error ? 'error' : saving ? 'saving' : dirty ? 'dirty' : canEdit ? 'saved' : 'read-only'}
       className={cn(
-        'markdown-note-editor grid h-full w-full min-h-0 min-w-0 max-w-full grid-cols-1 grid-rows-[minmax(0,1fr)]',
+        'markdown-note-editor relative isolate grid h-full w-full min-h-0 min-w-0 max-w-full grid-cols-[auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)]',
         editorScopeKey && 'markdown-note-editor-embedded'
       )}
       onKeyDownCapture={saveFromFocusedEditor}
     >
+      <NoteOutlineSidebar editor={editor} scrollRef={editorScrollRef} disabled={loading || loadFailed} />
       <section
         className={cn(
-          'grid min-h-0 min-w-0 grid-cols-1 gap-3',
+          'markdown-note-main grid min-h-0 min-w-0 grid-cols-1 gap-3',
           conflict
             ? 'grid-rows-[auto_auto_minmax(0,1fr)]'
             : 'grid-rows-[auto_minmax(0,1fr)]'

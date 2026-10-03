@@ -7,11 +7,13 @@ import { buildRenderedNoteDiff } from './renderedNoteDiff';
 import { revealReviewTarget } from './reviewNavigation';
 import { NoteDiffLines, NoteDiffContext, noteChangeKind } from './NoteDiffLines';
 import { NoteReviewDecisionBar } from './NoteReviewDecisionBar';
+import { formatAssistantError, useAssistantDebug } from '@/shared/lib/assistantDebug';
 
 export function NoteReviewPage({ proposalId, onOpenNote }: {
   proposalId: string; onOpenNote: (entryId: string, noteId: string) => void;
 }) {
   const review = useNoteReview();
+  const debug = useAssistantDebug();
   const item = review?.items[proposalId];
   const proposal = item?.proposal;
   const [selected, setSelected] = useState(0);
@@ -64,8 +66,10 @@ export function NoteReviewPage({ proposalId, onOpenNote }: {
     </div>
     <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 [scrollbar-gutter:stable]">
       <p className="mb-3 text-xs text-muted-foreground">内容已渲染：红色 − 为修改前，绿色 + 为修改后；图表、表格和公式按完整内容展示。确认前不会写入笔记。</p>
-      {result.error ? <p role="alert" className="text-sm text-destructive">{result.error}</p> : null}
-      {proposal?.error ? <p role="alert" className="mb-2 text-xs text-destructive">{proposal.error}</p> : null}
+      {result.error ? <p role="alert" className="text-sm text-destructive">{!proposal
+        ? '修改记录尚未加载，请从对应的对话提案重新打开。'
+        : formatAssistantError(result.error, { debug, fallback: '无法生成修改对比，请核对当前笔记并返回对话重新生成提案。' })}</p> : null}
+      {proposal?.error ? <p role="alert" className="mb-2 text-xs text-destructive">{formatAssistantError(proposal.error, { debug, fallback: '修改未完成，请先核对笔记，再返回对话重试。' })}</p> : null}
       {proposal?.noteTitle && proposal.noteTitle !== proposal.title ? <div className="mb-3 border-l-2 border-primary pl-2 text-sm">
         <span className="font-medium">标题修改</span><p className="break-words">{proposal.noteTitle} → {proposal.title}</p>
       </div> : null}

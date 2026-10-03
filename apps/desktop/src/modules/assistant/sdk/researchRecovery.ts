@@ -1,6 +1,7 @@
 import { RESEARCH_READ_TOOLS } from '@/shared/ipc/researchApi';
 import type { AssistantToolTraceEvent } from '@/shared/ipc/assistantApi';
 import { toolFingerprint } from '../agent-core/cycleGuard';
+import { AgentToolNotExecutedError } from '../agent-core/agent';
 
 const READ_TOOLS = new Set<string>([...RESEARCH_READ_TOOLS, 'search_sciverse_evidence', 'read_sciverse_content',
   'search_sciverse_metadata', 'get_sciverse_metadata_catalog', 'search_sciverse_paper_schema', 'get_sciverse_paper_schema']);
@@ -32,6 +33,6 @@ export function assertResearchRetry(name: string, input: unknown, events: readon
   const failures = events.filter(event => event.toolName === name && event.status === 'error'
     && requestKey(name, event.input) === key);
   if (failures.some(event => NO_RETRY_STATUS.test(event.error ?? '')) || failures.length >= 2) {
-    throw new Error('已跳过重复失败的检索请求（READ_RETRY_SKIPPED）。请更换来源或整理已有结果。');
+    throw new AgentToolNotExecutedError('已跳过重复失败的检索请求（READ_RETRY_SKIPPED）。请更换来源或整理已有结果。', 'TOOL_REPEAT_SKIPPED');
   }
 }

@@ -11,7 +11,8 @@ import {
   useMemo,
   useReducer,
   useRef,
-  useState
+  useState,
+  useSyncExternalStore
 } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -48,6 +49,8 @@ import {
   type WorkspaceSurface
 } from './workspaceSurface';
 import { resolveEntrySidebarContext, resolveTagNoteSidebarContext } from './entrySidebarContext';
+import { resolveSourceLinkSurface } from './workspaceSourceNavigation';
+import { localizeSciverseImages } from './sciverseRemoteImages';
 import { TagNoteDetailsSidebar } from '../modules/notes/components/TagNoteDetailsSidebar';
 import { sameTagEntries, startTagReadingActions, tagNoteOpenPane, tagReadingMoveTargets, tagReadingSurface } from './tagReadingNavigation';
 import { SameTagSidebar } from '../modules/library/components/SameTagSidebar';
@@ -61,7 +64,7 @@ import {
 } from './activityBarState';
 import { WorkspaceTabsBar } from './WorkspaceTabsBar';
 import { assistantSurfaceContext } from './assistantSurfaceContext';
-import { BROWSER_OPEN_EVENT, browserTitle, normalizeBrowserUrl } from '@/modules/browser/browserUrl';
+import { useBrowserTabRequests } from './useBrowserTabRequests';
 import {
   clampWorkspaceSplitLeftWidth,
   getWorkspaceSplitMinimums
@@ -98,6 +101,11 @@ import { usePdfDropImport } from './usePdfDropImport';
 import { noteCatalogRefreshKey } from './noteCatalogRefreshKey';
 import { useWorkspace } from '../shared/hooks/useWorkspace';
 import { useWorkspaceJobs } from '../shared/hooks/useWorkspaceJobs';
+import { getLocalBackgroundJobs, subscribeLocalBackgroundJobs } from '../shared/lib/localBackgroundJobs';
+import { useAssistantTaskDock } from './useAssistantTaskDock';
+import { workspaceTaskProjection } from './workspaceTaskProjection';
+import { isRunningJob, recentBackgroundJobs } from '../shared/lib/backgroundJobs';
+import { assistantErrorDiagnostic, formatAssistantError, readAssistantDebug, ASSISTANT_IMPORT_INCOMPLETE } from '../shared/lib/assistantDebug';
 import {
   APP_THEME_STORAGE_KEY,
   APP_THEME_PRESETS,
@@ -249,41 +257,8 @@ async function localizeSciverseRemoteImages({
   root: string;
   source: Extract<ConversationSourceLink, { provider: 'sciverse' }>;
 }) {
-  const replacements = new Map<string, Promise<string>>();
-  const failures: string[] = [];
-  let imageCount = 0;
-
-  const localize = async (url: string, alt: string) => {
-    if (!replacements.has(url)) {
-      imageCount += 1;
-      replacements.set(
-        url,
-        saveSciverseRemoteImage({ entryId, noteId, root, source, url, imageIndex: imageCount }).catch((error) => {
-          const message = error instanceof Error ? error.message : String(error);
-          failures.push(`${alt || url}：${message}`);
-          return `[图片未能保存到本地：${alt || '远程图片'}]`;
-        })
-      );
-    }
-    return replacements.get(url)!;
-  };
-
-  const markdownPattern = /!\[([^\]]*)\]\(\s*(?:<([^>]+)>|([^\s)]+))(?:\s+(?:"[^"]*"|'[^']*'))?\s*\)/g;
-  const htmlPattern = /<img\b[^>]*\bsrc\s*=\s*(["'])(.*?)\1[^>]*>/gi;
-  let result = await replaceAsync(markdown, markdownPattern, async (whole, alt, bracketedUrl, bareUrl) => {
-    const path = await localize(bracketedUrl || bareUrl, alt);
-    return path.startsWith('./') ? `![${alt}](${path})` : path;
-  });
-  result = await replaceAsync(result, htmlPattern, async (whole, _quote, url) => {
-    const alt = /\balt\s*=\s*(["'])(.*?)\1/i.exec(whole)?.[2] ?? '远程图片';
-    const path = await localize(url, alt);
-    return path.startsWith('./') ? `<img src="${path}" alt="${escapeHtmlAttribute(alt)}" />` : path;
-  });
-
-  if (failures.length === 0) return result;
-  const summary = failures.slice(0, 5).map((failure) => `- ${failure}`).join('\n');
-  const remaining = failures.length > 5 ? `\n- 另有 ${failures.length - 5} 张图片未能保存。` : '';
-  return `${result}\n\n> 以下远程图片未能离线保存，在线引用已移除：\n${summary}${remaining}\n`;
+  return localizeSciverseImages(markdown, (url, imageIndex) =>
+    saveSciverseRemoteImage({ entryId, noteId, root, source, url, imageIndex }));
 }
 
 async function saveSciverseRemoteImage({
@@ -375,27 +350,6 @@ function bytesToBase64(bytes: Uint8Array) {
   return btoa(binary);
 }
 
-async function replaceAsync(
-  value: string,
-  pattern: RegExp,
-  replacer: (...matches: string[]) => Promise<string>
-) {
-  const matches = [...value.matchAll(pattern)];
-  if (matches.length === 0) return value;
-  const replacements = await Promise.all(matches.map((match) => replacer(...match)));
-  let offset = 0;
-  return matches.reduce((result, match, index) => {
-    const start = match.index! + offset;
-    const replacement = replacements[index];
-    offset += replacement.length - match[0].length;
-    return `${result.slice(0, start)}${replacement}${result.slice(start + match[0].length)}`;
-  }, value);
-}
-
-function escapeHtmlAttribute(value: string) {
-  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-}
-
 function isHttpEndpoint(value: string) {
   try {
     const url = new URL(value);
@@ -437,16 +391,10 @@ export function App() {
   const [workspaceSplitLeftWidth, setWorkspaceSplitLeftWidth] = useState<number | null>(
     readStoredWorkspaceSplitLeftWidth
   );
-  useEffect(() => {
-    const open = (event: Event) => {
-      try {
-        const url = normalizeBrowserUrl(String((event as CustomEvent).detail));
-        dispatchSurface({ type: 'open', surface: { kind: 'browser', id: crypto.randomUUID(), url, title: browserTitle(url) } });
-      } catch { notify({ tone: 'danger', title: '无法打开链接', description: '只支持有效的外部 HTTP(S) 网页地址。' }); }
-    };
-    window.addEventListener(BROWSER_OPEN_EVENT, open);
-    return () => window.removeEventListener(BROWSER_OPEN_EVENT, open);
-  }, [notify]);
+  const openNewBrowserTab = useBrowserTabRequests(surfaceLayout, dispatchSurface, reason => notify({
+    tone: 'danger', title: reason === 'limit' ? '网页标签已达上限' : '无法打开链接',
+    description: reason === 'limit' ? '最多同时打开 8 个网页，请先关闭一个网页标签后重试。' : '只支持有效的外部 HTTP(S) 网页地址。'
+  }));
   const appShellRef = useRef<HTMLElement | null>(null);
   const workspaceSplitPreviewWidthRef = useRef<number | null>(workspaceSplitLeftWidth);
   const [activeContentByEntryId, setActiveContentByEntryId] = useState<Record<string, string | null>>({});
@@ -471,6 +419,7 @@ export function App() {
   const { previewRef: sidebarResizePreviewRef, effectiveWidth: effectiveSidebarWidth, maxWidth: sidebarMaxWidth,
     onPointerDown: startSidebarResize, onKeyDown: resizeSidebarWithKeyboard, observeContainer: observeSidebarContainer } = useSidebarResize({
     width: sidebarWidth, min: SIDEBAR_MIN_WIDTH, max: SIDEBAR_MAX_WIDTH, enabled: sidebarOpen, containerRef: appShellRef,
+    liveResize: surfaceLayout.left.kind === 'browser' || surfaceLayout.right?.kind === 'browser',
     onCommit: next => { setSidebarWidth(next); window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(next)); }
   });
   const [themePreset, setThemePreset] = useState<AppThemePresetId>(readStoredThemePreset);
@@ -490,6 +439,7 @@ export function App() {
     () => workspace.entries.map((entry) => toLibraryEntry(entry, tagPathById)),
     [tagPathById, workspace.entries]
   );
+  const taskEntryTitles = useMemo(() => Object.fromEntries(workspace.entries.map(entry => [entry.id, entry.title])), [workspace.entries]);
   const parseQueue = usePdfParseQueue(workspace.status === 'ready' ? workspace.root : null,
     mineruEndpoint, parserApiKey,
     workspace.entries.map(entry => `${entry.id}:${entry.pdf?.parse.status}`).join('|'),
@@ -531,19 +481,21 @@ export function App() {
     () => formatVectorStatus(vectorIndexStatus, vectorIndexError, vectorBuildStatus),
     [vectorBuildStatus, vectorIndexError, vectorIndexStatus]
   );
-  const { activeJobs, jobs: recentJobs } = useWorkspaceJobs(workspace.root);
+  const { jobs: recentJobs } = useWorkspaceJobs(workspace.root);
+  const localBackgroundJobs = useSyncExternalStore(subscribeLocalBackgroundJobs, getLocalBackgroundJobs);
+  const showAssistantTasks = useCallback(() => { setSidePanel('assistant'); setSidebarOpen(true); }, []);
+  const assistantTaskDock = useAssistantTaskDock(workspace.root, showAssistantTasks);
+  const scopedSciverseJobs = useMemo(() => sciverseBackgroundJobs.filter(job => job.scope?.root === workspace.root),
+    [sciverseBackgroundJobs, workspace.root]);
   const visibleBackgroundJobs = useMemo(
-    () => [...sciverseBackgroundJobs, ...recentJobs]
-      .sort((left, right) => right.updated_at.localeCompare(left.updated_at))
-      .slice(0, 8),
-    [recentJobs, sciverseBackgroundJobs]
+    () => workspaceTaskProjection(workspace.root, [...scopedSciverseJobs, ...recentJobs, ...localBackgroundJobs],
+      parseQueue.queue, parseQueue.configured, vectorBuildStatus, pdfDropImport.progress),
+    [workspace.root, recentJobs, scopedSciverseJobs, localBackgroundJobs, parseQueue.queue, parseQueue.configured, vectorBuildStatus, pdfDropImport.progress]
   );
-  const activeBackgroundJobCount = activeJobs.length + sciverseBackgroundJobs.filter(
-    (job) => job.status === 'queued' || job.status === 'processing'
-  ).length;
+  const activeBackgroundJobCount = visibleBackgroundJobs.filter(isRunningJob).length;
   const prepareWorkspaceChange = useCallback(async () => {
     if (activeBackgroundJobCount > 0) {
-      throw new Error('当前仍有解析、索引或翻译任务运行。请等待任务完成后再切换工作区。');
+      throw new Error('当前仍有论文添加、解析、索引或翻译任务运行。请等待任务完成后再切换工作区。');
     }
     await saveEditsBeforeWorkspaceChange();
   }, [activeBackgroundJobCount]);
@@ -1254,17 +1206,17 @@ export function App() {
             created_at: startedAt,
             error,
             id: jobId,
-            kind: 'llm',
+            kind: 'pdf_import',
             message,
-            progress: { current: status === 'processing' ? 1 : 2, percent: status === 'processing' ? 50 : 100, total: 2 },
+            progress: { current: status === 'succeeded' ? 1 : 0, percent: status === 'succeeded' ? 100 : 0, total: 1 },
             scope: workspace.root ? { kind: 'workspace', root: workspace.root } : null,
             status,
             updated_at: updatedAt
           };
-          return [nextJob, ...current.filter((job) => job.id !== jobId)].slice(0, 8);
+          return recentBackgroundJobs([nextJob, ...current.filter((job) => job.id !== jobId)], 24);
         });
       };
-      updateSciverseJob('processing', '正在保存到本地文库，可关闭论文详情页或切换标签。');
+      updateSciverseJob('processing', `正在添加：${source.title}，可关闭论文详情页或切换标签。`);
       try {
         if (!workspace.root) {
           throw new Error('当前未打开本地工作区，无法保存 Sciverse 论文。');
@@ -1281,6 +1233,7 @@ export function App() {
             pdfPath: existing.pdf ? workspaceEntryPdfPath(workspace.root, existing.id) : undefined,
             status: 'already_exists' as const
           };
+          updateSciverseJob('succeeded', `${source.title}：${importResult.message}`);
           notify({
             durationMs: 3000,
             title: 'Sciverse 论文已在本地文库',
@@ -1360,25 +1313,26 @@ export function App() {
               remoteContentNoteTitle = noteTitle;
             }
           } catch (error) {
-            remoteContentError = error instanceof Error ? error.message : String(error);
+            remoteContentError = assistantErrorDiagnostic(error);
           }
         }
 
         const message = importedWithPdf
-          ? '已加入文库，并已提交 PDF 自动解析。'
+          ? '已加入文库并保存 PDF；解析状态请在条目详情中查看。'
           : remoteContentNoteTitle
             ? '未获取到 PDF，已创建条目并保存远程全文笔记。'
-            : `${preparation.degradation_reason ?? '已加入文库；当前仅保存外部来源元数据。'} 远程全文未能保存：${remoteContentError ?? '未知原因。'}`;
+            : formatAssistantError(remoteContentError, { debug: readAssistantDebug(),
+              fallback: '已加入文库，但仅保存了论文信息，未能获取 PDF 或远程全文。可以打开来源网页核对。' });
         notify({
           description: message,
           title: importedWithPdf
-            ? 'Sciverse 论文已加入并开始解析'
+            ? 'Sciverse 论文和 PDF 已保存'
             : remoteContentNoteTitle
               ? 'Sciverse 远程全文已保存'
               : 'Sciverse 论文已降级加入',
           tone: importedWithPdf || remoteContentNoteTitle ? 'success' : 'default'
         });
-        updateSciverseJob('succeeded', message);
+        updateSciverseJob('succeeded', `${source.title}：${message}`);
         return {
           entryId: result.entryId,
           message,
@@ -1392,14 +1346,14 @@ export function App() {
               : 'created_metadata_only' as const
         };
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = formatAssistantError(error, { debug: readAssistantDebug(), fallback: ASSISTANT_IMPORT_INCOMPLETE });
         notify({
           durationMs: 6000,
           title: 'Sciverse 论文保存失败',
           description: message,
           tone: 'danger'
         });
-        updateSciverseJob('failed', message, message);
+        updateSciverseJob('failed', `${source.title}：${message}`, `${source.title}：${message}`);
         throw error;
       } finally {
         sciverseImportTasksRef.current.delete(source.doc_id);
@@ -1420,11 +1374,13 @@ export function App() {
         ? Math.max(0, target.page - 1)
         : 0;
     const entryId = target.sourceEntryId;
+    const destination = resolveSourceLinkSurface(surfaceLayout, entryId, target.originPane);
+    const targetSurfaceKey = surfaceKey(destination.surface);
     const requestKey = ++pdfJumpCounter.current;
     setPdfJumpByEntryId((current) => ({ ...current, [entryId]: target.segmentUid
-      ? { kind: 'segment', segmentUid: target.segmentUid, pageIdx, requestKey }
-      : { kind: 'page', pageIdx, requestKey } }));
-    if (!surfaceLayout.right) prepareWorkspaceSplit({ kind: 'pdf', entryId });
+      ? { kind: 'segment', segmentUid: target.segmentUid, pageIdx, requestKey, targetSurfaceKey }
+      : { kind: 'page', pageIdx, requestKey, targetSurfaceKey } }));
+    if (!surfaceLayout.right && destination.pane === 'right') prepareWorkspaceSplit(destination.surface);
     sourceLinkSurfaceActions(surfaceLayout, entryId, target.originPane).forEach(dispatchSurface);
   };
 
@@ -1963,7 +1919,7 @@ export function App() {
         style={shellStyle}
       >
         <WorkspaceTabsBar
-          onNewBrowser={() => dispatchSurface({ type: 'open', surface: { kind: 'browser', id: crypto.randomUUID() } })}
+          onNewBrowser={openNewBrowserTab}
           entries={entries}
           layout={surfaceLayout}
           onAddToAssistantContext={addWorkspaceSurfaceToAssistantContext}
@@ -2191,7 +2147,7 @@ export function App() {
           />
         ) : null}
         <ReaderPane
-          onUpdateBrowser={(id, url, title) => dispatchSurface({ type: 'updateBrowser', id, url, title })}
+          onUpdateBrowser={(id, url, title, metadata) => dispatchSurface({ type: 'updateBrowser', id, url, title, metadata })}
           onUpdateTagDescription={workspace.updateWorkspaceTagDescription}
           onOpenTrash={() => selectLibraryView('trash')}
           key={workspace.root ?? 'no-workspace'}
@@ -2394,7 +2350,16 @@ export function App() {
         <span>{vectorStatusText}</span>
         <span>{entries.length} 个条目</span>
         <span>{selectedEntry?.title ?? '未选择条目'}</span>
-        <JobStatusDock activeCount={activeBackgroundJobCount} jobs={visibleBackgroundJobs} />
+        <JobStatusDock jobs={visibleBackgroundJobs} assistantTasks={assistantTaskDock.tasks} entryTitles={taskEntryTitles}
+          onOpenAssistantTask={assistantTaskDock.openTask} onStopAssistantTask={assistantTaskDock.stopTask}
+          onOpenJob={job => {
+            const scope = job.scope;
+            if (scope?.root !== workspace.root || scope.kind !== 'entry') return;
+            const entry = workspace.entries.find(item => item.id === scope.entry_id);
+            if (!entry) { notify({ title: '原条目已不可用', description: '请在条目库或回收站核对。' }); return; }
+            openEntryContentTab(entry.id, entry.pdf ? 'pdf' : 'overview');
+            if (job.kind === 'parser') { setSidePanel('library'); setSidebarOpen(true); }
+          }} />
         <button type="button">辅助栏</button>
       </footer>
     </div>

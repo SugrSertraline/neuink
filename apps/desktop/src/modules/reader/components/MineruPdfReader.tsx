@@ -503,6 +503,7 @@ function MineruPdfReaderBody({
 
   const readingNavigation = useReadingNavigation();
   const rememberReadingPosition = readingNavigation?.remember;
+  const beginUserNavigation = readingNavigation?.beginUserNavigation;
   const hasRetainedPosition = readingNavigation?.hasRetainedPosition;
   const isJumpHandled = readingNavigation?.isJumpHandled;
   const markJumpHandled = readingNavigation?.markJumpHandled;
@@ -540,6 +541,7 @@ function MineruPdfReaderBody({
 
   const goToPageNumber = useCallback(
     (pageNumber: number) => {
+      beginUserNavigation?.();
       const requestedPageIdx = Math.min(pageCount - 1, Math.max(0, pageNumber - 1));
       const pageIdx = effectivePageDisplayMode === 'dual'
         ? Math.floor(requestedPageIdx / 2) * 2
@@ -547,7 +549,7 @@ function MineruPdfReaderBody({
       rememberReadingPosition?.();
       scrollToPage(pageIdx, pdfScrollRef.current);
     },
-    [pageCount, pdfScrollRef, effectivePageDisplayMode, rememberReadingPosition],
+    [pageCount, pdfScrollRef, effectivePageDisplayMode, rememberReadingPosition, beginUserNavigation],
   );
 
   useEffect(() => {
@@ -681,7 +683,7 @@ function MineruPdfReaderBody({
 
   const activateSegment = (
     segment: SourceSegment,
-    options: { mode?: "segment" | "annotation" } = {},
+    options: { mode?: "segment" | "annotation"; localOnly?: boolean } = {},
   ) => {
     if (
       selectedSegment &&
@@ -698,7 +700,8 @@ function MineruPdfReaderBody({
     if (!selectSegment(segment)) return false;
     setAnnotationFocusId(null);
     setNoteMode(options.mode ?? "segment");
-    flashSegment(segment);
+    if (options.localOnly) restartSegmentHighlight(segment.uid);
+    else flashSegment(segment);
     return true;
   };
 
@@ -819,10 +822,12 @@ function MineruPdfReaderBody({
     ({ segment, text }: { segment: SourceSegment; text: string }) =>
       translateTextSelection({
         context: segment.markdown ?? segment.text,
+        entryId: entry.id,
         entryTitle: entry.title,
+        root: workspaceRoot,
         text
       }),
-    [entry.title]
+    [entry.id, entry.title, workspaceRoot]
   );
 
   const insertSegmentImageIntoMarkdownNote = useCallback(
@@ -897,41 +902,6 @@ function MineruPdfReaderBody({
     ],
   );
 
-  const openSourceLinkInReader = useCallback(
-    (target: SourceLinkOpenTarget) => {
-      if (!target.segmentUid || target.sourceEntryId !== entry.id) {
-        onOpenSourceLink(target);
-        return;
-      }
-
-      const segment = findSegmentByLogicalOrRealUid(
-        segments,
-        target.segmentUid,
-      );
-      if (!segment) {
-        onOpenSourceLink(target);
-        return;
-      }
-
-      if (!selectSegment(segment)) return;
-      setAnnotationFocusId(null);
-      flashSegment(segment);
-      setHoveredSegmentUid(segment.uid);
-      window.requestAnimationFrame(() => {
-        scrollToMountedOrPendingSegment(segment);
-      });
-    },
-    [
-      entry.id,
-      flashSegment,
-      onOpenSourceLink,
-      scrollToMountedOrPendingSegment,
-      segments,
-      selectSegment,
-      setHoveredSegmentUid,
-    ],
-  );
-
   const sourceLinkHint =
     activeMarkdownNoteTarget || readingSession?.note
       ? undefined
@@ -952,7 +922,7 @@ function MineruPdfReaderBody({
     if (jumpRequest.kind === "page") {
       const frame = window.requestAnimationFrame(() => {
         handledJumpRequestKeyRef.current = jumpKey;
-        markJumpHandled?.(jumpKey);
+        markJumpHandled?.(jumpKey, { localOnly: Boolean(jumpRequest.targetSurfaceKey) });
         rememberReadingPosition?.();
         scrollToPage(jumpRequest.pageIdx, pdfScrollRef.current);
       });
@@ -966,16 +936,16 @@ function MineruPdfReaderBody({
     if (!segment) {
       const frame = window.requestAnimationFrame(() => {
         handledJumpRequestKeyRef.current = jumpKey;
-        markJumpHandled?.(jumpKey);
+        markJumpHandled?.(jumpKey, { localOnly: Boolean(jumpRequest.targetSurfaceKey) });
         rememberReadingPosition?.();
         scrollToPage(jumpRequest.pageIdx, pdfScrollRef.current);
       });
       return () => window.cancelAnimationFrame(frame);
     }
 
-    if (!activateSegment(segment)) return;
+    if (!activateSegment(segment, { localOnly: Boolean(jumpRequest.targetSurfaceKey) })) return;
     handledJumpRequestKeyRef.current = jumpKey;
-    markJumpHandled?.(jumpKey);
+    markJumpHandled?.(jumpKey, { localOnly: Boolean(jumpRequest.targetSurfaceKey) });
     if (jumpRequest.kind === "annotation") {
       const annotation = annotations.find(
         (candidate) => candidate.annotation_id === jumpRequest.annotationId,
@@ -1141,18 +1111,14 @@ function MineruPdfReaderBody({
         onReaderPreferencesChange={onReaderPreferencesChange}
         onRetryPdfParse={() => void retryPdfParse()}
         onRevealPdf={pdfPath ? () => void revealOriginalPdf() : undefined}
-        onSearchNext={pdfTextSearch.nextMatch}
-        onSearchPrevious={pdfTextSearch.previousMatch}
-        onSearchQueryChange={pdfTextSearch.setQuery}
+        onSearchNext={() => { beginUserNavigation?.(); pdfTextSearch.nextMatch(); }}
+        onSearchPrevious={() => { beginUserNavigation?.(); pdfTextSearch.previousMatch(); }}
+        onSearchQueryChange={(query) => { beginUserNavigation?.(); pdfTextSearch.setQuery(query); }}
         onStartPdfParse={() => void startPdfParse()}
         reparseBusy={parseRetryBusy}
         onTagSuggestionsOpenChange={setTagSuggestionsOpen}
-        onZoomIn={() =>
-          updateZoom((currentZoom) => currentZoom + PDF_ZOOM_STEP)
-        }
-        onZoomOut={() =>
-          updateZoom((currentZoom) => currentZoom - PDF_ZOOM_STEP)
-        }
+        onZoomIn={() => { beginUserNavigation?.(); updateZoom((currentZoom) => currentZoom + PDF_ZOOM_STEP); }}
+        onZoomOut={() => { beginUserNavigation?.(); updateZoom((currentZoom) => currentZoom - PDF_ZOOM_STEP); }}
       />
     }>
       <PaperExportDialog
@@ -1274,6 +1240,7 @@ function MineruPdfReaderBody({
                 selectedSegment ? logicalSegmentUid(selectedSegment) : null
               }
               onJumpToSegment={(segmentUid) => {
+                beginUserNavigation?.();
                 const segment = findSegmentByLogicalOrRealUid(
                   segments,
                   segmentUid,
@@ -1415,7 +1382,7 @@ function MineruPdfReaderBody({
               onReadMarkdownNote(sidePaneNoteTarget?.entryId ?? entry.id, globalNote.note_id)
             }
             onModeChange={switchReaderPanelMode}
-            onOpenSourceLink={openSourceLinkInReader}
+            onOpenSourceLink={onOpenSourceLink}
             onNoteImageInserted={(imageId) => {
               onConsumePendingNoteImageInsertion(
                 sidePaneNoteTarget?.entryId ?? entry.id,

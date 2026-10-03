@@ -129,7 +129,12 @@ impl LocalJobManager {
     }
 
     pub fn create(&self, kind: JobKind, scope: Option<JobScope>, total: usize) -> JobEvent {
-        let job = Job::queued(kind, scope, total);
+        self.enqueue(Job::queued(kind, scope, total))
+    }
+
+    /// Register a new queued job with a caller-supplied identity and message.
+    pub fn enqueue(&self, mut job: Job) -> JobEvent {
+        job.status = JobStatus::Queued;
         self.record(job, JobEventKind::Queued, Value::Null)
     }
 

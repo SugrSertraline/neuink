@@ -73,7 +73,7 @@ describe('production agent wiring', () => {
     expect(runResearchTool).toHaveBeenCalledTimes(2);
     expect(vi.mocked(runResearchTool).mock.calls.map(call => call[0])).toEqual(['read_webpage', 'search_web']);
     expect(JSON.stringify(model.doStreamCalls[1].prompt)).toContain('其他公开来源');
-    expect(JSON.stringify(model.doStreamCalls[2].prompt)).toContain('READ_RETRY_SKIPPED');
+    expect(JSON.stringify(model.doStreamCalls[2].prompt)).toContain('TOOL_REPEAT_SKIPPED');
     expect(runtime.events.map(event => event.status)).toEqual(['error', 'error', 'done']);
     expect(saved).toHaveBeenCalled();
   });
@@ -110,7 +110,7 @@ describe('production agent wiring', () => {
     const result = await answerWithGroundedAgent({ question: 'Search ACL papers', root: 'fixture', scope, settings: profile });
     expect(result.answer).toContain('unavailable');
     const continuation = JSON.stringify(model.doStreamCalls[1].prompt);
-    expect(continuation).toContain('TOOL_UNAVAILABLE');
+    expect(continuation).toContain('TOOL_NOT_AVAILABLE');
     expect(continuation).not.toContain('Tool arguments are invalid');
     expect(invokeAssistantTool).not.toHaveBeenCalled();
     expect(model.doStreamCalls[0].tools?.some(t => t.type === 'function' && t.name === 'search_web')).toBe(false);
@@ -130,7 +130,7 @@ describe('production agent wiring', () => {
     expect(await agent.run()).toBe('Summary of the actual result');
     expect(execute).toHaveBeenCalledOnce();
     expect(execute.mock.calls[0][0]).toEqual({ query: 'ACL code', limit: 10 });
-    expect(JSON.stringify(model.doStreamCalls[1].prompt)).toContain('Allowed fields: query, limit');
+    expect(JSON.stringify(model.doStreamCalls[1].prompt)).toContain('TOOL_INVALID_ARGUMENTS');
   });
   it('forces synthesis after repeated unavailable calls instead of spending all twelve turns', async () => {
     const model = fakeModel([
@@ -172,7 +172,7 @@ describe('production agent wiring', () => {
     expect(await agent.run()).toContain('incomplete');
     expect(execute).toHaveBeenCalledTimes(6);
     expect(model.doStreamCalls[6].tools).toBeUndefined();
-    expect(JSON.stringify(model.doStreamCalls[7].prompt)).toContain('TOOL_UNAVAILABLE');
+    expect(JSON.stringify(model.doStreamCalls[7].prompt)).toContain('TOOL_NOT_AVAILABLE');
   });
   it('never executes a provider tool call during forced final synthesis', async () => {
     vi.mocked(createNeuinkModel).mockReturnValue(fakeModel([{ call: { name: 'write', args: {} } }]));
@@ -257,7 +257,9 @@ describe('production agent wiring', () => {
     });
     expect(result.noteProposals).toHaveLength(1);
     expect(result.noteProposals![0].markdown).toBe('42 participants [S1].\n\nFollow-up questions.');
+    expect(JSON.stringify(model.doStreamCalls[2].prompt)).toContain('TOOL_PREFLIGHT_FAILED');
     expect(JSON.stringify(model.doStreamCalls[2].prompt)).toContain('no inline citation');
+    expect(JSON.stringify(model.doStreamCalls[2].prompt)).toContain('beside its supported claim');
     expect(invokeAssistantTool).toHaveBeenCalledTimes(1);
   });
   it('never executes a tool call from a length-truncated provider response', async () => {

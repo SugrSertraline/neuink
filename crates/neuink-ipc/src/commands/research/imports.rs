@@ -1,4 +1,4 @@
-use super::{canonical, network, selected, Paper, Selection};
+use super::{canonical, import_job::ImportJob, network, selected, Paper, Selection};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
@@ -73,8 +73,10 @@ pub async fn run<R: Runtime>(
     app: &AppHandle<R>,
     selection: Selection,
     approval_id: &str,
+    job: &mut ImportJob,
 ) -> Result<Value, String> {
     let papers = consume(&selection, approval_id)?;
+    job.queue(&selection.root, papers.len());
     // Bound peak PDF memory across conversations, not just within a batch.
     static DOWNLOAD: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
     let _permit = DOWNLOAD
@@ -86,9 +88,11 @@ pub async fn run<R: Runtime>(
         neuink_workspace::Workspace::open(&selection.root).map_err(|_| "资料库不可用")?;
     let mut results = vec![];
     for paper in papers {
+        job.start_paper(&paper);
         let result=async {
             if let Some(id)=existing(&workspace,&paper)? {return Ok(json!({"id":paper.id,"entry_id":id,"status":"already_in_library"}));}
             let url=paper.pdf_url.as_deref().ok_or("没有可下载的公开 PDF，请打开原文网页手动获取")?;
+            job.downloading();
             let bytes=network::get(url,64*1024*1024).await?;
             // Network is awaited outside write lock. The synchronous commit cannot be dropped midway by cancellation.
             let persisted=persist(&workspace,&paper,&bytes);
@@ -96,11 +100,14 @@ pub async fn run<R: Runtime>(
             let (id,reused)=persisted?;
             Ok::<Value,String>(json!({"id":paper.id,"entry_id":id,"status":if reused {"already_in_library"}else{"imported"},"parsed":false}))
         }.await;
-        results.push(match result {
+        let result = match result {
             Ok(v) => v,
             Err(e) => json!({"id":paper.id,"title":paper.title,"status":"failed","error":e}),
-        });
+        };
+        job.complete_paper(&result);
+        results.push(result);
     }
+    job.finish();
     Ok(
         json!({"results":results,"notice":"PDF 入库不代表已解析或已读全文。未修改标签或笔记；请使用现有解析入口后再生成有页码溯源的笔记。失败项需重新确认后重试。"}),
     )

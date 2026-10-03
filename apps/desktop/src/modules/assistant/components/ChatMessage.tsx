@@ -56,6 +56,7 @@ import { noteProposalElementId, useNoteReview } from '../review/NoteReviewContex
 import { AssistantDiagramBlock } from './AssistantDiagramBlock';
 import { NoteDiffLines, NoteRenderedContent } from '../review/NoteDiffLines';
 import { buildRenderedNoteDiff } from '../review/renderedNoteDiff';
+import { ASSISTANT_ACTION_INCOMPLETE, assistantToolErrorNotice, formatAssistantError, formatAssistantToolSummary, useAssistantDebug } from '@/shared/lib/assistantDebug';
 
 type ChatMessageProps = {
   reading?: boolean;
@@ -112,6 +113,7 @@ function ChatMessageComponent({
   const tagProposals = tagProposalsFromParts(messageParts);
   const entryMetaProposals = entryMetaProposalsFromParts(messageParts);
   const resolvedAgentRun = agentRunFromParts(messageParts);
+  const toolErrorNotice = assistantToolErrorNotice({ streaming, hasAnswer: Boolean(content.trim()), runStatus: resolvedAgentRun?.status });
   const resolvedMemory = memoryFromParts(messageParts);
   const reasoning = reasoningFromParts(messageParts);
   const contextItems = contextItemsFromParts(messageParts);
@@ -146,16 +148,16 @@ function ChatMessageComponent({
       <div className={`mb-1 text-[11px] font-medium text-muted-foreground ${message.role === 'user' ? 'text-right' : ''}`}>{message.role === 'user' ? '你' : 'Neuink'}</div>
       {isPlanningRequest ? <div className="mb-1 text-[11px] text-muted-foreground">仅规划 · 只读</div> : null}
       {message.role === 'assistant' && (streaming || resolvedAgentRun || resolvedPlan || resolvedMemory || resolvedToolEvents.length > 0 || reasoning) ? (
-        <ExecutionDetails key={message.message_id} awaitingApproval={awaitingApproval} streaming={streaming} hasAnswer={Boolean(content)} run={resolvedAgentRun} events={resolvedToolEvents}>
+        <ExecutionDetails key={message.message_id} awaitingApproval={awaitingApproval} streaming={streaming} hasAnswer={Boolean(content.trim())} run={resolvedAgentRun} events={resolvedToolEvents}>
       {resolvedAgentRun ? (
-        <AgentRunSummary run={resolvedAgentRun} onRetry={onRetryAgentRun} />
+        <AgentRunSummary run={resolvedAgentRun} errorNotice={toolErrorNotice} onRetry={onRetryAgentRun} />
       ) : null}
       {resolvedPlan ? <PlanSummary plan={resolvedPlan} /> : null}
       {resolvedMemory ? (
         <MemorySummary memory={resolvedMemory} />
       ) : null}
       {resolvedToolEvents.length > 0 ? (
-        <ToolTrace events={resolvedToolEvents} />
+        <ToolTrace events={resolvedToolEvents} errorNotice={toolErrorNotice} />
       ) : null}
       {reasoning ? (
         <section className="text-[11px] leading-4 text-muted-foreground" aria-label="思考过程">
@@ -619,11 +621,14 @@ function contextKindLabel(kind: NonNullable<Extract<AssistantContextItem, { kind
 
 function AgentRunSummary({
   onRetry,
+  errorNotice,
   run
 }: {
   onRetry?: (question: string) => void;
+  errorNotice: string;
   run: Extract<AssistantMessagePart, { type: 'agent-run' }>['run'];
 }) {
+  const debug = useAssistantDebug();
   const completed = run.nodes.filter((node) => node.status === 'succeeded').length;
   const failed = run.nodes.filter((node) => node.status === 'failed').length;
   const skipped = run.nodes.filter((node) => node.status === 'skipped').length;
@@ -655,10 +660,9 @@ function AgentRunSummary({
           <span
             className="inline-flex max-w-full items-center gap-1 rounded-sm border bg-background px-1.5 py-0.5"
             key={node.id}
-            title={[
+            title={node.error || node.status === 'failed' ? formatAssistantError(node.error ?? node.outputSummary, { debug, fallback: errorNotice }) : [
               node.inputSummary,
-              node.outputSummary,
-              node.error ? `Error: ${node.error}` : null
+              formatAssistantToolSummary(node.outputSummary, debug)
             ]
               .filter(Boolean)
               .join('\n')}
@@ -825,6 +829,7 @@ function NoteProposalList({
   onReject?: (proposal: AssistantNoteProposal) => void;
 }) {
   const review = useNoteReview();
+  const debug = useAssistantDebug();
   const [decisionError, setDecisionError] = useState<Record<string, string>>({});
   const decide = async (proposal: AssistantNoteProposal, action: 'apply' | 'reject') => {
     setDecisionError(current => ({ ...current, [proposal.id]: '' }));
@@ -865,7 +870,7 @@ function NoteProposalList({
 
           {proposal.error ? (
             <div className="mt-1 break-words text-[11px] text-destructive">
-              {proposal.error}
+              {formatAssistantError(proposal.error, { debug, fallback: ASSISTANT_ACTION_INCOMPLETE })}
             </div>
           ) : null}
 
@@ -898,7 +903,7 @@ function NoteProposalList({
             </div>
           ) : null}
 
-          {decisionError[proposal.id] ? <p role="alert" className="mt-1 text-destructive">{decisionError[proposal.id]}</p> : null}
+          {decisionError[proposal.id] ? <p role="alert" className="mt-1 text-destructive">{formatAssistantError(decisionError[proposal.id], { debug, fallback: ASSISTANT_ACTION_INCOMPLETE })}</p> : null}
           {proposal.status !== 'applied' && proposal.status !== 'rejected' ? <div className="note-proposal-actions mt-2 flex flex-wrap justify-end gap-1">
             {isProposalConflict(proposal) ? (
               <Button
@@ -946,11 +951,12 @@ function isProposalConflict(proposal: AssistantNoteProposal) {
 }
 
 function NoteProposalPreview({ proposal }: { proposal: AssistantNoteProposal }) {
+  const debug = useAssistantDebug();
   const result = useMemo(() => {
     try { return { preview: buildNoteProposalPreview(proposal), error: null }; }
     catch (error) { return { preview: null, error: error instanceof Error ? error.message : String(error) }; }
   }, [proposal]);
-  if (!result.preview) return <p role="alert" className="mt-2 text-sm text-destructive">无法预览：{result.error}</p>;
+  if (!result.preview) return <p role="alert" className="mt-2 text-sm text-destructive">{formatAssistantError(result.error, { debug, fallback: '无法预览修改，请重新生成提案。' })}</p>;
   const preview = result.preview;
   if (preview.kind === 'change') {
     return (
@@ -1019,6 +1025,7 @@ function DiffPane({
 }
 
 function NoteProposalStatus({ proposal }: { proposal: AssistantNoteProposal }) {
+  const debug = useAssistantDebug();
   if (proposal.status === 'applying') {
     return <Loader2 className="shrink-0 text-muted-foreground" size={13} />;
   }
@@ -1030,7 +1037,7 @@ function NoteProposalStatus({ proposal }: { proposal: AssistantNoteProposal }) {
   }
   if (proposal.status === 'error') {
     return (
-      <span className="shrink-0 text-[11px] text-destructive" title={proposal.error}>
+      <span className="shrink-0 text-[11px] text-destructive" title={formatAssistantError(proposal.error, { debug, fallback: ASSISTANT_ACTION_INCOMPLETE })}>
         失败
       </span>
     );
@@ -1061,7 +1068,8 @@ function noteProposalActionLabel(proposal: AssistantNoteProposal) {
   return '± 替换内容';
 }
 
-function ToolTrace({ events }: { events: AssistantToolTraceEvent[] }) {
+function ToolTrace({ events, errorNotice }: { events: AssistantToolTraceEvent[]; errorNotice: string }) {
+  const debug = useAssistantDebug();
   return (
     <div className="mb-2 grid gap-1">
       {events.map((event) => (
@@ -1076,9 +1084,11 @@ function ToolTrace({ events }: { events: AssistantToolTraceEvent[] }) {
             </span>
             <span className="shrink-0">{statusLabel(event.status)}</span>
           </div>
-          {event.error || event.summary ? (
+          {event.status === 'error' || event.error || event.summary ? (
             <div className="mt-0.5 min-w-0 break-words">
-              {event.error ?? event.summary}
+              {event.status === 'error' || event.error
+                ? formatAssistantError(event.error ?? event.summary, { debug, fallback: errorNotice })
+                : formatAssistantToolSummary(event.summary, debug)}
             </div>
           ) : null}
         </div>

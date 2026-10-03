@@ -55,15 +55,20 @@ export function resolveAssistantReadingContext({ choice, entries, tags = [], ite
       label: !entry ? '所选条目已不可用' : fixedEntry?.noteId ? note?.noteTitle ?? '所选笔记已不可用'
         : selectedPdf ? entry.pdfFileName ? `${entry.pdfFileName} · PDF` : '所选 PDF 已不可用'
           : segment ? `${entry.title} · 第 ${segment.pageIdx + 1} 页选区` : entry.title,
-      surface: { ...activeSurface, entryId: targetId, noteId: note?.noteId ?? null, segmentUid: segment?.segmentUid ?? null,
+      surface: { capturedAt: activeSurface.capturedAt, pane: activeSurface.pane,
+        entryId: targetId, noteId: note?.noteId ?? null, segmentUid: segment?.segmentUid ?? null,
         kind: note ? 'note' : selectedPdf ? 'pdf' : 'entry-overview',
         surfaceKey: note ? `note:${targetId}:${note.noteId}` : selectedPdf ? `pdf:${targetId}` : `entry-overview:${targetId}` }
     };
   }
   const missing = Boolean(activeSurface.entryId && !activeEntry) || Boolean(activeSurface.noteId && !activeNote);
-  const neutral = activeSurface.kind === 'browser' ? '当前网页（未附正文）' : activeSurface.kind === 'owned-note' && !activeEntry ? '标签笔记（未附正文）' : '资料库';
+  const browserTab = activeSurface.kind === 'browser' ? activeSurface.browserTab : undefined;
+  const neutral = activeSurface.kind === 'browser' ? browserTab ? `网页 · ${browserTab.title}` : '网页（尚未就绪）'
+    : activeSurface.kind === 'owned-note' && !activeEntry ? '标签笔记（未附正文）' : '资料库';
   return { entry: activeEntry, tag: null, note: activeNote, segment: activeSegment, surface: activeSurface,
     label: missing ? '当前阅读对象已不可用' : activeNote?.noteTitle ?? activeEntry?.title ?? neutral, bound: false, unavailable: missing,
-    notice: activeSurface.kind === 'browser' ? '网页不会自动交给助手。请在问题中附上网址，让助手调用网页读取工具。'
+    notice: activeSurface.kind === 'browser' ? browserTab
+      ? '提问时，助手可按需读取此网页当前显示的正文，并发送给已配置的模型。选择“不关联内容”可取消本次网页关联。'
+      : '当前网页尚不可读取，请打开网页并等待加载完成；仍可正常提问。'
       : activeSurface.kind === 'owned-note' && !activeEntry ? '标签笔记尚未接入助手的直接读写工具。可附上文字提问，不会改用旁边的论文。' : undefined };
 }

@@ -10,6 +10,7 @@
 
 ```powershell
 npm install
+npm --workspace apps/desktop run prepare:browser-reader
 npm run desktop:build
 npm --workspace apps/desktop run tauri -- build
 ```
@@ -60,6 +61,12 @@ apps/desktop/src-tauri/resources/embedding-models/default/
 - LLM 由用户配置，不随安装包内置；
 - 本地资料阅读、笔记和关键词搜索不应依赖 LLM；
 - 主安装包不捆绑 Python MinerU 服务或大型语言模型。
+
+### 网页内容读取组件
+
+Windows x64 的 `prepare:browser-reader` 从官方固定地址显式下载并校验 Python 嵌入运行时、yt-dlp／EJS wheel 与 QuickJS-NG；不使用系统 Python，不包含官方 yt-dlp.exe。版本和 SHA256 在 `apps/desktop/scripts/browser-reader-lock.json`。运行时约 34 MiB，原始许可证及捆绑组件声明保留在 `resources/browser-reader`；原版 Readability、PDF.js 和 subtp 的许可另随 `resources/reader-licenses` 携带。
+
+`npm --workspace apps/desktop run verify:browser-reader` 检查文件集、哈希及离线版本。`tauri.cjs` 的 dev/build/bundle 入口与便携脚本共用资源校验和复制，Windows x64 发行缺组件时明确失败，开发模式只警告；应用不会后台下载安装。视频仅读公开简介和可用字幕，没有音视频下载、自动播放、登录 cookies 或付费转写。其它平台暂不提供该视频运行时，普通网页／PDF 的读取逻辑独立保留。
 
 ## 4. 发布前检查
 

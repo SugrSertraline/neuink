@@ -23,6 +23,34 @@ function layout(left: WorkspaceSurface, right: WorkspaceSurface | null, focusedP
   return { left, right, focusedPane, leftTabs: [left], rightTabs: right ? [right] : [] };
 }
 describe('side-tool × content × split-focus matrix', () => {
+  it('captures only the focused ready browser document across split changes and navigation', () => {
+    const web: WorkspaceSurface = { kind: 'browser', id: 'web', url: 'https://example.org/a', title: 'Page A', navigationId: 'navigation-a', loading: false };
+    const webTwo: WorkspaceSurface = { kind: 'browser', id: 'web-two', url: 'https://example.org/b', title: 'Page B', navigationId: 'navigation-b', loading: false };
+    let state = layout(web, webTwo, 'right');
+    const frozen = assistantSurfaceContext(state, entries, selection);
+    expect(frozen.surface.browserTab).toEqual({ id: 'web-two', url: 'https://example.org/b', title: 'Page B', navigationId: 'navigation-b' });
+    expect(frozen.entry).toBeNull(); expect(frozen.note).toBeNull(); expect(frozen.segment).toBeNull();
+    state = workspaceSurfaceReducer(state, { type: 'focus', pane: 'left' });
+    expect(assistantSurfaceContext(state, entries, selection).surface.browserTab?.id).toBe('web');
+    state = workspaceSurfaceReducer(state, { type: 'updateBrowser', id: 'web', url: 'https://example.org/next', title: 'Next',
+      metadata: { navigationId: undefined, loading: true } });
+    expect(assistantSurfaceContext(state, entries, selection).surface.browserTab).toBeUndefined();
+    state = workspaceSurfaceReducer(state, { type: 'updateBrowser', id: 'web', url: 'https://example.org/next', title: 'Next',
+      metadata: { navigationId: 'navigation-next', loading: false } });
+    expect(assistantSurfaceContext(state, entries, selection).surface.browserTab?.navigationId).toBe('navigation-next');
+    state = workspaceSurfaceReducer(state, { type: 'updateBrowser', id: 'web', url: 'https://example.org/unconfirmed', title: 'Unconfirmed' });
+    expect(assistantSurfaceContext(state, entries, selection).surface.browserTab).toBeUndefined();
+    expect(frozen.surface.browserTab?.navigationId).toBe('navigation-b');
+    expect(assistantSurfaceContext(layout({ kind: 'pdf', entryId: 'a' }, web), entries, selection).surface.browserTab).toBeUndefined();
+  });
+  it('omits blank, unsafe, loading and non-native browser targets', () => {
+    for (const overrides of [{ url: undefined }, { url: 'example.org' }, { url: 'about:blank' }, { url: 'file:///C:/secret' },
+      { url: 'https://user:password@example.org/' }, { url: 'http://localhost:1420/' },
+      { loading: true }, { navigationId: undefined }]) {
+      const web: WorkspaceSurface = { kind: 'browser', id: 'web', url: 'https://example.org/', navigationId: 'navigation', loading: false, ...overrides };
+      expect(assistantSurfaceContext(layout(web, null), entries, selection).surface.browserTab).toBeUndefined();
+    }
+  });
   it.each<SidePanel>(['assistant', 'library', 'details', 'search', 'same-tag'])('%s stays independent across every surface kind, companion choices and focus directions', sidePanel => {
     for (const left of surfaces) for (const right of surfaces.filter(s => surfaceKey(s) !== surfaceKey(left))) for (const focus of ['left', 'right'] as const) {
       const state = layout(left, right, focus); const current = state[focus]!;
