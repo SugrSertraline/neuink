@@ -1,5 +1,9 @@
 # Neuink 文档
 
+**想了解功能或学习使用？请访问 [Neuink 官网与图文教程](https://sugrsertraline.github.io/neuink/)。**
+
+[开始阅读](https://sugrsertraline.github.io/neuink/start.html) · [核心概念](https://sugrsertraline.github.io/neuink/concepts.html) · [实机界面图解](https://sugrsertraline.github.io/neuink/screenshots.html)
+
 本目录只保留长期维护的权威文档。历史方案、阶段审计和已经完成的实施计划由 Git 历史保存，不再作为独立文件留在仓库。
 
 ## 权威文档

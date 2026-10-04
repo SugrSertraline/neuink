@@ -4,6 +4,12 @@
 
 <h1 align="center">Neuink</h1>
 
+<p align="center">
+  <strong><a href="https://sugrsertraline.github.io/neuink/">Explore Neuink — Product Website →</a></strong><br>
+  Features, real app screenshots, core concepts, and step-by-step tutorials.<br>
+  <a href="https://sugrsertraline.github.io/neuink/start.html">Start reading</a> · <a href="https://sugrsertraline.github.io/neuink/screenshots.html">Screenshot guide</a> · <a href="https://cdn.sugrsertraline.top/Neuink-windows-x64-portable.zip">Download for Windows</a>
+</p>
+
 ## Downloads and updates
 
 **[Download Windows x64 portable ZIP (CDN)](https://cdn.sugrsertraline.top/Neuink-windows-x64-portable.zip)**

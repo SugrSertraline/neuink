@@ -1,5 +1,9 @@
 # Neuink 产品介绍与使用手册
 
+**[打开 Neuink 官网 →](https://sugrsertraline.github.io/neuink/)**
+
+在线了解完整功能、实机界面与使用方法：[开始阅读](https://sugrsertraline.github.io/neuink/start.html) · [核心概念](https://sugrsertraline.github.io/neuink/concepts.html) · [实机界面图解](https://sugrsertraline.github.io/neuink/screenshots.html)。
+
 面向 GitHub Pages 的独立静态网站，中文首页与 22 篇专题指南。原有 `docs/` 继续承担产品、架构、开发状态与工程规范；本站只组织用户使用说明，不维护第二份开发流水账。
 
 ## 本地预览

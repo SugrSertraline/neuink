@@ -5,6 +5,12 @@
 <h1 align="center">Neuink</h1>
 
 <p align="center">
+  <strong><a href="https://sugrsertraline.github.io/neuink/">访问 Neuink 官网 · 完整功能介绍 →</a></strong><br>
+  通过实机截图、核心概念和分步教程，了解 Neuink 并开始第一次阅读。<br>
+  <a href="https://sugrsertraline.github.io/neuink/start.html">开始阅读</a> · <a href="https://sugrsertraline.github.io/neuink/screenshots.html">查看实机界面</a> · <a href="https://cdn.sugrsertraline.top/Neuink-windows-x64-portable.zip">下载 Windows 便携版</a>
+</p>
+
+<p align="center">
   <strong>简体中文</strong> · <a href="README_EN.md">English</a>
 </p>
 
