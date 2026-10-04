@@ -1,0 +1,51 @@
+{
+  "mode": "built-in image_gen",
+  "initial": [
+    {
+      "key": 1,
+      "prompt": "Use case: infographic-diagram. Create a polished Chinese product documentation structure diagram for Neuink, a local-first research reading workspace. Wide landscape 3:2, high resolution, editorial information design, warm ivory background, deep ink navy typography, subtle sage green and restrained cobalt accents. Elegant thin precise connectors, generous whitespace, sophisticated flat/isometric paper-document mini illustrations integrated into nodes. No generic rounded-card grid, no gradients, no clipart, no mascot, no dark cyberpunk, no decorative meaningless arrows. All simplified Chinese text clean and highly legible, Microsoft YaHei / 微软雅黑 typography, no calligraphy. This is a real explanatory diagram not a product UI screenshot.\nExact heading: “文献与笔记，如何组织”\nExact small subheading: “Neuink 核心结构”\nHierarchy, top to bottom: top “资料库” with subtitle “文献与阅读成果的家”. From this parent two clear branches: left dominant branch “条目” subtitle “一篇文献”; right “标签” subtitle “一个研究主题”. Under 条目 three children “原始 PDF” / “解析片段” / “文档笔记”. Under 解析片段 two smaller leaves “片段笔记” and “译文”. Under 标签 a child “标签综合笔记” subtitle “整理多篇文献”. Illustrations may be document sheets, structured paragraph strips, notebook pages, simple tag tab, restrained and refined. Solid connectors show hierarchy ONLY. Do not connect tags as parents of entries in this diagram. Bottom exact caption “同一篇文献可以添加多个标签；来源链接让笔记回到原文。” No other text. Balanced layout with title upper left and diagram filling most area. Make this beautiful enough for a premium scholarly software product website, not a PowerPoint default flowchart."
+    },
+    {
+      "key": 2,
+      "name": "concept-relations",
+      "prompt": "Use case: infographic-diagram. New Neuink Chinese documentation illustration, landscape 3:2. Premium editorial infographic on warm ivory, ink navy Microsoft YaHei 微软雅黑 typography, restrained sage green and cobalt. Refined small dimensional paper documents and notebooks, subtle natural shadows, huge readable simplified Chinese labels, generous whitespace, meticulous thin connectors. Sophisticated book-design composition, no rounded-card grid, no generic office flowchart, no mascot, no decorations that obscure meaning. Match a calm scholarly reading workspace. No fabricated product UI. Use the exact text specified, no invented explanations. Title “分类与引用，各有方向”. Small subtitle “Neuink 概念关系”. Two contrasting editorial zones separated by ample space, left titled “用标签组织文献”, right titled “用来源连接证据”. LEFT: top small tag “机器学习” connects downward to child tag “注意力机制”, connector caption “父子层级”. The child connects to document “论文 A”. A separate tag “组会阅读” also connects to SAME “论文 A”. These two tag-to-paper lines carry caption “分类”. RIGHT: notebook “主题综合笔记” subtitle “归属：注意力机制”. From notebook two dashed arrows point to distinct documents “论文 A” and “论文 B”; arrow caption “来源引用”. Do not connect paper A to paper B. Bottom statement “一篇论文可以有多个标签；一篇笔记可以引用多篇论文。” Accurate clear meaning, beautiful restrained document and tag illustrations, no crossing connectors, no extraneous nodes."
+    },
+    {
+      "key": 3,
+      "name": "first-reading-flow",
+      "prompt": "Use case: infographic-diagram. New Neuink Chinese documentation illustration, landscape 3:2. Premium editorial infographic on warm ivory, ink navy Microsoft YaHei 微软雅黑 typography, restrained sage green and cobalt. Refined small dimensional paper documents and notebooks, subtle natural shadows, huge readable simplified Chinese labels, generous whitespace, meticulous thin connectors. Sophisticated book-design composition, no rounded-card grid, no generic office flowchart, no mascot, no decorations that obscure meaning. Match a calm scholarly reading workspace. No fabricated product UI. Use the exact text specified, no invented explanations. Title “从阅读，到自己的理解”. Small subtitle “Neuink 使用路径”. A clean horizontal journey across the center using five separated miniature paper/tabletop scenes connected by light direction lines, numbered 01–05. Exact labels: “建立资料库” subtitle “确定保存位置”; “导入 PDF” subtitle “打开原文”; “分屏记笔记” subtitle “边读边整理”; “核对与保存” subtitle “检查内容和来源”; “导出分享” subtitle “选择成果与格式”. Below main journey two graceful separate OPTIONAL branch areas, clearly attached by dashed connectors: under import, “按需解析” subtitle “重排阅读与片段定位”; under note-taking, “按需使用 AI” subtitle “先配置模型，再核对结果”. Main journey works without either optional branch. Footer “先完成一次阅读，再逐步加入解析、翻译和助手。” No claim ordinary handwriting support. Visual narrative with elegant paper objects, not five large boxes."
+    },
+    {
+      "key": 4,
+      "name": "choose-note",
+      "prompt": "Use case: infographic-diagram. New Neuink Chinese documentation illustration, landscape 3:2. Premium editorial infographic on warm ivory, ink navy Microsoft YaHei 微软雅黑 typography, restrained sage green and cobalt. Refined small dimensional paper documents and notebooks, subtle natural shadows, huge readable simplified Chinese labels, generous whitespace, meticulous thin connectors. Sophisticated book-design composition, no rounded-card grid, no generic office flowchart, no mascot, no decorations that obscure meaning. Match a calm scholarly reading workspace. No fabricated product UI. Use the exact text specified, no invented explanations. Title “让每一种想法，各得其所”. Small subtitle “Neuink 记录方式”. Beautiful editorial field guide with five clearly separated horizontal rows, spacious aligned typography, small bespoke paper illustration per row, a thin line or short arrow indicating choice. NOT a grid of cards. Exact five intent → type pairs: “下次回到这一段” → “记住此处”; “标出原文并写短评” → “批注”; “解释一个段落或公式” → “片段笔记”; “总结一篇论文” → “文档笔记”; “比较一个主题的多篇论文” → “标签综合笔记”. Symbols are contextual miniature bookmark, highlighted paper, excerpt with note, bound notebook, several source papers beside a notebook. Footer “按记录的对象选择，而不是按文字长短选择。” Keep all Chinese text correctly readable, no added functions, ample whitespace, refined high-end print aesthetic."
+    },
+    {
+      "key": 5,
+      "name": "assistant-review-flow",
+      "prompt": "Use case: infographic-diagram. New Neuink Chinese documentation illustration, landscape 3:2. Premium editorial infographic on warm ivory, ink navy Microsoft YaHei 微软雅黑 typography, restrained sage green and cobalt. Refined small dimensional paper documents and notebooks, subtle natural shadows, huge readable simplified Chinese labels, generous whitespace, meticulous thin connectors. Sophisticated book-design composition, no rounded-card grid, no generic office flowchart, no mascot, no decorations that obscure meaning. Match a calm scholarly reading workspace. No fabricated product UI. Use the exact text specified, no invented explanations. Title “让助手参与，让你决定”. Small subtitle “Neuink 提问与修改审阅”. Beautiful clear editorial process composition. Main path first “选择模型与材料” then “提问并核对来源”. From second stage a small quiet endpoint “只需回答，到这里即可”. A distinct optional continuing path labeled “需要修改笔记时” goes to “查看修改预览”, then a visually clear decision branching to two endpoints: “拒绝” with subtitle “保留原内容”, and “应用” then “检查结果与保存状态”. Use precise directional arrows and no loop, no arrow connecting refusal to applied state. Footer “收到回答或修改提案，不等于笔记已经改变。” Small tasteful dimensional document comparison and source-marker illustrations, no robotic character or shield/checkmark clutter. Typography must be crisp simplified Chinese in Microsoft YaHei style. Scientific accuracy of workflow above all."
+    }
+  ],
+  "corrections": [
+    {
+      "key": 2,
+      "file": "exec-a897f058-ddc2-44f6-9841-adf3c3a801e2.png",
+      "prompt": "Edit this diagram preserving all concepts, connections, composition, colors and paper illustrations. Replace ALL diagram headings, labels and footer typography with clean sans-serif Microsoft YaHei 微软雅黑. Absolutely no Song/Ming serif Chinese or brush/calligraphy. Keep existing correct Chinese wording exactly. Remove incidental decorative margin slogans and all irrelevant tiny text on surrounding books/cup. Main hierarchy and citation arrows must stay unchanged."
+    },
+    {
+      "key": 3,
+      "file": "exec-b8a9b618-ccff-47d0-8ba0-358d95332768.png",
+      "prompt": "Edit this infographic preserving structure, main text, five steps, optional branches, illustrations and palette. Important factual correction: in rightmost step 05 导出分享 the list on the sheet MUST say Word, Markdown, TXT; replace PDF in that export list with Word. Keep PDF in step02 导入 PDF because that is correct. Make all explanatory headings and labels Microsoft YaHei 微软雅黑 clean sans-serif; no Chinese serif or calligraphy. Remove incidental decorative margin quotes/slogans only. Do not add new capabilities."
+    },
+    {
+      "key": 4,
+      "file": "exec-e0d22afd-e977-4a8f-be09-b9d18f82d396.png",
+      "prompt": "Edit this elegant five-row diagram. Keep exact main Chinese labels, illustrations and layout. Standardize title, five intent labels, five record-type labels and footer to Microsoft YaHei 微软雅黑 clean sans-serif Chinese with consistent typography. Remove incidental marginal decorative slogans and fake tiny book text. Preserve all five mappings exactly; do not add or remove any row. Keep warm ivory, sage and navy."
+    },
+    {
+      "key": 5,
+      "file": "exec-65539e84-cc61-4bd7-a1f7-2692cb667645.png",
+      "prompt": "Correct this Neuink diagram, retaining editorial style, scene composition and main Chinese wording. CRITICAL: Neuink Pro and Neuink Standard are invented models and MUST disappear. Replace the leftmost model-choice sheet with just two generic lines “已配置的模型” and “所选阅读材料”. No invented product tiers. Fix connectors: dashed line from step2 passes through “需要修改笔记时” and goes ONLY to step3 查看修改预览. Remove the dashed branch that goes directly to 拒绝. After step3 preview retain the solid fork to 拒绝/保留原内容 and 应用/检查结果与保存状态. All main title, labels, footer should use Microsoft YaHei 微软雅黑 clean sans-serif. Remove irrelevant marginal decorative slogans. Do not change any other real workflow."
+    }
+  ]
+}

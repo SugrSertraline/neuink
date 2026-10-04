@@ -42,4 +42,6 @@ Markdown 渲染使用独立锁定的 markdown-it，不修改桌面应用依赖�
 
 ## 教程插图
 
-`public/diagrams/` 保存五张概念与操作图，`diagrams.json` 校验图片尺寸。文字使用 Windows 本机微软雅黑渲染为 PNG，其他设备无需安装字体即可看到一致效果；不随站点分发字体文件。需要修改图片时，在装有 Pillow 和微软雅黑的 Windows 上运行 `python website/scripts/draw-guides.py`，检查文字和连线后重新构建。网站常规构建不需要 Python。图旁正文和替代文本应说明相同的关系，不能只靠颜色传达含义。
+`public/diagrams/` 保存五张经过文字和关系校对的生图插画，`diagrams.json` 校验图片尺寸。使用内置 image_gen 生成与修订，完整提示词保存在 `diagram-prompts.json`。提示词要求微软雅黑风格的无衬线中文；生成字形不是字体文件的确定性排版，不应声称已嵌入真实字体。站点不分发字体文件。
+
+修改时保留条目与标签的层级、分类与来源引用的区别，以及解析和 AI 的可选性质。检查中文、箭头和实际支持的功能后更新图片。`scripts/draw-guides.py` 是早期简图的生成器，不能用于覆盖现有生图版本。网站正常构建不需要 Python 或生图服务。

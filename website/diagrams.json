@@ -1,22 +1,22 @@
 {
-  "concept-hierarchy.png": [
-    1600,
-    1060
-  ],
-  "concept-relations.png": [
-    1600,
-    970
-  ],
-  "first-reading-flow.png": [
-    1600,
-    1150
+  "assistant-review-flow.png": [
+    1536,
+    1024
   ],
   "choose-note.png": [
-    1600,
-    1010
+    1536,
+    1024
   ],
-  "assistant-review-flow.png": [
-    1600,
-    1130
+  "concept-hierarchy.png": [
+    1536,
+    1024
+  ],
+  "concept-relations.png": [
+    1536,
+    1024
+  ],
+  "first-reading-flow.png": [
+    1536,
+    1024
   ]
 }
