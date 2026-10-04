@@ -34,11 +34,18 @@ for (const page of pages) {
 const allowed = new Set(['assets', 'index.html', '404.html', 'search.json', 'robots.txt', 'sitemap.xml', '.nojekyll', ...pages.map(p => `${p.id}.html`)]);
 for (const file of files) if (!allowed.has(file)) failures.push(`Unexpected publish file: ${file}`);
 for (const file of await fs.readdir(path.join(out, 'assets'))) if (!['logo.png', 'style.css', 'app.js', 'screenshots'].includes(file)) failures.push(`Unexpected asset: ${file}`);
-const screenshots = ['reading-workspace.png', 'assistant-and-notes.png', 'pdf-notes-split-view.png'];
+const screenshotSizes = {
+  'reading-workspace.png': [1600, 876],
+  'assistant-and-notes.png': [1600, 876],
+  'pdf-notes-split-view.png': [1600, 876],
+  'mineru-step-1-download-and-parse.png': [2100, 1215],
+  'mineru-step-2-zip-results.png': [2652, 1409]
+};
+const screenshots = Object.keys(screenshotSizes);
 for (const file of await fs.readdir(path.join(out, 'assets/screenshots'))) if (!screenshots.includes(file)) failures.push('Unexpected screenshot: ' + file);
 for (const file of screenshots) {
   const bytes = await fs.readFile(path.join(out, 'assets/screenshots', file));
-  if (bytes.toString('hex', 0, 8) !== '89504e470d0a1a0a' || bytes.readUInt32BE(16) !== 1600 || bytes.readUInt32BE(20) !== 876) failures.push('Screenshot must be reviewed, cropped PNG: ' + file);
+  if (bytes.toString('hex', 0, 8) !== '89504e470d0a1a0a' || bytes.readUInt32BE(16) !== screenshotSizes[file][0] || bytes.readUInt32BE(20) !== screenshotSizes[file][1]) failures.push('Screenshot must match reviewed PNG dimensions: ' + file);
 }
 if (failures.length) { console.error(failures.join('\n')); process.exitCode = 1; }
 else console.log(`PASS: ${htmlByFile.size} HTML pages; ${count} local links/anchors; ${index.length} search records; publish allowlist.`);

@@ -19,6 +19,11 @@ md.renderer.rules.link_open = (tokens, index, options, env, renderer) => {
   if (href && /^[a-z-]+\.md(?:#.*)?$/.test(href)) tokens[index].attrSet('href', href.replace('.md', '.html'));
   return renderLink(tokens, index, options, env, renderer);
 };
+const screenshotSizes = new Map();
+for (const name of await fs.readdir(path.join(root, 'public/screenshots'))) {
+  const bytes = await fs.readFile(path.join(root, 'public/screenshots', name));
+  screenshotSizes.set(name, { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) });
+}
 const renderImage = md.renderer.rules.image;
 md.renderer.rules.image = (tokens, index, options, env, renderer) => {
   const token = tokens[index];
@@ -27,8 +32,9 @@ md.renderer.rules.image = (tokens, index, options, env, renderer) => {
     token.attrSet('src', src.replace('../public/', 'assets/'));
     token.attrSet('loading', 'lazy');
     token.attrSet('decoding', 'async');
-    token.attrSet('width', '1600');
-    token.attrSet('height', '876');
+    const size = screenshotSizes.get(src.split('/').pop());
+    token.attrSet('width', String(size.width));
+    token.attrSet('height', String(size.height));
     return '<a class="screenshot-link" href="' + escape(token.attrGet('src')) + '" aria-label="打开原尺寸截图">' + renderImage(tokens, index, options, env, renderer) + '</a>';
   }
   return renderImage(tokens, index, options, env, renderer);
@@ -41,7 +47,7 @@ for (const [index, page] of pages.entries()) {
   const tokens = md.parse(source, {});
   const toc = [];
   for (let i = 0; i < tokens.length; i++) {
-    if (tokens[i].type !== 'heading_open') continue;
+    if (tokens[i].type !== 'heading_open' || tokens[i].tag !== 'h2') continue;
     const label = tokens[i + 1].content;
     const id = `section-${toc.length + 1}`;
     tokens[i].attrSet('id', id);

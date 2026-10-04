@@ -10,13 +10,32 @@
 
 设置“导入与解析”首先展示“MinerU 客户端（推荐）”。在应用内打开图文教程，按客户端完成解析、导出完整结果并压缩为 ZIP，再返回 Neuink 导入。
 
-1. 准备 `content_list_v2.json` 或兼容的 `content_list.json`。
-2. 保留正文引用的图片及其相对目录结构。
-3. 用 ZIP 创建新条目时，同时附上原 PDF。
-4. 向已有 PDF 条目导入结果时，无需在 ZIP 中重复附 PDF。
-5. 导入完成后，核对 PDF 的片段框、重排正文和图片是否对应。
+### 第一步：完成解析，打开结果文件夹
 
-ZIP 导入不要求在 Neuink 填写解析服务 URL 或 API Key。只打包一份 Markdown 文本并不等同于完整 MinerU 结果；缺少结构文件或图片时，需回到导出目录重新检查。
+在 MinerU 客户端完成 PDF 解析后，找到对应任务，点击任务旁边的文件夹按钮。下图红箭头指向“打开文件夹”；右边能看到解析后的文字。
+
+![MinerU 客户端已有截图：红箭头标出解析任务旁的打开文件夹按钮](../public/screenshots/mineru-step-1-download-and-parse.png)
+
+**检查结果**：应打开这篇论文的解析结果目录，而不是仅下载一份 Markdown。图中是 MinerU 客户端，不是 Neuink；客户端版本变化时按钮位置可能不同。
+
+### 第二步：检查文件，再压缩完整结果
+
+保留结构化 JSON、图片目录及原有相对路径。下图红框展示一份结果目录：有 images 文件夹、多个 JSON、PDF 与 Markdown。截图中的本地路径已做遮挡。
+
+![结果目录已有截图：红框圈出 images、JSON、PDF 与 Markdown，私人路径已遮挡](../public/screenshots/mineru-step-2-zip-results.png)
+
+**检查结果**：需要有 Neuink 支持的 content_list_v2.json 或兼容 content_list.json；部分长文件名在图中被截断，请实际检查完整文件名。不能仅凭图里的 block_list.json 或 full.md 判断结果可导入。将完整结果压缩成 ZIP，并保留图片相对目录。
+
+### 第三步：回到 Neuink，选择导入目标
+
+- **用 ZIP 创建新条目**：同时附上原 PDF。
+- **向已有 PDF 条目导入结果**：无需在 ZIP 中重复附 PDF。
+
+ZIP 导入不要求填写解析服务 URL 或 API Key。只打包一份 Markdown 文本不等同于完整 MinerU 结果；缺少结构文件或图片时，需回到结果目录检查。这一步的 Neuink 导入对话框尚未补充实机截图。
+
+### 第四步：打开 PDF 和重排，核对结果
+
+确认 PDF 的片段框、重排正文、表格与图片对应同一篇论文。正文能显示但图片缺失，仍不能视为完整导入；具体检查清单见下方“如何检查解析质量”。
 
 ## 路径三：连接自己的服务
 
