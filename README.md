@@ -57,24 +57,12 @@ Neuink 不把文献阅读理解成“看完一份文件”。它帮助你把页�
 | :--- | :--- | :--- |
 | 在 PDF 原始排版和 Reflow 重排阅读之间切换，定位章节、段落、列表、公式、表格与视觉块。 | 用 Markdown 记录想法，并插入可展开、可跳转、可导出脚注的 Source Link。 | 搜索条目、标签、字段、笔记、页面和片段；用显式上下文获得带来源的回答。 |
 
-## 看得见的工作流
+## 界面示例
 
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="docs/assets/screenshots/assistant-and-notes.png" alt="Neuink 的 AI 助手与学习笔记编辑器" />
-      <br /><br />
-      <strong>在上下文中写笔记</strong><br />
-      AI 助手、来源链接和 Markdown 编辑器位于同一工作区。助手读取的是明确选择的上下文，任何笔记或元数据修改都会先以 Proposal 提出，等待你确认应用。
-    </td>
-    <td width="50%" valign="top">
-      <img src="docs/assets/screenshots/pdf-notes-split-view.png" alt="Neuink 的 PDF 与笔记分屏阅读界面" />
-      <br /><br />
-      <strong>让原文与思考并排出现</strong><br />
-      左侧保留 PDF 的原始版式和片段导航，右侧整理你的学习笔记。每个关键论断都可以带着页码和片段回到证据本身。
-    </td>
-  </tr>
-</table>
+新增 **38 张完整窗口实机截图**，按导入、阅读、翻译、笔记、来源、搜索、关系图、助手、导出与设置分步讲解。点击图片查看原尺寸，或进入 [GitHub Pages 截图导航与完整教程](https://sugrsertraline.github.io/neuink/screenshots.html)。服务地址和私人路径已遮挡。
+
+![Neuink：PDF 与带来源的演示笔记分屏](website/public/screenshots/pdf-note-workspace.png)
+
 
 ## 核心能力
 

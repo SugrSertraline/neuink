@@ -1,0 +1,174 @@
+{
+  "annotations.png": [
+    2378,
+    1489
+  ],
+  "assistant-and-notes.png": [
+    1600,
+    876
+  ],
+  "assistant-attachment.png": [
+    2378,
+    1489
+  ],
+  "assistant-context.png": [
+    2378,
+    1489
+  ],
+  "browser-reading.png": [
+    2378,
+    1489
+  ],
+  "create-entry-pdf.png": [
+    2378,
+    1489
+  ],
+  "create-entry-zip.png": [
+    2378,
+    1489
+  ],
+  "entry-overview.png": [
+    2378,
+    1489
+  ],
+  "export-formats.png": [
+    2378,
+    1489
+  ],
+  "export-fulltext.png": [
+    2378,
+    1489
+  ],
+  "export-selection.png": [
+    2378,
+    1489
+  ],
+  "graph-filter.png": [
+    2378,
+    1489
+  ],
+  "graph-overview.png": [
+    2378,
+    1489
+  ],
+  "library-columns.png": [
+    2378,
+    1489
+  ],
+  "library-list.png": [
+    2378,
+    1489
+  ],
+  "mineru-step-1-download-and-parse.png": [
+    2100,
+    1215
+  ],
+  "mineru-step-2-zip-results.png": [
+    2652,
+    1409
+  ],
+  "model-add-dialog.png": [
+    2378,
+    1489
+  ],
+  "notes-editor.png": [
+    2378,
+    1489
+  ],
+  "notes-source-return.png": [
+    2378,
+    1489
+  ],
+  "pdf-note-workspace.png": [
+    2378,
+    1489
+  ],
+  "pdf-notes-split-view.png": [
+    1600,
+    876
+  ],
+  "pdf-reader.png": [
+    2378,
+    1489
+  ],
+  "reading-workspace.png": [
+    1600,
+    876
+  ],
+  "reflow-components.png": [
+    2378,
+    1489
+  ],
+  "reflow-display.png": [
+    2378,
+    1489
+  ],
+  "reflow-pdf-split.png": [
+    2378,
+    1489
+  ],
+  "reflow-reader.png": [
+    2378,
+    1489
+  ],
+  "search-results.png": [
+    2378,
+    1489
+  ],
+  "segment-notes.png": [
+    2378,
+    1489
+  ],
+  "settings-appearance.png": [
+    2378,
+    1489
+  ],
+  "settings-data.png": [
+    2378,
+    1489
+  ],
+  "settings-import.png": [
+    2378,
+    1489
+  ],
+  "settings-models.png": [
+    2378,
+    1489
+  ],
+  "settings-reading.png": [
+    2378,
+    1489
+  ],
+  "settings-tools.png": [
+    2378,
+    1489
+  ],
+  "settings-translation.png": [
+    2378,
+    1489
+  ],
+  "source-backlinks.png": [
+    2378,
+    1489
+  ],
+  "source-jump.png": [
+    2378,
+    1489
+  ],
+  "tag-reading.png": [
+    2378,
+    1489
+  ],
+  "tag-scope.png": [
+    2378,
+    1489
+  ],
+  "translation-filter.png": [
+    2378,
+    1489
+  ],
+  "translation-tasks.png": [
+    2378,
+    1489
+  ]
+}

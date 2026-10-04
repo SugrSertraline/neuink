@@ -47,24 +47,12 @@ Neuink treats literature work as more than finishing a file. It turns pages, par
 | :--- | :--- | :--- |
 | Switch between the original PDF layout and a Reflow view; locate headings, paragraphs, lists, formulas, tables, and visual blocks. | Write in Markdown and insert Source Links that can expand, jump to evidence, and export as readable footnotes. | Search entries, tags, fields, notes, pages, and segments; use explicit context to receive source-linked answers. |
 
-## A visible workflow
+## Interface examples
 
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="docs/assets/screenshots/assistant-and-notes.png" alt="Neuink AI assistant and learning-note editor" />
-      <br /><br />
-      <strong>Write inside the context</strong><br />
-      The AI assistant, source links, and Markdown editor share one workspace. The assistant reads only explicitly selected context, and note or metadata changes are first presented as proposals for you to apply.
-    </td>
-    <td width="50%" valign="top">
-      <img src="docs/assets/screenshots/pdf-notes-split-view.png" alt="Neuink split view for PDFs and notes" />
-      <br /><br />
-      <strong>Keep the source beside your thinking</strong><br />
-      Keep the original PDF layout and segment navigation on the left while building notes on the right. Key claims can retain their page and segment path back to the evidence.
-    </td>
-  </tr>
-</table>
+**38 new full-window screenshots** illustrate importing, reading, translation, notes, sources, search, graphs, the assistant, export, and settings. Open the [step-by-step screenshot guide](https://sugrsertraline.github.io/neuink/screenshots.html) (Chinese). Service addresses and private paths are redacted. Click the image for its original size.
+
+![Neuink: original PDF alongside evidence-linked demo notes](website/public/screenshots/pdf-note-workspace.png)
+
 
 ## Core capabilities
 
