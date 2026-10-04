@@ -1,6 +1,6 @@
 # Neuink 产品介绍与使用手册
 
-面向 GitHub Pages 的独立静态网站，中文首页与 21 篇专题指南。原有 `docs/` 继续承担产品、架构、开发状态与工程规范；本站只组织用户使用说明，不维护第二份开发流水账。
+面向 GitHub Pages 的独立静态网站，中文首页与 22 篇专题指南。原有 `docs/` 继续承担产品、架构、开发状态与工程规范；本站只组织用户使用说明，不维护第二份开发流水账。
 
 ## 本地预览
 
@@ -39,3 +39,7 @@ Markdown 渲染使用独立锁定的 markdown-it，不修改桌面应用依赖�
 已上线地址：`https://sugrsertraline.github.io/neuink/`。仓库更名或迁移时同步修改构建脚本的站点地址、404 返回地址和模板中的仓库链接。
 
 官方配置参考：[GitHub Pages 自定义工作流](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)。
+
+## 教程插图
+
+`public/diagrams/` 保存五张概念与操作图，`diagrams.json` 校验图片尺寸。文字使用 Windows 本机微软雅黑渲染为 PNG，其他设备无需安装字体即可看到一致效果；不随站点分发字体文件。需要修改图片时，在装有 Pillow 和微软雅黑的 Windows 上运行 `python website/scripts/draw-guides.py`，检查文字和连线后重新构建。网站常规构建不需要 Python。图旁正文和替代文本应说明相同的关系，不能只靠颜色传达含义。

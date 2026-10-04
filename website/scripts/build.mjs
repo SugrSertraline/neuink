@@ -20,22 +20,24 @@ md.renderer.rules.link_open = (tokens, index, options, env, renderer) => {
   return renderLink(tokens, index, options, env, renderer);
 };
 const screenshotSizes = new Map();
-for (const name of await fs.readdir(path.join(root, 'public/screenshots'))) {
-  const bytes = await fs.readFile(path.join(root, 'public/screenshots', name));
-  screenshotSizes.set(name, { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) });
+for (const directory of ['screenshots', 'diagrams']) {
+ for (const name of await fs.readdir(path.join(root, 'public', directory))) {
+  const bytes = await fs.readFile(path.join(root, 'public', directory, name));
+  screenshotSizes.set(`${directory}/${name}`, { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) });
+ }
 }
 const renderImage = md.renderer.rules.image;
 md.renderer.rules.image = (tokens, index, options, env, renderer) => {
   const token = tokens[index];
   const src = token.attrGet('src');
-  if (src?.startsWith('../public/screenshots/')) {
+  if (src?.startsWith('../public/screenshots/') || src?.startsWith('../public/diagrams/')) {
     token.attrSet('src', src.replace('../public/', 'assets/'));
     token.attrSet('loading', 'lazy');
     token.attrSet('decoding', 'async');
-    const size = screenshotSizes.get(src.split('/').pop());
+    const size = screenshotSizes.get(src.replace('../public/', ''));
     token.attrSet('width', String(size.width));
     token.attrSet('height', String(size.height));
-    return '<a class="screenshot-link" href="' + escape(token.attrGet('src')) + '" aria-label="打开原尺寸截图">' + renderImage(tokens, index, options, env, renderer) + '</a>';
+    return '<a class="screenshot-link" href="' + escape(token.attrGet('src')) + '" aria-label="打开原尺寸图片">' + renderImage(tokens, index, options, env, renderer) + '</a>';
   }
   return renderImage(tokens, index, options, env, renderer);
 };
@@ -67,6 +69,7 @@ await fs.writeFile(path.join(out, 'index.html'), shell({ pages, content: home(pa
 await fs.writeFile(path.join(out, '404.html'), shell({ pages, page: { id: '404', title: '页面未找到', description: '请从目录重新找到所需内容。' }, content: '<div class="doc-heading"><p class="eyebrow">404</p><h1>这页暂时找不到了。</h1><p class="lead">链接可能已经变更。返回首页，或用搜索找到功能说明。</p><a class="button primary" href="https://sugrsertraline.github.io/neuink/">返回 Neuink 首页</a></div>', siteUrl, absoluteAssets: true }));
 for (const file of ['style.css', 'app.js']) await fs.copyFile(path.join(root, 'public', file), path.join(out, 'assets', file));
 await fs.cp(path.join(root, 'public/screenshots'), path.join(out, 'assets/screenshots'), { recursive: true });
+await fs.cp(path.join(root, 'public/diagrams'), path.join(out, 'assets/diagrams'), { recursive: true });
 await fs.copyFile(path.join(root, '../apps/desktop/src-tauri/logo_assets/neuink_logo_transparent_1024.png'), path.join(out, 'assets', 'logo.png'));
 await fs.writeFile(path.join(out, 'search.json'), JSON.stringify(search));
 await fs.writeFile(path.join(out, '.nojekyll'), '');

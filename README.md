@@ -39,7 +39,7 @@
 
 ## 完整功能介绍与使用手册
 
-README 提供概览，详细用法收录于 [21 篇专题手册](website/README.md)。现已发布到 GitHub Pages，可通过 **[Neuink 产品与使用指南](https://sugrsertraline.github.io/neuink/)** 阅读，含功能导航、章节全文搜索、手机目录和完整研究流程。
+README 提供概览，详细用法收录于 [22 篇专题手册](website/README.md)。现已发布到 GitHub Pages，可通过 **[Neuink 产品与使用指南](https://sugrsertraline.github.io/neuink/)** 阅读，含功能导航、章节全文搜索、手机目录和完整研究流程。
 
 | 想了解什么 | 对应说明 |
 | --- | --- |
@@ -52,6 +52,10 @@ README 提供概览，详细用法收录于 [21 篇专题手册](website/README.
 | 分享、设置、迁移与问题排查 | [导出](website/content/export.md) · [设置](website/content/settings.md) · [数据](website/content/data.md) · [研究流程](website/content/workflows.md) · [常见问题](website/content/faq.md) |
 
 ## 核心概念
+
+![Neuink 内容层级：资料库、条目、标签和笔记](website/public/diagrams/concept-hierarchy.png)
+
+[查看概念关系与实例](https://sugrsertraline.github.io/neuink/concepts.html) · [按流程开始使用](https://sugrsertraline.github.io/neuink/start.html)
 
 | 概念 | 它是什么 | 什么时候用 |
 | --- | --- | --- |

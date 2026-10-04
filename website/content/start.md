@@ -1,6 +1,12 @@
 Neuink 把文献、阅读位置、笔记和证据放进一个本地资料库。第一次使用，可以先完成一条很短的路线：**打开一篇 PDF → 记下一条想法 → 给想法附上来源 → 保存笔记**。解析、翻译和 AI 都可以之后再配置。
 
 
+## 先走完一条阅读流程
+
+![上手流程：打开资料库、导入 PDF、分屏阅读与记录、核对并保存、导出；解析和 AI 是按需加入的分支](../public/diagrams/first-reading-flow.png)
+
+先完成左侧主流程。需要重排或精确片段时再导入解析结果；需要翻译或助手时再配置模型。不熟悉“条目”“片段”等名称，可以先看[核心概念](concepts.md)。
+
 ## 对照完整工作台
 
 ![Neuink 完整实机窗口：左侧条目详情、中间 PDF、右侧演示笔记](../public/screenshots/pdf-note-workspace.png)
@@ -9,7 +15,7 @@ Neuink 把文献、阅读位置、笔记和证据放进一个本地资料库。�
 
 ## 准备与安装
 
-从 [GitHub Releases](https://github.com/SugrSertraline/neuink/releases) 查看维护者已发布的版本、平台与说明。没有适合的平台产物时，可按仓库的[构建说明](https://github.com/SugrSertraline/neuink/blob/main/docs/deployment/packaging-and-distribution.md)从源码运行；不要把 Actions 构建成功等同于正式发行验收。
+从 [GitHub Releases](https://github.com/SugrSertraline/neuink/releases) 查看维护者已发布的版本、平台与说明。没有适合的平台产物时，可按仓库的[构建说明](https://github.com/SugrSertraline/neuink/blob/main/docs/deployment/packaging-and-distribution.md)从源码运行；下载前查看对应版本的支持平台与使用说明。
 
 Windows 便携包需要完整解压，再运行 `Neuink.exe`。保留随包的资源目录；运行成品不需要 Node.js 或 Rust，系统需有 WebView2 Runtime。请以该版本的发布说明为准，不将调试目录中的程序当成便携版。
 

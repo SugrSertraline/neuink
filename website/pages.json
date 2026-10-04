@@ -6,6 +6,12 @@
     "description": "从创建资料库到保存第一篇带来源的笔记。"
   },
   {
+    "id": "concepts",
+    "title": "核心概念与关系",
+    "group": "开始",
+    "description": "用层级图和实例认识资料库、条目、标签、片段、笔记与来源。"
+  },
+  {
     "id": "screenshots",
     "title": "实机界面图解",
     "group": "开始",

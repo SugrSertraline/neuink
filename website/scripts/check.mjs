@@ -33,7 +33,7 @@ for (const page of pages) {
 }
 const allowed = new Set(['assets', 'index.html', '404.html', 'search.json', 'robots.txt', 'sitemap.xml', '.nojekyll', ...pages.map(p => `${p.id}.html`)]);
 for (const file of files) if (!allowed.has(file)) failures.push(`Unexpected publish file: ${file}`);
-for (const file of await fs.readdir(path.join(out, 'assets'))) if (!['logo.png', 'style.css', 'app.js', 'screenshots'].includes(file)) failures.push(`Unexpected asset: ${file}`);
+for (const file of await fs.readdir(path.join(out, 'assets'))) if (!['logo.png', 'style.css', 'app.js', 'screenshots', 'diagrams'].includes(file)) failures.push(`Unexpected asset: ${file}`);
 const screenshotSizes = JSON.parse(await fs.readFile(path.join(root, 'screenshots.json'), 'utf8'));
 const screenshots = Object.keys(screenshotSizes);
 for (const file of await fs.readdir(path.join(out, 'assets/screenshots'))) if (!screenshots.includes(file)) failures.push('Unexpected screenshot: ' + file);
@@ -41,5 +41,13 @@ for (const file of screenshots) {
   const bytes = await fs.readFile(path.join(out, 'assets/screenshots', file));
   if (bytes.toString('hex', 0, 8) !== '89504e470d0a1a0a' || bytes.readUInt32BE(16) !== screenshotSizes[file][0] || bytes.readUInt32BE(20) !== screenshotSizes[file][1]) failures.push('Screenshot must match reviewed PNG dimensions: ' + file);
 }
+const diagramSizes = JSON.parse(await fs.readFile(path.join(root, 'diagrams.json'), 'utf8'));
+for (const name of await fs.readdir(path.join(out, 'assets/diagrams'))) if (!(name in diagramSizes)) failures.push('Unexpected diagram: ' + name);
+for (const [name, [width, height]] of Object.entries(diagramSizes)) {
+  const bytes = await fs.readFile(path.join(out, 'assets/diagrams', name));
+  if (bytes.toString('hex', 0, 8) !== '89504e470d0a1a0a' || bytes.readUInt32BE(16) !== width || bytes.readUInt32BE(20) !== height) failures.push('Invalid diagram: ' + name);
+  if (![...htmlByFile.values()].some(html => html.includes('assets/diagrams/' + name))) failures.push('Unused diagram: ' + name);
+}
 if (failures.length) { console.error(failures.join('\n')); process.exitCode = 1; }
 else console.log(`PASS: ${htmlByFile.size} HTML pages; ${count} local links/anchors; ${index.length} search records; publish allowlist.`);
+
