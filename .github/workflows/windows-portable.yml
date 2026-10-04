@@ -85,7 +85,7 @@ jobs:
             target: x86_64-apple-darwin
             arch: x64
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    timeout-minutes: 150
     defaults:
       run:
         shell: bash
@@ -101,6 +101,9 @@ jobs:
       - run: rustup toolchain install 1.96.0 --profile minimal
       - run: rustup override set 1.96.0
       - run: rustup target add ${{ matrix.target }}
+      - name: Build pinned ONNX Runtime for Intel (upstream has no prebuilt archive)
+        if: matrix.arch == 'x64'
+        run: node apps/desktop/scripts/macos-intel-runtime.cjs
       - run: node apps/desktop/scripts/embedding-resources.cjs
       - name: Prepare resource manifest even when tutorial files are absent
         run: npm --workspace apps/desktop run prepare:resources

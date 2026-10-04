@@ -103,6 +103,8 @@ embedding 由 `embedding-resources.cjs` 从 Hugging Face 固定 revision 下载�
 
 ### macOS 预览包
 
+Intel 使用固定 ONNX Runtime 1.24.4 源码提交构建共享库（对应当前 ort-sys API 24），因为上游不再提供该目标的预编译档案。仅 Intel job 构建该依赖；最低 macOS 13.3。运行库及许可证随 app 打包，链接到包内 Frameworks，不依赖用户安装 Homebrew 或构建机器目录。打包时校验链接路径、架构及签名；完整云端构建与实机运行仍需分别验收。Apple Silicon 沿用依赖提供的预编译运行库。
+
 macOS job 使用 GitHub 的真实 Mac runner 编译，不在 Windows 上伪造交叉构建。Apple Silicon 对应 `aarch64-apple-darwin`，Intel 对应 `x86_64-apple-darwin`。PR 会检查两种目标；主分支与标签还构建 `.app`。
 
 Mac 在原生 `cargo check` 前无条件运行 `prepare:resources`。全新 checkout 缺少演示素材时也生成 `included:false` 状态文件，避免被 Git 忽略的本地生成文件造成云端检查失败；PR 路径同样准备。

@@ -18,6 +18,19 @@ function inspectBundle(app) {
   return { binary, demoIncluded: availability.included };
 }
 
+function verifyNativeBundle(app, binary, arch, run = execFileSync) {
+  run('lipo', [binary, '-verify_arch', arch === 'x64' ? 'x86_64' : 'arm64']);
+  if (arch === 'x64') {
+    const library = path.join(app, 'Contents/Frameworks/libonnxruntime.1.24.4.dylib');
+    run('lipo', [library, '-verify_arch', 'x86_64']);
+    const dependencies = run('otool', ['-L', binary], { encoding: 'utf8' });
+    if (!dependencies.includes('@executable_path/../Frameworks/libonnxruntime.1.24.4.dylib')) {
+      throw new Error('Intel app must link to its bundled ONNX Runtime');
+    }
+  }
+  run('codesign', ['--verify', '--deep', '--strict', app]);
+}
+
 async function packageMac(arch) {
   if (process.platform !== 'darwin') throw new Error('macOS packaging requires a macOS runner');
   const targets = { arm64: 'aarch64-apple-darwin', x64: 'x86_64-apple-darwin' };
@@ -26,8 +39,7 @@ async function packageMac(arch) {
   const version = validateVersion(root);
   const app = path.join(root, 'target', targets[arch], 'release/bundle/macos/Neuink.app');
   const { binary, demoIncluded } = inspectBundle(app);
-  execFileSync('lipo', ['-verify_arch', arch === 'x64' ? 'x86_64' : 'arm64', binary]);
-  execFileSync('codesign', ['--verify', '--deep', '--strict', app]);
+  verifyNativeBundle(app, binary, arch);
   const output = path.join(root, 'release', `publish-macos-${arch}`);
   fs.mkdirSync(output, { recursive: true });
   const stem = `Neuink-macos-${arch}`;
@@ -45,7 +57,7 @@ async function packageMac(arch) {
     `${metadata.zipSha256}  ${stem}.app.zip\n${await hashFile(path.join(output, info))}  ${info}\n`, { flag: 'wx' });
   console.log(JSON.stringify(metadata));
 }
-module.exports = { inspectBundle, packageMac };
+module.exports = { inspectBundle, verifyNativeBundle, packageMac };
 if (require.main === module) packageMac(process.argv[2]).catch(error => {
   console.error(error.message); process.exitCode = 1;
 });
