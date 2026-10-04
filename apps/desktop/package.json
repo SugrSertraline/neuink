@@ -16,7 +16,7 @@
     "verify:browser-reader": "node scripts/browser-reader-resources.cjs --smoke-test",
     "prepare:reader-licenses": "node scripts/reader-licenses.cjs --prepare",
     "verify:reader-licenses": "node scripts/reader-licenses.cjs",
-    "test:packaging": "node --test scripts/onboarding-resources.test.cjs scripts/browser-reader-resources.test.cjs scripts/reader-licenses.test.cjs",
+    "test:packaging": "node --test scripts/onboarding-resources.test.cjs scripts/browser-reader-resources.test.cjs scripts/reader-licenses.test.cjs scripts/embedding-resources.test.cjs scripts/release-artifacts.test.cjs scripts/macos-artifacts.test.cjs scripts/release-version.test.cjs",
     "test:frontend": "vitest run",
     "preview": "vite preview"
   },

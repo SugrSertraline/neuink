@@ -1,0 +1,151 @@
+name: Desktop portable (Windows and macOS)
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-portable-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  verify:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Validate application and tag versions before building
+        run: node apps/desktop/scripts/release-version.cjs
+      - run: rustup toolchain install 1.96.0 --profile minimal
+      - run: rustup override set 1.96.0
+      - run: npm --workspace apps/desktop run test:packaging
+      - run: npm --workspace apps/desktop run test:frontend -- --maxWorkers=2
+      - run: npm run desktop:build
+      - name: Rust tests (serial local-server fixtures)
+        run: cargo test --locked -p neuink-ipc -p neuink-workspace -p neuink-job --no-default-features -- --test-threads=1
+
+  build:
+    needs: verify
+    if: github.event_name != 'pull_request'
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: rustup toolchain install 1.96.0 --profile minimal
+      - run: rustup override set 1.96.0
+      - run: node apps/desktop/scripts/embedding-resources.cjs
+      - run: npm --workspace apps/desktop run prepare:browser-reader
+      - run: npm --workspace apps/desktop run verify:browser-reader
+      - run: npm run desktop:release:portable
+      - name: Prepare download metadata and checksums
+        run: node apps/desktop/scripts/release-artifacts.cjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Neuink-windows-x64-${{ github.sha }}
+          path: release/publish/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  macos:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            arch: arm64
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: rustup toolchain install 1.96.0 --profile minimal
+      - run: rustup override set 1.96.0
+      - run: rustup target add ${{ matrix.target }}
+      - name: Prepare resource manifest even when tutorial files are absent
+        run: npm --workspace apps/desktop run prepare:resources
+      - name: Native macOS compilation check (including PRs)
+        run: cargo check --locked -p neuink-desktop --target ${{ matrix.target }}
+      - if: github.event_name != 'pull_request'
+        run: node apps/desktop/scripts/embedding-resources.cjs
+      - name: Build self-contained app bundle (ad-hoc signed, not notarized)
+        if: github.event_name != 'pull_request'
+        env:
+          APPLE_SIGNING_IDENTITY: '-'
+        run: npm --workspace apps/desktop run tauri -- build --target ${{ matrix.target }} --bundles app -- --locked
+      - if: github.event_name != 'pull_request'
+        run: node apps/desktop/scripts/macos-artifacts.cjs ${{ matrix.arch }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: Neuink-macos-${{ matrix.arch }}-${{ github.sha }}
+          path: release/publish-macos-${{ matrix.arch }}/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  release-draft:
+    needs: [build, macos]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-2022
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: Neuink-*-${{ github.sha }}
+          path: publish
+      - name: Create reviewable release draft (never replace published assets)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') { throw 'Invalid release tag' }
+          $notes = "publish/Neuink-windows-x64-$env:GITHUB_SHA/RELEASE_NOTES.md"
+          Add-Content -LiteralPath $notes -Value "`n## macOS 预览版`nApple Silicon 下载 arm64；Intel 下载 x64。解压 .app.zip 后将 Neuink.app 移至 Applications。包含 embedding；不含 Windows 专用内嵌网页和视频字幕运行时。仅 ad-hoc 签名、未 Apple 公证，Gatekeeper 可能阻止运行；不建议关闭系统安全防护。实机验收尚未完成。"
+          $assets = @(Get-ChildItem -LiteralPath publish -Recurse -File | Where-Object { $_.Extension -in '.zip', '.json', '.txt' } | ForEach-Object FullName)
+          if ($assets.Count -ne 9) { throw 'Expected ZIP, metadata and checksums for all three platforms' }
+          $options = @('--draft', '--verify-tag', '--title', "Neuink $env:RELEASE_TAG", '--notes-file', $notes)
+          if ($env:RELEASE_TAG.Contains('-')) { $options += '--prerelease' }
+          gh release create $env:RELEASE_TAG @assets @options
+          if ($LASTEXITCODE -ne 0) { throw 'Release draft creation failed; existing release was not overwritten' }
