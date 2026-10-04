@@ -18,6 +18,7 @@
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/desktop-Windows%20%7C%20macOS-1f2937?style=flat-square" alt="Desktop platforms: Windows and macOS">
   <img src="https://img.shields.io/badge/Tauri-2-24c8db?style=flat-square" alt="Tauri 2">
   <img src="https://img.shields.io/badge/React-18-61dafb?style=flat-square" alt="React 18">
   <img src="https://img.shields.io/badge/license-Apache--2.0-2563eb?style=flat-square" alt="Apache-2.0 license">

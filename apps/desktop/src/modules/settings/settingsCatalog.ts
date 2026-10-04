@@ -62,6 +62,7 @@ const ALL_SETTINGS_CATALOG: SettingDefinition[] = [
   { id: 'agent-subagents', tab: 'subagents', title: '子助手', description: '配置内置子助手的模型、权限和系统提示词。', keywords: '子Agent 子 Agent worker 权限 启用' },
   { id: 'tools-services', tab: 'external-tools', title: 'Sciverse 外部检索', description: '配置科学文献检索服务和访问凭据。', keywords: 'Sciverse 检索 服务 插件 工具 API Key 密钥 外部工具' },
   { id: 'tools-research', tab: 'external-tools', title: '论文与网页检索', description: '免费免密钥检索、网页读取、确认下载 PDF，以及可选 Tavily 增强。', keywords: 'arXiv Crossref OpenAlex DuckDuckGo Tavily 免费 免配置 论文 下载 PDF 搜索 网页 URL API Key 密钥' },
+  { id: 'tools-assistant-debug', tab: 'external-tools', title: '助手调试信息', description: '仅本机显示安全错误类别和状态码，默认关闭。', keywords: '调试 debug 诊断 工具报错 错误详情' },
   { id: 'tools-mcp', tab: 'external-tools', title: 'MCP 与工具连接', description: '注册工具服务并配置连接参数。', keywords: 'MCP 服务 插件 工具 外部工具' }
 ];
 export const SETTINGS_CATALOG = ALL_SETTINGS_CATALOG.filter(item =>

@@ -36,4 +36,22 @@ describe('AgentLoopGuard', () => {
     expect(() => guard.beforeToolCall('read', { id: 2 })).toThrow('TOOL_LIMIT_REACHED');
     expect(guard.state.status).toBe('running');
   });
+
+  it.each(['calls', 'failures', 'budget', 'progress'] as const)('attaches a structured host code for %s protection', reason => {
+    const state = createAgentLoopState('test');
+    const guard = new AgentLoopGuard(state);
+    if (reason === 'calls') {
+      guard.beforeToolCall('read', {});
+      guard.beforeToolCall('read', {});
+    } else if (reason === 'failures') {
+      const fingerprint = guard.beforeToolCall('read', {});
+      guard.recordFailure(fingerprint);
+      guard.recordFailure(fingerprint);
+    } else if (reason === 'budget') state.toolCallCount = state.maxToolCalls;
+    else state.noProgressCount = 3;
+    let error: unknown;
+    try { guard.beforeToolCall('read', {}); } catch (caught) { error = caught; }
+    expect(error).toBeInstanceOf(AgentToolNotExecutedError);
+    expect(error).toMatchObject({ code: reason === 'calls' || reason === 'failures' ? 'TOOL_REPEAT_SKIPPED' : 'TOOL_LIMIT_REACHED' });
+  });
 });

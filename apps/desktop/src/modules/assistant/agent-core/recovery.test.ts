@@ -17,6 +17,7 @@ describe('durable kernel recovery', () => {
     { messages: [], turns: 1, answer: 42 },
     { messages: [], turns: 1, pending: { response: { text: '', messages: [], calls: [call] }, next: 2, started: false } },
     { messages: [], turns: 1, pending: { response: { text: '', messages: [], calls: [] }, next: 0, started: true } },
+    { messages: [], turns: 1, pending: { response: { text: '', messages: [], calls: [{ ...call, errorCode: 'unknown' }] }, next: 0, started: false } },
   ])('rejects malformed execution state before invoking anything: %j', saved => {
     const provider = driver();
     const write = vi.fn();
@@ -60,7 +61,9 @@ describe('durable kernel recovery', () => {
     const checkpoint: AgentCheckpoint<string> = { messages: ['question', 'call'], turns: 1,
       pending: { response: { text: '', messages: ['call'], calls: [call] }, next: 0, started: true } };
     const write = vi.fn();
-    await expect(new Agent({ driver: driver(), messages: [], tools: { write }, budget: new RunBudget(), checkpoint: structuredClone(checkpoint) }).run()).rejects.toThrow('执行结果尚未确认');
+    const uncertain = new Agent({ driver: driver(), messages: [], tools: { write }, budget: new RunBudget(), checkpoint: structuredClone(checkpoint) });
+    expect(await uncertain.run()).toBe('done');
+    expect(JSON.parse(uncertain.messages[2])).toMatchObject({ code: 'TOOL_OUTCOME_UNKNOWN', outcome: 'unknown' });
     expect(write).not.toHaveBeenCalled();
     const readOnly = vi.fn(async () => 'evidence');
     const provider = driver();
@@ -76,13 +79,17 @@ describe('durable kernel recovery', () => {
     await expect(new Agent({ driver: driver(), messages: ['question'], tools: { write }, budget: new RunBudget(), saveCheckpoint }).run()).rejects.toThrow('检查点保存失败');
     expect(write).not.toHaveBeenCalled();
   });
-  it('does not ask the model to retry a failed write with an uncertain outcome', async () => {
+  it('returns an uncertain write to the model for explanation without allowing a retry', async () => {
     const write = vi.fn(async () => { throw new Error('connection lost after commit'); });
     const provider = driver();
-    await expect(new Agent({ driver: provider, messages: ['question'], tools: { write }, budget: new RunBudget(),
-      saveCheckpoint: async () => {} }).run()).rejects.toThrow('无法确认是否已产生修改');
+    const budget = new RunBudget();
+    const agent = new Agent({ driver: provider, messages: ['question'], tools: { write }, budget,
+      saveCheckpoint: async () => {} });
+    expect(await agent.run()).toBe('done');
+    expect(JSON.parse(agent.messages[2])).toMatchObject({ code: 'TOOL_OUTCOME_UNKNOWN', outcome: 'unknown', recovery: { writesBlocked: true, retryable: false } });
+    expect(budget.writesBlocked).toBe(true);
     expect(write).toHaveBeenCalledOnce();
-    expect(provider.turn).toHaveBeenCalledOnce();
+    expect(provider.turn).toHaveBeenCalledTimes(2);
   });
   it('returns a saved final response even if the turn budget has been exhausted', async () => {
     const provider = driver();

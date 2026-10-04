@@ -56,3 +56,13 @@ it('cancels all pending correction frames on navigation, user cancellation and u
   expect(offsets).not.toHaveBeenCalled();
   expect(vi.getTimerCount()).toBe(0);
 });
+
+it('preserves note keyboard focus for citations while ordinary reader navigation still focuses the reader', () => {
+  const { scroll, adapter } = fixture();
+  scroll.tabIndex = 0;
+  const note = document.createElement('textarea'); document.body.append(note); note.focus();
+  act(() => { expect(adapter.navigate({ pageIdx: 4, segmentUid: 'p', focus: false })).toBe(true); });
+  expect(document.activeElement).toBe(note);
+  act(() => { adapter.navigate({ pageIdx: 4, segmentUid: 'p' }); });
+  expect(document.activeElement).toBe(scroll);
+});

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  formatSearchSegmentsOutput,
   formatSciverseSearchOutput,
   applyMarkdownPatchPreview,
   markdownPatchOperations,
@@ -10,6 +11,24 @@ import {
   prependMarkdownPreview,
   sourcesFromMarkers
 } from './toolSupport';
+
+describe('local search degradation', () => {
+  it.each(['semantic_fallback_keyword', 'hybrid_fallback_keyword', 'keyword'])(
+    'does not echo backend warning payloads for %s', mode => {
+      const output = formatSearchSegmentsOutput({ query: 'participants', mode, index_generation: 1,
+        total_hit_count: 0, entries: [], warnings: ['Embedding unavailable at C:\\Private\\models\\secret-model.onnx; Authorization: Bearer secret-token']
+      }, () => 1);
+      expect(output.modelOutput.warnings).toHaveLength(1);
+      expect(output.modelOutput.warnings[0]).toContain(mode === 'keyword' ? 'limitation' : 'keyword fallback');
+      expect(JSON.stringify(output)).not.toMatch(/Private|secret-model|Authorization|secret-token/);
+    }
+  );
+  it('does not invent a warning for an unqualified successful search', () => {
+    const output = formatSearchSegmentsOutput({ query: 'participants', mode: 'keyword', index_generation: 1,
+      total_hit_count: 0, entries: [] }, () => 1);
+    expect(output.modelOutput.warnings).toEqual([]);
+  });
+});
 
 describe('prepend note proposals', () => {
   it('accepts prepend as a model-visible proposal action', () => {

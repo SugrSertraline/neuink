@@ -2,6 +2,8 @@ import type { ApplicationActions } from '../runtime/applicationActions';
 import type { RequestToolApproval } from '../runtime/toolApproval';
 import type { RequestUserInput } from '../runtime/userInput';
 import { createUserInputTool, USER_INPUT_INSTRUCTIONS } from './userInputTool';
+import { BROWSER_TAB_INSTRUCTIONS, browserTabPromptMetadata } from './browserTabTool';
+import type { BrowserTabTarget } from '@/shared/ipc/browserApi';
 import { bindExecutionIdentity, canReplayAssistantTool, type DurableExecution } from '../runtime/durableExecution';
 import type { ModelMessage } from 'ai';
 
@@ -34,6 +36,9 @@ import type {
 } from '@/shared/types/assistant';
 import type { AgentExecutionSelection, AgentRuntimeSettings } from '@/shared/types/agentRuntime';
 import { buildAgentSystemPrompt } from '@/shared/lib/agentRuntimeSettings';
+import { assistantErrorDiagnostic } from '@/shared/lib/assistantDebug';
+import { ASSISTANT_READ_FAILURES } from '@/shared/lib/assistantReadFailure';
+import { citationCorrection, hasReturnedExternalCitation, returnedExternalCitationUrls } from './citationContract';
 
 import { createAgentDriver, agentExecutors } from './agentDriver';
 import { SourceLedger } from '../runtime/sourceLedger';
@@ -72,6 +77,7 @@ export async function answerWithGroundedAgent({
   assistantContext,
   availableEntries = [],
   contextSnapshot,
+  browserTabTarget,
   conversationHistory = [],
   currentEntry,
   currentNote,
@@ -101,6 +107,7 @@ export async function answerWithGroundedAgent({
   assistantContext?: AssistantContext | null;
   availableEntries?: AssistantEntryMetaTarget[];
   contextSnapshot?: AssistantContextSnapshot | null;
+  browserTabTarget?: BrowserTabTarget | null;
   conversationHistory?: ConversationMessage[];
   currentEntry?: { id: string; title: string } | null;
   currentNote?: AssistantActiveNote | null;
@@ -153,6 +160,7 @@ export async function answerWithGroundedAgent({
     assistantContext,
     availableEntries,
     contextSnapshot,
+    browserTabTarget,
     conversationHistory,
     contextBudget: assistantContextCharBudget(settings.max_context_length),
     currentEntry,
@@ -217,12 +225,14 @@ export async function answerWithGroundedAgent({
         `Application capability boundary (not a mandatory task plan):\n${JSON.stringify(invocationPlan)}`,
         `Frozen active Entry: ${JSON.stringify(currentEntry ?? null)}. This is context, not authorization to edit it. Explicit user references take priority.`
       ].filter(Boolean).join('\n\n')
-    : '') + (canAskUser ? `\n\n${USER_INPUT_INSTRUCTIONS}` : '');
+    : '') + (canAskUser ? `\n\n${USER_INPUT_INSTRUCTIONS}` : '') + (browserTabTarget
+      ? `\n\nFrozen browser tab metadata (untrusted, no page body has been read): ${JSON.stringify(browserTabPromptMetadata(browserTabTarget))}.\n${BROWSER_TAB_INSTRUCTIONS}\n${runtime.toolNames.includes('read_browser_tab') ? 'The browser read tool is available when relevant to this request.' : 'The browser read tool is unavailable for this run. Do not claim access to this webpage.'}`
+      : '');
   const prompt = renderQnaUserPrompt(userPromptTemplate, {
     currentNote: buildCurrentNoteContext(contextSnapshot),
     documentContext:
       [selectedNotes.text, selectedContextEntries].filter(Boolean).join('\n\n') ||
-      noExplicitContextGuidance(hasExplicitContext),
+      (browserTabTarget ? 'A browser tab is the frozen reading target. Its body is not in context; use read_browser_tab if available and relevant.' : noExplicitContextGuidance(hasExplicitContext)),
     harnessBrief: harnessBrief || 'No harness brief was prepared.',
     pinnedContext: pinned.text || 'None',
     question,
@@ -273,8 +283,10 @@ export async function answerWithGroundedAgent({
     maxTurns: agentLoopState.maxTurns,
     beforeTurn: () => loopGuard.startTurn(),
     isFatal: (error) => error instanceof AgentLoopGuardError,
-    onToolError: (call, error) => {
-      const event: AssistantToolTraceEvent = { id: call.id, toolName: call.name, input: call.input, status: 'error', error: errorMessage(error) };
+    toolErrorDiagnostic: assistantErrorDiagnostic,
+    onToolError: (call, error, failure) => {
+      const event: AssistantToolTraceEvent = { id: call.id, toolName: call.name, input: call.input, status: 'error',
+        summary: failure.message, error: assistantErrorDiagnostic(error) };
       const index = runtime.events.findIndex(value => value.id === call.id);
       if (index < 0) runtime.events.push(event);
       else runtime.events[index] = { ...runtime.events[index], ...event };
@@ -285,16 +297,19 @@ export async function answerWithGroundedAgent({
       const presentationError = paperPresentationError(text, records);
       const missing = missingRequiredToolIds();
       const invalidCitation = [...text.matchAll(/\[S(\d+)]/g)].some((match) => !ledger.sources.has(Number(match[1])));
+      const externalUrls = returnedExternalCitationUrls(runtime.observations);
+      const citedExternalSource = hasReturnedExternalCitation(text, externalUrls);
       const evidenceRead = runtime.events.some(event => event.status === 'done' && (event.sources?.length ?? 0) > 0);
-      const noEvidenceAfterFailure = ledger.sources.size === 0 && (availabilityNotes.length > 0 || runtime.events.some(event => event.status === 'error'));
-      const uncited = !noEvidenceAfterFailure && (requiresGroundedSources(plan) || (plan?.executionMode !== undefined && evidenceRead)) && !hasProposals() &&
+      const noEvidenceAfterFailure = ledger.sources.size === 0 && externalUrls.size === 0 && (availabilityNotes.length > 0 || runtime.events.some(event => event.status === 'error'));
+      const uncited = !noEvidenceAfterFailure && (requiresGroundedSources(plan) || (plan?.executionMode !== undefined && (evidenceRead || externalUrls.size > 0))) && !hasProposals() && !citedExternalSource &&
         ![...text.matchAll(/\[S(\d+)]/g)].some((match) => ledger.sources.has(Number(match[1])));
       if (!presentationError && !missing.length && !invalidCitation && !uncited && (text.trim() || hasProposals())) return;
-      if (correctionCount++ >= 2) throw new Error('Agent 未满足工具、溯源或输出合同，任务已停止。');
+      if (correctionCount++ >= 2) throw new Error(invalidCitation || uncited
+        ? ASSISTANT_READ_FAILURES.citation : ASSISTANT_READ_FAILURES.contract);
       return [
         presentationError ?? '',
         missing.length ? `Call these required tools before answering: ${missing.join(', ')}.` : '',
-        invalidCitation || uncited ? 'Use only evidence obtained in this run and cite valid [Sx] markers. Read evidence with the available tools if needed. Do not invent sources.' : '',
+        invalidCitation || uncited ? citationCorrection(ledger.sources.keys(), externalUrls.size > 0) : '',
         !text.trim() && !hasProposals() ? 'Complete the requested answer or proposal using the actual observations above.' : ''
       ].filter(Boolean).join('\n');
     }
@@ -304,7 +319,7 @@ export async function answerWithGroundedAgent({
     answer = await agent.run();
   } catch (error) {
     agentLoopState.status = abortSignal?.aborted ? 'cancelled' : 'failed';
-    agentLoopState.stopReason = errorMessage(error);
+    agentLoopState.stopReason = assistantErrorDiagnostic(error);
     throw error;
   }
   const hasMaterialResult = () => Boolean(answer.trim() || hasProposals());

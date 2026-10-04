@@ -2,6 +2,7 @@ import { Tags, Plus, Minus, PencilLine, Loader2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import type { AssistantTagProposal } from '@/shared/types/assistant';
+import { ASSISTANT_ACTION_INCOMPLETE, formatAssistantError, useAssistantDebug } from '@/shared/lib/assistantDebug';
 
 export function TagProposalList({
   disabled = false,
@@ -16,6 +17,7 @@ export function TagProposalList({
   onReject?: (proposal: AssistantTagProposal) => void;
   proposals: AssistantTagProposal[];
 }) {
+  const debug = useAssistantDebug();
   return (
     <div className="tag-proposal-list mt-2 grid min-w-0 gap-1.5">
       {proposals.map((proposal) => (
@@ -48,7 +50,7 @@ export function TagProposalList({
             </p>
           ) : null}
           {proposal.error ? (
-            <p className="mt-1 break-words text-destructive">{proposal.error}</p>
+            <p className="mt-1 break-words text-destructive">{formatAssistantError(proposal.error, { debug, fallback: ASSISTANT_ACTION_INCOMPLETE })}</p>
           ) : null}
           {proposal.status === 'applying' && decidingProposalId !== proposal.id ? <p className="mt-1 text-[11px] text-warning">上次提交结果待核对，不会自动重试。请检查标签后再生成新提案。</p> : null}
           {proposal.status === 'pending' ? (

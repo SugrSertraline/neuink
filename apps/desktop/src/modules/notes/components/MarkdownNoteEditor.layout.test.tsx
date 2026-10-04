@@ -36,7 +36,9 @@ describe('MarkdownNoteEditor responsive layout', () => {
 
     // CSS grid's implicit auto column uses the header's intrinsic width even
     // when the grid container itself has min-width: 0. Constrain every track.
-    for (const grid of [root, ...root.querySelectorAll('.grid')]) {
+    expect(root.classList.contains('grid-cols-[auto_minmax(0,1fr)]')).toBe(true);
+    expect(root.classList.contains('min-w-0')).toBe(true);
+    for (const grid of root.querySelectorAll('.grid')) {
       expect(grid.classList.contains('grid-cols-1')).toBe(true);
       expect(grid.classList.contains('min-w-0')).toBe(true);
     }
@@ -50,6 +52,9 @@ describe('MarkdownNoteEditor responsive layout', () => {
     expect(scroll.classList.contains('[scrollbar-gutter:stable]')).toBe(true);
     expect(content.classList.contains('[overflow-wrap:anywhere]')).toBe(true);
     expect(content.querySelector('.tableWrapper table')).toBeTruthy();
-    expect(root.querySelectorAll('.overflow-y-auto')).toHaveLength(1);
+    const outline = root.querySelector<HTMLElement>('nav[aria-label="笔记文内定位"]')!;
+    expect(root.querySelectorAll('.overflow-y-auto')).toHaveLength(2);
+    expect(outline.parentElement?.hidden).toBe(true);
+    expect(scroll.contains(outline)).toBe(false);
   });
 });

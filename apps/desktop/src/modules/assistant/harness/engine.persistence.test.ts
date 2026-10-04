@@ -161,6 +161,8 @@ describe('real harness wiring (only model and IPC transports are replaced)', () 
     vi.mocked(createNeuinkModel).mockReturnValue(model);
     const answer = await runAssistantHarness({ ...options, scope: { ...options.scope, entry_ids: ['entry'], entry_titles: ['Paper'] } });
     expect(JSON.stringify(model.doStreamCalls[1].prompt)).toContain('Read the current target note');
+    expect(JSON.stringify(model.doStreamCalls[1].prompt)).toContain('TOOL_PREFLIGHT_FAILED');
+    expect(JSON.stringify(model.doStreamCalls[1].prompt)).toContain('not_executed');
     expect(readNote).toHaveBeenCalledOnce();
     expect(answer.noteProposals).toHaveLength(1);
     expect(answer.noteProposals?.[0]).toMatchObject({ action: 'patch', beforeMarkdown: 'Old\n', afterMarkdown: 'New\n', status: 'pending' });

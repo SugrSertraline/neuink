@@ -1,5 +1,9 @@
 const { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } = require('node:fs');
-const { verifyResources, copyResources } = require('./onboarding-resources.cjs');
+const { copyOptionalResources, assertEmbeddingResources, writeAvailabilityManifest } = require('./onboarding-resources.cjs');
+const { DEFAULT_SOURCE: browserReaderSource, verifyResources: verifyBrowserReader,
+  copyResources: copyBrowserReader } = require('./browser-reader-resources.cjs');
+const { DEFAULT_SOURCE: readerLicenseSource, verifyResources: verifyReaderLicenses,
+  copyResources: copyReaderLicenses } = require('./reader-licenses.cjs');
 const { execFileSync, spawn } = require('node:child_process');
 const path = require('node:path');
 
@@ -31,7 +35,9 @@ void main().catch((caught) => {
 });
 
 async function main() {
-  verifyResources(onboardingSource);
+  assertEmbeddingResources(modelSource);
+  verifyBrowserReader(browserReaderSource);
+  verifyReaderLicenses(readerLicenseSource);
   const runtimeSource = findVcRuntimeDir();
   if (!skipBuild) {
     console.log('步骤 1/3：构建 Tauri release exe…');
@@ -66,13 +72,20 @@ async function main() {
   mkdirSync(path.join(portableRoot, 'embedding-models'), { recursive: true });
 
   await copyPortableResources(executableSource, portableRoot, runtimeSource);
-  copyResources(onboardingSource, path.join(portableRoot, 'resources', 'onboarding'));
+  copyBrowserReader(browserReaderSource, path.join(portableRoot, 'resources', 'browser-reader'));
+  copyReaderLicenses(readerLicenseSource, path.join(portableRoot, 'resources', 'reader-licenses'));
+  const includesOnboarding = copyOptionalResources(onboardingSource, path.join(portableRoot, 'resources', 'onboarding'));
+  writeAvailabilityManifest(includesOnboarding, path.join(portableRoot, 'resources', 'onboarding-availability.json'));
   writeFileSync(path.join(portableRoot, '使用说明.txt'), '\ufeff' + [
     'Neuink Windows x64 便携版', '',
     '1. 完整解压此压缩包到一个可写目录。',
     '2. 双击 Neuink.exe 启动，无需安装 Node.js、Rust 或启动开发服务。',
     '3. 请保留同目录的 embedding-models 文件夹，用于本地语义搜索。', '',
-    '请保留 resources/onboarding 文件夹；新手教程的演示 PDF、解析结果与笔记无需联网即可准备。',
+    '4. 请保留 resources/browser-reader 文件夹及其许可证；视频字幕读取已内置所需运行环境，无需安装 Python。', '',
+    '5. 请保留 resources/reader-licenses 文件夹，其中包含网页、PDF 和字幕读取组件及资源的原始许可证。', '',
+    includesOnboarding
+      ? '已包含离线演示素材。请保留 resources/onboarding 文件夹；新手教程的演示 PDF、解析结果与笔记无需联网即可准备。'
+      : '本包未包含演示素材（构建时缺失或校验未通过）；不影响主程序、本地 PDF 阅读及 embedding 语义搜索。',
     '适用于 Windows 10 1903 或更新版本、Windows 11（64 位）。已附带 Visual C++ 运行库。',
     '系统需要 Microsoft Edge WebView2 Runtime；若提示缺失，请从微软官方网站安装后再运行。',
     '资料库和设置沿用应用默认位置，可在“设置 → 资料库与数据”中更改资料库位置。',

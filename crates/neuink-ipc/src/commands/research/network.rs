@@ -94,6 +94,9 @@ async fn client(url: &Url) -> Result<Client, String> {
         return Err("服务地址解析到非公开网络，已阻止访问".into());
     }
     Client::builder()
+        // The workspace enables both TLS backends; choose the tested public-reader path
+        // explicitly instead of inheriting Windows native-tls/ALPN defaults.
+        .use_rustls_tls()
         .no_proxy()
         .redirect(Policy::none())
         .connect_timeout(Duration::from_secs(15))
@@ -104,7 +107,15 @@ async fn client(url: &Url) -> Result<Client, String> {
         .map_err(|_| "无法创建检索连接".into())
 }
 
-async fn bounded(mut response: reqwest::Response, max: usize) -> Result<Vec<u8>, String> {
+async fn bounded(response: reqwest::Response, max: usize) -> Result<Vec<u8>, String> {
+    bounded_with_body_timeout(response, max, None).await
+}
+
+async fn bounded_with_body_timeout(
+    mut response: reqwest::Response,
+    max: usize,
+    body_timeout: Option<Duration>,
+) -> Result<Vec<u8>, String> {
     if !response.status().is_success() {
         return Err(format!("远程服务返回 HTTP {}", response.status().as_u16()));
     }
@@ -119,11 +130,19 @@ async fn bounded(mut response: reqwest::Response, max: usize) -> Result<Vec<u8>,
         return Err("响应超过大小限制".into());
     }
     let mut bytes = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|_| "读取远程内容失败".to_string())?
-    {
+    loop {
+        // Start a fresh idle deadline for each chunk; ongoing transfers retain the
+        // client's existing total request deadline rather than a new body budget.
+        let chunk = match body_timeout {
+            Some(duration) => tokio::time::timeout(duration, response.chunk())
+                .await
+                .map_err(|_| "读取远程内容失败".to_string())?,
+            None => response.chunk().await,
+        }
+        .map_err(|_| "读取远程内容失败".to_string())?;
+        let Some(chunk) = chunk else {
+            break;
+        };
         if bytes.len() + chunk.len() > max {
             return Err("响应超过大小限制".into());
         }
@@ -143,6 +162,22 @@ pub struct Response {
 }
 
 pub async fn fetch(value: &str, max: usize) -> Result<Response, String> {
+    fetch_inner(value, max, None).await
+}
+
+pub async fn fetch_with_body_timeout(
+    value: &str,
+    max: usize,
+    body_timeout: Duration,
+) -> Result<Response, String> {
+    fetch_inner(value, max, Some(body_timeout)).await
+}
+
+async fn fetch_inner(
+    value: &str,
+    max: usize,
+    body_timeout: Option<Duration>,
+) -> Result<Response, String> {
     let mut url = public_url(value)?;
     for _ in 0..6 {
         let response = client(&url)
@@ -168,12 +203,16 @@ pub async fn fetch(value: &str, max: usize) -> Result<Response, String> {
             return Ok(Response {
                 url,
                 content_type,
-                bytes: bounded(response, max).await?,
+                bytes: bounded_with_body_timeout(response, max, body_timeout).await?,
             });
         }
     }
     Err("远程跳转次数过多".into())
 }
+
+#[cfg(test)]
+#[path = "network_body_tests.rs"]
+mod body_tests;
 
 pub async fn tavily(endpoint: &str, key: &str, body: Value) -> Result<Value, String> {
     let url = public_url(&format!("https://api.tavily.com/{endpoint}"))?;

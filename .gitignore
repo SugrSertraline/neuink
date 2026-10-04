@@ -77,3 +77,9 @@ src-tauri/.cargo/
 apps/desktop/src-tauri/resources/onboarding/attention-is-all-you-need.pdf
 apps/desktop/src-tauri/resources/onboarding/segments.json
 apps/desktop/src-tauri/resources/onboarding/mineru.zip
+apps/desktop/src-tauri/resources/onboarding-availability.json
+
+# Reproducible browser reader runtimes are installed by the explicit preparation script.
+apps/desktop/src-tauri/resources/browser-reader/
+apps/desktop/src-tauri/resources/.browser-reader-prepare-*/
+apps/desktop/src-tauri/resources/.browser-reader-backup-*/

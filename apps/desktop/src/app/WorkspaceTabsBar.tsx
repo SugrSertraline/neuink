@@ -164,10 +164,13 @@ export function WorkspaceTabsBar({
       if (!target || (pane !== 'left' && pane !== 'right')) {
         return null;
       }
-      const paneLeft = target.getBoundingClientRect().left;
+      const paneBounds = target.getBoundingClientRect();
+      const paneScale = target.offsetWidth > 0 ? paneBounds.width / target.offsetWidth : 1;
       const slots = [...target.querySelectorAll<HTMLElement>('[data-workspace-tab-index]')]
         .map((tab) => ({
-          center: paneLeft + tab.offsetLeft + tab.offsetWidth / 2,
+          // TabPane is the offset parent. Use its untransformed layout slots,
+          // converted to viewport pixels, so split offsets and UI zoom count once.
+          center: paneBounds.left + (tab.offsetLeft + tab.offsetWidth / 2) * paneScale,
           index: Number(tab.dataset.workspaceTabIndex ?? 0)
         }))
         .sort((left, right) => left.center - right.center);

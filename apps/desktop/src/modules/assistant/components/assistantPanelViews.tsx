@@ -18,6 +18,7 @@ import type { AssistantNoteProposal } from '@/shared/types/assistant';
 
 import { ChatMessage } from './ChatMessage';
 import { contextItemChipTitle } from './assistantContextTargets';
+import { formatAssistantError, useAssistantDebug } from '@/shared/lib/assistantDebug';
 
 type ChatMessageCallbacks = Pick<
   ComponentProps<typeof ChatMessage>,
@@ -62,6 +63,7 @@ export function AssistantConversationHistory({
   onRename,
   open
 }: AssistantConversationHistoryProps) {
+  const debug = useAssistantDebug();
   if (!open) {
     return null;
   }
@@ -88,7 +90,7 @@ export function AssistantConversationHistory({
           </div>
         ) : error ? (
           <div className="rounded-md border border-destructive/25 bg-destructive/5 px-2 py-2 text-xs leading-5 text-destructive">
-            无法读取聊天历史：{error}
+            {formatAssistantError(error, { debug, fallback: '聊天历史读取未完成，请稍后重试。' })}
           </div>
         ) : items.length > 0 ? (
           items.map((item) => {

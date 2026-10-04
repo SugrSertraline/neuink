@@ -4,6 +4,7 @@ export type AgentToolId =
   | 'search_papers'
   | 'search_web'
   | 'read_webpage'
+  | 'read_browser_tab'
   | 'import_papers'
   | 'app.set_appearance'
   | 'create_entry'

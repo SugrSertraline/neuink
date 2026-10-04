@@ -1,0 +1,9 @@
+{
+  "project": "Mozilla Readability",
+  "version": "0.6.0",
+  "license": "Apache-2.0",
+  "modified": false,
+  "source": "https://raw.githubusercontent.com/mozilla/readability/0.6.0/Readability.js",
+  "sha256": "34dcab3d0832d0019f02990eed6b6124e029e8c32b9f0c6f2550544ff8dff174",
+  "licenseSource": "https://raw.githubusercontent.com/mozilla/readability/0.6.0/LICENSE.md"
+}

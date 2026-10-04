@@ -3,6 +3,7 @@ import { Check, Loader2, PencilLine, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { ConversationSourceLink } from '@/shared/ipc/assistantApi';
 import type { AssistantEntryMetaProposal } from '@/shared/types/assistant';
+import { ASSISTANT_ACTION_INCOMPLETE, formatAssistantError, useAssistantDebug } from '@/shared/lib/assistantDebug';
 
 export function EntryMetaProposalCard({
   disabled = false,
@@ -19,6 +20,7 @@ export function EntryMetaProposalCard({
   onReject?: (proposal: AssistantEntryMetaProposal) => void;
   proposal: AssistantEntryMetaProposal;
 }) {
+  const debug = useAssistantDebug();
   return (
     <div className="rounded-md border bg-muted/20 p-2">
       <div className="flex items-center gap-1.5">
@@ -73,7 +75,7 @@ export function EntryMetaProposalCard({
       ) : null}
 
       {proposal.error ? (
-        <p className="mt-1 break-words text-[11px] text-destructive">{proposal.error}</p>
+        <p className="mt-1 break-words text-[11px] text-destructive">{formatAssistantError(proposal.error, { debug, fallback: ASSISTANT_ACTION_INCOMPLETE })}</p>
       ) : null}
 
       {proposal.status === 'applying' && !deciding ? <p className="mt-1 text-[11px] text-warning">上次提交结果待核对，不会自动重试。请检查条目后再生成新提案。</p> : null}

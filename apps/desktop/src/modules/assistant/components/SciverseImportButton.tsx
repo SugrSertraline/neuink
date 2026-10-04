@@ -3,6 +3,7 @@ import { BookPlus, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { ConversationSourceLink, SciverseLibraryImportResult } from '@/shared/ipc/assistantApi';
 import { useSciverseImportState } from './ResearchPaperActions';
+import { ASSISTANT_IMPORT_INCOMPLETE, formatAssistantError, useAssistantDebug } from '@/shared/lib/assistantDebug';
 
 export function SciverseImportButton({
   onImport,
@@ -13,6 +14,7 @@ export function SciverseImportButton({
   ) => Promise<SciverseLibraryImportResult>;
   source: Extract<ConversationSourceLink, { provider: 'sciverse' }>;
 }) {
+  const debug = useAssistantDebug();
   const [state, setState] = useSciverseImportState(source.doc_id);
   const inFlight = useRef(false);
   const confirm = () => {
@@ -42,7 +44,7 @@ export function SciverseImportButton({
         className="h-auto min-h-7 max-w-full whitespace-normal text-left"
         disabled={state.status === 'loading' || state.status === 'done' || state.status === 'confirm'}
         size="sm"
-        title={state.status === 'error' ? state.message : undefined}
+        title={state.status === 'error' ? formatAssistantError(state.message, { debug, fallback: ASSISTANT_IMPORT_INCOMPLETE }) : undefined}
         type="button"
         variant="outline"
         onClick={() => setState({ status: 'confirm' })}
@@ -59,10 +61,10 @@ export function SciverseImportButton({
         <div className="flex flex-wrap gap-2"><Button size="sm" variant="ghost" onClick={() => setState({ status: 'idle' })}>取消</Button>
           <Button size="sm" onClick={confirm}>确认添加</Button></div>
       </div>}
-      {state.status === 'done' && <p role="status" className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">{state.result.message}</p>}
+      {state.status === 'done' && <p role="status" className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">{state.result.status === 'created_metadata_only' ? '已保存元数据，PDF 和远程全文未能保存，请在来源页面核对。' : state.result.message}</p>}
       {state.status === 'error' ? (
         <div role="alert" className="mt-1 text-sm text-destructive [overflow-wrap:anywhere]">
-          {state.message}
+          {formatAssistantError(state.message, { debug, fallback: ASSISTANT_IMPORT_INCOMPLETE })}
         </div>
       ) : null}
     </div>

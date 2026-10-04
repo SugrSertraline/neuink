@@ -428,6 +428,39 @@
   container-type: inline-size;
 }
 
+/* The outline is local to a note, never part of the global app sidebar. */
+.markdown-note-outline-slot {
+  width: 36px;
+}
+
+.markdown-note-outline-slot[data-open="true"] {
+  width: 224px;
+}
+
+.markdown-note-outline-sidebar {
+  width: 100%;
+}
+
+/* Formatting/header density follows the space left for the document, not the outline. */
+.markdown-note-main {
+  container-name: markdown-note-editor;
+  container-type: inline-size;
+}
+
+@container markdown-note-editor (max-width: 640px) {
+  .markdown-note-outline-slot[data-open="true"] {
+    width: 36px;
+  }
+
+  .markdown-note-outline-slot[data-open="true"] > .markdown-note-outline-sidebar {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: var(--z-menu);
+    width: min(224px, calc(100cqw - 8px));
+    @apply shadow-md;
+  }
+}
+
 /* The parallel-reading frame already labels the owner; retain one compact
    note title/status/menu row at every split width, using the existing menu. */
 .markdown-note-editor-embedded :is(.markdown-note-entry-title, .markdown-note-header-divider, .markdown-note-header-actions) {
@@ -512,6 +545,7 @@
   .markdown-note-toolbar {
     gap: 4px;
   }
+
 }
 
 .source-snapshot-preview .katex {
@@ -593,6 +627,7 @@
 }
 
 .workspace-tab-pane {
+  position: relative;
   display: flex;
   flex: 1 1 auto;
   width: 100%;

@@ -358,6 +358,7 @@ export function EntryWorkspaceView({
             {activeContentId === 'reflow' ? (
               <div className="size-full min-h-0 min-w-0">
                 <ReflowEntryReader
+                  jumpRequest={!reflowSyncSegment && pdfJumpRequest?.targetSurfaceKey ? pdfJumpRequest : null}
                   recordReloadKey={segmentRecordReloadKey}
                   entry={entry}
                   editorScopeKey={editorScopeKey}

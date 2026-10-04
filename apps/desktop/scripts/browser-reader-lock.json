@@ -1,0 +1,122 @@
+{
+  "version": 1,
+  "platform": "windows-x64",
+  "pythonVersion": "3.13.16",
+  "ytDlpVersion": "2026.08.19",
+  "ejsVersion": "0.8.0",
+  "quickJsVersion": "0.17.0",
+  "assets": [
+    {
+      "name": "python-3.13.16-embed-amd64.zip",
+      "url": "https://www.python.org/ftp/python/3.13.16/python-3.13.16-embed-amd64.zip",
+      "sha256": "97dae5274cc54867065e8d5a3226e48c35017ed332a0fdb0e27d5b5821961297",
+      "kind": "zip",
+      "destination": "python"
+    },
+    {
+      "name": "yt_dlp-2026.8.19-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/69/b2/8cd1613f56eed7ceb64fbd4df3f1c01246bfb098e6f398228bafda22b80b/yt_dlp-2026.8.19-py3-none-any.whl",
+      "sha256": "1d57897e94c6665a0a6f9bc54b34e584284e32c034ffab3a7df25d8f7b24eedf",
+      "kind": "zip",
+      "destination": "python/Lib/site-packages"
+    },
+    {
+      "name": "yt_dlp_ejs-0.8.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/e3/bd/520769863744b669440a924271a6159ddd82ad5ae26b4ac4d4b69e9f8d44/yt_dlp_ejs-0.8.0-py3-none-any.whl",
+      "sha256": "79300e5fca7f937a1eeede11f0456862c1b41107ce1d726871e0207424f4bdb4",
+      "kind": "zip",
+      "destination": "python/Lib/site-packages"
+    },
+    {
+      "name": "qjs-windows-x86_64.exe",
+      "url": "https://github.com/quickjs-ng/quickjs/releases/download/v0.17.0/qjs-windows-x86_64.exe",
+      "sha256": "2aeabf0092c3262d6b2609824418f7dd7ed1f1df939f73b2b15645230cac0d77",
+      "kind": "file",
+      "destination": "quickjs/qjs.exe"
+    },
+    {
+      "name": "QuickJS-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/quickjs-ng/quickjs/v0.17.0/LICENSE",
+      "sha256": "96f73f9d2a16c21a36b418f06073be26e7d6d5e7c1bc99756b21a4f2c74ef171",
+      "kind": "file",
+      "destination": "licenses/QuickJS-LICENSE.txt"
+    },
+    {
+      "name": "Python-license.rst",
+      "url": "https://raw.githubusercontent.com/python/cpython/v3.13.16/Doc/license.rst",
+      "sha256": "952ac05720d7f1dcb63589b35eb0931b1442eb250230a4ad31198eddf0ad6abc",
+      "kind": "file",
+      "destination": "licenses/Python-license.rst"
+    },
+    {
+      "name": "HACL-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/hacl-star/hacl-star/bb3d0dc8d9d15a5cd51094d5b69e70aa09005ff0/dist/LICENSE.txt",
+      "sha256": "998ce04fb8ad9dedb0bc1b44938f8c3dcf1089780fa105ce1c8c30fb5554d78c",
+      "kind": "file",
+      "destination": "licenses/HACL-LICENSE.txt"
+    },
+    {
+      "name": "BLAKE2-COPYING.txt",
+      "url": "https://raw.githubusercontent.com/BLAKE2/libb2/v0.98.1/COPYING",
+      "sha256": "6a1ee543e5282cd9061881edf462e6fdab181f328da71fc2c9a6950a80e94d01",
+      "kind": "file",
+      "destination": "licenses/BLAKE2-COPYING.txt"
+    },
+    {
+      "name": "Expat-COPYING.txt",
+      "url": "https://raw.githubusercontent.com/python/cpython/v3.13.16/Modules/expat/COPYING",
+      "sha256": "31b15de82aa19a845156169a17a5488bf597e561b2c318d159ed583139b25e87",
+      "kind": "file",
+      "destination": "licenses/Expat-COPYING.txt"
+    },
+    {
+      "name": "mpdecimal-COPYRIGHT.txt",
+      "url": "https://raw.githubusercontent.com/python/cpython-source-deps/mpdecimal-4.0.0/COPYRIGHT.txt",
+      "sha256": "2713324211652ce4a60e6e21e54f9dc3004299e591b0933a352f1a89c5fb53c2",
+      "kind": "file",
+      "destination": "licenses/mpdecimal-COPYRIGHT.txt"
+    },
+    {
+      "name": "xz-COPYING.txt",
+      "url": "https://raw.githubusercontent.com/python/cpython-source-deps/xz-5.2.5/COPYING",
+      "sha256": "bcb02973ef6e87ea73d331b3a80df7748407f17efdb784b61b47e0e610d3bb5c",
+      "kind": "file",
+      "destination": "licenses/xz-COPYING.txt"
+    },
+    {
+      "name": "zlib-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/python/cpython-source-deps/zlib-1.3.1/LICENSE",
+      "sha256": "845efc77857d485d91fb3e0b884aaa929368c717ae8186b66fe1ed2495753243",
+      "kind": "file",
+      "destination": "licenses/zlib-LICENSE.txt"
+    },
+    {
+      "name": "mimalloc-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/microsoft/mimalloc/f8401befa675adb13b98decababd7fdc59572477/LICENSE",
+      "sha256": "82ade5d7d9b029044b5fbbc326207fc47c2d44ee4dd71e8a559c36d728217de9",
+      "kind": "file",
+      "destination": "licenses/mimalloc-LICENSE.txt"
+    },
+    {
+      "name": "QuickJS-release.yml",
+      "url": "https://raw.githubusercontent.com/quickjs-ng/quickjs/v0.17.0/.github/workflows/release.yml",
+      "sha256": "ab26b7b7bd5160d173568e9712e1b698648c6484e24a3f0455c8e1fb731fb5ab",
+      "kind": "file",
+      "destination": "licenses/QuickJS-release.yml"
+    },
+    {
+      "name": "meriyah-LICENSE.md",
+      "url": "https://raw.githubusercontent.com/meriyah/meriyah/v6.1.4/LICENSE.md",
+      "sha256": "e9a5df5a6ae5cd51ca430715f4c62fb5424946e8da07b7caa058a1ba0582a848",
+      "kind": "file",
+      "destination": "licenses/meriyah-LICENSE.md"
+    },
+    {
+      "name": "astring-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/davidbonnet/astring/v1.9.0/LICENSE",
+      "sha256": "d7e882d386050a13b3244078d95b1e3d943b4741fb1b2d7d936cf39a08f52a09",
+      "kind": "file",
+      "destination": "licenses/astring-LICENSE.txt"
+    }
+  ]
+}

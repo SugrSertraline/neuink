@@ -3,7 +3,7 @@ import type { SourceSegment } from '@/shared/types/domain';
 import { useRetainedReadingSnapshot } from './ReadingStateRetention';
 import { useReadingViewSession, publishReadingView, subscribeReadingView } from './ReadingViewSession';
 
-export type ReadingTarget = { pageIdx: number; segmentUid?: string; rect?: readonly [number, number, number, number] };
+export type ReadingTarget = { pageIdx: number; segmentUid?: string; rect?: readonly [number, number, number, number]; focus?: boolean };
 export type ReadingPosition = { pageIdx: number; segmentUid?: string; segmentOffset?: number; offset: number; left: number; zoom?: number };
 export type ReadingAdapter = {
   capture: () => ReadingPosition | null;
@@ -15,11 +15,12 @@ type Navigation = {
   canBack: boolean; canForward: boolean;
   back: () => void; forward: () => void;
   remember: () => void;
-  navigate: (target: ReadingTarget) => boolean;
+  beginUserNavigation: () => void;
+  navigate: (target: ReadingTarget, options?: { localOnly?: boolean }) => boolean;
   register: (adapter: ReadingAdapter, scroll?: HTMLElement | null) => () => void;
   hasRetainedPosition: boolean;
   isJumpHandled: (key: string) => boolean;
-  markJumpHandled: (key: string) => void;
+  markJumpHandled: (key: string, options?: { localOnly?: boolean }) => void;
 };
 const Context = createContext<Navigation | null>(null);
 const LIMIT = 80;
@@ -38,8 +39,14 @@ export function ReadingNavigationScope({ children, retentionKey }: { children: R
   const adapter = useRef<ReadingAdapter | null>(null);
   const stacks = useRef(snapshot);
   const cancelPending = useRef<() => void>(() => {});
-  const claimNavigation = useRef<() => void>(() => {});
+  const claimNavigation = useRef<(localOnly?: boolean) => void>(() => {});
+  const localNavigation = useRef(false);
   const [, refresh] = useState(0);
+  const beginUserNavigation = useCallback(() => {
+    claimNavigation.current(false);
+    needsRestore.current = false;
+    cancelPending.current();
+  }, []);
   const remember = useCallback(() => {
     const position = adapter.current?.capture();
     if (!position) return;
@@ -65,7 +72,7 @@ export function ReadingNavigationScope({ children, retentionKey }: { children: R
     let captureFrame = 0;
     let restoring = false;
     let following = false;
-    claimNavigation.current = () => { following = false; };
+    claimNavigation.current = (localOnly = false) => { following = false; localNavigation.current = localOnly; };
     const identity = viewRef.current;
     const unlink = identity ? subscribeReadingView(identity.group, { id: identity.id,
       capture: () => viewRef.current?.active ? next.capture() : null,
@@ -82,7 +89,7 @@ export function ReadingNavigationScope({ children, retentionKey }: { children: R
       const position = next.capture();
       if (position) snapshot.position = { ...position };
       const current = viewRef.current;
-      if (position && current?.active && !following) publishReadingView(current.group, current.id, position);
+      if (position && current?.active && !following && !localNavigation.current) publishReadingView(current.group, current.id, position);
     };
     const onScroll = () => {
       // The virtualizer commits measured rows during the scroll event. Reading
@@ -92,7 +99,7 @@ export function ReadingNavigationScope({ children, retentionKey }: { children: R
     };
     const cancel = () => { cancelAnimationFrame(frame); restoring = false; next.cancelRestore?.(); };
     cancelPending.current = cancel;
-    const onInput = () => { following = false; needsRestore.current = false; cancel(); };
+    const onInput = () => { following = false; localNavigation.current = false; needsRestore.current = false; cancel(); };
     const onKey = (event: KeyboardEvent) => {
       if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) onInput();
     };
@@ -126,11 +133,14 @@ export function ReadingNavigationScope({ children, retentionKey }: { children: R
     };
   }, []);
   const isJumpHandled = useCallback((key: string) => snapshot.lastJump === key, [snapshot]);
-  const markJumpHandled = useCallback((key: string) => {
+  const markJumpHandled = useCallback((key: string, options?: { localOnly?: boolean }) => {
+    // A citation addresses one view, not every same-document peer. Resume normal
+    // position linking after the next user scroll/navigation gesture.
+    claimNavigation.current(options?.localOnly);
     snapshot.lastJump = key; needsRestore.current = false; cancelPending.current();
   }, [snapshot]);
-  const navigate = useCallback((target: ReadingTarget) => {
-    claimNavigation.current();
+  const navigate = useCallback((target: ReadingTarget, options?: { localOnly?: boolean }) => {
+    claimNavigation.current(options?.localOnly);
     needsRestore.current = false; cancelPending.current();
     const position = adapter.current?.capture();
     if (!adapter.current?.navigate(target)) return false;
@@ -140,7 +150,7 @@ export function ReadingNavigationScope({ children, retentionKey }: { children: R
     stacks.current.forward = []; refresh(n => n + 1); return true;
   }, []);
   return <Context.Provider value={{ canBack: stacks.current.back.length > 0, canForward: stacks.current.forward.length > 0,
-    back: () => travel('back'), forward: () => travel('forward'), remember, navigate, register,
+    back: () => travel('back'), forward: () => travel('forward'), remember, beginUserNavigation, navigate, register,
     hasRetainedPosition, isJumpHandled, markJumpHandled }}>
     <div className="contents" onKeyDown={event => {
       if (!event.altKey || event.ctrlKey || event.metaKey || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;

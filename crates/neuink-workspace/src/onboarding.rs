@@ -9,16 +9,13 @@ use neuink_domain::{
     SourceSegment,
 };
 use serde::Deserialize;
-use std::{
-    collections::{BTreeMap, HashSet},
-    fs,
-    io::{Cursor, Read},
-    path::{Component, PathBuf},
-    sync::Mutex,
-};
+use std::{collections::BTreeMap, fs, path::PathBuf, sync::Mutex};
 
 pub const DEMO_ID: &str = "attention-v1";
 static INSTALL_LOCK: Mutex<()> = Mutex::new(());
+
+#[path = "onboarding_validation.rs"]
+mod validation;
 
 #[derive(Deserialize)]
 pub struct OnboardingDemo {
@@ -38,13 +35,9 @@ impl Workspace {
             if entry.fields.get("tutorial_demo").map(String::as_str) != Some(DEMO_ID) {
                 continue;
             }
-            let Ok(mut file) = fs::File::open(self.layout().entry_pdf_file(&entry.id)) else {
-                continue;
-            };
-            let mut header = [0; 5];
-            if file.read_exact(&mut header).is_ok() && &header == b"%PDF-" {
-                return Ok(Some(entry));
-            }
+            // A broken existing demo must remain identifiable. Never replace it
+            // with a second copy and strand the user's notes and annotations.
+            return Ok(Some(entry));
         }
         Ok(None)
     }
@@ -61,10 +54,11 @@ impl Workspace {
         let _lock = INSTALL_LOCK
             .lock()
             .map_err(|_| WorkspaceError::Onboarding("演示资料准备锁不可用".into()))?;
+        let artifacts = validation::validate_bundle(demo, pdf, segments, mineru)?;
         if let Some(entry) = self.find_onboarding_demo()? {
+            validation::validate_entry(self, &entry, demo, pdf, segments, mineru, &artifacts)?;
             return Ok(entry);
         }
-        validate(demo, pdf, segments, mineru)?;
         let staging_path = self
             .layout()
             .cache_dir()
@@ -162,9 +156,11 @@ impl Workspace {
                 }],
             },
         )?;
+        validation::validate_entry(&staged, &entry, demo, pdf, segments, mineru, &artifacts)?;
         // The metadata guard is global: acquire only after all staging API calls finish.
         let _guard = self.begin_tag_safe_mutation()?;
         if let Some(existing) = self.find_onboarding_demo()? {
+            validation::validate_entry(self, &existing, demo, pdf, segments, mineru, &artifacts)?;
             return Ok(existing);
         }
         fs::rename(
@@ -173,66 +169,6 @@ impl Workspace {
         )?;
         self.read_entry(&entry.id)
     }
-}
-
-fn validate(
-    demo: &OnboardingDemo,
-    pdf: &[u8],
-    segments: &[SourceSegment],
-    mineru: &[u8],
-) -> Result<(), WorkspaceError> {
-    let invalid = |message: &str| WorkspaceError::Onboarding(message.into());
-    if demo.version != DEMO_ID
-        || !pdf.starts_with(b"%PDF-")
-        || blake3::hash(pdf).to_hex().as_str() != demo.pdf_hash
-    {
-        return Err(invalid("演示 PDF 与资源清单不匹配"));
-    }
-    if segments.is_empty()
-        || !segments
-            .iter()
-            .any(|segment| segment.uid.as_str() == demo.segment_uid)
-        || !demo.note_markdown.contains("{source}")
-        || demo.translation.trim().is_empty()
-    {
-        return Err(invalid("演示解析结果或笔记不完整"));
-    }
-    let mut ids = HashSet::new();
-    for segment in segments {
-        if !ids.insert(&segment.uid) {
-            return Err(invalid("演示片段标识重复"));
-        }
-        if let Some(path) = &segment.asset_path {
-            if path.contains('\\')
-                || !std::path::Path::new(path)
-                    .components()
-                    .all(|part| matches!(part, Component::Normal(_)))
-            {
-                return Err(invalid("演示图片路径不安全"));
-            }
-        }
-    }
-    let mut zip = zip::ZipArchive::new(Cursor::new(mineru))?;
-    let mut size = 0u64;
-    if zip.len() > 500 {
-        return Err(invalid("演示解析资源过多"));
-    }
-    for index in 0..zip.len() {
-        let file = zip.by_index(index)?;
-        size = size.saturating_add(file.size());
-        if file.enclosed_name().is_none()
-            || size > 64 * 1024 * 1024
-            || file
-                .unix_mode()
-                .is_some_and(|mode| mode & 0o170000 == 0o120000)
-        {
-            return Err(invalid("演示解析资源无效或过大"));
-        }
-    }
-    if zip.is_empty() {
-        return Err(invalid("演示解析资源为空"));
-    }
-    Ok(())
 }
 
 // This path is exclusively created by this installer under its cache directory.

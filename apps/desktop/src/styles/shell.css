@@ -241,7 +241,7 @@
   position: relative;
   display: grid;
   grid-template-columns:
-    var(--app-activity-width) var(--app-sidebar-width)
+    var(--app-activity-width) var(--app-sidebar-live-width, var(--app-sidebar-width))
     minmax(0, 1fr);
   grid-template-rows: var(--app-tabs-height) minmax(0, 1fr);
   min-width: 0;

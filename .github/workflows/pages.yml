@@ -2,7 +2,7 @@ name: Documentation Pages
 
 on:
   push:
-    branches: [main, codex/product-guide]
+    branches: [main]
     paths: ['website/**', '.github/workflows/pages.yml', 'apps/desktop/src-tauri/logo_assets/neuink_logo_transparent_1024.png']
   pull_request:
     paths: ['website/**', '.github/workflows/pages.yml', 'apps/desktop/src-tauri/logo_assets/neuink_logo_transparent_1024.png']
@@ -34,12 +34,12 @@ jobs:
           GUIDE_SOURCE_REF: ${{ github.head_ref || github.ref_name }}
       - run: npm run check --prefix website
       - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
-        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/product-guide') && github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         with:
           path: website/dist
 
   deploy:
-    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/product-guide') && github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10

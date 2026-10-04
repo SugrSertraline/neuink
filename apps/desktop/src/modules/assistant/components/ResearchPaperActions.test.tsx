@@ -6,6 +6,7 @@ import { approveResearchImport, previewResearchImport, runResearchTool, type Res
 import { ResearchPaperAction, ResearchPaperActionsProvider } from './ResearchPaperActions';
 import { getAssistantBackgroundRuns, setAssistantBackgroundRun, stopAssistantBackgroundRun } from './assistantBackgroundRuns';
 import { ChatMessage } from './ChatMessage';
+import { setAssistantDebug } from '@/shared/lib/assistantDebug';
 
 vi.mock('@/shared/ipc/researchApi', async original => ({
   ...await original<typeof import('@/shared/ipc/researchApi')>(),
@@ -15,12 +16,13 @@ const paper: ResearchPaper = { id: 'paper', title: '真实论文', authors: ['A'
   doi: '', url: 'https://example.com/paper', pdf_url: 'https://example.com/paper.pdf', abstract_text: '摘要', provider: 'arxiv', evidence_level: 'abstract' };
 const notify = vi.fn(() => 'toast');
 beforeEach(() => {
+  setAssistantDebug(false);
   vi.clearAllMocks();
   vi.mocked(previewResearchImport).mockResolvedValue([paper]);
   vi.mocked(approveResearchImport).mockResolvedValue();
   vi.mocked(runResearchTool).mockResolvedValue({ results: [{ id: paper.id, status: 'imported' }] });
 });
-afterEach(() => { cleanup(); setAssistantBackgroundRun(null); });
+afterEach(() => { cleanup(); setAssistantDebug(false); setAssistantBackgroundRun(null); });
 function ui(copies = 1) {
   return render(<ToastContext.Provider value={{ notify, dismiss: vi.fn() }}>
     <ResearchPaperActionsProvider root="root">{Array.from({ length: copies }, (_, index) => <ResearchPaperAction key={index} paper={paper} />)}</ResearchPaperActionsProvider>
@@ -93,12 +95,16 @@ it('cancels without granting permission or writing', async () => {
   expect(runResearchTool).not.toHaveBeenCalled();
 });
 it('reports failed downloads and requires a fresh preview/confirmation on retry', async () => {
-  vi.mocked(runResearchTool).mockResolvedValue({ results: [{ id: 'paper', status: 'failed', error: '下载失败' }] });
+  const raw = 'Timeout HTTP 504 Authorization: Bearer sk-private C:\\Users\\Alice\\private.pdf <body>REMOTE_BODY</body>';
+  vi.mocked(runResearchTool).mockResolvedValue({ results: [{ id: 'paper', status: 'failed', error: raw }] });
   const view = ui(); await prepare(view);
   fireEvent.click(view.getByRole('button', { name: '确认添加' }));
-  await waitFor(() => expect(view.getByRole('alert').textContent).toContain('下载失败'));
+  await waitFor(() => expect(view.getByRole('alert').textContent).toBe('论文添加未完成，请先核对条目库。'));
   expect(view.queryByRole('button', { name: '已在本地' })).toBeNull();
-  expect(notify).toHaveBeenCalledWith(expect.objectContaining({ tone: 'danger' }));
+  expect(notify).toHaveBeenCalledWith(expect.objectContaining({ tone: 'danger', description: '论文添加未完成，请先核对条目库。' }));
+  act(() => setAssistantDebug(true));
+  expect(view.getByRole('alert').textContent).toContain('调试：请求超时 · HTTP 504');
+  for (const secret of ['sk-private', 'Authorization', 'Alice', 'REMOTE_BODY']) expect(view.container.innerHTML).not.toContain(secret);
   fireEvent.click(view.getByRole('button', { name: '重试添加' }));
   await waitFor(() => expect(previewResearchImport).toHaveBeenCalledTimes(2));
   expect(runResearchTool).toHaveBeenCalledTimes(1);
@@ -110,7 +116,7 @@ it.each([{ papers: [] as ResearchPaper[] }, { papers: [{ ...paper, pdf_url: null
   expect(runResearchTool).not.toHaveBeenCalled();
 });
 it('shares Sciverse confirmation and completion across chat and reading views', async () => {
-  const add = vi.fn().mockResolvedValue({ entryId: 'entry', status: 'created_metadata_only', message: '仅保存元数据，PDF 不可用。' });
+  const add = vi.fn().mockResolvedValue({ entryId: 'entry', status: 'created_metadata_only', message: '仅保存元数据，PDF 不可用。HTTP 503 Authorization: Bearer sk-private <html>REMOTE_BODY</html>' });
   const message = { message_id: 'reply', content: '论文 [S1]', role: 'assistant' as const, created_at: '',
     source_links: [{ provider: 'sciverse' as const, doc_id: 'remote', title: '论文', quote: '证据' }] };
   const view = render(<ToastContext.Provider value={{ notify, dismiss: vi.fn() }}><ResearchPaperActionsProvider root="root">
@@ -123,6 +129,10 @@ it('shares Sciverse confirmation and completion across chat and reading views', 
   fireEvent.click(view.getAllByRole('button', { name: '确认添加' })[0]);
   await waitFor(() => expect(view.getAllByRole('button', { name: '已加入（元数据）' })).toHaveLength(2));
   expect(view.getAllByRole('status')).toHaveLength(2);
+  expect(view.getAllByRole('status')[0].textContent).toBe('已保存元数据，PDF 和远程全文未能保存，请在来源页面核对。');
+  act(() => setAssistantDebug(true));
+  expect(view.container.innerHTML).not.toContain('sk-private');
+  expect(view.container.innerHTML).not.toContain('REMOTE_BODY');
   expect(add).toHaveBeenCalledTimes(1);
 });
 it('does not start a download when stopped while approving', async () => {

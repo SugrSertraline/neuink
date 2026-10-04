@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { useReducer } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { WorkspaceTabsBar } from './WorkspaceTabsBar';
-import type { WorkspaceSurfaceLayout } from './workspaceSurface';
+import { surfaceKey, workspaceSurfaceReducer, type WorkspaceSurfaceLayout } from './workspaceSurface';
 import { TooltipProvider } from '@/components/ui/tooltip';
 
 class TestPointerEvent extends MouseEvent {
@@ -87,6 +88,54 @@ function setup(options: {
     Object.defineProperty(tab, 'offsetWidth', { configurable: true, value: 176 });
   });
   return { ...result, onAddToAssistantContext, onCloseToRight, onMove, onDuplicate, onSelect, onSetPinned, onSwitchEntryView, tabs };
+}
+
+function setupReducer() {
+  const initial: WorkspaceSurfaceLayout = {
+    focusedPane: 'right',
+    left: { kind: 'library' },
+    leftTabs: [{ kind: 'library' }],
+    right: { kind: 'pdf', entryId: 'a' },
+    rightTabs: [{ kind: 'pdf', entryId: 'a' }],
+    pinnedTabKeys: []
+  };
+  let current = initial;
+  const onMove = vi.fn();
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this.hasAttribute('data-workspace-split-drop-target')) return rect(520, 0, 480, 40);
+    const pane = this.closest<HTMLElement>('[data-workspace-pane]');
+    const left = pane?.dataset.workspacePane === 'right' ? 520 : 0;
+    if (this.hasAttribute('data-workspace-pane')) return rect(left, 0, 500, 40);
+    if (this.hasAttribute('data-workspace-tab-index')) return rect(left + Number(this.dataset.workspaceTabIndex) * 180, 0, 176, 28);
+    return rect(0, 0, 0, 0);
+  });
+  vi.spyOn(HTMLElement.prototype, 'offsetLeft', 'get').mockImplementation(function (this: HTMLElement) {
+    return Number(this.dataset.workspaceTabIndex ?? 0) * 180;
+  });
+  vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+    return this.hasAttribute('data-workspace-pane') ? 500 : 176;
+  });
+  function StatefulTabs() {
+    const [state, dispatch] = useReducer(workspaceSurfaceReducer, initial);
+    current = state;
+    return <TooltipProvider>
+      <WorkspaceTabsBar entries={[{ id: 'a', title: 'Entry A', pdfFileName: 'paper.pdf' }]} layout={state}
+        onClose={(pane, surface) => dispatch({ type: 'close', pane, key: surfaceKey(surface) })}
+        onCloseOthers={(pane, surface) => dispatch({ type: 'closeOthers', pane, key: surfaceKey(surface) })}
+        onClosePane={(pane) => dispatch({ type: 'closePane', pane })}
+        onMove={(surface, pane, targetIndex) => {
+          onMove(surface, pane, targetIndex);
+          dispatch({ type: 'move', key: surfaceKey(surface), pane, targetIndex });
+        }}
+        onSelect={(pane, surface) => dispatch({ type: 'open', pane, surface })}
+        onSwap={() => dispatch({ type: 'swap' })} />
+    </TooltipProvider>;
+  }
+  const result = render(<StatefulTabs />);
+  const tab = (pane: 'left' | 'right', key: string) => result.container.querySelector<HTMLElement>(
+    `[data-workspace-pane="${pane}"] [data-workspace-surface-key="${key}"]`
+  )!;
+  return { ...result, onMove, tab, state: () => current };
 }
 
 describe('WorkspaceTabsBar pointer interaction', () => {
@@ -231,6 +280,60 @@ describe('WorkspaceTabsBar pointer interaction', () => {
     expect(onSwap).toHaveBeenCalledOnce();
   });
 
+  it('swaps and drags the final left PDF into one valid pane, then keeps selection and library dragging usable', async () => {
+    const view = setupReducer();
+    fireEvent.click(view.getByRole('button', { name: '交换左右分屏' }));
+    expect(view.tab('left', 'pdf:a')).toBeTruthy();
+    expect(view.tab('right', 'library')).toBeTruthy();
+
+    fireEvent.pointerDown(view.tab('left', 'pdf:a'), { button: 0, clientX: 20, clientY: 14, pointerId: 11 });
+    fireEvent.pointerMove(window, { clientX: 640, clientY: 14, pointerId: 11 });
+    fireEvent.pointerUp(window, { clientX: 640, clientY: 14, pointerId: 11 });
+    expect(view.onMove).toHaveBeenCalledExactlyOnceWith({ kind: 'pdf', entryId: 'a' }, 'right', 1);
+    expect(view.state().leftTabs.map(surfaceKey)).toEqual(['library', 'pdf:a']);
+    expect(surfaceKey(view.state().left)).toBe('pdf:a');
+    expect(view.state().right).toBeNull();
+    expect(view.container.querySelectorAll('[data-workspace-surface-key="library"]')).toHaveLength(1);
+    expect(view.container.querySelectorAll('[data-workspace-surface-key="pdf:a"]')).toHaveLength(1);
+
+    await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 0)); });
+    fireEvent.click(view.tab('left', 'library').querySelector('button')!);
+    expect(surfaceKey(view.state().left)).toBe('library');
+    expect(view.state().focusedPane).toBe('left');
+
+    fireEvent.pointerDown(view.tab('left', 'library'), { button: 0, clientX: 20, clientY: 14, pointerId: 12 });
+    fireEvent.pointerMove(window, { clientX: 220, clientY: 14, pointerId: 12 });
+    fireEvent.pointerUp(window, { clientX: 220, clientY: 14, pointerId: 12 });
+    expect(view.onMove).toHaveBeenCalledTimes(2);
+    expect(view.onMove).toHaveBeenLastCalledWith({ kind: 'library' }, 'left', 1);
+    expect(view.state().leftTabs.map(surfaceKey)).toEqual(['pdf:a', 'library']);
+    expect(surfaceKey(view.state().left)).toBe('library');
+    expect(view.state().right).toBeNull();
+
+    await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 0)); });
+    fireEvent.click(view.tab('left', 'pdf:a').querySelector('button')!);
+    expect(surfaceKey(view.state().left)).toBe('pdf:a');
+    expect(view.container.querySelectorAll('[data-workspace-surface-key="library"]')).toHaveLength(1);
+  });
+
+  it.each(['Escape', 'pointercancel'])('does not commit a cross-pane drag cancelled by %s after swapping', (cancel) => {
+    const view = setupReducer();
+    fireEvent.click(view.getByRole('button', { name: '交换左右分屏' }));
+    const swapped = view.state();
+    fireEvent.pointerDown(view.tab('left', 'pdf:a'), { button: 0, clientX: 20, clientY: 14, pointerId: 13 });
+    fireEvent.pointerMove(window, { clientX: 640, clientY: 14, pointerId: 13 });
+    expect(view.container.querySelector('.is-tab-dragging')).toBeTruthy();
+    if (cancel === 'Escape') fireEvent.keyDown(window, { key: 'Escape' });
+    else fireEvent.pointerCancel(window, { pointerId: 13 });
+    fireEvent.pointerUp(window, { clientX: 640, clientY: 14, pointerId: 13 });
+    expect(view.onMove).not.toHaveBeenCalled();
+    expect(view.state()).toBe(swapped);
+    expect(view.tab('left', 'pdf:a')).toBeTruthy();
+    expect(view.tab('right', 'library')).toBeTruthy();
+    expect(view.container.querySelector('.is-tab-dragging')).toBeNull();
+    expect(document.querySelector('.workspace-tab-drag-preview')).toBeNull();
+  });
+
   it('keeps a normal tab click selectable', () => {
     const { onSelect, tabs } = setup();
     fireEvent.click(tabs[0].querySelector('button')!);
@@ -251,6 +354,41 @@ describe('WorkspaceTabsBar pointer interaction', () => {
     fireEvent.pointerMove(window, { clientX: 220, clientY: 14, pointerId: 1 });
     fireEvent.pointerUp(window, { clientX: 220, clientY: 14, pointerId: 1 });
     expect(onMove).toHaveBeenCalledWith(layout.leftTabs[0], 'left', 1);
+  });
+
+  it.each([1, 1.25])('keeps the right-pane insertion slot stable at %s scale while tabs are displaced', (scale) => {
+    const rightLeft = 640;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.hasAttribute('data-workspace-pane')) {
+        return rect(this.dataset.workspacePane === 'right' ? rightLeft : 0, 0, 500 * scale, 40 * scale);
+      }
+      return rect(0, 0, 0, 0);
+    });
+    const view = setup({ layout: {
+      ...layout,
+      leftTabs: [layout.left],
+      right: { kind: 'reflow', entryId: 'a' },
+      rightTabs: [{ kind: 'library' }, { kind: 'reflow', entryId: 'a' }]
+    } });
+    const pane = view.container.querySelector<HTMLElement>('[data-workspace-pane="right"]')!;
+    Object.defineProperty(pane, 'offsetWidth', { configurable: true, value: 500 });
+    const targetTabs = [...pane.querySelectorAll<HTMLElement>('[data-workspace-tab-index]')];
+    expect(targetTabs).toHaveLength(2);
+    targetTabs.forEach((tab, index) => {
+      Object.defineProperty(tab, 'offsetLeft', { configurable: true, value: index * 180 });
+      Object.defineProperty(tab, 'offsetWidth', { configurable: true, value: 176 });
+      vi.spyOn(tab, 'getBoundingClientRect').mockImplementation(() =>
+        rect(rightLeft + (index * 180 + (tab.style.transform ? 180 : 0)) * scale, 0, 176 * scale, 28 * scale));
+    });
+    vi.spyOn(view.tabs[0], 'getBoundingClientRect').mockReturnValue(rect(0, 0, 176 * scale, 28 * scale));
+    const pointerX = rightLeft + (240 - 68) * scale;
+    fireEvent.pointerDown(view.tabs[0], { button: 0, clientX: 20 * scale, clientY: 14 * scale, pointerId: 14 });
+    fireEvent.pointerMove(window, { clientX: pointerX, clientY: 14 * scale, pointerId: 14 });
+    expect(targetTabs[1].style.transform).toBe('translateX(180px)');
+    expect(targetTabs[1].getBoundingClientRect().left).toBe(rightLeft + 360 * scale);
+    fireEvent.pointerMove(window, { clientX: pointerX, clientY: 14 * scale, pointerId: 14 });
+    fireEvent.pointerUp(window, { clientX: pointerX, clientY: 14 * scale, pointerId: 14 });
+    expect(view.onMove).toHaveBeenCalledExactlyOnceWith(layout.left, 'right', 1);
   });
 
   it('accepts a drop anywhere inside the workspace pane, not only in the tab bar', () => {

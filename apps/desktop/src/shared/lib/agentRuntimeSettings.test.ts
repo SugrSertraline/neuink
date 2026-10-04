@@ -3,6 +3,21 @@ import { DEFAULT_AGENT_RUNTIME_SETTINGS, auditAgentToolPermissions, configuredAg
 import type { SubagentProfile } from '@/shared/types/agentRuntime';
 
 describe('agent capability policy', () => {
+  it('migrates browser reads once only for the complete prior main grant', () => {
+    const old = structuredClone(DEFAULT_AGENT_RUNTIME_SETTINGS); old.capabilityRevision = 2;
+    old.mainAssistant.enabledToolIds = old.mainAssistant.enabledToolIds.filter(id => id !== 'read_browser_tab');
+    const migrated = normalizeAgentRuntimeSettings(old);
+    expect(migrated.capabilityRevision).toBe(3);
+    expect(migrated.mainAssistant.enabledToolIds).toContain('read_browser_tab');
+    migrated.mainAssistant.enabledToolIds = migrated.mainAssistant.enabledToolIds.filter(id => id !== 'read_browser_tab');
+    expect(normalizeAgentRuntimeSettings(migrated).mainAssistant.enabledToolIds).not.toContain('read_browser_tab');
+    old.mainAssistant.permissions.canInvokeTools = false;
+    expect(normalizeAgentRuntimeSettings(old).mainAssistant.enabledToolIds).not.toContain('read_browser_tab');
+    old.mainAssistant.permissions.canInvokeTools = true;
+    old.mainAssistant.enabledToolIds = old.mainAssistant.enabledToolIds.filter(id => id !== 'read_webpage');
+    expect(normalizeAgentRuntimeSettings(old).mainAssistant.enabledToolIds).not.toContain('read_browser_tab');
+    expect(auditAgentToolPermissions(['read_browser_tab'], migrated.subagents[0], migrated).allowedToolIds).toEqual([]);
+  });
   it('contains autonomous workers only, not fixed model tasks', () => {
     expect(DEFAULT_AGENT_RUNTIME_SETTINGS.subagents.map((agent) => agent.id)).toEqual(['evidence-agent']);
     expect(resolveAllowedSubagents(DEFAULT_AGENT_RUNTIME_SETTINGS, DEFAULT_AGENT_RUNTIME_SETTINGS.mainAssistant)).toEqual([]);

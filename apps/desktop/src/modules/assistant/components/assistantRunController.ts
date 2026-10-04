@@ -171,6 +171,8 @@ export async function runAssistantPanelTask({
     noteProposalsByMessageId,
     question: trimmedQuestion,
     root,
+    startedAt: Date.now(),
+    taskKind: 'conversation',
     streamingMessageId: null,
     toolEventsByMessageId,
   });

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ProviderCatalogPicker } from './ProviderCatalogPicker';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
@@ -10,7 +10,14 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(256);
   vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(416);
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(async () => {
+  cleanup();
+  // TanStack removes scroll listeners on unmount but retains its 150ms debounce.
+  // Let that already-scheduled callback settle while the jsdom window still exists.
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 200)); });
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 it('searches providers by Chinese alias and confirms with keyboard', () => {
   const select = vi.fn(); render(<ProviderCatalogPicker catalog={[]} baseUrl="" busy={false} onSelect={select} onCustom={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: '搜索模型提供商' }));

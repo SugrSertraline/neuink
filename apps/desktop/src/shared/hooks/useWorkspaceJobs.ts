@@ -2,29 +2,20 @@ import { listen } from '@tauri-apps/api/event';
 import { useEffect, useMemo, useState } from 'react';
 
 import { listJobs, type Job, type JobEvent, type JobScope } from '@/shared/ipc/workspaceApi';
+import { compareJobTimes, isRunningJob, mergeBackgroundJobs, recentBackgroundJobs } from '@/shared/lib/backgroundJobs';
 
 export function useWorkspaceJobs(root: string | null) {
-  const [jobs, setJobs] = useState<Job[]>([]);
+  const [snapshot, setSnapshot] = useState<{ root: string | null; jobs: Job[] }>({ root: null, jobs: [] });
+  const jobs = snapshot.root === root ? snapshot.jobs : [];
 
   useEffect(() => {
     let cancelled = false;
-    if (!root) {
-      setJobs([]);
-      return;
-    }
-
-    void listJobs()
-      .then((nextJobs) => {
-        if (!cancelled) {
-          setJobs(filterJobsForRoot(nextJobs, root));
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setJobs([]);
-        }
-      });
-
+    setSnapshot({ root, jobs: [] });
+    if (!root) return;
+    let loadingSnapshot = true;
+    // Temporary, untrimmed event journal prevents an old snapshot resurrecting
+    // terminal tasks already evicted from the bounded UI history.
+    const initialEvents = new Map<string, Job>();
     const unlistenPromise = listen<JobEvent>('neuink://job-event', (event) => {
       if (cancelled) {
         return;
@@ -33,24 +24,41 @@ export function useWorkspaceJobs(root: string | null) {
       if (!jobMatchesRoot(nextJob, root)) {
         return;
       }
-      setJobs((current) => upsertJob(current, nextJob));
+      if (loadingSnapshot) {
+        const previous = initialEvents.get(nextJob.id);
+        if (!previous || compareJobTimes(nextJob, previous) >= 0) initialEvents.set(nextJob.id, nextJob);
+      }
+      setSnapshot(current => ({ root, jobs: mergeBackgroundJobs(
+        current.root === root ? current.jobs : [], [nextJob]
+      ) }));
+    });
+    // Subscribe before requesting the snapshot so fast imports cannot disappear
+    // between the initial read and listener registration.
+    void unlistenPromise.catch(() => undefined).then(async () => {
+      if (cancelled) return;
+      try {
+        const nextJobs = filterJobsForRoot(await listJobs(), root);
+        const observed = [...initialEvents.values()];
+        if (!cancelled) setSnapshot(current => ({ root, jobs: mergeBackgroundJobs(
+          nextJobs, [...observed, ...(current.root === root ? current.jobs : [])]
+        ) }));
+      } catch { /* Keep observed task progress when the initial read fails. */ }
+      finally { loadingSnapshot = false; initialEvents.clear(); }
     });
 
     return () => {
       cancelled = true;
-      void unlistenPromise.then((unlisten) => unlisten());
+      initialEvents.clear();
+      void unlistenPromise.then((unlisten) => unlisten()).catch(() => undefined);
     };
   }, [root]);
 
   const activeJobs = useMemo(
-    () => jobs.filter((job) => job.status === 'queued' || job.status === 'processing'),
+    () => jobs.filter(isRunningJob),
     [jobs]
   );
   const recentJobs = useMemo(
-    () =>
-      [...jobs]
-        .sort(sortJobsByUpdatedAt)
-        .slice(0, 8),
+    () => recentBackgroundJobs(jobs),
     [jobs]
   );
 
@@ -67,15 +75,4 @@ function filterJobsForRoot(jobs: Job[], root: string) {
 function jobMatchesRoot(job: Job, root: string) {
   const scope: JobScope | null = job.scope;
   return scope?.root === root;
-}
-
-function upsertJob(currentJobs: Job[], nextJob: Job) {
-  const filtered = currentJobs.filter((job) => job.id !== nextJob.id);
-  return [...filtered, nextJob].sort(sortJobsByUpdatedAt).slice(0, 24);
-}
-
-function sortJobsByUpdatedAt(left: Job, right: Job) {
-  return (
-    new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime()
-  );
 }

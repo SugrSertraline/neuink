@@ -117,7 +117,8 @@ describe('ChatMessage performance boundaries', () => {
     ];
     const { getByRole, queryByText, getByText } = render(<ChatMessage message={message} streaming={false} onOpenSource={() => undefined} />);
     expect(getByText('Markdown')).toBeTruthy();
-    expect(getByText('资料库无法访问')).toBeTruthy();
+    expect(queryByText('资料库无法访问')).toBeNull();
+    expect(getByText('助手已根据可用结果完成回答，部分操作未完成。')).toBeTruthy();
     expect(queryByText('隐藏的记忆')).toBeNull();
     expect(queryByText('隐藏的长思考')).toBeNull();
     const toggle = getByRole('button', { name: '展开执行详情' });
@@ -164,7 +165,7 @@ describe('ChatMessage performance boundaries', () => {
       <ChatMessage message={message} streaming={false} onOpenSource={() => undefined} onApplyNoteProposal={apply} />,
     );
 
-    expect(getByText('segment does not exist: v2-continuation-0')).toBeTruthy();
+    expect(getByText('操作未完成，请核对目标内容后重试。')).toBeTruthy();
     expect((getByRole('button', { name: '确认' }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(getByRole('button', { name: '确认' }));
     expect(apply).toHaveBeenCalledOnce();

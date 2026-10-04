@@ -1,5 +1,9 @@
 import { jsonSchema, tool, type JSONSchema7, type ToolSet } from 'ai';
-import { isResearchTool, runResearchTool, researchPapersFromResult } from '@/shared/ipc/researchApi';
+import { isResearchTool, runResearchTool, researchPapersFromResult, ResearchImportNotApprovedError } from '@/shared/ipc/researchApi';
+import { assertSuccessfulToolResult, ToolPreconditionError } from './toolFailurePolicy';
+import { AgentToolNotExecutedError } from '../agent-core/agent';
+import { createAgentToolFailure } from '../agent-core/toolFailure';
+import { assistantErrorDiagnostic } from '@/shared/lib/assistantDebug';
 import { researchOutput } from './researchOutput';
 import { formatSciverseSearchOutput } from './sciverseOutput';
 export { formatSciverseSearchOutput } from './sciverseOutput';
@@ -23,7 +27,7 @@ import type {
 } from '@/modules/sciverse/types';
 import {
   conversationSourceKey,
-  invokeAssistantTool,
+  invokeAssistantTool as invokeNativeTool,
   invokeMcpTool,
   isLocalConversationSource,
   listTools
@@ -285,6 +289,12 @@ export function mcpToolIdsForAgent(
     );
 }
 
+async function invokeAssistantTool<T>(name: string, input: JsonObject): Promise<T> {
+  const result = await invokeNativeTool<T>(name, input);
+  assertSuccessfulToolResult(result);
+  return result;
+}
+
 export async function executeTool(
   toolName: string,
   input: JsonObject,
@@ -302,12 +312,36 @@ export async function executeTool(
 ) {
   if (isPdfTool(toolName)) return runPdfTool(toolName, input, addSource, contextBudget, signal);
   if (isResearchTool(toolName)) {
-    const result = await runResearchTool(toolName, input, signal, toolCallId);
+    let result: unknown;
+    try { result = await runResearchTool(toolName, input, signal, toolCallId); }
+    catch (error) {
+      if (error instanceof ResearchImportNotApprovedError) {
+        throw new AgentToolNotExecutedError(error.message, 'TOOL_APPROVAL_UNAVAILABLE');
+      }
+      throw error;
+    }
+    assertSuccessfulToolResult(result);
+    if (toolName === 'import_papers' && Array.isArray(asObject(result).results)) {
+      const rows = asObject(result).results as unknown[];
+      if (rows.some(row => asObject(row).status === 'failed')) {
+        return { modelOutput: { ...createAgentToolFailure('TOOL_PARTIAL_FAILURE'),
+          results: rows.slice(0, 10).map(row => {
+            const item = asObject(row);
+            return { id: optionalString(item.id), entry_id: optionalString(item.entry_id),
+              status: item.status === 'imported' || item.status === 'already_in_library' ? item.status : 'failed',
+              ...(typeof item.parsed === 'boolean' ? { parsed: item.parsed } : {}),
+              ...(item.status === 'failed' ? { error: assistantErrorDiagnostic(item.error) } : {}) };
+          }), notice: 'PDF 入库不代表已解析或已读全文。请核对已有条目；失败项需要重新确认，不能自动重试整个批次。'
+        }, sources: [], summary: '论文下载入库未全部完成，请核对逐项结果。' };
+      }
+    }
     return { modelOutput: researchOutput(result, contextBudget), sources: [], researchPapers: toolName === 'search_papers' ? researchPapersFromResult(result) : undefined, summary: toolName === 'import_papers'
       ? '已完成论文下载尝试；请查看各项结果。' : '已获取外部检索结果（不代表已读论文全文）。' };
   }
   if (toolName.startsWith('mcp.')) {
     const result = await invokeMcpTool(toolName, input, signal);
+    assertSuccessfulToolResult(result);
+    assertSuccessfulToolResult(result.output);
     return {
       modelOutput: result.output ?? result,
       sources: [],
@@ -467,17 +501,22 @@ export function formatSearchSegmentsOutput(
       } satisfies ToolEvidence;
     });
 
+  // Backend warnings may embed provider errors and private model paths. Keep the
+  // successful evidence, but expose only host-owned degradation copy.
+  const keywordFallback = results.mode === 'semantic_fallback_keyword' || results.mode === 'hybrid_fallback_keyword';
+  const warnings = keywordFallback
+    ? ['Semantic search is unavailable. These are keyword fallback results, not semantic matches.']
+    : results.warnings?.length ? ['Search reported a limitation. Use only the returned evidence; completeness is not guaranteed.'] : [];
   const modelOutput = {
     evidence,
     kind: 'search_segments',
     mode: results.mode,
     query: results.query,
     total_hit_count: results.total_hit_count,
-    warnings: results.warnings ?? []
+    warnings
   };
 
-  const warningText =
-    (results.warnings ?? []).length > 0 ? ` ${results.warnings?.join(' ')}` : '';
+  const warningText = warnings.length > 0 ? ` ${warnings.join(' ')}` : '';
 
   return {
     modelOutput,
@@ -836,7 +875,7 @@ export function buildNoteProposal(
     null;
 
   if (!entryId) {
-    throw new Error('A note proposal needs a target Entry.');
+    throw new ToolPreconditionError('note_target_required');
   }
   entryIdOrSingleScope(entryId, scope);
 
@@ -860,7 +899,7 @@ export function buildNoteProposal(
       : null;
 
   if (targetKind === 'segment_note' && !segmentUid) {
-    throw new Error('Segment note proposals need a target segment_uid.');
+    throw new ToolPreconditionError('note_target_required');
   }
 
   const noteId = targetKind === 'segment_note' || action === 'create'
@@ -868,7 +907,7 @@ export function buildNoteProposal(
     : optionalString(object.note_id) ?? plan?.target.noteId ?? currentNote?.noteId ?? null;
 
   if (targetKind === 'markdown_note' && action !== 'create' && !noteId) {
-    throw new Error('Prepend, append, and replace note proposals need a target note.');
+    throw new ToolPreconditionError('note_target_required');
   }
 
   const noteTitle =
@@ -896,14 +935,14 @@ export function buildNoteProposal(
       operation.type !== 'insert_lines'
     )
   ) {
-    throw new Error('This note task requires line-precise patch operations with expected_text.');
+    throw new ToolPreconditionError('patch_coordinates_required');
   }
   if (
     plan?.editCoordinatePolicy === 'line_and_hash' &&
     noteId &&
     !readNoteSnapshots.has(noteSnapshotKey(entryId, noteId))
   ) {
-    throw new Error('Read the current target note before creating a line-precise patch proposal.');
+    throw new ToolPreconditionError('note_read_required');
   }
   const citationMarkdown = action === 'patch' || action === 'delete'
     ? patchOperationsPreview(patchOperations ?? [])
@@ -1063,7 +1102,7 @@ export function applyMarkdownPatchPreview(
 
     if (operation.type === 'replace_exact') {
       if (countOccurrences(nextMarkdown, operation.oldText) !== 1) {
-        throw new Error('Patch replacement text must match exactly once.');
+        throw new ToolPreconditionError('patch_content_mismatch');
       }
       nextMarkdown = nextMarkdown.replace(operation.oldText, operation.newText);
       continue;
@@ -1080,7 +1119,7 @@ export function applyMarkdownPatchPreview(
 
     const matchCount = countOccurrences(nextMarkdown, operation.anchorText);
     if (matchCount !== 1) {
-      throw new Error('Patch anchor text must match exactly once.');
+      throw new ToolPreconditionError('patch_content_mismatch');
     }
 
     const index = nextMarkdown.indexOf(operation.anchorText);
@@ -1105,11 +1144,11 @@ function applyLinePatchPreview(
 
   if (operation.type === 'insert_lines') {
     if (operation.line > lines.length) {
-      throw new Error(`Patch line ${operation.line} is outside the current Markdown.`);
+      throw new ToolPreconditionError('patch_content_mismatch');
     }
     const currentLine = lines[operation.line - 1] ?? '';
     if (currentLine !== operation.expectedText) {
-      throw new Error(`Patch line ${operation.line} no longer matches expected_text.`);
+      throw new ToolPreconditionError('patch_content_mismatch');
     }
     const insertion = operation.text.replace(/\r\n/g, '\n').split('\n');
     const index = operation.position === 'before' ? operation.line - 1 : operation.line;
@@ -1118,15 +1157,11 @@ function applyLinePatchPreview(
   }
 
   if (operation.endLine < operation.startLine || operation.endLine > lines.length) {
-    throw new Error(
-      `Patch line range ${operation.startLine}-${operation.endLine} is outside the current Markdown.`
-    );
+    throw new ToolPreconditionError('patch_content_mismatch');
   }
   const currentText = lines.slice(operation.startLine - 1, operation.endLine).join('\n');
   if (currentText !== operation.expectedText.replace(/\r\n/g, '\n')) {
-    throw new Error(
-      `Patch line range ${operation.startLine}-${operation.endLine} no longer matches expected_text.`
-    );
+    throw new ToolPreconditionError('patch_content_mismatch');
   }
   const replacement = operation.type === 'replace_lines'
     ? operation.newText.replace(/\r\n/g, '\n').split('\n')
@@ -1429,7 +1464,7 @@ export function sourcesFromMarkers(
 
     const source = sourceByMarker.get(markerNumber);
     if (!source) throw new Error(`Unknown evidence marker: S${markerNumber}`);
-    if (!isLocalConversationSource(source)) throw new Error('External evidence cannot be persisted as a local Source Link. Import the paper before creating a linked note.');
+    if (!isLocalConversationSource(source)) throw new ToolPreconditionError('local_source_required');
 
     seen.add(markerNumber);
     sources.push({

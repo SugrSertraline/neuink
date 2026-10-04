@@ -1,18 +1,19 @@
 /** @vitest-environment jsdom */
 import { useEffect } from 'react';
-import { fireEvent, render, screen, cleanup } from '@testing-library/react';
+import { act, fireEvent, render, screen, cleanup } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AssistantNoteProposal } from '@/shared/types/assistant';
 import { NoteReviewProvider, useNoteReview } from './NoteReviewContext';
 import { NoteReviewBanner } from './NoteReviewBanner';
 import { NoteReviewPage } from './NoteReviewPage';
+import { setAssistantDebug } from '@/shared/lib/assistantDebug';
 
 const proposal: AssistantNoteProposal = {
   id: 'p', entryId: 'e', entryTitle: '论文', noteId: 'n', title: '研究笔记', action: 'replace',
   beforeMarkdown: '# 标题\n\n旧结论\n\n不变正文\n\n旧方法', markdown: '# 标题\n\n新结论\n\n不变正文\n\n新方法',
   createdAt: '', status: 'pending', sources: []
 };
-afterEach(cleanup);
+afterEach(() => { cleanup(); setAssistantDebug(false); });
 function Publish({ value = proposal }: { value?: AssistantNoteProposal }) {
   const review = useNoteReview();
   useEffect(() => review?.publish([{ proposal: value, conversationId: 'conversation', messageId: 'message' }]), [review?.publish, value]);
@@ -64,8 +65,14 @@ describe('note review navigation and read-only content', () => {
     expect(screen.getByText(/已应用 · 历史修改快照/)).toBeTruthy();
   });
   it('shows missing base and failure explicitly without inventing a diff', () => {
-    render(<Harness value={{ ...proposal, beforeMarkdown: null, status: 'error', error: '保存冲突' }} />);
+    const { container } = render(<Harness value={{ ...proposal, beforeMarkdown: null, status: 'error',
+      error: 'Timeout HTTP 504 Authorization: Bearer sk-private C:\\Users\\Alice\\private.md <html>REMOTE_BODY</html>' }} />);
     expect(screen.getAllByRole('alert')).toHaveLength(2);
+    expect(screen.getByText('无法生成修改对比，请核对当前笔记并返回对话重新生成提案。')).toBeTruthy();
+    expect(screen.getByText('修改未完成，请先核对笔记，再返回对话重试。')).toBeTruthy();
+    act(() => setAssistantDebug(true));
+    expect(screen.getByText(/调试：请求超时 · HTTP 504/)).toBeTruthy();
+    for (const secret of ['sk-private', 'Authorization', 'Alice', 'REMOTE_BODY']) expect(container.innerHTML).not.toContain(secret);
     expect(screen.getByRole('button', { name: /下一处/ }).hasAttribute('disabled')).toBe(true);
   });
   it('is usable without a loaded record and does not leak records across workspaces', () => {

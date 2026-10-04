@@ -172,6 +172,7 @@ async function executeAssistantHarness(options: RunAssistantHarnessOptions): Pro
       history: conversationHistory,
       legacyPlan: composerSnapshot?.executionMode === 'plan',
       hasContext: Boolean(observed.activeEntryId || observed.activeNote || observed.activeSegment ||
+        currentSurface?.browserTab ||
         observed.pinnedSegments.length || assistantContext?.items.length ||
         composerSnapshot?.mentions.length || contextPlan?.items.length || contextPlan?.editTarget ||
         options.destinationEntryId || preferredAgentId),
@@ -254,6 +255,7 @@ async function executeAssistantHarness(options: RunAssistantHarnessOptions): Pro
       assistantContext,
       availableEntries,
       contextSnapshot: snapshot,
+      browserTabTarget: currentSurface?.kind === 'browser' ? currentSurface.browserTab : null,
       conversationHistory,
       currentEntry: snapshot.active_entry
         ? { id: snapshot.active_entry.entry_id, title: snapshot.active_entry.entry_title }
@@ -262,6 +264,7 @@ async function executeAssistantHarness(options: RunAssistantHarnessOptions): Pro
       harnessBrief: modelDrivenBrief({
         composerSnapshot,
         contextPlan,
+        currentSurface,
         history: conversationHistory,
         mentionScope: mentionScope ?? scope,
         tagMentionScopes
@@ -314,6 +317,9 @@ async function executeAssistantHarness(options: RunAssistantHarnessOptions): Pro
     }
     verifyGroundedProposals({
       composerSnapshot,
+      assistantContext,
+      contextPlan,
+      currentSurface,
       history: conversationHistory,
       proposals: grounded.noteProposals ?? [],
       sources: grounded.sources
@@ -444,12 +450,14 @@ async function executeAssistantHarness(options: RunAssistantHarnessOptions): Pro
 export function modelDrivenBrief({
   composerSnapshot,
   contextPlan,
+  currentSurface,
   history,
   mentionScope,
   tagMentionScopes
 }: {
   composerSnapshot?: AssistantComposerSnapshot | null;
   contextPlan?: AssistantContextPlan | null;
+  currentSurface?: AssistantActiveSurfaceSnapshot | null;
   history: ConversationMessage[];
   mentionScope: ScopeSnapshot;
   tagMentionScopes?: Record<string, ScopeSnapshot>;
@@ -490,6 +498,9 @@ export function modelDrivenBrief({
     'For requests to read or summarize the papers under a TagScope, treat the resolved Entry list as exhaustive: call read_entry_assistant_context for each relevant Entry. A zero-result keyword/semantic search does not prove that scoped Entries have no parsed content.',
     'PDF parsing is not required for basic reading. For unparsed Entries use read_pdf_pages or search_pdf_text (read_entry_assistant_context also falls back automatically). Preserve actual page citations, read further pages when necessary, and disclose OCR, layout or partial-coverage limits. Never mark a PDF as fully parsed or read based on this fallback.',
     mentionMap ? `Current Typed Mention Map:\n${mentionMap}` : 'Current Typed Mention Map: none',
+    currentSurface?.kind === 'browser' && currentSurface.browserTab
+      ? 'The submitted browser tab is the current reading target. Historical paper mentions below describe prior requests, not an instruction to include those papers in this webpage task. Current explicit paper, tag and excerpt attachments still apply. If the user actually continues an earlier paper task, read and cite its evidence again.'
+      : '',
     historicalMentionMaps ? `Historical Typed Mention Maps available for continuation:\n${historicalMentionMaps}` : '',
     taskObservation,
     contextPlan?.summary ? `UI context summary (informational only; the Agent decides semantic roles): ${contextPlan.summary}` : '',
@@ -526,16 +537,25 @@ function activeNote(snapshot: AssistantContextSnapshot): AssistantActiveNote | n
 
 export function verifyGroundedProposals({
   composerSnapshot,
+  assistantContext,
+  contextPlan,
+  currentSurface,
   history = [],
   proposals,
   sources
 }: {
   composerSnapshot?: AssistantComposerSnapshot | null;
+  assistantContext?: AssistantContext | null;
+  contextPlan?: AssistantContextPlan | null;
+  currentSurface?: AssistantActiveSurfaceSnapshot | null;
   history?: ConversationMessage[];
   proposals: AssistantNoteProposal[];
   sources: GroundedAnswer['sources'];
 }) {
-  const historicalMentions = history.flatMap((message) => (message.parts ?? []).flatMap((part) =>
+  const browserTarget = currentSurface?.kind === 'browser' && Boolean(currentSurface.browserTab);
+  // A newly submitted webpage does not inherit evidence obligations from old paper requests.
+  // Current attachments and sources acquired in this run retain their normal citation checks.
+  const historicalMentions = browserTarget ? [] : history.flatMap((message) => (message.parts ?? []).flatMap((part) =>
     part.type === 'context-snapshot' ? part.composer?.mentions ?? [] : []
   ));
   const hasEvidenceReference = [
@@ -543,8 +563,12 @@ export function verifyGroundedProposals({
     ...historicalMentions
   ].some((mention) =>
     mention.kind === 'tag' || mention.kind === 'pdf' || mention.kind === 'reflow' ||
-    mention.kind === 'segment' || mention.kind === 'overview'
-  );
+    mention.kind === 'segment' || mention.kind === 'overview' || mention.role === 'evidence'
+  ) || Boolean(browserTarget && (
+    assistantContext?.items.some(item => item.kind === 'segment' || ['pdf', 'reflow', 'overview'].includes(item.contentKind ?? '')) ||
+    contextPlan?.items.some(item => item.role !== 'edit_target' &&
+      (['pdf', 'reflow', 'segment', 'overview'].includes(item.kind) || (item.role === 'evidence' && item.kind !== 'note')))
+  ));
   if (!hasEvidenceReference && sources.length === 0) return;
   const invalid = proposals.find(
     (proposal) =>

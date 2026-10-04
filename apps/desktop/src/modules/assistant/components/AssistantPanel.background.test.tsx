@@ -4,13 +4,15 @@ import { type ComponentProps } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AssistantPanel } from './AssistantPanel';
 import { runAssistantHarness } from '../harness/engine';
-import { getAssistantBackgroundRuns, setAssistantBackgroundRun } from './assistantBackgroundRuns';
+import { getAssistantBackgroundRuns, getAssistantMessageQueues, setAssistantBackgroundRun } from './assistantBackgroundRuns';
+import { requestOpenAssistantConversation } from './assistantConversationNavigation';
 import type { Conversation, ConversationMessage } from '@/shared/ipc/assistantApi';
-import type { AssistantNoteProposal, AssistantTagProposal } from '@/shared/types/assistant';
+import type { AssistantEntryMetaProposal, AssistantNoteProposal, AssistantTagProposal } from '@/shared/types/assistant';
 import { NoteReviewProvider } from '../review/NoteReviewContext';
 import { NoteReviewPage } from '../review/NoteReviewPage';
 import type { LibraryEntry } from '@/modules/library/components/LibrarySidebar';
 import type { TagMeta } from '@/shared/types/domain';
+import { setAssistantDebug } from '@/shared/lib/assistantDebug';
 
 const mocks = vi.hoisted(() => ({ notify: vi.fn(), disks: new Map<string, Conversation>(), nextId: 0 }));
 vi.mock('@/shared/components/AppearanceProvider', () => ({ useAppearance: () => ({ appearance: 'standard', setAppearance: vi.fn() }) }));
@@ -26,6 +28,15 @@ vi.mock('./useAssistantAutoScroll', () => ({ useAssistantAutoScroll: () => ({
 }) }));
 vi.mock('../harness/engine', () => ({ runAssistantHarness: vi.fn(), AssistantHarnessError: class extends Error {} }));
 vi.mock('../harness/durableHarness', () => ({ acknowledgeExecution: vi.fn() }));
+vi.mock('@/shared/ipc/assistantProposalApi', () => ({
+  decideAssistantProposal: vi.fn(async (_root: string, proposal: AssistantTagProposal | AssistantEntryMetaProposal,
+    confirmation: { conversationId: string; messageId: string }, decision: 'apply' | 'reject') => {
+    const part = mocks.disks.get(confirmation.conversationId)!.messages.find(message => message.message_id === confirmation.messageId)!
+      .parts!.find(part => (part.type === 'tag-proposal' || part.type === 'entry-meta-proposal') && part.proposal.id === proposal.id)!;
+    if (part.type === 'tag-proposal' || part.type === 'entry-meta-proposal') part.proposal.status = decision === 'apply' ? 'applied' : 'rejected';
+    return { status: decision === 'apply' ? 'applied' : 'rejected', entries: [], tags: [] };
+  }),
+}));
 vi.mock('@/shared/ipc/assistantApi', async original => ({
   ...await original<typeof import('@/shared/ipc/assistantApi')>(),
   getLlmSettings: vi.fn(async () => ({ profiles: [{ id: 'test', name: 'test', model: 'test' }], assistant_profile_id: 'test' })),
@@ -67,7 +78,22 @@ beforeEach(() => {
     options.abortSignal?.addEventListener('abort', () => reject(new Error('用户停止')), { once: true });
   }));
 });
-afterEach(() => { cleanup(); setAssistantBackgroundRun(null); });
+afterEach(() => { cleanup(); setAssistantBackgroundRun(null); setAssistantDebug(false); window.localStorage.clear(); });
+
+it('protects top-level run failures by default and exposes only safe diagnostics after opt-in', async () => {
+  const raw = 'Timeout HTTP 504 Authorization: Bearer sk-private C:\\Users\\Alice\\notes.md REMOTE_BODY';
+  vi.mocked(runAssistantHarness).mockRejectedValueOnce(new Error(raw));
+  const ui = render(<AssistantPanel {...props} />);
+  await waitFor(() => expect(ui.getByRole('combobox', { name: '对话模型' }).textContent).toContain('test'));
+  fireEvent.change(ui.getByLabelText('输入问题'), { target: { value: '解释论文' } });
+  fireEvent.click(ui.getByRole('button', { name: '发送' }));
+  await ui.findByText('助手未完成本次操作，请核对结果后再继续。');
+  expect(ui.container.innerHTML).not.toContain('sk-private');
+  act(() => setAssistantDebug(true));
+  expect(ui.getAllByText(/调试：请求超时 · HTTP 504/).length).toBeGreaterThan(0);
+  for (const privateText of ['sk-private', 'Authorization', 'Alice', 'REMOTE_BODY'])
+    expect(ui.container.innerHTML).not.toContain(privateText);
+});
 
 function paper(id: string): LibraryEntry {
   return { id, title: `论文 ${id}`, contents: [{ kind: 'note', note_id: `note-${id}`, title: `${id} 的笔记` }],
@@ -299,4 +325,139 @@ it('runs the queued follow-up in its original background conversation, not the n
   await waitFor(() => expect(getAssistantBackgroundRuns()).toHaveLength(0));
   expect(ui.getByText('B 完成')).toBeTruthy();
   expect(ui.queryByText('A 第二轮完成')).toBeNull();
+});
+
+it('edits and cancels multiple unsent requests without interrupting the active response', async () => {
+  const ui = render(<AssistantPanel {...props} />);
+  await waitFor(() => expect(ui.getByRole('combobox', { name: '对话模型' }).textContent).toContain('test'));
+  const submit = (question: string, button = '排队发送') => {
+    fireEvent.change(ui.getByLabelText('输入问题'), { target: { value: question } });
+    fireEvent.click(ui.getByRole('button', { name: button }));
+  };
+  submit('first', '发送');
+  await waitFor(() => expect(pending.has('first')).toBe(true));
+  submit('second'); submit('cancel this'); submit('fourth');
+  expect(getAssistantMessageQueues()[0].items).toHaveLength(3);
+  fireEvent.click(ui.getByRole('button', { name: '编辑待发送消息 1' }));
+  expect(document.activeElement).toBe(ui.getByRole('textbox', { name: '编辑待发送消息 1' }));
+  fireEvent.change(ui.getByRole('textbox', { name: '编辑待发送消息 1' }), { target: { value: 'edited second' } });
+  fireEvent.click(ui.getByRole('button', { name: '取消待发送消息 2' }));
+  expect(document.activeElement).toBe(ui.getByRole('button', { name: '待发送 · 2' }));
+  await act(async () => pending.get('first')!.finish({ answer: 'first complete', sources: [] }));
+  expect(pending.has('second')).toBe(false);
+  expect(pending.has('fourth')).toBe(false);
+  expect(ui.getByRole('textbox', { name: '编辑待发送消息 1' })).toBeTruthy();
+  fireEvent.click(ui.getByRole('button', { name: '保存修改' }));
+  await waitFor(() => expect(pending.has('edited second')).toBe(true));
+  expect(pending.get('edited second')!.options.composerSnapshot?.text).toBe('edited second');
+  expect(pending.get('first')!.options.abortSignal?.aborted).toBe(false);
+  await act(async () => pending.get('edited second')!.finish({ answer: 'second complete', sources: [] }));
+  await waitFor(() => expect(pending.has('fourth')).toBe(true));
+  expect(pending.get('fourth')!.options.conversationHistory?.some(message => message.content === 'second complete')).toBe(true);
+  await act(async () => pending.get('fourth')!.finish({ answer: 'done', sources: [] }));
+  expect(getAssistantMessageQueues()).toHaveLength(0);
+  expect(pending.has('cancel this')).toBe(false);
+  expect(mocks.disks.get('conversation-1')!.messages.filter(message => message.role === 'user').map(message => message.content))
+    .toEqual(['first', 'edited second', 'fourth']);
+});
+
+it('keeps stopped requests in the queue and requires explicit continuation', async () => {
+  const ui = render(<AssistantPanel {...props} />);
+  await waitFor(() => expect(ui.getByRole('combobox', { name: '对话模型' }).textContent).toContain('test'));
+  fireEvent.change(ui.getByLabelText('输入问题'), { target: { value: 'stop first' } });
+  fireEvent.click(ui.getByRole('button', { name: '发送' }));
+  await waitFor(() => expect(pending.has('stop first')).toBe(true));
+  fireEvent.change(ui.getByLabelText('输入问题'), { target: { value: 'keep second' } });
+  fireEvent.click(ui.getByRole('button', { name: '排队发送' }));
+  fireEvent.click(ui.getByRole('button', { name: '停止' }));
+  await waitFor(() => expect(getAssistantBackgroundRuns()).toHaveLength(0));
+  expect(getAssistantMessageQueues()[0].pauseReason).toBe('stopped');
+  expect(pending.has('keep second')).toBe(false);
+  expect(ui.getByText('当前任务已停止，待发送消息已保留。')).toBeTruthy();
+  fireEvent.click(ui.getByRole('button', { name: '继续队列' }));
+  await waitFor(() => expect(pending.has('keep second')).toBe(true));
+  await act(async () => pending.get('keep second')!.finish({ answer: 'done', sources: [] }));
+  expect(getAssistantMessageQueues()).toHaveLength(0);
+});
+
+it('preserves editing text across conversation navigation and completes the remaining queue after unmount', async () => {
+  const ui = render(<AssistantPanel {...props} />);
+  await waitFor(() => expect(ui.getByRole('combobox', { name: '对话模型' }).textContent).toContain('test'));
+  fireEvent.change(ui.getByLabelText('输入问题'), { target: { value: 'background first' } });
+  fireEvent.click(ui.getByRole('button', { name: '发送' }));
+  await waitFor(() => expect(pending.has('background first')).toBe(true));
+  for (const question of ['queued second', 'queued third']) {
+    fireEvent.change(ui.getByLabelText('输入问题'), { target: { value: question } });
+    fireEvent.click(ui.getByRole('button', { name: '排队发送' }));
+  }
+  fireEvent.click(ui.getByRole('button', { name: '编辑待发送消息 1' }));
+  fireEvent.change(ui.getByRole('textbox', { name: '编辑待发送消息 1' }), { target: { value: 'preserved edit' } });
+  fireEvent.click(ui.getByRole('button', { name: '新建对话' }));
+  act(() => requestOpenAssistantConversation('fixture', 'conversation-1'));
+  const edit = await ui.findByRole('textbox', { name: '编辑待发送消息 1' });
+  expect((edit as HTMLTextAreaElement).value).toBe('preserved edit');
+  fireEvent.keyDown(edit, { key: 'Enter', ctrlKey: true });
+  ui.unmount();
+  await act(async () => pending.get('background first')!.finish({ answer: 'first done', sources: [] }));
+  await waitFor(() => expect(pending.has('preserved edit')).toBe(true));
+  await act(async () => pending.get('preserved edit')!.finish({ answer: 'second done', sources: [] }));
+  await waitFor(() => expect(pending.has('queued third')).toBe(true));
+  await act(async () => pending.get('queued third')!.finish({ answer: 'third done', sources: [] }));
+  expect(getAssistantMessageQueues()).toHaveLength(0);
+  expect(getAssistantBackgroundRuns()).toHaveLength(0);
+});
+
+it.each(['apply', 'reject'] as const)('refreshes saved note %s decisions before an edited queued message runs', async decision => {
+  const proposal: AssistantNoteProposal = { id: 'note-review', action: 'create', entryId: 'e', entryTitle: '论文',
+    title: '阅读笔记', markdown: 'Summary', status: 'pending', createdAt: '', sources: [] };
+  const ui = render(<AssistantPanel {...props} onApplyNoteProposal={async value => ({ ...value, status: 'applied' })} />);
+  await waitFor(() => expect(ui.getByRole('combobox', { name: '对话模型' }).textContent).toContain('test'));
+  fireEvent.change(ui.getByLabelText('输入问题'), { target: { value: 'prepare note' } });
+  fireEvent.click(ui.getByRole('button', { name: '发送' }));
+  await waitFor(() => expect(pending.has('prepare note')).toBe(true));
+  fireEvent.change(ui.getByLabelText('输入问题'), { target: { value: 'follow decision' } });
+  fireEvent.click(ui.getByRole('button', { name: '排队发送' }));
+  fireEvent.click(ui.getByRole('button', { name: '编辑待发送消息 1' }));
+  await act(async () => pending.get('prepare note')!.finish({ answer: 'Please review', sources: [], noteProposals: [proposal] }));
+  fireEvent.click(ui.getByRole('button', { name: decision === 'apply' ? '确认' : '忽略' }));
+  const expected = decision === 'apply' ? 'applied' : 'rejected';
+  await waitFor(() => expect(mocks.disks.get('conversation-1')!.messages[1].note_proposals?.[0].status).toBe(expected));
+  fireEvent.click(ui.getByRole('button', { name: '保存修改' }));
+  await waitFor(() => expect(pending.has('follow decision')).toBe(true));
+  const history = pending.get('follow decision')!.options.conversationHistory!;
+  expect(history[1].note_proposals?.[0].status).toBe(expected);
+  expect(history[1].parts?.find(part => part.type === 'note-proposal')).toMatchObject({ proposal: { status: expected } });
+  await act(async () => pending.get('follow decision')!.finish({ answer: 'done', sources: [] }));
+});
+
+it.each([
+  ['tag', 'apply'], ['tag', 'reject'], ['metadata', 'apply'], ['metadata', 'reject'],
+] as const)('refreshes saved %s %s decisions before a queued message runs', async (kind, decision) => {
+  const tag: AssistantTagProposal = { id: 'tag-review', action: 'create', name: '中文标签', createdAt: '', entryIds: [], status: 'pending' };
+  const metadata: AssistantEntryMetaProposal = { id: 'meta-review', entryId: 'e', entryTitle: '论文', fields: ['title'],
+    beforeTitle: 'old', afterTitle: 'new', beforeDescription: '', afterDescription: '', baseUpdatedAt: '',
+    createdAt: '', sources: [], status: 'pending' };
+  const apply = async () => {
+    const part = mocks.disks.get('conversation-1')!.messages[1].parts!.find(part =>
+      part.type === (kind === 'tag' ? 'tag-proposal' : 'entry-meta-proposal'))!;
+    if (part.type === 'tag-proposal' || part.type === 'entry-meta-proposal') part.proposal.status = 'applied';
+  };
+  const ui = render(<AssistantPanel {...props} onApplyTagProposal={apply} onApplyEntryMetaProposal={apply} />);
+  await waitFor(() => expect(ui.getByRole('combobox', { name: '对话模型' }).textContent).toContain('test'));
+  fireEvent.change(ui.getByLabelText('输入问题'), { target: { value: 'prepare mutation' } });
+  fireEvent.click(ui.getByRole('button', { name: '发送' }));
+  await waitFor(() => expect(pending.has('prepare mutation')).toBe(true));
+  fireEvent.change(ui.getByLabelText('输入问题'), { target: { value: 'follow mutation' } });
+  fireEvent.click(ui.getByRole('button', { name: '排队发送' }));
+  fireEvent.click(ui.getByRole('button', { name: '编辑待发送消息 1' }));
+  await act(async () => pending.get('prepare mutation')!.finish({ answer: 'Please review', sources: [],
+    ...(kind === 'tag' ? { tagProposals: [tag] } : { entryMetaProposals: [metadata] }) }));
+  fireEvent.click(ui.getByRole('button', { name: decision === 'apply' ? '确认应用' : '拒绝' }));
+  const expected = decision === 'apply' ? 'applied' : 'rejected';
+  await waitFor(() => expect(ui.getByText(decision === 'apply' ? '已应用' : '已拒绝')).toBeTruthy());
+  fireEvent.click(ui.getByRole('button', { name: '保存修改' }));
+  await waitFor(() => expect(pending.has('follow mutation')).toBe(true));
+  expect(pending.get('follow mutation')!.options.conversationHistory![1].parts?.find(part =>
+    part.type === (kind === 'tag' ? 'tag-proposal' : 'entry-meta-proposal'))).toMatchObject({ proposal: { status: expected } });
+  await act(async () => pending.get('follow mutation')!.finish({ answer: 'done', sources: [] }));
 });

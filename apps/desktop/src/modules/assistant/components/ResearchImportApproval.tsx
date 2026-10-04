@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { approveResearchImport, previewResearchImport, rememberResearchConsent, type ResearchPaper } from '@/shared/ipc/researchApi';
 import { decideToolApproval, getToolApprovals, type PendingToolApproval } from '../runtime/toolApproval';
+import { formatAssistantError, useAssistantDebug } from '@/shared/lib/assistantDebug';
 
 /** Approval store owns the operation; this panel owns only its preview. Parent owns scrolling. */
 export function ResearchImportApproval({ item }: { item: PendingToolApproval }) {
+  const debug = useAssistantDebug();
   const [papers, setPapers] = useState<ResearchPaper[] | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -47,7 +49,7 @@ export function ResearchImportApproval({ item }: { item: PendingToolApproval }) 
         </details>
       </li>)}
     </ul>}
-    {error && <p role="alert" className="text-destructive [overflow-wrap:anywhere]">{error}</p>}
+    {error && <p role="alert" className="text-destructive [overflow-wrap:anywhere]">{formatAssistantError(error, { debug, fallback: '论文确认未完成，请拒绝本次操作后重新检索。' })}</p>}
     <div className="flex flex-wrap justify-end gap-2">
       <Button size="sm" variant="ghost" disabled={busy} onClick={() => decideToolApproval(item.id, false)}>拒绝并停止</Button>
       <Button size="sm" disabled={busy || !papers?.some(p => p.pdf_url)} onClick={() => void confirm()}>{busy ? '正在确认…' : `确认下载 ${papers?.filter(p => p.pdf_url).length ?? 0} 篇`}</Button>

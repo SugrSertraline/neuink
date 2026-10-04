@@ -13,7 +13,10 @@ export function normalizeBrowserUrl(input: string): string {
 export function browserTitle(url: string) { try { return new URL(url).hostname; } catch { return '新网页'; } }
 
 export const BROWSER_OPEN_EVENT = 'neuink:open-browser';
-export function requestBrowserTab(url: string) {
+export type BrowserTabSource = { sourceId: string; requestId: string };
+export type BrowserOpenDetail = string | (BrowserTabSource & { url: string });
+export function requestBrowserTab(url: string, source?: BrowserTabSource) {
   const normalized = normalizeBrowserUrl(url);
-  window.dispatchEvent(new CustomEvent(BROWSER_OPEN_EVENT, { detail: normalized }));
+  const detail: BrowserOpenDetail = source ? { url: normalized, sourceId: source.sourceId, requestId: source.requestId } : normalized;
+  window.dispatchEvent(new CustomEvent<BrowserOpenDetail>(BROWSER_OPEN_EVENT, { detail }));
 }

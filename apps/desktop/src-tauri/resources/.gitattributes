@@ -1,0 +1,2 @@
+# Preserve the exact upstream bytes checked by reader-licenses.cjs on every platform.
+reader-licenses/** -text

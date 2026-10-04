@@ -1,6 +1,7 @@
 import { ReadingStateRetention } from './navigation/ReadingStateRetention';
 import { ReadingViewSession } from './navigation/ReadingViewSession';
-import { BrowserSurface } from '@/modules/browser/BrowserSurface';
+import { jumpForSurface } from '../sourceJump';
+import { BrowserSurface, type BrowserSurfaceMetadata } from '@/modules/browser/BrowserSurface';
 import { AssistantReplyReader } from '@/modules/assistant/components/AssistantReplyReader';
 import {
   lazy,
@@ -80,7 +81,7 @@ const EntryWorkspaceView = lazy(() => import('./EntryWorkspaceView')
   .then((module) => ({ default: module.EntryWorkspaceView })));
 
 type ReaderPaneProps = EntryPdfHandlers & {
-  onUpdateBrowser?: (id: string, url: string, title: string) => void;
+  onUpdateBrowser?: (id: string, url: string, title: string, metadata?: BrowserSurfaceMetadata) => void;
   librarySection: 'papers' | 'notes';
   onLibrarySectionChange: (section: 'papers' | 'notes') => void;
   onOpenTagLibrary: (tagId: string, section?: 'papers' | 'notes') => void;
@@ -460,6 +461,13 @@ export function ReaderPane({
       }
       return next;
     });
+    setLinkedReflowSegmentByEntryId((current) => {
+      const next = { ...current };
+      for (const entryId of changedEntryIds) {
+        if (pdfJumpByEntryId[entryId]?.targetSurfaceKey) delete next[entryId];
+      }
+      return next;
+    });
   }, [pdfJumpByEntryId]);
 
 
@@ -740,7 +748,7 @@ export function ReaderPane({
     const linkedReaderKind: WorkspaceReaderSurfaceKind | null =
       pairing?.relation === 'record-sync' ? readerKind(siblingSurface) : null;
     const linkedPdfJump = linkedPdfJumpByEntryId[parsed.entryId] ?? null;
-    const externalPdfJump = pdfJumpByEntryId[parsed.entryId] ?? null;
+    const externalPdfJump = jumpForSurface(pdfJumpByEntryId[parsed.entryId] ?? null, editorScopeOverride ?? surfaceKey(currentSurface));
 
     return (
       <Suspense fallback={<div className="grid h-full min-h-0 place-items-center text-sm text-muted-foreground" role="status">正在载入阅读器…</div>}>
@@ -976,7 +984,7 @@ export function ReaderPane({
     if (surface.kind === 'browser') return <BrowserSurface id={surface.id} initialUrl={surface.url}
       active={surfaceLayout[pane]?.kind === 'browser' && surfaceKey(surfaceLayout[pane]!) === surfaceKey(surface)}
       onFocus={() => onFocusSurface(pane)}
-      onChange={(url, title) => onUpdateBrowser?.(surface.id, url, title)} />;
+      onChange={(url, title, metadata) => onUpdateBrowser?.(surface.id, url, title, metadata)} />;
     if (surface.kind === 'note-review') return <NoteReviewPage key={surface.proposalId} proposalId={surface.proposalId} onOpenNote={onOpenEntryNote} />;
     if (surface.kind === 'tag-details') return <TagDetailsView key={`${workspaceRoot}:${surface.tagId}`} root={workspaceRoot} tagId={surface.tagId} tags={tags} entries={entries} initialView={surface.view}
       onDescription={onUpdateTagDescription} onOpenNote={(target, label) => onOpenSurface(noteSurface(target, label), pane)}

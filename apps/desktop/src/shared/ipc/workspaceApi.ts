@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { runLocalBackgroundJob } from '../lib/localBackgroundJobs';
 
 import type {
   EntryId,
@@ -953,8 +954,22 @@ export async function translateEntrySegment(
   entryId: EntryId,
   segmentUid: string
 ): Promise<EntryTranslationResponse> {
-  return invoke<EntryTranslationResponse>('translate_entry_segment', {
-    request: { root, entry_id: entryId, segment_uid: segmentUid }
+  return runLocalBackgroundJob({
+    idPrefix: 'single-segment-translation',
+    kind: 'paragraph_translation',
+    scope: { kind: 'entry', root, entry_id: entryId },
+    message: '正在翻译片段',
+    successMessage: '片段翻译完成',
+    failureMessage: '片段翻译未完成，请返回论文重试。'
+  }, async () => {
+    const response = await invoke<EntryTranslationResponse>('translate_entry_segment', {
+      request: { root, entry_id: entryId, segment_uid: segmentUid }
+    });
+    const segment = response.translation?.segments.find(item => item.segment_uid === segmentUid);
+    if (!segment || segment.status !== 'translated' || !segment.translated_text?.trim()) {
+      throw new Error('片段翻译未返回有效译文，请返回论文重试。');
+    }
+    return response;
   });
 }
 

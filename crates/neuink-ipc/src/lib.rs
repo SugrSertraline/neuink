@@ -4,6 +4,8 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
     let handler: Box<dyn Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync> =
         Box::new(tauri::generate_handler![
             commands::browser::browser_command,
+            commands::browser::read_browser_tab,
+            commands::browser::cancel_browser_read,
             commands::onboarding::import_onboarding_paper,
             commands::pdf_text::inspect_pdf_text,
             commands::pdf_text::read_assistant_pdf_bytes,

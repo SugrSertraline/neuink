@@ -39,6 +39,23 @@ it('keeps the unavailable-object error distinct from unparsed status', () => {
   expect(screen.getByRole('alert').textContent).toContain('对象已不可用');
   expect(screen.queryByRole('status')).toBeNull();
 });
+it('shows the webpage target and model sharing notice, with keyboard-accessible opt-out', () => {
+  function Harness() {
+    const [choice, setChoice] = useState<AssistantReadingChoice>(null);
+    const resolved = resolveAssistantReadingContext({ choice, entries: [], items: [], activeEntry: null,
+      activeNote: null, activeSegment: null, activeSurface: { ...context.surface, kind: 'browser', entryId: null,
+        surfaceKey: 'browser:web', browserTab: { id: 'web', url: 'https://example.org/', title: 'Example page', navigationId: 'document-one' } } });
+    return <AssistantReadingContextControl context={resolved} entries={[]} busy={false} choice={choice} onChange={setChoice} />;
+  }
+  render(<Harness />);
+  expect(screen.getByRole('button', { name: '更换阅读对象：网页 · Example page' })).toBeTruthy();
+  expect(screen.getByRole('status').textContent).toContain('发送给已配置的模型');
+  expect(screen.queryByRole('alert')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '取消关联阅读对象' }));
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '更换阅读对象：不关联内容' }));
+  expect(screen.queryByRole('status')).toBeNull();
+  expect(screen.getByText('不跟随标签页；手动附加的资料和已有对话仍保留。')).toBeTruthy();
+});
 it('clears the object, stays unbound on tab changes, and lets the user resume following or pin a paper', async () => {
   function Harness({ activeEntry }: { activeEntry: LibraryEntry }) {
     const [choice, setChoice] = useState<AssistantReadingChoice>(null);

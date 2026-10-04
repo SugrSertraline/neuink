@@ -4,3 +4,6 @@
 *.ps1 text eol=crlf
 *.bat text eol=crlf
 *.cmd text eol=crlf
+
+# Preserve upstream source bytes and recorded SHA256 across Windows checkouts.
+crates/neuink-ipc/src/commands/vendor/readability/** -text

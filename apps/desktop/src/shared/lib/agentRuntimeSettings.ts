@@ -21,6 +21,7 @@ const DEFAULT_MAIN_PROMPT = 'You are Neuink Main Assistant. Stay grounded in wor
 const DEFAULT_MAIN_TOOL_IDS: AgentToolId[] = [
   'read_pdf_pages', 'search_pdf_text',
   'search_papers', 'search_web', 'read_webpage', 'import_papers',
+  'read_browser_tab',
   'app.set_appearance',
   'create_entry',
   'search_segments',
@@ -99,7 +100,7 @@ function createSubagent(
 }
 
 export const DEFAULT_AGENT_RUNTIME_SETTINGS: AgentRuntimeSettings = {
-  capabilityRevision: 2,
+  capabilityRevision: 3,
   mainAssistant: createMainAssistant({}),
   mcpServers: [],
   subagents: [
@@ -146,7 +147,7 @@ export function normalizeAgentRuntimeSettings(
     return DEFAULT_AGENT_RUNTIME_SETTINGS;
   }
   return {
-    capabilityRevision: 2,
+    capabilityRevision: 3,
     mainAssistant: normalizeMainAssistant(settings.mainAssistant, settings.capabilityRevision ?? 0),
     mcpServers: normalizeMcpServers(settings.mcpServers),
     subagents: normalizeSubagents(settings.subagents),
@@ -155,7 +156,7 @@ export function normalizeAgentRuntimeSettings(
   };
 }
 
-function normalizeMainAssistant(value: unknown, revision = 2) {
+function normalizeMainAssistant(value: unknown, revision = 3) {
   if (!value || typeof value !== 'object') {
     return DEFAULT_AGENT_RUNTIME_SETTINGS.mainAssistant;
   }
@@ -164,11 +165,15 @@ function normalizeMainAssistant(value: unknown, revision = 2) {
   // Native descriptors still require the user to opt in to the external service in Settings.
   const research = ['search_papers', 'search_web', 'read_webpage', 'import_papers'] as AgentToolId[];
   const pdf = ['read_pdf_pages', 'search_pdf_text'] as AgentToolId[];
-  const hadStandardTools = DEFAULT_MAIN_TOOL_IDS.filter(id => !research.includes(id) && !pdf.includes(id)).every(id => normalized.enabledToolIds.includes(id));
+  const hadStandardTools = DEFAULT_MAIN_TOOL_IDS.filter(id => !research.includes(id) && !pdf.includes(id) && id !== 'read_browser_tab').every(id => normalized.enabledToolIds.includes(id));
+  const migratedTools = [...new Set([...normalized.enabledToolIds,
+    ...(revision < 1 && hadStandardTools ? research : []), ...(revision < 2 && hadStandardTools ? pdf : [])])];
+  const hadCompletePreviousGrant = DEFAULT_MAIN_TOOL_IDS.filter(id => id !== 'read_browser_tab').every(id => migratedTools.includes(id));
+  if (revision < 3 && hadCompletePreviousGrant && normalized.permissions.canInvokeTools) migratedTools.push('read_browser_tab');
   return {
     ...normalized,
     allowedSubagentIds: normalized.allowedSubagentIds.filter((id) => id !== 'patch-planner-agent'),
-    enabledToolIds: [...new Set([...normalized.enabledToolIds, ...(revision < 1 && hadStandardTools ? research : []), ...(revision < 2 && hadStandardTools ? pdf : [])])]
+    enabledToolIds: [...new Set(migratedTools)]
   };
 }
 
@@ -310,6 +315,9 @@ function deniedToolReason(
   }
   if (!isActiveTool(toolId)) {
     return 'unsupported tool';
+  }
+  if (toolId === 'read_browser_tab' && agent.kind !== 'main_assistant') {
+    return 'browser tab access requires the main assistant frozen target';
   }
   if (toolId === 'import_papers' && (agent.kind !== 'main_assistant' ||
       !agent.permissions.canWriteProposals || agent.sandbox === 'read-only')) {
