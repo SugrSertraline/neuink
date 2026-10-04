@@ -32,7 +32,7 @@ Markdown 渲染使用独立锁定的 markdown-it，不修改桌面应用依赖�
 
 工作流位于 `.github/workflows/pages.yml`。网站相关 PR 只构建和检查；仅 main 上的网站变更可以发布，手动运行也仅允许 main 部署。部署 job 独占 `pages: write` 与 `id-token: write`，只上传 `website/dist`。发布任务共享并发组，避免同时覆盖。
 
-官网与图文手册已统一从 main 维护。个人主页由独立的 `SugrSertraline.github.io` 仓库提供；本仓库继续发布到 `/neuink/`。构建的 `GUIDE_SOURCE_REF` 让“查看本页源文档”链接指向实际构建分支。
+官网与图文手册已统一从 main 维护。个人主页由独立的 `homepage` 仓库提供；本仓库继续发布到 `/neuink/`。构建的 `GUIDE_SOURCE_REF` 让“查看本页源文档”链接指向实际构建分支。
 
 首次需要在仓库 **Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**。之后推送网站变更或从 Actions 手动运行 **Documentation Pages**。仅当部署 job 成功且访问确认后，才能声称网站已上线。
 
