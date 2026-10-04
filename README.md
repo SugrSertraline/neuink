@@ -33,10 +33,11 @@
 
 ## 完整功能介绍与使用手册
 
-README 提供概览，详细用法收录于 [20 篇专题手册](website/README.md)。现已发布到 GitHub Pages，可通过 **[Neuink 产品与使用指南](https://sugrsertraline.github.io/neuink/)** 阅读，含功能导航、章节全文搜索、手机目录和完整研究流程。
+README 提供概览，详细用法收录于 [21 篇专题手册](website/README.md)。现已发布到 GitHub Pages，可通过 **[Neuink 产品与使用指南](https://sugrsertraline.github.io/neuink/)** 阅读，含功能导航、章节全文搜索、手机目录和完整研究流程。
 
 | 想了解什么 | 对应说明 |
 | --- | --- |
+| 先看实际界面 | [实机界面图解](website/content/screenshots.md)：阅读、翻译、分屏笔记和助手 |
 | 安装、资料库、侧栏与分屏 | [第一次使用](website/content/start.md) · [认识工作台](website/content/workspace.md) |
 | 条目、标签、属性与解析 | [资料整理](website/content/library.md) · [MinerU 导入](website/content/import.md) |
 | PDF、书页模式、重排、翻译与多篇对照 | [PDF](website/content/pdf.md) · [重排](website/content/reflow.md) · [翻译](website/content/translation.md) · [标签阅读](website/content/parallel.md) |

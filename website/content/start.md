@@ -1,5 +1,13 @@
 Neuink 把文献、阅读位置、笔记和证据放进一个本地资料库。第一次使用，可以先完成一条很短的路线：**打开一篇 PDF → 记下一条想法 → 给想法附上来源 → 保存笔记**。解析、翻译和 AI 都可以之后再配置。
 
+## 对照界面看操作
+
+![Neuink 实机界面：左侧 PDF 摘要，右侧学习笔记、实验表格与来源链接](../public/screenshots/pdf-notes-split-view.png)
+
+先看整体：左侧核对论文，右侧整理笔记。图中是已准备好的示例，不是首次打开时的空资料库。
+
+*仓库已有实机截图，已裁去含服务地址的底栏；按钮可能随版本变化。点击图片查看原尺寸，或阅读[完整界面图解](screenshots.md)。*
+
 ## 准备与安装
 
 从 [GitHub Releases](https://github.com/SugrSertraline/neuink/releases) 查看维护者已发布的版本、平台与说明。没有适合的平台产物时，可按仓库的[构建说明](https://github.com/SugrSertraline/neuink/blob/main/docs/deployment/packaging-and-distribution.md)从源码运行；不要把 Actions 构建成功等同于正式发行验收。
