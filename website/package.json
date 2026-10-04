@@ -1,0 +1,14 @@
+{
+  "name": "neuink-guide",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "node scripts/check.mjs",
+    "preview": "node scripts/serve.mjs"
+  },
+  "devDependencies": {
+    "markdown-it": "14.1.0"
+  }
+}

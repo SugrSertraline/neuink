@@ -1,0 +1,56 @@
+name: Documentation Pages
+
+on:
+  push:
+    branches: [main, codex/product-guide]
+    paths: ['website/**', '.github/workflows/pages.yml', 'apps/desktop/src-tauri/logo_assets/neuink_logo_transparent_1024.png']
+  pull_request:
+    paths: ['website/**', '.github/workflows/pages.yml', 'apps/desktop/src-tauri/logo_assets/neuink_logo_transparent_1024.png']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.event_name == 'pull_request' && github.ref || 'deployment' }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - run: npm ci --prefix website --ignore-scripts
+      - run: npm run build --prefix website
+        env:
+          GUIDE_SOURCE_REF: ${{ github.head_ref || github.ref_name }}
+      - run: npm run check --prefix website
+      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/product-guide') && github.event_name != 'pull_request'
+        with:
+          path: website/dist
+
+  deploy:
+    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/product-guide') && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+      - name: Publish documentation
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

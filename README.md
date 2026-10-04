@@ -31,6 +31,19 @@
 
 > **Neuink** 是一个面向论文、报告、标准和书籍章节的本地优先知识工作台。它把 PDF 阅读、结构化解析、笔记、检索和 AI 协作放进同一个 Workspace，并让结论始终能够回到原始证据。
 
+## 完整功能介绍与使用手册
+
+README 提供概览，详细用法收录于 [20 篇专题手册](website/README.md)。GitHub Pages 发布后可通过 **[Neuink 产品与使用指南](https://sugrsertraline.github.io/neuink/)** 阅读，含功能导航、章节全文搜索、手机目录和完整研究流程。
+
+| 想了解什么 | 对应说明 |
+| --- | --- |
+| 安装、资料库、侧栏与分屏 | [第一次使用](website/content/start.md) · [认识工作台](website/content/workspace.md) |
+| 条目、标签、属性与解析 | [资料整理](website/content/library.md) · [MinerU 导入](website/content/import.md) |
+| PDF、书页模式、重排、翻译与多篇对照 | [PDF](website/content/pdf.md) · [重排](website/content/reflow.md) · [翻译](website/content/translation.md) · [标签阅读](website/content/parallel.md) |
+| 笔记、批注、收藏、来源与关系图 | [记录方式](website/content/notes.md) · [来源追溯](website/content/sources.md) · [关系图](website/content/graph.md) |
+| 本地搜索、AI、在线文献和网页 | [搜索](website/content/search.md) · [助手](website/content/assistant.md) · [在线研究](website/content/research.md) · [网页与字幕](website/content/browser.md) |
+| 分享、设置、迁移与问题排查 | [导出](website/content/export.md) · [设置](website/content/settings.md) · [数据](website/content/data.md) · [研究流程](website/content/workflows.md) · [常见问题](website/content/faq.md) |
+
 ## 从 PDF 到可验证的理解
 
 ```text

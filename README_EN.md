@@ -31,6 +31,10 @@
 
 > **Neuink** is a local-first knowledge workspace for papers, reports, standards, and book chapters. It brings PDF reading, structured parsing, notes, search, and AI collaboration into one Workspace—while keeping every conclusion connected to its original evidence.
 
+## Complete product guide
+
+The [documentation website](website/README.md) contains 20 detailed guides in Chinese, covering workflows, controls, data boundaries, and troubleshooting, with section search and mobile navigation. Once deployed through GitHub Pages, it is available at [Neuink Product & User Guide](https://sugrsertraline.github.io/neuink/). The [guide sources](website/content) can also be read directly in this repository.
+
 ## From PDF to verifiable understanding
 
 ```text

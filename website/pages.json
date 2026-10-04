@@ -1,0 +1,22 @@
+[
+  {"id":"start","title":"第一次使用","group":"开始","description":"从创建资料库到保存第一篇带来源的笔记。"},
+  {"id":"workspace","title":"认识工作台","group":"开始","description":"五个侧栏入口、多标签、左右分屏、任务和保存保护。"},
+  {"id":"library","title":"条目、标签与属性","group":"整理资料","description":"列表与书架、标签层级、自定义属性和阅读统计。"},
+  {"id":"import","title":"PDF 导入与 MinerU 解析","group":"整理资料","description":"PDF 与客户端 ZIP 两条路径，以及自建解析服务。"},
+  {"id":"pdf","title":"PDF 原文阅读","group":"阅读与理解","description":"连续与书页阅读、单页双页、片段预览、选字和收藏位置。"},
+  {"id":"reflow","title":"重排阅读与图表","group":"阅读与理解","description":"按内容阅读段落、公式、表格、图片和 Mermaid。"},
+  {"id":"translation","title":"翻译与双语对照","group":"阅读与理解","description":"划词、片段、全文翻译，自动化选项与暂停恢复。"},
+  {"id":"parallel","title":"标签平行阅读","group":"阅读与理解","description":"同主题论文、独立对照和标签综合笔记。"},
+  {"id":"notes","title":"笔记、批注与收藏","group":"记录证据","description":"区分四种记录，编辑长笔记，保存、恢复与导出。"},
+  {"id":"sources","title":"来源链接与反向引用","group":"记录证据","description":"把结论连接到页码与片段，处理失效来源。"},
+  {"id":"graph","title":"关系图","group":"记录证据","description":"查看真实归属与引用，聚焦对象并探索二维和三维关系。"},
+  {"id":"search","title":"关键词、语义与混合搜索","group":"检索与 AI","description":"选搜索方式、读结果、理解索引和模型缺失状态。"},
+  {"id":"assistant","title":"AI 助手与修改审阅","group":"检索与 AI","description":"阅读对象、@ 上下文、对话历史、消息队列和提案确认。"},
+  {"id":"research","title":"在线文献与网页检索","group":"检索与 AI","description":"检索候选、核对证据，确认添加 PDF 或元数据。"},
+  {"id":"browser","title":"内嵌网页与字幕读取","group":"检索与 AI","description":"网页标签、公开 PDF、视频字幕与外部来源笔记。"},
+  {"id":"export","title":"导出与分享","group":"成果与设置","description":"全文、译稿、笔记和批注的格式选择与内容检查。"},
+  {"id":"settings","title":"模型、外观与阅读设置","group":"成果与设置","description":"模型连接、任务模型、主题、缩放和七类设置。"},
+  {"id":"data","title":"本地数据、迁移与恢复","group":"成果与设置","description":"资料库在哪里，哪些需要联网，如何迁移和恢复。"},
+  {"id":"workflows","title":"三个完整研究流程","group":"使用参考","description":"精读一篇论文、对照多篇论文、从网页发现到研究笔记。"},
+  {"id":"faq","title":"常见问题与快捷操作","group":"使用参考","description":"解析、搜索、模型、保存、导出及功能边界排查。"}
+]
