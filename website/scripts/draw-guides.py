@@ -98,7 +98,7 @@ box(d,(965,355,550,155),'需要重排或精确片段？','导入 MinerU 解析�
 line(d,[(775,415),(965,415)],'可选',(870,376),GREEN,True)
 box(d,(965,635,550,155),'需要翻译或助手？','先配置模型，再选择材料\n核对译文、回答与修改建议','#eaf5f0',GREEN)
 line(d,[(775,760),(875,760),(875,710),(965,710)],color=GREEN,dashed=True)
-d.text((80,1080),'提示：普通阅读与手写笔记可以先开始，不必等待解析或配置 AI。',font=font(25),fill=MUTED)
+d.text((80,1080),'提示：普通阅读与手动记笔记可以先开始，不必等待解析或配置 AI。',font=font(25),fill=MUTED)
 save(im,'first-reading-flow')
 
 im,d=canvas('该用哪一种记录？','按你想留下的内容选择，而不是按记录长短选择。',1010)
@@ -117,3 +117,4 @@ for i,(a,b) in enumerate(rows):
 save(im,'assistant-review-flow')
 (ROOT/'diagrams.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf8')
 print('Rendered',len(manifest),'diagrams using Microsoft YaHei')
+
