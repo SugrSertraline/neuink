@@ -101,12 +101,11 @@ jobs:
       - run: rustup toolchain install 1.96.0 --profile minimal
       - run: rustup override set 1.96.0
       - run: rustup target add ${{ matrix.target }}
+      - run: node apps/desktop/scripts/embedding-resources.cjs
       - name: Prepare resource manifest even when tutorial files are absent
         run: npm --workspace apps/desktop run prepare:resources
       - name: Native macOS compilation check (including PRs)
         run: cargo check --locked -p neuink-desktop --target ${{ matrix.target }}
-      - if: github.event_name != 'pull_request'
-        run: node apps/desktop/scripts/embedding-resources.cjs
       - name: Build self-contained app bundle (ad-hoc signed, not notarized)
         if: github.event_name != 'pull_request'
         env:

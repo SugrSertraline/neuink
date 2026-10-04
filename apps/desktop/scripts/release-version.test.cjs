@@ -53,7 +53,15 @@ test('Mac check always prepares absent demo manifests first; version gate runs b
   const mac = workflow.split('\n  macos:')[1].split('\n  release-draft:')[0];
   const prepare = mac.indexOf('run: npm --workspace apps/desktop run prepare:resources');
   assert.ok(prepare > 0 && prepare < mac.indexOf('run: cargo check'));
+  const model = mac.indexOf('run: node apps/desktop/scripts/embedding-resources.cjs');
+  assert.ok(model > 0 && model < prepare);
   assert.ok(!mac.slice(0, prepare).includes('if: github.event_name'));
   const verify = workflow.split('\n  verify:')[1].split('\n  build:')[0];
   assert.ok(verify.indexOf('run: node apps/desktop/scripts/release-version.cjs') < verify.indexOf('run: npm run desktop:build'));
+});
+test('Windows resource downloads suppress progress rather than filling child-process buffers', () => {
+  for (const file of ['embedding-resources.cjs', 'browser-reader-resources.cjs']) {
+    const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
+    assert.match(source, /\$ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest/);
+  }
 });

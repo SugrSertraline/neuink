@@ -32,7 +32,7 @@ async function download(url, destination) {
   }
   // Use Windows OS networking/proxy settings rather than Node's default fetch.
   const quote = value => `'${value.replace(/'/g, "''")}'`;
-  const script = `$ErrorActionPreference = 'Stop'; Invoke-WebRequest -UseBasicParsing -Uri ${quote(url)} -OutFile ${quote(destination)} -TimeoutSec 600`;
+  const script = `$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest -UseBasicParsing -Uri ${quote(url)} -OutFile ${quote(destination)} -TimeoutSec 600`;
   execFileSync(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe'),
     ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
     { windowsHide: true, stdio: 'pipe', timeout: 630_000 });

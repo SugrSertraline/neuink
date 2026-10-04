@@ -191,7 +191,7 @@ async function fetchOfficialAsset(url) {
   const temporary = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'neuink-reader-download-'));
   const file = path.join(temporary, 'asset');
   const quote = value => `'${value.replace(/'/g, "''")}'`;
-  const script = `$ErrorActionPreference = 'Stop'; Invoke-WebRequest -UseBasicParsing -Uri ${quote(url)} -OutFile ${quote(file)} -TimeoutSec 60`;
+  const script = `$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest -UseBasicParsing -Uri ${quote(url)} -OutFile ${quote(file)} -TimeoutSec 60`;
   try {
     const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
     execFileSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand',
