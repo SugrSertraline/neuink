@@ -33,7 +33,7 @@
 
 ## 完整功能介绍与使用手册
 
-README 提供概览，详细用法收录于 [20 篇专题手册](website/README.md)。GitHub Pages 发布后可通过 **[Neuink 产品与使用指南](https://sugrsertraline.github.io/neuink/)** 阅读，含功能导航、章节全文搜索、手机目录和完整研究流程。
+README 提供概览，详细用法收录于 [20 篇专题手册](website/README.md)。现已发布到 GitHub Pages，可通过 **[Neuink 产品与使用指南](https://sugrsertraline.github.io/neuink/)** 阅读，含功能导航、章节全文搜索、手机目录和完整研究流程。
 
 | 想了解什么 | 对应说明 |
 | --- | --- |

@@ -36,6 +36,6 @@ Markdown 渲染使用独立锁定的 markdown-it，不修改桌面应用依赖�
 
 首次需要在仓库 **Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**。之后推送网站变更或从 Actions 手动运行 **Documentation Pages**。仅当部署 job 成功且访问确认后，才能声称网站已上线。
 
-预期地址：`https://sugrsertraline.github.io/neuink/`。仓库更名或迁移时同步修改构建脚本的站点地址、404 返回地址和模板中的仓库链接。
+已上线地址：`https://sugrsertraline.github.io/neuink/`。仓库更名或迁移时同步修改构建脚本的站点地址、404 返回地址和模板中的仓库链接。
 
 官方配置参考：[GitHub Pages 自定义工作流](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)。
