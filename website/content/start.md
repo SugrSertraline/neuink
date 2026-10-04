@@ -15,6 +15,10 @@ Neuink 把文献、阅读位置、笔记和证据放进一个本地资料库。�
 
 ## 准备与安装
 
+**[下载 Windows x64 便携版（ZIP，CDN 直链）](https://cdn.sugrsertraline.top/Neuink-windows-x64-portable.zip)**
+
+下载后将整个压缩包解压到一个文件夹，再双击 `Neuink.exe`，不要在压缩包内直接运行。更新时先关闭旧版，将新版解压到新文件夹，再打开原有资料库。
+
 从 [GitHub Releases](https://github.com/SugrSertraline/neuink/releases) 查看维护者已发布的版本、平台与说明。没有适合的平台产物时，可按仓库的[构建说明](https://github.com/SugrSertraline/neuink/blob/main/docs/deployment/packaging-and-distribution.md)从源码运行；下载前查看对应版本的支持平台与使用说明。
 
 Windows 便携包需要完整解压，再运行 `Neuink.exe`。保留随包的资源目录；运行成品不需要 Node.js 或 Rust，系统需有 WebView2 Runtime。请以该版本的发布说明为准，不将调试目录中的程序当成便携版。

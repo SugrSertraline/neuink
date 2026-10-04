@@ -31,6 +31,12 @@
 
 [产品官网](https://sugrsertraline.github.io/neuink/) · [作者主页](https://sugrsertraline.github.io/homepage/) · [核心功能](#核心功能) · [开始使用](#开始使用) · [本地与在线能力](#本地与在线能力) · [开发与构建](#开发与构建) · [项目文档](#项目文档)
 
+## Windows 便携版下载
+
+**[下载 Neuink Windows x64 便携版（ZIP，CDN 直链）](https://cdn.sugrsertraline.top/Neuink-windows-x64-portable.zip)**
+
+完整解压后双击 `Neuink.exe`，保留随包资源目录，不要在压缩包内直接运行。运行成品不需要安装 Node.js 或 Rust，系统需有 WebView2 Runtime。更新时先关闭旧版，将新版解压到新文件夹，再打开原有资料库。
+
 ## macOS 预览构建
 
 [自动构建](https://github.com/SugrSertraline/neuink/actions/workflows/windows-portable.yml) 已配置 Apple Silicon 和 Intel 两种 Mac runner，云端成功后分别提供 `Neuink-macos-arm64.app.zip` 与 `Neuink-macos-x64.app.zip`。解压后将 `Neuink.app` 移到“应用程序”，embedding 随包提供，用户资料另存于系统数据目录。
