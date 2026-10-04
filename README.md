@@ -45,9 +45,9 @@
 
 ## macOS 预览构建
 
-[自动构建](https://github.com/SugrSertraline/neuink/actions/workflows/windows-portable.yml) 已配置 Apple Silicon 和 Intel 两种 Mac runner，云端成功后分别提供 `Neuink-macos-arm64.app.zip` 与 `Neuink-macos-x64.app.zip`。解压后将 `Neuink.app` 移到“应用程序”，embedding 随包提供，用户资料另存于系统数据目录。
+macOS 暂提供 Apple Silicon 和 Intel 预览构建，可从[自动构建页面](https://github.com/SugrSertraline/neuink/actions/workflows/windows-portable.yml)查看成功任务的下载产物。解压后将 `Neuink.app` 移到“应用程序”。
 
-目前仅 ad-hoc 签名、未 Apple 公证，也未完成 Mac 实机验收；Gatekeeper 可能阻止运行，不建议关闭系统安全防护。Windows 专用内嵌网页及视频字幕运行时尚未移植，Mac 暂按预览版提供，不视为功能完全对等的正式版。详见 [打包与发行](docs/deployment/packaging-and-distribution.md)。
+预览版尚未完成 Apple 公证与 Mac 实机验收，系统可能阻止运行；内嵌网页及视频字幕读取尚未移植。下载与平台说明见[打包与发行](docs/deployment/packaging-and-distribution.md)。
 
 ## 完整功能介绍与使用手册
 
@@ -156,9 +156,7 @@ Windows 原生应用支持内嵌网页标签、地址栏、前进后退、独立
 5. **按需启用 AI**：在模型设置中建立连接，为助手和翻译指定模型；选择阅读范围后提问，审阅修改提案。
 6. **导出成果**：从 PDF／Reflow 的导出入口生成全文或译稿，从文档笔记或条目概览导出所选阅读成果。
 
-**MinerU ZIP 要求**：包含 `content_list_v2.json` 或兼容的 `content_list.json`，以及正文引用的图片。用 ZIP 创建新条目还需附原 PDF；导入已有 PDF 条目时不必重复附带。此路径无需在 Neuink 配置解析服务 URL 或 API Key。
-
-也可在“自建 MinerU 服务”中配置 URL 和可选 API Key。导入 PDF 后自动解析默认关闭，需主动开启；解析服务与 LLM 配置相互独立。
+需要解析、重排或翻译时，可按[PDF 导入与解析教程](https://sugrsertraline.github.io/neuink/import.html)操作。普通 PDF 阅读无需先配置解析服务。
 
 ## 本地与在线能力
 
@@ -177,75 +175,16 @@ Workspace 是普通本地文件夹，保存 PDF、笔记、批注、标签、译
 
 ## 开发与构建
 
-### 从源码运行
-
-需要 Node.js、npm、Rust stable 及 [Tauri 2 平台前置依赖](https://v2.tauri.app/start/prerequisites/)。在仓库根目录执行：
+从源码运行需要 Node.js、npm、Rust stable 和 [Tauri 2 平台依赖](https://v2.tauri.app/start/prerequisites/)。
 
 ```powershell
 npm install
 npm run desktop:dev
 ```
 
-基础阅读和笔记无需 `.env`、LLM 或 embedding 模型。解析服务和模型在应用设置中配置；`.env.example` 仅提供可选的旧 MinerU 地址列表配置，不是 MinerU Cloud Token 模板。
-
-<details>
-<summary>可选：启用本地语义搜索</summary>
-
-将 FastEmbed 兼容的 `intfloat/multilingual-e5-small` 资源置于：
-
-```text
-apps/desktop/src-tauri/resources/embedding-models/default/
-```
-
-所需文件见[模型目录说明](apps/desktop/src-tauri/resources/embedding-models/default/README.md)。实际模型文件被 Git 忽略，资源齐备后重启应用。没有模型仍可运行应用和关键词搜索。
-
-</details>
-
-<details>
-<summary>Windows x64：准备网页／视频读取组件</summary>
-
-```powershell
-npm --workspace apps/desktop run prepare:browser-reader
-npm --workspace apps/desktop run verify:browser-reader
-```
-
-准备命令显式下载并校验固定版本的 Python、yt-dlp、EJS 和 QuickJS-NG，不要求用户另装 Python。版本、来源与 SHA256 由[资源锁定清单](apps/desktop/scripts/browser-reader-lock.json)维护；正常运行不自动下载安装。缺资源时开发模式警告，Windows x64 发行构建失败。读取范围和资源分发规则见[打包说明](docs/deployment/packaging-and-distribution.md#网页内容读取组件)。
-
-</details>
-
-### 验证与打包
-
-```powershell
-# TypeScript 检查与前端构建
-npm run desktop:build
-
-# Rust 检查、Rust 测试、前端测试
-npm run check
-npm run test
-npm --workspace apps/desktop run test:frontend
-
-# Windows x64 发行前准备并验证读取运行时
-npm --workspace apps/desktop run prepare:browser-reader
-npm --workspace apps/desktop run verify:browser-reader
-
-# 构建原生 Tauri bundle
-npm --workspace apps/desktop run tauri -- build
-
-# 或构建 Windows 便携 ZIP
-npm run desktop:release:portable
-```
-
-便携包输出为 `release/Neuink-portable-<timestamp>.zip`，当前流程还要求本地 embedding 资源完整，不打包本机 `.env` 凭据。可选教程素材缺失不阻止普通构建。
-
-`desktop:build` 只构建前端，不会更新独立桌面程序；`desktop:dev` 和调试程序依赖本地前端服务。体验最新独立版本需重新构建原生 bundle 或便携包。
+基础阅读和笔记不需要配置模型服务。模型资源、网页读取组件和发行打包见[打包与发行](docs/deployment/packaging-and-distribution.md)，开发约定和检查命令见[工程规范](docs/development/engineering-guidelines.md)。
 
 ## 项目文档
-
-```text
-apps/desktop/   Tauri 桌面壳、React UI 与打包脚本
-crates/         Rust 领域、Workspace、解析、搜索、任务、配置、研究接入与 IPC
-docs/           产品、架构、工程规范、回归与发行文档
-```
 
 - [文档索引](docs/README.md)：查找长期维护文档。
 - [产品需求](docs/product/01-prd.md)：产品定位与需求边界。
@@ -253,30 +192,6 @@ docs/           产品、架构、工程规范、回归与发行文档
 - [开发计划](docs/development/dev-plan.md)：已实现内容、待验收项与后续路线。
 - [工程规范](docs/development/engineering-guidelines.md) · [UI 设计与交互规范](docs/development/ui-design-system.md) · [系统测试用例](docs/development/system-test-cases.md)。
 
-## 开源组件与许可证
+## 许可证
 
-Neuink 自身采用 [Apache License 2.0](LICENSE)。项目使用下列主要直接依赖；它们各自的许可证与声明在分发构建产物时仍然有效。
-
-| 组件 | 在 Neuink 中的作用 | 许可证 |
-| :--- | :--- | :--- |
-| [Tauri](https://tauri.app/) 与 Tauri Plugins | 桌面运行时、原生对话框、HTTP | Apache-2.0 OR MIT |
-| [React](https://react.dev/)、[Vite](https://vite.dev/)、[Tailwind CSS](https://tailwindcss.com/) | 用户界面与构建工具 | MIT |
-| [PDF.js](https://mozilla.github.io/pdf.js/) | PDF 渲染与文字提取 | Apache-2.0，字体／CMap／WASM 保留各自声明 |
-| [Mozilla Readability](https://github.com/mozilla/readability) | 已加载网页正文提取，固定 0.6.0 原始源码 | Apache-2.0 |
-| [yt-dlp](https://github.com/yt-dlp/yt-dlp)／[EJS](https://github.com/yt-dlp/ejs) | 公开视频字幕及元信息 | Unlicense；EJS 捆绑组件另含 MIT／ISC |
-| [CPython](https://www.python.org/)／[QuickJS-NG](https://github.com/quickjs-ng/quickjs) | 隔离媒体读取运行时 | PSF 及随附组件许可／MIT 及随附组件许可 |
-| [subtp](https://crates.io/crates/subtp) | SRT／WebVTT 字幕语法解析 | MIT OR Apache-2.0 |
-| [TipTap](https://tiptap.dev/)、[KaTeX](https://katex.org/)、[Mermaid](https://mermaid.js.org/) | Markdown 编辑、数学公式、图表 | MIT |
-| [assistant-ui](https://www.assistant-ui.com/) | AI 对话界面 | MIT |
-| [Vercel AI SDK](https://ai-sdk.dev/) 与 `@ai-sdk/openai-compatible` | 模型服务接入与流式响应 | Apache-2.0 |
-| [FastEmbed](https://crates.io/crates/fastembed)、[Tokio](https://tokio.rs/)、[Reqwest](https://crates.io/crates/reqwest)、[Serde](https://serde.rs/)、[Rayon](https://github.com/rayon-rs/rayon) | 本地 embedding、异步、网络、序列化与并行搜索 | Apache-2.0、MIT 或 MIT OR Apache-2.0（以各 crate 声明为准） |
-| [`intfloat/multilingual-e5-small`](https://huggingface.co/intfloat/multilingual-e5-small) | 可选本地 embedding 模型 | MIT |
-| [MinerU](https://github.com/opendatalab/MinerU) | 可选 PDF 解析集成，不随本仓库分发 | MinerU Open Source License（基于 Apache-2.0，含附加条款） |
-
-这是主要组件的可读摘要，不替代完整的第三方声明。精确的解析版本分别锁定在 [`package-lock.json`](package-lock.json) 与 [`Cargo.lock`](Cargo.lock)。发布安装包前，请为所有已解析的 npm / Cargo 依赖生成完整 notices，并复核任何一并分发的模型文件和外部服务条款。
-
-媒体运行时另由 `apps/desktop/scripts/browser-reader-lock.json` 锁定官方来源和 SHA256，使用 PyPI wheel 而不是含额外 GPL 组件的官方 yt-dlp.exe。原始许可证与第三方声明随运行时保留；Readability、PDF.js 和 subtp 的声明随 `resources/reader-licenses` 分发。上游源码未改写，Neuink 仅负责目标授权、调度、输出整理及资源清理。
-
-## License
-
-Neuink is licensed under [Apache-2.0](LICENSE). Third-party component guidance is available in [NOTICE](NOTICE).
+Neuink 采用 [Apache License 2.0](LICENSE)。第三方组件保留各自的许可证，详见 [第三方组件与许可证](docs/deployment/third-party-components.md) 和 [NOTICE](NOTICE)。

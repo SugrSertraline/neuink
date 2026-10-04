@@ -16,14 +16,9 @@
 
 Fully extract the ZIP, keep the bundled resource folders, and run `Neuink.exe`. Do not run it from inside the archive.
 
-- [Published releases](https://github.com/SugrSertraline/neuink/releases): check the release date and notes. Download `Neuink-windows-x64-portable.zip`, not GitHub's Source code archive. The old Beta 1 executable does not represent current main-branch features.
-- [Development builds](https://github.com/SugrSertraline/neuink/actions/workflows/windows-portable.yml): open a successful `main` run and download its commit-labelled artifact (GitHub sign-in required; retained for 14 days). Artifacts become available only after the workflow has been pushed and completed successfully.
-- Extract the artifact, then fully extract the portable ZIP and run `Neuink.exe`. Windows 10 1903+/11 x64 and WebView2 are required. Windows builds are currently unsigned.
-- macOS preview builds: use `Neuink-macos-arm64.app.zip` for Apple Silicon or `Neuink-macos-x64.app.zip` for Intel, extract and move `Neuink.app` to Applications. Embedding is inside the app bundle, while user data is separate. Builds are ad-hoc signed, not notarized, and may be blocked by Gatekeeper; do not disable system security globally. Native Mac validation is pending. Windows-only embedded browser and video subtitle runtime have not been ported. Downloads appear only after successful cloud builds.
-- Packages include embedding resources and browser-reading dependencies. Demo assets are optional: consult `build-info.json` (`demoIncluded`). Cloud builds omit the untracked tutorial paper by default.
-- Back up your workspace, close the old app, and extract updates to a new folder. Do not delete your workspace. Verify the source commit in `build-info.json`.
+Windows requires Windows 10 1903+ / 11 x64 and WebView2. To update, close the app, extract the new version to a new folder, and reopen your existing workspace.
 
-Main-branch pushes run tests and build artifacts; version tags create reviewable Release drafts rather than automatically publishing untested releases.
+macOS preview builds for Apple Silicon and Intel are available from successful [automated builds](https://github.com/SugrSertraline/neuink/actions/workflows/windows-portable.yml). They are not notarized or validated on a physical Mac; Gatekeeper may block launch. Embedded web pages and the video-caption runtime have not been ported. See [downloads and platform details](docs/deployment/packaging-and-distribution.md).
 
 <p align="center">
   <a href="README.md">简体中文</a> · <strong>English</strong>
@@ -134,9 +129,7 @@ The project version is **0.1.0**. A Windows portable build workflow exists; sign
 5. **Enable AI as needed:** configure connections and assign assistant/translation models, select your context, ask questions, and review proposed changes.
 6. **Export:** use the PDF/Reflow export action for manuscripts, or the document note / entry overview for selected reading results.
 
-**MinerU ZIP requirements:** include `content_list_v2.json` or compatible `content_list.json` and referenced images. Creating an entry from a ZIP also requires the original PDF; importing results into an existing PDF entry does not. This path needs no parser URL or API key in Neuink.
-
-Alternatively, configure a self-hosted MinerU-compatible URL and optional API key. Automatic parsing after PDF import is off by default. Parser and LLM settings are independent.
+For parsing, reflow, or translation, follow the [PDF import and parsing tutorial](https://sugrsertraline.github.io/neuink/import.html) (Chinese). Reading an ordinary PDF does not require a parser service.
 
 ## Local and online capabilities
 
@@ -155,99 +148,22 @@ A Workspace is a normal local folder containing PDFs, notes, annotations, tags, 
 
 ## Development and builds
 
-### Run from source
-
-Install Node.js, npm, Rust stable, and the [Tauri 2 platform prerequisites](https://v2.tauri.app/start/prerequisites/), then run from the repository root:
+Install Node.js, npm, Rust stable, and the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/), then run:
 
 ```powershell
 npm install
 npm run desktop:dev
 ```
 
-Basic reading and notes require no `.env`, LLM, or embedding model. Configure parsers and models in the app. `.env.example` only contains optional legacy MinerU endpoint configuration, not a MinerU Cloud Token template.
-
-<details>
-<summary>Optional: enable local semantic search</summary>
-
-Place FastEmbed-compatible `intfloat/multilingual-e5-small` resources in:
-
-```text
-apps/desktop/src-tauri/resources/embedding-models/default/
-```
-
-See the [model directory guide](apps/desktop/src-tauri/resources/embedding-models/default/README.md) for required files. Actual model files are Git-ignored. Restart after preparing them; keyword search and the app remain usable without them.
-
-</details>
-
-<details>
-<summary>Windows x64: prepare web / video reading resources</summary>
-
-```powershell
-npm --workspace apps/desktop run prepare:browser-reader
-npm --workspace apps/desktop run verify:browser-reader
-```
-
-Preparation explicitly downloads and verifies pinned Python, yt-dlp, EJS, and QuickJS-NG resources; users do not need a separate Python installation. The [resource lockfile](apps/desktop/scripts/browser-reader-lock.json) records versions, sources, and SHA256 hashes. Normal operation does not install or update these resources automatically. Missing resources warn in development and fail Windows x64 release builds. See [packaging](docs/deployment/packaging-and-distribution.md) for details.
-
-</details>
-
-### Verify and package
-
-```powershell
-# TypeScript checks and frontend build
-npm run desktop:build
-
-# Rust checks, Rust tests, frontend tests
-npm run check
-npm run test
-npm --workspace apps/desktop run test:frontend
-
-# Prepare and verify Windows x64 reading resources before release
-npm --workspace apps/desktop run prepare:browser-reader
-npm --workspace apps/desktop run verify:browser-reader
-
-# Native Tauri bundle
-npm --workspace apps/desktop run tauri -- build
-
-# Or a Windows portable ZIP
-npm run desktop:release:portable
-```
-
-The portable workflow produces `release/Neuink-portable-<timestamp>.zip`, currently requires complete local embedding resources, and excludes local `.env` credentials. Optional tutorial assets are not required for a normal build.
-
-`desktop:build` only builds the frontend; it does not update a standalone executable. `desktop:dev` and debug executables depend on a local frontend server. Rebuild a native bundle or portable package to use current code independently.
+Basic reading and notes do not require a model service. See [packaging and distribution](docs/deployment/packaging-and-distribution.md) for model resources, browser-reading components, and release builds, and [engineering guidelines](docs/development/engineering-guidelines.md) for development checks.
 
 ## Documentation
-
-```text
-apps/desktop/   Tauri desktop shell, React UI, packaging scripts
-crates/         Rust domain, Workspace, parsing, search, jobs, config, research, IPC
-docs/           Product, architecture, engineering, regression, distribution
-```
 
 - [Documentation index](docs/README.md)
 - [Product requirements](docs/product/01-prd.md) and [system architecture](docs/architecture/system-architecture.md)
 - [Development plan](docs/development/dev-plan.md): implementation status and pending validation
 - [Engineering guidelines](docs/development/engineering-guidelines.md), [UI design system](docs/development/ui-design-system.md), and [system test cases](docs/development/system-test-cases.md)
 
-## Open-source components and licences
-
-Neuink itself is licensed under [Apache License 2.0](LICENSE). The project uses the following important direct dependencies; their own licences and notices remain applicable when you distribute a build.
-
-| Component | Role in Neuink | Licence |
-| :--- | :--- | :--- |
-| [Tauri](https://tauri.app/) and Tauri plugins | Desktop runtime, native dialogs, HTTP | Apache-2.0 OR MIT |
-| [React](https://react.dev/), [Vite](https://vite.dev/), [Tailwind CSS](https://tailwindcss.com/) | User interface and build tooling | MIT |
-| [PDF.js](https://mozilla.github.io/pdf.js/) | Original PDF rendering | Apache-2.0 |
-| [TipTap](https://tiptap.dev/), [KaTeX](https://katex.org/), [Mermaid](https://mermaid.js.org/) | Markdown editing, mathematics, and diagrams | MIT |
-| [assistant-ui](https://www.assistant-ui.com/) | AI chat interface | MIT |
-| [Vercel AI SDK](https://ai-sdk.dev/) and `@ai-sdk/openai-compatible` | Model-service integration and streaming responses | Apache-2.0 |
-| [FastEmbed](https://crates.io/crates/fastembed), [Tokio](https://tokio.rs/), [Reqwest](https://crates.io/crates/reqwest), [Serde](https://serde.rs/), [Rayon](https://github.com/rayon-rs/rayon) | Local embeddings, async runtime, networking, serialization, and parallel search | Apache-2.0, MIT, or MIT OR Apache-2.0, as declared by each crate |
-| [`intfloat/multilingual-e5-small`](https://huggingface.co/intfloat/multilingual-e5-small) | Optional local embedding model | MIT |
-| [MinerU](https://github.com/opendatalab/MinerU) | Optional PDF parsing integration; not distributed by this repository | MinerU Open Source License (Apache-2.0 based, with additional terms) |
-
-This is a readable summary of primary components, not a replacement for complete third-party notices. Exact resolved versions are locked in [`package-lock.json`](package-lock.json) and [`Cargo.lock`](Cargo.lock). Before publishing an installer, generate full notices for every resolved npm and Cargo dependency, and review the terms of every model file or external service you distribute or operate.
-
 ## Licence
 
-Neuink is licensed under [Apache-2.0](LICENSE). Third-party component guidance is available in [NOTICE](NOTICE).
+Neuink is licensed under [Apache-2.0](LICENSE). Third-party components retain their own licences; see the [component summary](docs/deployment/third-party-components.md) (Chinese) and [NOTICE](NOTICE).

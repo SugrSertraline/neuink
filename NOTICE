@@ -3,7 +3,8 @@ Copyright 2026 Neuink contributors
 
 This product includes third-party open-source software. Each third-party
 component is licensed under its own terms. A summary of the primary direct
-components and licence obligations is maintained in README.md. Exact resolved
+components and licence obligations is maintained in
+docs/deployment/third-party-components.md. Exact resolved
 dependency versions are recorded in package-lock.json and Cargo.lock.
 
 The optional intfloat/multilingual-e5-small embedding model, MinerU parser

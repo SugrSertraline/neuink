@@ -8,6 +8,8 @@
 
 ## 权威文档
 
+- [第三方组件与许可证](deployment/third-party-components.md)：主要依赖的许可证摘要与分发声明入口。
+
 - [产品需求](product/01-prd.md)：产品定位、核心模型、能力边界和优先级。
 - [系统架构](architecture/system-architecture.md)：当前真实模块、数据、搜索、Assistant 与写盘边界。
 - [开发计划](development/dev-plan.md)：当前完成度、剩余工作和近期顺序。
