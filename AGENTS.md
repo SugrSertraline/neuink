@@ -1,5 +1,14 @@
 # NeuInk repository instructions
 
+## Branch workflow
+
+- `main` is the approved release branch and the GitHub default branch.
+- Use `beta` for everyday feature development. Validate changes and obtain the user's confirmation before merging new features into `main`.
+- Keep `seal-campus-travel` separate for the campus travel prototype.
+- Name branches by purpose without a `codex/` prefix.
+- Desktop release artifacts and website deployments must come from `main`; release tags must point to commits already included in `main`. Pull requests targeting `main` may run validation without publishing artifacts.
+- Keep unrelated uncommitted work out of maintenance commits and preserve it when switching branches.
+
 ## Code navigation
 
 When a `.codegraph/` directory exists, use CodeGraph before grep/find or broad file reads to locate symbols, callers and current implementation paths. Indexing remains an explicit repository decision.

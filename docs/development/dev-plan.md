@@ -1,5 +1,12 @@
 # Neuink 开发计划
 
+### 2026-10-07：main 发布与 beta 开发分支约定
+
+- 核对 GitHub 默认分支为 main，远程保留 main、beta、seal-campus-travel；最近桌面与官网 main 构建成功。main 尚未配置 GitHub 强制 PR 审批保护，不能把人工确认约定描述为服务器强制规则。
+- beta 从旧测试基线快进同步 main，本地切换 beta，原有未提交功能完整保留；日常新功能在 beta 验证并经用户确认后合入 main，分支名不使用 codex 前缀。约定写入 AGENTS.md。
+- 构建来源修复放在 beta 待确认：桌面依赖安装前拦截非 main 手动构建，标签必须指向已包含在 origin/main 的提交；main PR 仅验证。官网仅接收 main PR，非 main 手动执行不构建或部署。
+- 70 项打包测试通过，包括真实临时 Git 仓库的 main／beta 标签来源校验；两个工作流 YAML 解析及差异空白检查通过。仅提交构建约束与对应文档，现有 Agent、阅读和其他功能未提交到 main。
+
 ### 2026-10-04：修复 macOS 自动打包失败
 
 - 云端 run 37174343609 的验证与 Windows 便携包成功；arm64 在 lipo 参数顺序处失败，Intel 因 ort-sys 没有对应预编译库失败。
