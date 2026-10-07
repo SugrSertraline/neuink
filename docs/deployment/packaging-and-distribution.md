@@ -83,10 +83,17 @@ Windows x64 的 `prepare:browser-reader` 从官方固定地址显式下载并校
 
 ## 5. GitHub 自动构建与下载
 
+### 分支与构建来源
+
+- `main` 是 GitHub 默认分支，保存确认后的版本；`beta` 用于日常新功能开发，验证后由用户确认，再合入 `main`。校园旅行在 `seal-campus-travel` 独立维护。
+- 桌面流程的来源门禁在依赖安装之前执行：直接提交和手动运行仅接受 `main`；版本标签的提交必须已包含在远程 `main` 的历史中，不能从尚未合入的 `beta` 打标签发布。
+- 指向 `main` 的 PR 运行验证和原生编译检查，不上传发行包或生成 Release。官网 PR 也仅面向 `main`，手动选择其他分支不会构建或部署官网。
+- 分支名称不会自动建立 GitHub 的 PR 审批保护；合并仍需遵守人工确认约定。不要把 `beta` 的开发进度自动合入 `main`。
+
 工作流：`.github/workflows/windows-portable.yml`（沿用文件名，展示名 Desktop portable），Windows 2022、macOS 15 arm64 和 macOS 15 Intel runner；Node 24、Rust 1.96.0。
 
 - PR 到 main：前端、打包脚本与 Rust 测试、前端编译，只读权限，不创建发布。
-- main 提交／手动 Run workflow：验证成功后构建 Windows x64 便携 ZIP，上传保留 14 天的 commit 标记 Artifact。
+- main 提交／在 main 手动 Run workflow：验证成功后构建 Windows x64 便携 ZIP，上传保留 14 天的 commit 标记 Artifact。
 - 推送 `v0.1.0-beta.2` 这类版本标签：同样验证并构建，再生成 **draft Release**；带预发布后缀的标签标记为 prerelease。已有 Release 不会覆盖，失败需人工核对。
 - 维护者从草稿下载并人工验收后点 Publish。只有这一步之后普通用户才可从 Releases 页面下载，无需 Actions 登录。不要把构建成功等同于人工验收。
 - Release 生成独立低权限构建产物后，只有草稿发布 job 获得 `contents: write`。不使用 `pull_request_target`，不向 PR 暴露发布凭据。Actions 依赖固定到 commit。
