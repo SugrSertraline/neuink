@@ -11,14 +11,19 @@ import {
   FileText,
   Loader2,
   Library,
+  Maximize2,
   Route,
   Search,
   Bot,
   UserRound,
   X
 } from 'lucide-react';
-import { memo, useId, useMemo, useState } from 'react';
+import { memo, useId, useMemo, useRef, useState } from 'react';
 import { useAssistantReading } from './AssistantReplyActionsContext';
+import { AssistantContextSummary } from './AssistantContextSummary';
+import { AssistantSourceHover } from './AssistantSourceHover';
+import { AssistantMentionChip } from './AssistantMentionChip';
+import { inlineContextMentionIds, remarkSourceCitations } from './assistantCitationMarkdown';
 import { PaperAnswerContent } from './PaperAnswerContent';
 import { SciverseImportButton } from './SciverseImportButton';
 import ReactMarkdown from 'react-markdown';
@@ -42,7 +47,7 @@ import {
 } from '@/shared/ipc/assistantApi';
 import type {
   AssistantContextItem,
-  AssistantContextPlan,
+  AssistantComposerMention,
   AssistantEntryMetaProposal,
   AssistantNoteProposal,
   AssistantTagProposal,
@@ -56,6 +61,7 @@ import { noteProposalElementId, useNoteReview } from '../review/NoteReviewContex
 import { AssistantDiagramBlock } from './AssistantDiagramBlock';
 import { NoteDiffLines, NoteRenderedContent } from '../review/NoteDiffLines';
 import { buildRenderedNoteDiff } from '../review/renderedNoteDiff';
+import { canReviewNoteProposal } from '../review/noteReviewDiff';
 import { ASSISTANT_ACTION_INCOMPLETE, assistantToolErrorNotice, formatAssistantError, formatAssistantToolSummary, useAssistantDebug } from '@/shared/lib/assistantDebug';
 
 type ChatMessageProps = {
@@ -118,6 +124,10 @@ function ChatMessageComponent({
   const reasoning = reasoningFromParts(messageParts);
   const contextItems = contextItemsFromParts(messageParts);
   const contextPlan = contextPlanFromParts(messageParts);
+  const composer = messageParts.find(part => part.type === 'context-snapshot')?.composer;
+  const mentions = message.role === 'user' ? composer?.mentions : undefined;
+  const inlineIds = useMemo(() => inlineContextMentionIds(content, mentions), [content, mentions]);
+  const extraContextItems = contextItems.filter(item => !inlineIds.has(item.id));
   const isPlanningRequest = messageParts.some(part => part.type === 'context-snapshot' && part.composer?.executionMode === 'plan');
   const sourceLinks =
     message.source_links.length > 0 ? message.source_links : sourceLinksFromParts(messageParts);
@@ -126,7 +136,7 @@ function ChatMessageComponent({
     ? <PaperAnswerContent message={message} content={content} sources={sourceLinks} discovered={discoveredSciverseSources}
       streaming={streaming} onOpenSource={onOpenSource} onImport={onAddSciverseSource}
       renderMarkdown={text => <MarkdownMessageContent content={text} sources={sourceLinks} streaming={streaming} onOpenSource={onOpenSource} />} />
-    : <MarkdownMessageContent content={content} sources={sourceLinks} streaming={streaming} onOpenSource={onOpenSource} />;
+    : <MarkdownMessageContent content={content} sources={sourceLinks} mentions={mentions} streaming={streaming} onOpenSource={onOpenSource} />;
   if (reading) return <div className="min-w-0 text-base leading-7 [overflow-wrap:anywhere]">
     {answerContent}
     {diagrams.map(event => <ToolDiagram key={event.id} event={event} onOpenSource={onOpenSource} />)}
@@ -135,7 +145,7 @@ function ChatMessageComponent({
 
   return (
     <article aria-label={message.role === 'user' ? '你的消息' : 'Neuink 的回复'}
-      className={`assistant-message-row mb-3 flex min-w-0 items-start gap-1.5 ${message.role === 'user' ? 'flex-row-reverse pl-5' : 'pr-3'}`}>
+      className={`assistant-message-row group/reply mb-3 flex min-w-0 items-start gap-1.5 ${message.role === 'user' ? 'flex-row-reverse pl-5' : 'pr-3'}`}>
       <span aria-hidden="true" className={`assistant-message-avatar mt-1 flex size-6 shrink-0 items-center justify-center rounded-full border ${message.role === 'user' ? 'bg-accent text-accent-foreground' : 'bg-muted text-muted-foreground'}`}>
         {message.role === 'user' ? <UserRound size={14} /> : <Bot size={14} />}
       </span>
@@ -145,7 +155,15 @@ function ChatMessageComponent({
           message.role === 'user' ? 'rounded-tr-none bg-accent text-accent-foreground' : 'flex-1 rounded-tl-none bg-card text-card-foreground'
         }`}
       >
-      <div className={`mb-1 text-[11px] font-medium text-muted-foreground ${message.role === 'user' ? 'text-right' : ''}`}>{message.role === 'user' ? '你' : 'Neuink'}</div>
+      <div className={`mb-2 flex min-w-0 items-center gap-2 ${message.role === 'user' ? 'justify-end' : 'justify-between'}`}>
+        <span className="text-[11px] font-medium text-muted-foreground">{message.role === 'user' ? '你' : 'Neuink'}</span>
+        {message.role === 'assistant' && (content.trim() || diagrams.length > 0) && !streaming && readingActions ?
+          <Button size="xs" variant="outline" type="button" title="在工作区阅读完整回答，并点击证据查看原文"
+            className="border-primary/25 bg-primary/5 text-primary group-hover/reply:border-primary/50 group-hover/reply:bg-primary/10 group-focus-within/reply:border-primary/50"
+            onClick={() => readingActions.openReply({ ...message, content, source_links: sourceLinks, conversation_id: message.conversation_id })}>
+            <Maximize2 aria-hidden="true" />展开阅读
+          </Button> : null}
+      </div>
       {isPlanningRequest ? <div className="mb-1 text-[11px] text-muted-foreground">仅规划 · 只读</div> : null}
       {message.role === 'assistant' && (streaming || resolvedAgentRun || resolvedPlan || resolvedMemory || resolvedToolEvents.length > 0 || reasoning) ? (
         <ExecutionDetails key={message.message_id} awaitingApproval={awaitingApproval} streaming={streaming} hasAnswer={Boolean(content.trim())} run={resolvedAgentRun} events={resolvedToolEvents}>
@@ -167,10 +185,7 @@ function ChatMessageComponent({
       ) : null}
         </ExecutionDetails>
       ) : null}
-      {contextItems.length > 0 ? <ContextSummary items={contextItems} plan={contextPlan} /> : null}
-      {message.role === 'assistant' && (content || diagrams.length > 0) && !streaming && readingActions ? <div className="mb-2">
-        <Button size="xs" variant="ghost" onClick={() => readingActions.openReply({ ...message, content, source_links: sourceLinks })}>展开阅读</Button>
-      </div> : null}
+      {extraContextItems.length > 0 ? <AssistantContextSummary items={extraContextItems} plan={contextPlan} onOpenSource={onOpenSource} /> : null}
       {answerContent}
       {diagrams.map(event => <ToolDiagram key={event.id} event={event} onOpenSource={onOpenSource} />)}
       {message.role === 'assistant' && resolvedNoteProposals.length > 0 ? (
@@ -307,15 +322,13 @@ function SourceLinkList({
       {visibleLocalSources.length > 0 ? (
         <div className="flex flex-wrap gap-1">
           {visibleLocalSources.map(({ marker, source }) => (
-          <button
+          <AssistantSourceHover key={`${conversationSourceKey(source)}:${marker}`} source={source}><button
             className="rounded-md border px-1.5 py-0.5 text-[11px] text-primary hover:bg-muted"
-            key={`${conversationSourceKey(source)}:${marker}`}
-            title="查看引用证据"
             type="button"
             onClick={() => onOpenSource(source)}
           >
             {sourceButtonLabel(source, marker)}
-          </button>
+          </button></AssistantSourceHover>
           ))}
         </div>
       ) : null}
@@ -457,6 +470,7 @@ function toolEventsFromParts(parts: AssistantMessagePart[]): AssistantToolTraceE
       eventsById.set(part.id, {
         id: part.id,
         input: part.args,
+        recovered: part.recovered,
         status: part.status,
         toolName: part.toolName
       });
@@ -550,73 +564,6 @@ function contextPlanFromParts(parts: AssistantMessagePart[]) {
     (part): part is Extract<AssistantMessagePart, { type: 'context-snapshot' }> =>
       part.type === 'context-snapshot'
   )?.plan;
-}
-
-function ContextSummary({
-  items,
-  plan
-}: {
-  items: AssistantContextItem[];
-  plan?: AssistantContextPlan | null;
-}) {
-  return (
-    <div className="mb-2 flex min-w-0 flex-wrap gap-1 rounded-md border bg-muted/20 px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
-      <span className="mr-0.5 font-medium text-foreground/80">Context</span>
-      {items.map((item) => (
-        <span
-          className="inline-flex max-w-full items-center gap-1 rounded-full border bg-background px-1.5 py-0.5"
-          key={item.id}
-          title={contextItemFullLabel(item)}
-        >
-          <FileText className="shrink-0 text-primary" size={11} aria-hidden="true" />
-          <span className="max-w-40 truncate">{contextItemShortLabel(item)}</span>
-        </span>
-      ))}
-      {plan?.summary ? (
-        <span className="min-w-0 basis-full truncate pt-0.5 text-[10px] text-muted-foreground">
-          {plan.summary}
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
-function contextItemShortLabel(item: AssistantContextItem) {
-  if (item.kind === 'segment') {
-    return `${item.entryTitle} · p.${item.pageIdx + 1}`;
-  }
-  const kind =
-    item.contentKind && item.contentKind !== 'entry'
-      ? item.contentTitle ?? contextKindLabel(item.contentKind)
-      : 'Overall';
-  return `${item.entryTitle} · ${kind}`;
-}
-
-function contextItemFullLabel(item: AssistantContextItem) {
-  if (item.kind === 'segment') {
-    return `${item.entryTitle} · Segment · p.${item.pageIdx + 1}`;
-  }
-  const kind =
-    item.contentKind && item.contentKind !== 'entry'
-      ? item.contentTitle ?? contextKindLabel(item.contentKind)
-      : 'Overall';
-  return `${item.entryTitle} · ${kind}`;
-}
-
-function contextKindLabel(kind: NonNullable<Extract<AssistantContextItem, { kind: 'entry' }>['contentKind']>) {
-  if (kind === 'pdf') {
-    return 'PDF';
-  }
-  if (kind === 'reflow') {
-    return 'Reflow';
-  }
-  if (kind === 'note') {
-    return 'Note';
-  }
-  if (kind === 'overview') {
-    return 'Overview';
-  }
-  return 'Overall';
 }
 
 function AgentRunSummary({
@@ -842,6 +789,9 @@ function NoteProposalList({
   const decisionDisabled = (proposal: AssistantNoteProposal) => !['pending', 'error'].includes(proposal.status) ||
     Boolean(review && proposal.targetKind !== 'segment_note' &&
       (review.deciding.length > 0 || !review.items[proposal.id] || review.actionConversationId !== review.items[proposal.id].conversationId));
+  const invalidProposals = useMemo(() => new Set(proposals
+    .filter(proposal => proposal.targetKind !== 'segment_note' && !canReviewNoteProposal(proposal))
+    .map(proposal => proposal.id)), [proposals]);
   return (
     <div className="note-proposal-list mt-2 grid min-w-0 gap-2">
       {proposals.map((proposal) => (
@@ -926,7 +876,8 @@ function NoteProposalList({
               忽略
             </Button>
             <Button
-              disabled={!onApply || decisionDisabled(proposal)}
+              disabled={!onApply || decisionDisabled(proposal) || invalidProposals.has(proposal.id)}
+              title={invalidProposals.has(proposal.id) ? '无法可靠对比，请查看修改详情或重新生成修改。' : undefined}
               size="xs"
               type="button"
               onClick={() => void decide(proposal, 'apply')}
@@ -1082,11 +1033,11 @@ function ToolTrace({ events, errorNotice }: { events: AssistantToolTraceEvent[];
             <span className="min-w-0 truncate font-medium text-foreground">
               {toolLabel(event.toolName)}
             </span>
-            <span className="shrink-0">{statusLabel(event.status)}</span>
+            <span className="shrink-0">{event.recovered ? '已纠正' : statusLabel(event.status)}</span>
           </div>
           {event.status === 'error' || event.error || event.summary ? (
             <div className="mt-0.5 min-w-0 break-words">
-              {event.status === 'error' || event.error
+              {event.recovered ? '读取请求已调整，后续调用已覆盖原请求页码。' : event.status === 'error' || event.error
                 ? formatAssistantError(event.error ?? event.summary, { debug, fallback: errorNotice })
                 : formatAssistantToolSummary(event.summary, debug)}
             </div>
@@ -1102,7 +1053,7 @@ function ToolTraceIcon({ event }: { event: AssistantToolTraceEvent }) {
     return <Loader2 className="shrink-0 animate-spin" size={12} aria-hidden="true" />;
   }
 
-  if (event.status === 'error') {
+  if (event.status === 'error' && !event.recovered) {
     return <AlertCircle className="shrink-0 text-destructive" size={12} aria-hidden="true" />;
   }
 
@@ -1125,6 +1076,7 @@ function ToolTraceIcon({ event }: { event: AssistantToolTraceEvent }) {
 }
 
 function toolLabel(toolName: string) {
+  toolName = toolName.replace(/^(?:claude|codex|opencode)\.mcp__neuink__/, '');
   if (toolName === 'read_pdf_pages') return '读取 PDF 文字';
   if (toolName === 'search_pdf_text') return '搜索 PDF 文字';
   if (toolName === 'agent.route') {
@@ -1181,16 +1133,20 @@ function statusLabel(status: AssistantToolTraceEvent['status']) {
 
 export const MarkdownMessageContent = memo(function MarkdownMessageContent({
   content,
+  mentions,
   onOpenSource,
   sources,
   streaming
 }: {
   content: string;
+  mentions?: AssistantComposerMention[];
   onOpenSource: (source: ConversationSourceLink) => void;
   sources: ConversationSourceLink[];
   streaming: boolean;
 }) {
   const markdown = normalizeMathDelimiters(content);
+  const citationState = useRef({ sources, mentions, onOpenSource });
+  citationState.current = { sources, mentions, onOpenSource };
   const renderPre = useMemo<NonNullable<Components['pre']>>(() => ({ children, node }) => {
     const code = node?.children[0];
     if (code?.type === 'element' && code.tagName === 'code'
@@ -1201,24 +1157,23 @@ export const MarkdownMessageContent = memo(function MarkdownMessageContent({
     }
     return <pre>{children}</pre>;
   }, [streaming]);
-
-  return (
-    <div
-      aria-busy={streaming || undefined}
-      aria-live={streaming ? 'polite' : undefined}
-      className="assistant-message-content assistant-markdown"
-      data-streaming={streaming ? 'true' : undefined}
-    >
-      <ReactMarkdown
-        components={{
+  // Stable component types preserve the pressed link while pane focus rerenders
+  // the workspace between pointer-down and click. The handler still uses fresh data.
+  const components = useMemo<Components>(() => ({
           a: ({ children, href }) => {
+            const contextMarker = href?.match(/^#neuink-context-C([1-9]\d*)-O\d+$/)?.[1];
+            if (contextMarker) {
+              const mention = citationState.current.mentions?.find(item => item.marker === `[C${contextMarker}]` || item.marker === `C${contextMarker}`);
+              return mention ? <AssistantMentionChip mention={mention} onOpenSource={source => citationState.current.onOpenSource(source)} />
+                : <span>[C{contextMarker}]</span>;
+            }
             const citation = citationFromHref(href);
-            const source = citation == null ? undefined : sources[citation.marker - 1];
+            const source = citation == null ? undefined : citationState.current.sources[citation.marker - 1];
             if (citation != null) {
               return source ? (
                 <InlineSourceCitation
                   marker={citation.marker}
-                  onOpenSource={onOpenSource}
+                  onOpenSource={source => citationState.current.onOpenSource(source)}
                   source={source}
                 />
               ) : (
@@ -1235,7 +1190,17 @@ export const MarkdownMessageContent = memo(function MarkdownMessageContent({
             <code className={className}>{children}</code>
           ),
           pre: renderPre
-        }}
+        }), [renderPre]);
+
+  return (
+    <div
+      aria-busy={streaming || undefined}
+      aria-live={streaming ? 'polite' : undefined}
+      className="assistant-message-content assistant-markdown"
+      data-streaming={streaming ? 'true' : undefined}
+    >
+      <ReactMarkdown
+        components={components}
         rehypePlugins={[[rehypeKatex, { strict: false, throwOnError: false }]]}
         remarkPlugins={[remarkGfm, remarkMath, remarkSourceCitations]}
       >
@@ -1277,71 +1242,15 @@ function InlineCitationButton({
   title: string;
 }) {
   return (
-    <button
+    <AssistantSourceHover source={source}><button
       aria-label={`来源 S${marker}：${title}，${sourceLocationLabel(source)}`}
       className="mx-0.5 inline-flex min-h-5 translate-y-[-1px] items-center rounded border border-primary/30 bg-primary/5 px-1.5 py-0.5 text-[0.72em] font-medium leading-[1.35] text-primary hover:bg-primary/10"
       type="button"
       onClick={onClick}
     >
       S{marker}
-    </button>
+    </button></AssistantSourceHover>
   );
-}
-
-type MarkdownAstNode = {
-  children?: MarkdownAstNode[];
-  type?: string;
-  url?: string;
-  value?: string;
-};
-
-function remarkSourceCitations() {
-  return (tree: MarkdownAstNode) => transformCitationTextNodes(tree, { current: 0 });
-}
-
-function transformCitationTextNodes(
-  node: MarkdownAstNode,
-  occurrence: { current: number }
-) {
-  if (
-    !node.children ||
-    node.type === 'link' ||
-    node.type === 'linkReference' ||
-    node.type === 'code' ||
-    node.type === 'inlineCode'
-  ) {
-    return;
-  }
-
-  const transformed: MarkdownAstNode[] = [];
-  for (const child of node.children) {
-    if (child.type !== 'text' || !child.value) {
-      transformCitationTextNodes(child, occurrence);
-      transformed.push(child);
-      continue;
-    }
-
-    const expression = /\[S([1-9]\d*)\]/g;
-    let cursor = 0;
-    let match: RegExpExecArray | null;
-    while ((match = expression.exec(child.value)) !== null) {
-      if (match.index > cursor) {
-        transformed.push({ type: 'text', value: child.value.slice(cursor, match.index) });
-      }
-      const marker = Number(match[1]);
-      occurrence.current += 1;
-      transformed.push({
-        children: [{ type: 'text', value: `S${marker}` }],
-        type: 'link',
-        url: `#neuink-source-S${marker}-O${occurrence.current}`
-      });
-      cursor = expression.lastIndex;
-    }
-    if (cursor < child.value.length) {
-      transformed.push({ type: 'text', value: child.value.slice(cursor) });
-    }
-  }
-  node.children = transformed;
 }
 
 function citationFromHref(href?: string) {

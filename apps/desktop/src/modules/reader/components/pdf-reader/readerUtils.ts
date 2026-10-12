@@ -3,7 +3,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import type { SegmentType, SourceSegment } from "@/shared/types/domain";
 
 import type { PageSegments, SegmentRegionItem } from "./types";
-import { parseListItemRegions } from "./listItemRegions";
+import { listItemSegments } from '@/shared/lib/listItemSegments';
 import { revealPdfPage } from './pdfPageNavigation';
 
 export function inferPageCount(segments: SourceSegment[]) {
@@ -284,20 +284,13 @@ function segmentRegionsFor(
   pageCount: number,
 ): SegmentRegionItem[] {
   const bbox = normalizeBbox(segment.bbox);
-  if (!bbox) {
-    return [];
-  }
-
-  const listItemRegions =
-    segment.segment_type === "list"
-      ? parseListItemRegions(segment.mineru_metadata?.list_item_regions)
-      : [];
+  const listItemRegions = listItemSegments(segment);
   const hasListItemRegions = listItemRegions.some((item) =>
     Boolean(normalizeBbox(item.bbox)),
   );
   const regions: SegmentRegionItem[] = hasListItemRegions
     ? []
-    : [
+    : bbox ? [
         {
           bbox,
           hoverGroupUid: segmentHoverGroupUid(segment),
@@ -308,33 +301,22 @@ function segmentRegionsFor(
           segment,
           sourceSegment: segment,
         },
-      ];
+      ] : [];
 
   if (hasListItemRegions) {
     for (const [index, item] of listItemRegions.entries()) {
       const itemBbox = normalizeBbox(item.bbox);
       if (!itemBbox) continue;
-      const itemUid = `${segment.uid}:list-item:${index}`;
+      const itemUid = item.uid;
       regions.push({
         bbox: itemBbox,
         hoverGroupUid: itemUid,
         id: itemUid,
         isContinuation: false,
         listItemIndex: index,
-        relationGroupUid: segmentRelationGroupUid(segment),
+        relationGroupUid: null,
         pageIdx: item.page_idx ?? segment.page_idx,
-        segment: {
-          ...segment,
-          bbox: [...itemBbox],
-          markdown: item.text,
-          mineru_metadata: {
-            ...segment.mineru_metadata,
-            list_item_regions: JSON.stringify([item]),
-          },
-          text: item.text,
-          uid: itemUid,
-          page_idx: item.page_idx ?? segment.page_idx,
-        },
+        segment: item,
         sourceSegment: segment,
       });
     }

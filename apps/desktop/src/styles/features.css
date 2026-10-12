@@ -434,7 +434,7 @@
 }
 
 .markdown-note-outline-slot[data-open="true"] {
-  width: 224px;
+  width: 180px;
 }
 
 .markdown-note-outline-sidebar {
@@ -447,7 +447,8 @@
   container-type: inline-size;
 }
 
-@container markdown-note-editor (max-width: 640px) {
+/* Keep a useful reading column when a note shares the workspace with a PDF. */
+@container markdown-note-editor (max-width: 760px) {
   .markdown-note-outline-slot[data-open="true"] {
     width: 36px;
   }
@@ -456,7 +457,7 @@
     position: absolute;
     inset: 0 auto 0 0;
     z-index: var(--z-menu);
-    width: min(224px, calc(100cqw - 8px));
+    width: min(180px, calc(100cqw - 8px));
     @apply shadow-md;
   }
 }

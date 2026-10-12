@@ -2,10 +2,12 @@ pub mod agent_execution;
 pub mod annotation_index;
 pub mod atomic_write;
 pub mod entry_meta;
+mod downloaded_pdf;
 pub mod error;
 pub mod export;
 pub mod layout;
 pub mod note;
+pub mod note_image;
 pub mod note_catalog;
 #[cfg(test)]
 mod note_catalog_tests;

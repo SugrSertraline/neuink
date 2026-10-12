@@ -7,6 +7,7 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 
 import type { SourceSegment } from '@/shared/types/domain';
 import type { TranslatedSegment } from '@/shared/ipc/workspaceApi';
+import { ToastContext } from '@/shared/hooks/useToast';
 
 vi.mock('./PdfCanvasPage', () => ({
   PdfCanvasPage: ({ pageWidth }: { pageWidth: number }) => (
@@ -24,11 +25,14 @@ vi.mock('./PdfCanvasPage', () => ({
 import { PdfSourcePage } from './PdfSourcePage';
 import * as pdfRenderQueue from './pdfRenderQueue';
 import type { PageSegments, SegmentRegionItem } from './types';
+import { pdfBlockDrag } from '@/shared/lib/pdfBlockDrag';
+import { groupSegmentsByPage } from './readerUtils';
 
 const originalResizeObserver = globalThis.ResizeObserver;
 
 afterEach(() => {
   cleanup();
+  window.getSelection()?.removeAllRanges();
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -36,6 +40,144 @@ afterEach(() => {
 });
 
 describe('PdfSourcePage performance boundaries', () => {
+  it.each([false, true])('offers item choice instead of selecting or dragging an ambiguous old list (Ctrl: %s)', ctrlKey => {
+    vi.stubGlobal('PointerEvent', class extends MouseEvent { pointerId = 7; isPrimary = true; });
+    const parent: SourceSegment = { uid: 'old-list', segment_type: 'list', page_idx: 0,
+      bbox: [100, 100, 900, 500], text: 'First\nSecond', markdown: '- First\n- Second' };
+    const onToggleSegment = vi.fn(), onAddAssistantContext = vi.fn();
+    const ui = render(<ToastContext.Provider value={{ dismiss: vi.fn(), notify: () => 'toast' }}>{cloneElement(pdfSourcePage(groupSegmentsByPage([parent], 1)[0]), {
+      renderEnabled: true, onToggleSegment, onAddAssistantContext,
+    })}</ToastContext.Provider>);
+    const hit = ui.getByTestId('pdf-page-hit-layer-0');
+    vi.spyOn(hit, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 1000, 1000));
+    fireEvent.pointerDown(hit, { button: 0, ctrlKey, clientX: 200, clientY: 400 });
+    if (!ctrlKey) fireEvent.click(hit, { button: 0, clientX: 200, clientY: 400 });
+    expect(onToggleSegment).not.toHaveBeenCalled();
+    expect(pdfBlockDrag.getState()).toBeNull();
+    fireEvent.click(ui.getByRole('menuitem', { name: '第 2 项' }));
+    fireEvent.click(ui.getByRole('menuitem', { name: '附到助手对话' }));
+    expect(onAddAssistantContext).toHaveBeenCalledWith(expect.objectContaining({ uid: 'old-list:list-item:1', text: 'Second' }));
+  });
+  it.each(['bullet', 'reference'])('selects, attaches and Ctrl-drags only the hit %s item', sub_type => {
+    vi.useFakeTimers();
+    vi.stubGlobal('PointerEvent', class extends MouseEvent { pointerId = 7; isPrimary = true; });
+    const parent: SourceSegment = { uid: 'list', segment_type: 'list', sub_type, page_idx: 0,
+      bbox: [100, 100, 900, 500], text: 'First\nSecond', markdown: '- First\n- Second',
+      continuation_group_id: 'whole-list', mineru_metadata: { list_item_regions: JSON.stringify([
+        { bbox: [100, 100, 900, 250], text: 'First' }, { bbox: [100, 300, 900, 500], text: 'Second' },
+      ]) } };
+    const onToggleSegment = vi.fn(), onAddAssistantContext = vi.fn(), onCopyContent = vi.fn();
+    const ui = render(<ToastContext.Provider value={{ dismiss: vi.fn(), notify: () => 'toast' }}>{cloneElement(pdfSourcePage(groupSegmentsByPage([parent], 1)[0]), {
+      renderEnabled: true, onToggleSegment, onAddAssistantContext, onCopyContent, flashSegmentUid: 'list:list-item:1',
+    })}</ToastContext.Provider>);
+    const hit = ui.getByTestId('pdf-page-hit-layer-0');
+    vi.spyOn(hit, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 1000, 1000));
+    Object.assign(hit, { setPointerCapture: vi.fn(), hasPointerCapture: () => true, releasePointerCapture: vi.fn() });
+    fireEvent.pointerDown(hit, { button: 0, clientX: 200, clientY: 400 });
+    fireEvent.click(hit, { button: 0, clientX: 200, clientY: 400 });
+    expect(onToggleSegment).toHaveBeenCalledWith(expect.objectContaining({ uid: 'list:list-item:1', text: 'Second', continuation_group_id: null }));
+    expect(ui.container.querySelectorAll('.segment-navigation-highlight')).toHaveLength(1);
+    fireEvent.contextMenu(hit, { clientX: 200, clientY: 400 });
+    expect(ui.getByRole('menu', { name: '列表项操作' }).textContent).toContain('仅针对当前列表项');
+    fireEvent.click(ui.getByRole('menuitem', { name: '附到助手对话' }));
+    expect(onAddAssistantContext).toHaveBeenCalledWith(expect.objectContaining({ uid: 'list:list-item:1', text: 'Second' }));
+    fireEvent.contextMenu(hit, { clientX: 200, clientY: 400 });
+    fireEvent.click(ui.getByRole('menuitem', { name: '复制原文内容' }));
+    expect(onCopyContent).toHaveBeenCalledWith(expect.objectContaining({ text: 'Second' }));
+    fireEvent.contextMenu(hit, { clientX: 200, clientY: 400 });
+    fireEvent.click(ui.getByRole('menuitem', { name: '添加整个列表到助手' }));
+    expect(onAddAssistantContext).toHaveBeenLastCalledWith(parent);
+    fireEvent.pointerDown(hit, { button: 0, buttons: 1, ctrlKey: true, clientX: 200, clientY: 400 });
+    fireEvent.pointerMove(hit, { buttons: 1, clientX: 600, clientY: 300 });
+    expect(pdfBlockDrag.getState()?.segment).toMatchObject({ uid: 'list:list-item:1', text: 'Second' });
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(pdfBlockDrag.getState()).toBeNull();
+  });
+  it.each([true, false])('captures Ctrl drag from the block interior through hover dismissal (preview enabled: %s)', hoverPreviewEnabled => {
+    vi.useFakeTimers();
+    vi.stubGlobal('PointerEvent', class extends MouseEvent { pointerId = 7; isPrimary = true; });
+    const onAddAssistantContext = vi.fn();
+    const onToggleSegment = vi.fn();
+    const ui = render(<ToastContext.Provider value={{ dismiss: vi.fn(), notify: () => 'toast' }}>{cloneElement(pdfSourcePage(createPage(1)), { renderEnabled: true, hoverPreviewEnabled, onAddAssistantContext, onToggleSegment })}</ToastContext.Provider>);
+    const hit = ui.getByTestId('pdf-page-hit-layer-0');
+    vi.spyOn(hit, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 1000, 1000));
+    fireEvent.pointerEnter(hit, { buttons: 0, clientX: 100, clientY: 100 });
+    expect(ui.queryByRole('button', { name: '拖动第 1 页片段到聊天框' })).toBeNull();
+    Object.assign(hit, { setPointerCapture: vi.fn(), hasPointerCapture: () => true, releasePointerCapture: vi.fn() });
+    const text = document.createElement('span');
+    text.className = 'pdf-text-layer'; text.textContent = 'Original PDF text'; hit.append(text);
+    expect(fireEvent.pointerDown(text, { button: 0, buttons: 1, ctrlKey: true, clientX: 300, clientY: 400 })).toBe(false);
+    fireEvent.pointerMove(hit, { buttons: 1, clientX: 500, clientY: 250 });
+    expect(pdfBlockDrag.getState()?.segment.uid).toBe('segment-0');
+    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent.pointerUp(hit, { clientX: 500, clientY: 250 });
+    fireEvent.click(hit);
+    expect(pdfBlockDrag.getState()).toBeNull();
+    expect(onAddAssistantContext).not.toHaveBeenCalled();
+    expect(onToggleSegment).not.toHaveBeenCalled();
+    expect(window.getSelection()?.toString()).toBe('');
+  });
+  it('resolves overlapping block edges by geometry rather than the previous hovered block', () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('PointerEvent', MouseEvent);
+    const page = createPage(2);
+    page.regions[1].bbox = [200, 200, 400, 400];
+    const ui = render(cloneElement(pdfSourcePage(page), { hoverPreviewShowOriginal: true }));
+    const hit = ui.getByTestId('pdf-page-hit-layer-0');
+    vi.spyOn(hit, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 1000, 1000));
+    fireEvent.pointerEnter(hit, { buttons: 0, clientX: 100, clientY: 100 });
+    expect(ui.getByRole('region', { name: '片段悬停预览' }).textContent).toContain('region 0');
+    fireEvent.pointerMove(hit, { buttons: 0, clientX: 300, clientY: 201 });
+    act(() => vi.advanceTimersByTime(20));
+    expect(ui.getByRole('region', { name: '片段悬停预览' }).textContent).toContain('region 1');
+    fireEvent.pointerMove(hit, { buttons: 0, clientX: 300, clientY: 400 });
+    act(() => vi.advanceTimersByTime(20));
+    expect(ui.getByRole('region', { name: '片段悬停预览' }).textContent).toContain('region 0');
+  });
+
+  it('hands an open preview to native selection, closes with Escape, then resumes hover on movement', () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('PointerEvent', MouseEvent);
+    const onToggleSegment = vi.fn();
+    const ui = render(<ToastContext.Provider value={{ dismiss: vi.fn(), notify: () => 'toast' }}>{cloneElement(pdfSourcePage(createPage(1)), {
+      hoverPreviewShowOriginal: true, onToggleSegment,
+      renderEnabled: true,
+      onTranslateTextSelection: async () => 'translation',
+    })}</ToastContext.Provider>);
+    const hit = ui.getByTestId('pdf-page-hit-layer-0');
+    vi.spyOn(hit, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 1000, 1000));
+    const textLayer = document.createElement('div');
+    textLayer.className = 'pdf-text-layer';
+    textLayer.textContent = 'Chosen passage';
+    hit.appendChild(textLayer);
+    fireEvent.pointerEnter(hit, { buttons: 0, clientX: 100, clientY: 100 });
+    expect(document.querySelector('[data-slot="pointer-preview"]')).toBeTruthy();
+    fireEvent.pointerDown(textLayer, { button: 0, buttons: 1, clientX: 100, clientY: 100 });
+    const range = document.createRange();
+    range.selectNodeContents(textLayer);
+    range.getClientRects = () => [new DOMRect(100, 100, 150, 20)] as unknown as DOMRectList;
+    range.getBoundingClientRect = () => new DOMRect(100, 100, 150, 20);
+    window.getSelection()!.addRange(range);
+    fireEvent(document, new Event('selectionchange'));
+    act(() => vi.advanceTimersByTime(30));
+    expect(ui.queryByRole('dialog', { name: '选区操作' })).toBeNull();
+    expect(document.querySelector('[data-slot="pointer-preview"]')).toBeNull();
+    fireEvent.pointerUp(textLayer, { button: 0, clientX: 250, clientY: 100 });
+    fireEvent.click(hit, { button: 0, clientX: 250, clientY: 100 });
+    act(() => vi.advanceTimersByTime(30));
+    expect(ui.getByRole('dialog', { name: '选区操作' })).toBeTruthy();
+    expect(onToggleSegment).not.toHaveBeenCalled();
+    fireEvent.pointerMove(hit, { buttons: 0, clientX: 260, clientY: 100 });
+    act(() => vi.advanceTimersByTime(30));
+    expect(document.querySelector('[data-slot="pointer-preview"]')).toBeNull();
+    fireEvent.keyDown(hit, { key: 'Escape' });
+    expect(ui.queryByRole('dialog', { name: '选区操作' })).toBeNull();
+    expect(window.getSelection()?.isCollapsed).toBe(true);
+    fireEvent.pointerMove(hit, { buttons: 0, clientX: 270, clientY: 100 });
+    act(() => vi.advanceTimersByTime(30));
+    expect(document.querySelector('[data-slot="pointer-preview"]')).toBeTruthy();
+  });
+
   it('restores hover on the next pointer frame after scrolling without blocking PDF rendering', () => {
     vi.useFakeTimers();
     vi.stubGlobal('PointerEvent', MouseEvent);

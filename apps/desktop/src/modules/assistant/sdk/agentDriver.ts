@@ -144,7 +144,7 @@ export function agentExecutors(tools: ToolSet, requestApproval?: RequestToolAppr
           approved = await requestApproval({ toolCallId: context.id, toolName: name, input: structuredClone(frozenInput) }, context.signal);
         } catch (error) {
           context.signal?.throwIfAborted();
-          if (error instanceof AgentStoppedError) throw error;
+          if (error instanceof AgentStoppedError || error instanceof AgentToolNotExecutedError) throw error;
           throw new AgentToolNotExecutedError(undefined, 'TOOL_APPROVAL_UNAVAILABLE');
         }
         if (!approved) {

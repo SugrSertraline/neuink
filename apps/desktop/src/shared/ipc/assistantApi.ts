@@ -150,6 +150,8 @@ export function conversationSourceKey(source: ConversationSourceLink) {
 export type ConversationRole = 'user' | 'assistant';
 
 export type AssistantToolTraceEvent = {
+  /** A rejected read was subsequently satisfied; the original failure remains in the trace. */
+  recovered?: boolean;
   diagram?: import('@/modules/assistant/sdk/diagramArtifact').AssistantDiagramArtifact;
   researchPapers?: import('./researchApi').ResearchPaper[];
   error?: string;
@@ -175,6 +177,7 @@ export type AssistantConversationMemory = {
 };
 
 export type AssistantMessagePart =
+  | { type: 'local-agent'; provider: 'claude' | 'codex' | 'opencode'; sessionId: string; initialized: boolean }
   | { type: 'text'; markdown: string }
   | { type: 'reasoning'; text: string }
   | { type: 'context'; items: AssistantContextItem[] }
@@ -190,6 +193,7 @@ export type AssistantMessagePart =
   | { memory: AssistantConversationMemory; type: 'memory' }
   | {
       args?: unknown;
+      recovered?: boolean;
       id: string;
       status: AssistantToolTraceEvent['status'];
       toolName: string;
@@ -211,6 +215,8 @@ export type AssistantMessagePart =
   | { id?: string; message: string; toolName?: string; type: 'error' };
 
 export type ConversationMessage = {
+  /** UI projection supplied when opening a reply outside its conversation. */
+  conversation_id?: string;
   message_id: string;
   role: ConversationRole;
   content: string;

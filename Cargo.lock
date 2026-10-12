@@ -3245,6 +3245,7 @@ dependencies = [
  "encoding_rs",
  "futures-util",
  "keyring",
+ "libc",
  "neuink-config",
  "neuink-domain",
  "neuink-job",

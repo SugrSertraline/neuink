@@ -30,6 +30,7 @@ export type SettingDefinition = {
 
 // Metadata only: never index user values, credentials, paths or document content.
 const ALL_SETTINGS_CATALOG: SettingDefinition[] = [
+  { id: 'tools-local-agent', tab: 'external-tools', title: '本地 Agent', description: '检测本地 Agent，管理已记住的操作授权。', keywords: 'claudecode Claude Code Codex OpenCode 本地 agent 智能体 工具 检测 权限 授权 以后都允许 撤销 恢复询问' },
   { id:'data-onboarding', tab:'data', title:'新手引导', description:'继续或回放聚焦式任务教程。', keywords:'教程 onboarding 入门 引导 回放 Attention 论文 示例' },
   { id: 'appearance-style', tab: 'appearance', title: '界面风格', description: '标准、拟物和玻璃。', keywords: '主题 theme 外观 皮肤 材质' },
   { id: 'appearance-color', tab: 'appearance', title: '强调色', description: '选中、焦点与主要操作使用的颜色预设。', keywords: '主题 颜色 配色 蓝色 绿色 紫色' },
@@ -43,8 +44,9 @@ const ALL_SETTINGS_CATALOG: SettingDefinition[] = [
   { id: 'reader-regions', tab: 'reader', title: '默认显示 PDF 分段框', description: '控制 PDF 上分段区域框的默认显示。', keywords: '默认显示区域 框线 阅读 高亮' },
   { id: 'reader-open-note', tab: 'reader', title: '打开片段记录的方式', description: '选中后操作、单击或 Alt + 单击。', keywords: '打开片段笔记 左键 手势 点击 笔记' },
   { id: 'reader-close-overlay', tab: 'reader', title: '片段浮层关闭方式', description: '点击空白处或再次点击当前片段关闭。', keywords: '空白处关闭片段浮层 再次点击片段关闭 笔记 批注' },
-  { id: 'translation-model', tab: 'translation', title: '阅读翻译模型', description: '指定整篇、片段和选中文字翻译使用的模型。', keywords: '任务模型 AI 翻译 模型' },
-  { id: 'translation-selection', tab: 'translation', title: '选中文字后自动翻译', description: '选择文字后自动调用阅读翻译模型。', keywords: '划词 选区 翻译 英译中' },
+  { id: 'translation-model', tab: 'translation', title: '整体翻译模型', description: '指定整篇 PDF 和段落／片段翻译的模型。', keywords: '任务模型 AI 阅读 全文 整篇 翻译 模型' },
+  { id: 'translation-service', tab: 'translation', title: '选中文字翻译', description: '独立选择已适配的 Azure、DeepL、Qwen-MT 服务，也可沿用整体翻译模型。', keywords: '免费 额度 API Key 密钥 微软 通义 划词 选区 快速 翻译' },
+  { id: 'translation-selection', tab: 'translation', title: '选中文字后自动翻译', description: '选择文字后自动调用选区翻译服务。', keywords: '划词 选区 翻译 英译中' },
   { id: 'translation-auto', tab: 'translation', title: '解析后自动翻译 PDF', description: '解析成功后自动启动英译中。', keywords: 'PDF自动翻译 自动翻译 数据与解析' },
   { id: 'translation-content', tab: 'translation', title: '自动翻译内容范围', description: '选择段落、标题、表格等参与翻译的内容类型。', keywords: '翻译 图片 公式 页眉 页脚 列表' },
   { id: 'translation-display', tab: 'translation', title: '重排翻译显示', description: '默认显示原文、译文或双语对照。', keywords: '翻译 reflow 双语 原文 译文' },

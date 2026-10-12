@@ -396,6 +396,7 @@ export function buildAssistantMessageParts({
   for (const event of toolEvents) {
     parts.push({
       args: event.input,
+      recovered: event.recovered,
       id: event.id,
       status: event.status,
       toolName: event.toolName,

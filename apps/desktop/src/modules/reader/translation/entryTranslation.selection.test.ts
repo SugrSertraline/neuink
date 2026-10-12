@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ settings: vi.fn(), generate: vi.fn() }));
+const mocks = vi.hoisted(() => ({ settings: vi.fn(), generate: vi.fn(), service: vi.fn() }));
+vi.mock('@/shared/ipc/selectionTranslationApi', () => ({ translateSelectionService: mocks.service }));
 vi.mock('@/shared/ipc/assistantApi', () => ({ getLlmSettings: mocks.settings }));
 vi.mock('ai', () => ({ generateText: mocks.generate }));
 vi.mock('../../assistant/sdk/provider', () => ({ createNeuinkModel: () => 'model', generationSettings: () => ({}) }));
@@ -10,9 +11,25 @@ beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
   mocks.settings.mockResolvedValue({ translation_profile: { max_context_length: 8192 } });
+  mocks.service.mockResolvedValue(null);
 });
 
 describe('selection translation task lifecycle', () => {
+  it('uses the selected API without loading a model or sending paragraph context', async () => {
+    mocks.service.mockResolvedValue('快速译文');
+    const { translateTextSelection } = await import('./entryTranslation');
+    await expect(translateTextSelection(request)).resolves.toBe('快速译文');
+    expect(mocks.service).toHaveBeenCalledWith(request.text);
+    expect(mocks.settings).not.toHaveBeenCalled();
+    expect(mocks.generate).not.toHaveBeenCalled();
+  });
+  it('does not fall back to a model when the selected service fails', async () => {
+    mocks.service.mockRejectedValue('翻译服务请求失败（HTTP 429）');
+    const { translateTextSelection } = await import('./entryTranslation');
+    await expect(translateTextSelection(request)).rejects.toContain('429');
+    expect(mocks.settings).not.toHaveBeenCalled();
+    expect(mocks.generate).not.toHaveBeenCalled();
+  });
   it('tracks the same model request after subscribers close and does not copy selected text into task records', async () => {
     const { translateTextSelection } = await import('./entryTranslation');
     const registry = await import('@/shared/lib/localBackgroundJobs');

@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AssistantNoteProposal } from '@/shared/types/assistant';
+import { noteReviewVersions } from './noteReviewDiff';
 
 export type NoteReviewItem = { conversationId: string; messageId: string; proposal: AssistantNoteProposal };
 type ReturnRequest = NoteReviewItem & { nonce: number };
@@ -43,6 +44,7 @@ export function NoteReviewProvider({ children, onOpen, onShowAssistant }: {
     if (locks.current.size) throw new Error('另一条修改正在处理，请完成后再确认。');
     if (!item || !handler || handler.conversationId !== item.conversationId) throw new Error('请先返回对应对话，加载修改后再确认。');
     if (!['pending', 'error'].includes(item.proposal.status)) return;
+    if (decision === 'apply') noteReviewVersions(item.proposal);
     locks.current.add(id); setDeciding([...locks.current]);
     try { await handler.decide(item, decision); }
     finally { locks.current.delete(id); setDeciding([...locks.current]); }

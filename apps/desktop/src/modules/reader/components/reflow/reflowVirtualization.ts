@@ -1,4 +1,5 @@
 import type { ReflowSegmentGroup } from './buildReflowBlocks';
+import { listItemSegments } from '@/shared/lib/listItemSegments';
 
 export function buildReflowGroupIndex(groups: ReflowSegmentGroup[]) {
   const indexBySegmentUid = new Map<string, number>();
@@ -7,6 +8,7 @@ export function buildReflowGroupIndex(groups: ReflowSegmentGroup[]) {
     indexBySegmentUid.set(group.body.uid, index);
     for (const segment of group.segments) {
       indexBySegmentUid.set(segment.uid, index);
+      for (const item of listItemSegments(segment)) indexBySegmentUid.set(item.uid, index);
     }
   });
 

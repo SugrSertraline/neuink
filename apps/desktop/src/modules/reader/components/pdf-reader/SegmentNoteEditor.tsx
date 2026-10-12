@@ -265,7 +265,7 @@ export function SegmentNoteEditor({
                   </p>
                 </div>
                 <div className="ml-auto flex shrink-0 items-center gap-1">
-                  <SegmentBookmarkButton segment={segment} disabled={busy} />
+                  <SegmentBookmarkButton segment={segment} disabled={busy || noteValidation.overLimit} beforeRemember={dirty ? onSave : undefined} />
                   {translationPreviewText ? (
                     <Button
                       size="sm"

@@ -2,6 +2,7 @@ import { SettingsPage } from './SettingsPrimitives';
 import { SciverseSettingsSection } from '@/modules/sciverse/components/SciverseSettingsSection';
 import { ResearchSettingsSection } from './ResearchSettingsSection';
 import { AssistantDebugSetting } from './AssistantDebugSetting';
+import { LocalAgentSettingsSection } from './LocalAgentSettingsSection';
 
 import { AgentToolRuntimeSection } from './AgentSettingsSection';
 import { ADVANCED_ASSISTANT_SETTINGS_VISIBLE } from '../settingsCatalog';
@@ -15,7 +16,8 @@ export function ExternalToolsSettingsSection({
   const active = props.activeSettingsTab === 'external-tools';
 
   return (
-    <SettingsPage tab="external-tools" title="工具与扩展" description="管理助手可使用的检索服务，开关更改后自动保存。">
+    <SettingsPage tab="external-tools" title="工具与扩展" description="管理本地 Agent 与检索服务，开关更改后自动保存。">
+        <LocalAgentSettingsSection active={active} workspaceRoot={props.workspaceRoot} />
         <ResearchSettingsSection active={active}><SciverseSettingsSection active={active} /></ResearchSettingsSection>
         <AssistantDebugSetting />
         {ADVANCED_ASSISTANT_SETTINGS_VISIBLE && <fieldset data-setting-id="tools-mcp" tabIndex={-1} disabled={props.runtimeUnavailable} className="min-w-0"><AgentToolRuntimeSection

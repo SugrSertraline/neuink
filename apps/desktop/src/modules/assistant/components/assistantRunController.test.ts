@@ -5,6 +5,10 @@ import { runAssistantHarness } from '../harness/engine';
 import { acknowledgeExecution } from '../harness/durableHarness';
 import { getAssistantBackgroundRun, runAssistantPanelTask, setAssistantBackgroundRun } from './assistantRunController';
 import { findAssistantBackgroundRun, getAssistantBackgroundRuns, guardAssistantView, stopAssistantBackgroundRun } from './assistantBackgroundRuns';
+import { decideToolApproval, getToolApprovals } from '../runtime/toolApproval';
+import { runLocalAgentHarness } from '../local-agent/runner';
+import { CLAUDE_PROFILE, conversationLocalSession } from '../local-agent/session';
+import { ASSISTANT_READ_FAILURES } from '@/shared/lib/assistantReadFailure';
 
 vi.mock('@/shared/ipc/assistantApi', async original => ({
   ...await original<typeof import('@/shared/ipc/assistantApi')>(),
@@ -13,6 +17,7 @@ vi.mock('@/shared/ipc/assistantApi', async original => ({
 }));
 vi.mock('../harness/engine', () => ({ runAssistantHarness: vi.fn(), AssistantHarnessError: class extends Error {} }));
 vi.mock('../harness/durableHarness', () => ({ acknowledgeExecution: vi.fn() }));
+vi.mock('../local-agent/runner', () => ({runLocalAgentHarness:vi.fn()}));
 
 const scope = { entry_ids: [], entry_titles: [], tag_ids: [], tag_names: [] };
 let disk: Conversation;
@@ -39,7 +44,7 @@ beforeEach(() => {
     created_at: '', updated_at: '' };
   vi.mocked(createConversation).mockImplementation(async () => structuredClone(disk));
   vi.mocked(appendConversationMessages).mockImplementation(async (_, __, messages) => {
-    disk.messages.push(...messages.map((message, index) => ({ ...message, message_id: `msg-${index}`,
+    disk.messages.push(...messages.map((message, index) => ({ ...message, message_id: `msg-${disk.messages.length + index}`,
       created_at: '', source_links: message.source_links ?? [] })));
     return structuredClone(disk);
   });
@@ -53,6 +58,63 @@ beforeEach(() => {
 afterEach(() => { setAssistantBackgroundRun(null); vi.useRealTimers(); });
 
 describe('assistant production controller persistence boundaries', () => {
+  it('discards a rejected answer while preserving completed tool receipts and the verification error', async () => {
+    vi.mocked(runAssistantHarness).mockImplementation(async callbacks => {
+      callbacks.onToolEvent?.({ id: 'imported', toolName: 'import_papers', status: 'done', summary: 'PDF 已下载入库 1 篇，尚未解析。' });
+      callbacks.onDelta?.('收到，规则已确认。错误结论 [S999]。');
+      throw new Error(ASSISTANT_READ_FAILURES.citation);
+    });
+    await runAssistantPanelTask(options());
+    expect(lastMessage().content).not.toContain('规则已确认');
+    expect(lastMessage().content).not.toContain('[S999]');
+    expect(lastMessage().content).toContain('已完成的操作');
+    expect(lastMessage().content).toContain('PDF 已下载入库 1 篇');
+    expect(lastMessage().tool_events).toContainEqual(expect.objectContaining({ id: 'imported', status: 'done' }));
+    expect(lastMessage().parts).toContainEqual({ type: 'error', message: ASSISTANT_READ_FAILURES.citation });
+  });
+  it('persists the local engine before startup and resumes its identity on the next turn', async () => {
+    const input = options(); input.selectedProfile = CLAUDE_PROFILE;
+    vi.mocked(runLocalAgentHarness).mockImplementation(async (_options,session,initialized) => {
+      expect(conversationLocalSession(disk)?.sessionId).toBe(session.sessionId);
+      initialized({...session,initialized:true});
+      return {answer:'Claude 回答',sources:[]};
+    });
+    await runAssistantPanelTask(input);
+    const identity = conversationLocalSession(disk)!;
+    expect(identity.initialized).toBe(true); expect(runAssistantHarness).not.toHaveBeenCalled();
+    const next = options(); next.conversation = structuredClone(disk);
+    await runAssistantPanelTask(next);
+    expect(vi.mocked(runLocalAgentHarness).mock.calls[1][1]).toEqual(identity);
+    expect(lastMessage().content).toBe('Claude 回答');
+  });
+  it('keeps a local conversation local after startup failure and stores an actionable error', async () => {
+    const input = options(); input.selectedProfile = CLAUDE_PROFILE;
+    vi.mocked(runLocalAgentHarness).mockRejectedValue(new Error('Claude Code 无法启动，请检查安装。'));
+    await runAssistantPanelTask(input);
+    expect(conversationLocalSession(disk)?.initialized).toBe(false);
+    expect(lastMessage().parts).toContainEqual({type:'error',message:'Claude Code 无法启动，请检查安装。'});
+    expect(getAssistantBackgroundRuns()).toHaveLength(0);
+  });
+  it('persists a rejected approval as a normal stop without an error banner', async () => {
+    const input = options();
+    vi.mocked(runAssistantHarness).mockImplementation(async callbacks => {
+      callbacks.onDelta?.('准备下载。');
+      await callbacks.requestToolApproval!({ toolName: 'create_entry', toolCallId: 'reject', input: {} }, callbacks.abortSignal);
+      callbacks.abortSignal?.throwIfAborted();
+      throw new Error('Must stop before executing');
+    });
+    const run = runAssistantPanelTask(input);
+    await vi.waitFor(() => expect(getToolApprovals()).toHaveLength(1));
+    decideToolApproval(getToolApprovals()[0].id, false);
+    await run;
+    expect(lastMessage().content).toContain('准备下载。');
+    expect(lastMessage().content).toContain('任务已停止');
+    expect(lastMessage().parts?.some(part => part.type === 'error')).toBe(false);
+    expect(input.setError).toHaveBeenLastCalledWith(null);
+    expect(input.setBusy).toHaveBeenLastCalledWith(false);
+    expect(getToolApprovals()).toHaveLength(0);
+    expect(getAssistantBackgroundRuns()).toHaveLength(0);
+  });
   it('keeps two conversations independent after switching views and stops only the selected task', async () => {
     const disks = new Map(['A', 'B'].map(id => [id, { ...structuredClone(disk), id }]));
     vi.mocked(appendConversationMessages).mockImplementation(async (_, id, messages) => {
@@ -101,7 +163,9 @@ describe('assistant production controller persistence boundaries', () => {
     await runB;
     expect(controllerA.signal.aborted).toBe(false);
     expect(findAssistantBackgroundRun('fixture', 'A')).not.toBeNull();
-    expect(disks.get('B')!.messages[1].parts).toContainEqual({ type: 'error', message: '用户已停止任务' });
+    expect(disks.get('B')!.messages[1].content).toContain('任务已停止');
+    expect(disks.get('B')!.messages[1].parts?.some(part => part.type === 'error')).toBe(false);
+    expect(second.setError).toHaveBeenLastCalledWith(null);
     pending.get('A')!.resolve({ answer: 'A 的最终回答', sources: [] });
     await runA;
     expect(disks.get('A')!.messages[1].content).toBe('A 的最终回答');

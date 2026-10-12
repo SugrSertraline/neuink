@@ -72,7 +72,7 @@ function SegmentRegionImpl({
   isContinuation: boolean;
   listItemIndex?: number;
   pageIdx: number;
-  previewPosition: { x: number; segmentTop: number; segmentBottom: number } | null;
+  previewPosition: { x: number; segmentRight?: number; segmentTop: number; segmentBottom: number } | null;
   previewFontSize?: PdfHoverPreviewFontSize;
   previewSize?: PdfHoverPreviewSize;
   previewShowRegion: boolean;
@@ -116,7 +116,7 @@ function SegmentRegionImpl({
     if (
       !fullTranslation ||
       segment.segment_type !== 'list' ||
-      listItemIndex === undefined
+      listItemIndex === undefined || translatedSegment?.segment_uid === segment.uid
     ) {
       return fullTranslation;
     }
@@ -433,7 +433,7 @@ function SegmentPreview({
   onPointerEnter,
   onPointerLeave
 }: {
-  position: { x: number; segmentTop: number; segmentBottom: number };
+  position: { x: number; segmentRight?: number; segmentTop: number; segmentBottom: number };
   isContinuation: boolean;
   listItemRegions: ListItemRegion[];
   pageIdx: number;
@@ -508,7 +508,7 @@ function SegmentPreview({
 
   return (
     <PointerPreview
-      anchor={{ x: position.x, top: position.segmentTop, bottom: position.segmentBottom }}
+      anchor={{ x: position.x, right: position.segmentRight, top: position.segmentTop, bottom: position.segmentBottom }}
       width={previewLayout.width}
       maxHeight={previewLayout.maxHeight}
       interactive
@@ -666,7 +666,7 @@ function getTranslationHint({
 type PreviewLayoutInput = {
   fontSize?: PdfHoverPreviewFontSize;
   hasFooter: boolean;
-  position: { x: number; segmentTop: number; segmentBottom: number };
+  position: { x: number; segmentRight?: number; segmentTop: number; segmentBottom: number };
   preferScrollable: boolean;
   size?: PdfHoverPreviewSize;
   text: string;
@@ -750,7 +750,7 @@ export function buildPreviewLayout({
 
   const safeHeight = Math.min(selected.estimatedHeight, maxHeight);
   const { left, top } = placePointerPreview(
-    { x: position.x, top: position.segmentTop, bottom: position.segmentBottom },
+    { x: position.x, right: position.segmentRight, top: position.segmentTop, bottom: position.segmentBottom },
     { width: selected.width, height: safeHeight },
     { width: viewportWidth, height: viewportHeight },
   );

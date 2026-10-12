@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { SegmentBookmarkButton } from '../SegmentBookmarks';
 import { SegmentMenuButton as MenuButton } from '../SegmentMenuButton';
@@ -20,6 +20,7 @@ import type { SourceSegment } from "@/shared/types/domain";
 import type { SourceBacklink } from "../../types";
 import { segmentTypeLabel } from "./readerUtils";
 import { ViewportOverlay } from '@/components/ui/viewport-overlay';
+import { listItemAddress, listItemSegments } from '@/shared/lib/listItemSegments';
 
 export function SegmentActionMenu({
   canAddSourceLink,
@@ -27,7 +28,8 @@ export function SegmentActionMenu({
   canCopySourceLink,
   canInsertSegmentImage = false,
   position,
-  segment,
+  segment: initialSegment,
+  wholeListSegment: initialWholeListSegment,
   onAddAssistantContext,
   onAddSourceLink,
   onCopyContent,
@@ -50,6 +52,7 @@ export function SegmentActionMenu({
   canInsertSegmentImage?: boolean;
   position: { x: number; y: number };
   segment: SourceSegment;
+  wholeListSegment?: SourceSegment;
   sourceBacklinks: SourceBacklink[];
   onAddAssistantContext?: (segment: SourceSegment) => void;
   onAddSourceLink?: (segment: SourceSegment) => void;
@@ -67,6 +70,13 @@ export function SegmentActionMenu({
   onClose: () => void;
 }) {
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const [choice, setChoice] = useState<SourceSegment | null>(null);
+  const segment = choice ?? initialSegment;
+  const candidates = listItemSegments(initialSegment);
+  const chooseItem = !choice && candidates.length > 1;
+  const wholeListSegment = initialWholeListSegment ?? (choice && choice.uid !== initialSegment.uid ? initialSegment : undefined);
+  const isListItem = Boolean(listItemAddress(segment.uid));
+  const scopeLabel = isListItem ? '列表项' : segmentTypeLabel(segment.segment_type);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   useLayoutEffect(() => {
     const menu = menuRef.current;
@@ -90,7 +100,8 @@ export function SegmentActionMenu({
       observer?.disconnect();
       if (previous instanceof HTMLElement && previous.isConnected && menu.contains(document.activeElement)) previous.focus({ preventScroll: true });
     };
-  }, [position.x, position.y]);
+  }, [position.x, position.y, segment.uid, chooseItem]);
+  useEffect(() => setChoice(null), [initialSegment, position]);
 
   useEffect(() => {
     const closeOnOutsidePointerDown = (event: PointerEvent) => {
@@ -128,11 +139,11 @@ export function SegmentActionMenu({
     <div
       ref={menuRef}
       role="menu"
-      aria-label="段落操作"
-      className="absolute z-[var(--z-menu)] w-60 overflow-y-auto overscroll-contain rounded-md border bg-popover p-1 text-sm text-popover-foreground shadow-md"
+      aria-label={`${scopeLabel}操作`}
+      className="absolute z-[var(--z-menu)] w-72 overflow-y-auto overscroll-contain rounded-md border bg-popover p-1 text-sm text-popover-foreground shadow-md"
       data-allow-context-menu="true"
       style={{
-        left: `clamp(0.5rem, ${position.x}px, calc(100vw - 15rem))`,
+        left: `clamp(0.5rem, ${position.x}px, calc(100vw - 18rem))`,
         top: `clamp(0.5rem, ${position.y}px, calc(100vh - 16rem))`,
       }}
       onClick={(event) => event.stopPropagation()}
@@ -153,9 +164,21 @@ export function SegmentActionMenu({
       }}
     >
       <div className="border-b px-2 py-1.5 text-[11px] text-muted-foreground">
-        {segmentTypeLabel(segment.segment_type)} · 第 {segment.page_idx + 1} 页
+        <div className="font-medium text-foreground">第 {segment.page_idx + 1} 页 · {scopeLabel}</div>
+        <div className="mt-0.5">{chooseItem ? '请选择要操作的列表项' : isListItem ? '以下操作仅针对当前列表项' : `以下操作针对右键处的整个${scopeLabel}`}</div>
       </div>
-      {sourceBacklinks.length > 0 ? (
+      {chooseItem ? <>
+        {candidates.map((item, index) => <MenuButton key={item.uid} disabled={false} icon={null}
+          label={`第 ${index + 1} 项`} description={item.text.length > 100 ? `${item.text.slice(0, 100)}…` : item.text}
+          onClick={() => setChoice(item)} />)}
+        <div className="my-1 border-t" />
+        {onAddAssistantContext ? <MenuButton disabled={false} icon={<MessageSquarePlus size={13} aria-hidden="true" />}
+          label="添加整个列表到助手" description="包含当前列表中的所有条目"
+          onClick={() => { onAddAssistantContext(initialSegment); onClose(); }} /> : null}
+        <MenuButton disabled={false} icon={null} label="操作整个列表" description="对整个列表写笔记、批注或复制"
+          onClick={() => setChoice(initialSegment)} />
+      </> : <>
+      {sourceBacklinks.length > 0 && !(choice && isListItem) ? (
         <div className="border-b px-2 py-1.5">
           <div className="text-[11px] font-semibold text-foreground">
             {sourceBacklinks.length} 个笔记引用
@@ -189,7 +212,8 @@ export function SegmentActionMenu({
       <MenuButton
         disabled={false}
         icon={<StickyNote size={13} aria-hidden="true" />}
-        label="编辑片段笔记（浮窗）"
+        label="为此处写笔记"
+        description="小窗口编辑，保存为关联原文的片段笔记"
         onClick={() => {
           onOpenSegmentNote(segment);
           onClose();
@@ -199,7 +223,8 @@ export function SegmentActionMenu({
       <MenuButton
         disabled={false}
         icon={<Pencil size={13} aria-hidden="true" />}
-        label="添加批注或高亮（浮窗）"
+        label="添加批注"
+        description="设置类型、重要性，写下批注说明"
         onClick={() => {
           onOpenSegmentAnnotation(segment);
           onClose();
@@ -211,7 +236,8 @@ export function SegmentActionMenu({
           <MenuButton
             disabled={false}
             icon={<PanelRightOpen size={13} aria-hidden="true" />}
-            label="在分屏中打开片段记录"
+            label="在另一分栏查看片段记录"
+            description="打开记录页，定位到此处的笔记"
             onClick={() => {
               onOpenSegmentWorkspace(segment);
               onClose();
@@ -220,11 +246,12 @@ export function SegmentActionMenu({
           <div className="my-1 border-t" />
         </>
       ) : null}
-      {onHideSegment ? (
+      {onHideSegment && !isListItem ? (
         <MenuButton
           disabled={false}
           icon={<EyeOff size={13} aria-hidden="true" />}
-          label="隐藏重排版元素"
+          label="在重排视图中隐藏此内容"
+          description="仅调整重排显示，保留原始 PDF"
           onClick={() => {
             onHideSegment(segment);
             onClose();
@@ -234,28 +261,37 @@ export function SegmentActionMenu({
       <MenuButton
         disabled={!onAddAssistantContext}
         icon={<MessageSquarePlus size={13} aria-hidden="true" />}
-        label="加入对话上下文"
+        label="附到助手对话"
+        description={onAddAssistantContext ? '附上此处原文，输入问题后再发送' : '当前阅读视图未连接助手'}
         onClick={() => {
           onAddAssistantContext?.(segment);
           onClose();
         }}
       />
+      {wholeListSegment && onAddAssistantContext ? (
+        <MenuButton disabled={false} icon={<MessageSquarePlus size={13} aria-hidden="true" />}
+          label="添加整个列表到助手" description="包含当前列表中的所有条目"
+          onClick={() => { onAddAssistantContext(wholeListSegment); onClose(); }} />
+      ) : null}
       {translationActions ?? (onTranslateSegment ? (
         <MenuButton
           disabled={false}
           icon={<Languages size={13} aria-hidden="true" />}
-          label="翻译此片段"
+          label="翻译此处内容"
+          description="使用翻译模型生成此处的中文译文"
           onClick={() => {
             onTranslateSegment(segment);
             onClose();
           }}
         />
       ) : null)}
-      {displayActions}
+      {!isListItem && displayActions}
+      <div className="my-1 border-t" />
       <MenuButton
         disabled={!canCopyContent || !onCopyContent}
         icon={<ClipboardCopy size={13} aria-hidden="true" />}
-        label="复制内容"
+        label="复制原文内容"
+        description={canCopyContent && onCopyContent ? '复制此处的文字，不附带论文来源' : '当前内容暂不可复制'}
         onClick={() => {
           onCopyContent?.(segment);
           onClose();
@@ -263,8 +299,9 @@ export function SegmentActionMenu({
       />
       <MenuButton
         disabled={!canCopySourceLink || !onCopySourceLink}
-        icon={<ClipboardCopy size={13} aria-hidden="true" />}
-        label="复制来源链接"
+        icon={<Link2 size={13} aria-hidden="true" />}
+        label="复制原文引用"
+        description={canCopySourceLink && onCopySourceLink ? '含摘录、论文名和页码，粘贴到笔记可回原文' : '当前内容暂不可复制引用'}
         onClick={() => {
           onCopySourceLink?.(segment);
           onClose();
@@ -274,7 +311,8 @@ export function SegmentActionMenu({
         <MenuButton
           disabled={!canInsertSegmentImage || !segment.asset_path}
           icon={<ImagePlus size={13} aria-hidden="true" />}
-          label="插入片段图片"
+          label="将此处图片插入笔记"
+          description={!segment.asset_path ? '此内容没有可插入的图片' : !canInsertSegmentImage ? '请先在另一分栏打开可编辑的笔记' : '插入到当前分屏打开的文档笔记'}
           onClick={() => {
             onInsertSegmentImage(segment);
             onClose();
@@ -285,13 +323,18 @@ export function SegmentActionMenu({
         <MenuButton
           disabled={false}
           icon={<Link2 size={13} aria-hidden="true" />}
-          label="插入到分屏笔记"
+          label="将此处引用插入笔记"
+          description="插入到当前分屏笔记，点击引用可回原文"
           onClick={() => {
             onAddSourceLink(segment);
             onClose();
           }}
         />
       ) : null}
+      <div className="mt-1 border-t px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
+        给部分文字高亮：先拖选文字，再点“仅高亮”。
+      </div>
+      </>}
     </div>
     </ViewportOverlay>,
     document.body,

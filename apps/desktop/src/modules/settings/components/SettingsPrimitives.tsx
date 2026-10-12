@@ -1,6 +1,5 @@
 import { useId, type ReactNode } from 'react';
 import { Checkbox } from '@/components/ui/checkbox';
-import { DisclosureIcon } from '@/components/ui/disclosure-icon';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
@@ -22,19 +21,18 @@ export function SettingsGroup({ id, title, description, children, action }: { id
   </section>;
 }
 
-/** Native disclosure stays compatible with settings-search reveal; content never owns scrolling. */
-export function SettingsDisclosure({ id, title, description, status, children, onToggle }: {
-  id?: string; title: string; description: string; status: string; children: ReactNode; onToggle?: (open: boolean) => void;
+/** Settings are always expanded; the surrounding settings viewport owns scrolling. */
+export function SettingsServiceSection({ id, title, description, status, children }: {
+  id?: string; title: string; description: string; status: string; children: ReactNode;
 }) {
-  return <details data-setting-id={id} tabIndex={id ? -1 : undefined} className="settings-service group/service" onToggle={event => onToggle?.(event.currentTarget.open)}>
-    <summary className="flex cursor-pointer list-none items-center gap-3 rounded-sm py-3 focus-visible:outline focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
-      <DisclosureIcon className="group-open/service:rotate-90" />
+  return <section data-setting-id={id} tabIndex={id ? -1 : undefined} className="settings-service">
+    <div className="flex flex-wrap items-center gap-3 py-3">
       <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium">{title}</span>
         <span className="mt-1 block text-xs leading-5 text-muted-foreground">{description}</span></span>
       <span className="shrink-0 text-xs text-muted-foreground">{status}</span>
-    </summary>
+    </div>
     <div className="min-w-0 pb-3">{children}</div>
-  </details>;
+  </section>;
 }
 
 type SettingRowProps = { id?: string; label: string; description?: string; disabled?: boolean; children: ReactNode; controlId?: string; className?: string };

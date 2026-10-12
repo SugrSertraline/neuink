@@ -81,6 +81,7 @@ import { usePdfReaderZoom } from "./pdf-reader/usePdfReaderZoom";
 import { useReadingActivityTracker } from "./pdf-reader/useReadingActivityTracker";
 import { usePdfAnnotationActions } from "./pdf-reader/usePdfAnnotationActions";
 import { usePdfSegmentNavigation } from "./pdf-reader/usePdfSegmentNavigation";
+import { usePdfSourceJump } from './pdf-reader/usePdfSourceJump';
 import { usePdfSourceLinkActions } from "./pdf-reader/usePdfSourceLinkActions";
 import { usePdfTextSearch } from "./pdf-reader/usePdfTextSearch";
 import { usePdfTranslationController } from "./pdf-reader/usePdfTranslationController";
@@ -99,6 +100,7 @@ import {
   saveSegmentEditorsBeforeClose,
 } from "./segmentEditorDirtyRegistry";
 import { translateTextSelection } from "../translation/entryTranslation";
+import { ReadingSelectionToolbarProvider } from './pdf-reader/ReadingSelectionToolbarProvider';
 import { TranslationTaskDialog } from "../translation/TranslationTaskDialog";
 import { PaperExportDialog } from "../export/PaperExportDialog";
 import { UnsavedSegmentChangesDialog } from "./pdf-reader/UnsavedSegmentChangesDialog";
@@ -304,7 +306,6 @@ function MineruPdfReaderBody({
   const [visiblePageIndexes, setVisiblePageIndexes] = useState<number[]>([]);
   const parseStatusToastRef = useRef<{ key: string; id: string } | null>(null);
   const resumedReadingStateKeyRef = useRef<string | null>(null);
-  const handledJumpRequestKeyRef = useRef<string | null>(null);
 
   const {
     busy: annotationBusy,
@@ -910,42 +911,25 @@ function MineruPdfReaderBody({
         ? "要添加到笔记，请在左侧用分屏按钮打开笔记。"
         : "要添加到笔记，请先在左侧新建笔记，并用分屏按钮打开。";
 
-  useEffect(() => {
-    if (!jumpRequest || loadState.status !== "ready" || pdfState.status !== 'ready') {
-      return;
+  usePdfSourceJump({ entryId: entry.id, request: jumpRequest,
+    ready: loadState.status === 'ready' && pdfState.status === 'ready', isHandled: isJumpHandled, markHandled: markJumpHandled,
+    navigate: jumpRequest => {
+    if (jumpRequest.kind === 'page') {
+      rememberReadingPosition?.();
+      scrollToPage(jumpRequest.pageIdx, pdfScrollRef.current);
+      return true;
     }
-    const jumpKey = `${entry.id}:${jumpRequest.requestKey}`;
-    if (handledJumpRequestKeyRef.current === jumpKey || isJumpHandled?.(jumpKey)) {
-      return;
-    }
-
-    if (jumpRequest.kind === "page") {
-      const frame = window.requestAnimationFrame(() => {
-        handledJumpRequestKeyRef.current = jumpKey;
-        markJumpHandled?.(jumpKey, { localOnly: Boolean(jumpRequest.targetSurfaceKey) });
-        rememberReadingPosition?.();
-        scrollToPage(jumpRequest.pageIdx, pdfScrollRef.current);
-      });
-      return () => window.cancelAnimationFrame(frame);
-    }
-
     const segment = findSegmentByLogicalOrRealUid(
       navigableSegments,
       jumpRequest.segmentUid,
     );
     if (!segment) {
-      const frame = window.requestAnimationFrame(() => {
-        handledJumpRequestKeyRef.current = jumpKey;
-        markJumpHandled?.(jumpKey, { localOnly: Boolean(jumpRequest.targetSurfaceKey) });
-        rememberReadingPosition?.();
-        scrollToPage(jumpRequest.pageIdx, pdfScrollRef.current);
-      });
-      return () => window.cancelAnimationFrame(frame);
+      rememberReadingPosition?.();
+      scrollToPage(jumpRequest.pageIdx, pdfScrollRef.current);
+      return true;
     }
 
-    if (!activateSegment(segment, { localOnly: Boolean(jumpRequest.targetSurfaceKey) })) return;
-    handledJumpRequestKeyRef.current = jumpKey;
-    markJumpHandled?.(jumpKey, { localOnly: Boolean(jumpRequest.targetSurfaceKey) });
+    if (!activateSegment(segment, { localOnly: Boolean(jumpRequest.targetSurfaceKey) })) return false;
     if (jumpRequest.kind === "annotation") {
       const annotation = annotations.find(
         (candidate) => candidate.annotation_id === jumpRequest.annotationId,
@@ -955,25 +939,12 @@ function MineruPdfReaderBody({
       onOpenAnnotationsSurface(logicalSegmentUid(segment));
       if (annotation) {
         focusPdfAnnotation(annotation, segment);
-        return;
+        return true;
       }
     }
-    const frame = window.requestAnimationFrame(() => {
-      scrollToMountedOrPendingSegment(segment);
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [
-    jumpRequest?.requestKey,
-    rememberReadingPosition,
-    annotations,
-    focusPdfAnnotation,
-    loadState.status,
-    pdfState.status,
-    isJumpHandled,
-    markJumpHandled,
-    scrollToMountedOrPendingSegment,
-    navigableSegments,
-  ]);
+    scrollToMountedOrPendingSegment(segment);
+    return true;
+  } });
 
   const saveSegmentNote = async () => {
     return Boolean(await saveNote());
@@ -1510,5 +1481,5 @@ function clampCanvasCoordinate(value: number, max: number) {
 
 export function MineruPdfReader(props: ComponentProps<typeof MineruPdfReaderBody>) {
   const key = JSON.stringify(['pdf', props.workspaceRoot, props.entry.id, props.entry.pdfFileName]);
-  return <ReadingNavigationScope key={key} retentionKey={key}><MineruPdfReaderBody {...props} /></ReadingNavigationScope>;
+  return <ReadingNavigationScope key={key} retentionKey={key}><ReadingSelectionToolbarProvider><MineruPdfReaderBody {...props} /></ReadingSelectionToolbarProvider></ReadingNavigationScope>;
 }

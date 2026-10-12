@@ -22,15 +22,15 @@ export function ReaderSettingsSection({ props }: { props: SettingsPanelLayoutPro
         <div className="settings-checkbox-grid">{PREVIEW_CONTENT.map(([key, label]) => <SettingCheckbox key={key} label={label} checked={p[key]} disabled={previewDisabled} onCheckedChange={checked => update({ [key]: checked })} />)}</div>
         <SettingCheckbox label="PDF 预览时高亮对应区域" checked={p.hoverPreviewShowRegion} disabled={!p.hoverPreviewEnabled} onCheckedChange={hoverPreviewShowRegion => update({ hoverPreviewShowRegion })} />
       </SettingsGroup>
-      <details className="settings-advanced" data-setting-id="reader-preview-size" tabIndex={-1}>
-        <summary>PDF 预览大小</summary>
+      <section className="settings-advanced" data-setting-id="reader-preview-size" tabIndex={-1}>
+        <h4 className="text-sm font-medium">PDF 预览大小</h4>
         <SettingSelect label="预览文字大小" disabled={!p.hoverPreviewEnabled} value={p.pdfHoverPreviewFontSize}
           options={[{ value: 'small', label: '较小' }, { value: 'standard', label: '标准' }, { value: 'large', label: '较大' }]}
           onValueChange={value => update({ pdfHoverPreviewFontSize: value as ReaderPreferences['pdfHoverPreviewFontSize'] })} />
         <SettingSelect label="预览卡片大小" disabled={!p.hoverPreviewEnabled} value={p.pdfHoverPreviewSize}
           options={[{ value: 'compact', label: '紧凑' }, { value: 'standard', label: '标准' }, { value: 'large', label: '宽大' }]}
           onValueChange={value => update({ pdfHoverPreviewSize: value as ReaderPreferences['pdfHoverPreviewSize'] })} />
-      </details>
+      </section>
     </SettingsGroup>
     <SettingsGroup title="分段与片段记录">
       <SettingSwitch id="reader-regions" label="默认显示 PDF 分段框" description="显示 PDF 上解析得到的分段区域框。" checked={p.showRegions} onCheckedChange={showRegions => update({ showRegions })} />

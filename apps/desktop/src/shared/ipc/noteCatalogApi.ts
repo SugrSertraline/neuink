@@ -7,6 +7,7 @@ export type NoteCatalog = { notes: CatalogNote[]; errors: string[] };
 export type SourceAvailability = { entry_id: string; segment_uid: string; quote_hash: string;
   status: 'available' | 'entry_trashed' | 'entry_deleted' | 'segment_missing' | 'content_changed' | 'unavailable'; message: string; can_locate: boolean };
 export const NOTES_CHANGED = 'neuink:notes-changed';
+export const SEGMENT_BOOKMARK_CHANGED = 'neuink:segment-bookmark-changed';
 export const notifyNotesChanged = (root: string) => { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(NOTES_CHANGED, { detail: root })); };
 export async function noteMutation<T>(root: string, operation: Promise<T>): Promise<T> {
   const result = await operation; notifyNotesChanged(root); return result;

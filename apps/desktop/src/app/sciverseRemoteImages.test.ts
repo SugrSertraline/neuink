@@ -2,6 +2,23 @@ import { describe, expect, it, vi } from 'vitest';
 import { localizeSciverseImages } from './sciverseRemoteImages';
 
 describe('Sciverse offline image failure presentation', () => {
+  it('limits concurrent downloads while preserving image numbering and document order', async () => {
+    let active = 0;
+    let peak = 0;
+    const save = vi.fn(async (_url: string, index: number) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise(resolve => setTimeout(resolve, index % 2));
+      active -= 1;
+      return `./assets/${index}.jpg`;
+    });
+    const markdown = Array.from({ length: 29 }, (_, i) => `![](dt=2026-06-07/ht=08/figure-${i}.jpg)`).join('\n');
+    const result = await localizeSciverseImages(markdown, save);
+    expect(peak).toBe(3);
+    expect(save).toHaveBeenCalledTimes(29);
+    expect(result).toBe(Array.from({ length: 29 }, (_, i) => `![](./assets/${i + 1}.jpg)`).join('\n'));
+  });
+
   it('keeps successful images and reports failures without persisting private diagnostics or URLs', async () => {
     const remote = 'https://example.test/private.png?token=private-token';
     const save = vi.fn(async (url: string) => {

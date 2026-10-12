@@ -1,7 +1,7 @@
+import { fetchEntryPdf } from '@/shared/ipc/entryPdfApi';
 import { Library, ListFilter, MessageSquare, PanelRight, Search, Settings } from 'lucide-react';
 import { OnboardingGuide } from '@/modules/onboarding/OnboardingGuide';
 import { importOnboardingPaper } from '@/shared/ipc/onboardingApi';
-import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import {
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -9,7 +9,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useReducer,
   useRef,
   useState,
   useSyncExternalStore
@@ -37,7 +36,6 @@ import {
   defaultEntryContentId,
   entryContentSurface,
   entryContentId,
-  initialWorkspaceSurfaceLayout,
   noteSurface,
   sourceLinkSurfaceActions,
   surfaceKey,
@@ -49,7 +47,9 @@ import {
   type WorkspaceSurface
 } from './workspaceSurface';
 import { resolveEntrySidebarContext, resolveTagNoteSidebarContext } from './entrySidebarContext';
+import { useWorkspaceSession } from './useWorkspaceSession';
 import { resolveSourceLinkSurface } from './workspaceSourceNavigation';
+import { assistantEvidenceNavigation } from './assistantReplyNavigation';
 import { localizeSciverseImages } from './sciverseRemoteImages';
 import { TagNoteDetailsSidebar } from '../modules/notes/components/TagNoteDetailsSidebar';
 import { sameTagEntries, startTagReadingActions, tagNoteOpenPane, tagReadingMoveTargets, tagReadingSurface } from './tagReadingNavigation';
@@ -133,8 +133,7 @@ import {
   type SciverseLibraryImportResult
 } from '../shared/ipc/assistantApi';
 import {
-  prepareSciversePaperImport,
-  readSciverseContent
+  prepareSciversePaperImport
 } from '../modules/sciverse/api/sciverseApi';
 import type {
   AssistantActiveNote,
@@ -153,7 +152,9 @@ import type {
   SearchHit
 } from '../shared/ipc/workspaceApi';
 import type { SourceLink } from '../shared/types/domain';
-import { saveNoteAssetBytes, updateNote } from '../shared/ipc/workspaceApi';
+import { updateNote } from '../shared/ipc/workspaceApi';
+import { saveSciverseNoteImage } from '../shared/ipc/sciverseImagesApi';
+import { readAllSciversePaperContent } from './sciverseContent';
 
 type PendingMarkdownNoteDelete = {
   entryId: string;
@@ -196,36 +197,6 @@ function workspaceEntryPdfPath(root: string | null, entryId: string) {
   return root ? `${root.replace(/[\\/]+$/, '')}/entries/${entryId}/paper.pdf` : undefined;
 }
 
-const SCIVERSE_REMOTE_CONTENT_PAGE_LIMIT = 16_000;
-const SCIVERSE_REMOTE_CONTENT_MAX_PAGES = 256;
-const SCIVERSE_REMOTE_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
-
-async function readAllSciversePaperContent(docId: string) {
-  const chunks: string[] = [];
-  let offset = 0;
-  let truncated = false;
-
-  for (let page = 0; page < SCIVERSE_REMOTE_CONTENT_MAX_PAGES; page += 1) {
-    const response = await readSciverseContent({
-      doc_id: docId,
-      limit: SCIVERSE_REMOTE_CONTENT_PAGE_LIMIT,
-      offset
-    });
-    if (response.text.trim()) chunks.push(response.text.trim());
-    if (!response.more) break;
-    if (response.next_offset <= offset) {
-      throw new Error('Sciverse 正文分页未推进，已停止保存。');
-    }
-    offset = response.next_offset;
-    truncated = page + 1 === SCIVERSE_REMOTE_CONTENT_MAX_PAGES;
-  }
-
-  return {
-    text: chunks.join('\n\n'),
-    truncated
-  };
-}
-
 function buildSciverseRemoteContentMarkdown(
   source: Extract<ConversationSourceLink, { provider: 'sciverse' }>,
   content: { text: string; truncated: boolean }
@@ -245,109 +216,15 @@ function buildSciverseRemoteContentMarkdown(
 }
 
 async function localizeSciverseRemoteImages({
-  entryId,
-  markdown,
-  noteId,
-  root,
-  source
+  entryId, markdown, noteId, root
 }: {
   entryId: string;
   markdown: string;
   noteId: string;
   root: string;
-  source: Extract<ConversationSourceLink, { provider: 'sciverse' }>;
 }) {
-  return localizeSciverseImages(markdown, (url, imageIndex) =>
-    saveSciverseRemoteImage({ entryId, noteId, root, source, url, imageIndex }));
-}
-
-async function saveSciverseRemoteImage({
-  entryId,
-  imageIndex,
-  noteId,
-  root,
-  source,
-  url
-}: {
-  entryId: string;
-  imageIndex: number;
-  noteId: string;
-  root: string;
-  source: Extract<ConversationSourceLink, { provider: 'sciverse' }>;
-  url: string;
-}) {
-  const resolvedUrl = resolveSciverseImageUrl(url, source.access_oa_url);
-  if (!resolvedUrl) throw new Error('图片地址不是可下载的 HTTP(S) 或 data 图片。');
-
-  if (resolvedUrl.startsWith('data:')) {
-    const payload = dataImagePayload(resolvedUrl);
-    return (await saveNoteAssetBytes(
-      root,
-      entryId,
-      noteId,
-      payload.mimeType,
-      payload.dataBase64,
-      `sciverse-image-${imageIndex}`
-    )).markdown_path;
-  }
-
-  const response = await tauriFetch(resolvedUrl);
-  if (!response.ok) throw new Error(`图片下载失败：HTTP ${response.status}`);
-  const contentLength = Number(response.headers.get('content-length') ?? 0);
-  if (Number.isFinite(contentLength) && contentLength > SCIVERSE_REMOTE_IMAGE_MAX_BYTES) {
-    throw new Error('图片超过 20 MB。');
-  }
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.byteLength === 0) throw new Error('图片内容为空。');
-  if (bytes.byteLength > SCIVERSE_REMOTE_IMAGE_MAX_BYTES) throw new Error('图片超过 20 MB。');
-  return (await saveNoteAssetBytes(
-    root,
-    entryId,
-    noteId,
-    imageMimeType(response.headers.get('content-type'), resolvedUrl),
-    bytesToBase64(bytes),
-    `sciverse-image-${imageIndex}`
-  )).markdown_path;
-}
-
-function resolveSciverseImageUrl(value: string, baseUrl?: string | null) {
-  if (value.startsWith('data:image/')) return value;
-  try {
-    const url = new URL(value, baseUrl ?? undefined);
-    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : null;
-  } catch {
-    return null;
-  }
-}
-
-function dataImagePayload(value: string) {
-  const match = /^data:(image\/(?:avif|gif|jpe?g|png|webp));base64,([a-z\d+/=]+)$/i.exec(value);
-  if (!match) throw new Error('不支持的内嵌图片格式。');
-  const estimatedSize = Math.floor((match[2].length * 3) / 4);
-  if (estimatedSize > SCIVERSE_REMOTE_IMAGE_MAX_BYTES) throw new Error('图片超过 20 MB。');
-  return { dataBase64: match[2], mimeType: match[1].toLowerCase() };
-}
-
-function imageMimeType(contentType: string | null, url: string) {
-  const normalized = contentType?.split(';', 1)[0].trim().toLowerCase();
-  if (normalized && ['image/avif', 'image/gif', 'image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(normalized)) {
-    return normalized;
-  }
-  const extension = /\.([a-z\d]+)(?:$|[?#])/i.exec(url)?.[1]?.toLowerCase();
-  const byExtension: Record<string, string> = {
-    avif: 'image/avif', gif: 'image/gif', jpeg: 'image/jpeg', jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp'
-  };
-  if (extension && byExtension[extension]) return byExtension[extension];
-  throw new Error(`不支持的图片类型：${contentType ?? '未知类型'}`);
-}
-
-function bytesToBase64(bytes: Uint8Array) {
-  const chunkSize = 0x8000;
-  let binary = '';
-  for (let start = 0; start < bytes.length; start += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(start, start + chunkSize));
-  }
-  return btoa(binary);
+  return localizeSciverseImages(markdown, async (reference) =>
+    (await saveSciverseNoteImage({ entryId, noteId, root, reference })).markdown_path);
 }
 
 function isHttpEndpoint(value: string) {
@@ -384,10 +261,10 @@ export function App() {
     }
     return window.localStorage.getItem(PARSER_API_KEY_STORAGE_KEY) ?? '';
   });
-  const [surfaceLayout, dispatchSurface] = useReducer(
-    workspaceSurfaceReducer,
-    initialWorkspaceSurfaceLayout
-  );
+  const [surfaceLayout, dispatchSurface] = useWorkspaceSession({
+    root: workspace.root, status: workspace.status, entries: workspace.entries, tags: workspace.tags,
+    onSaveError: () => notify({ tone: 'danger', title: '阅读会话未能保存', description: '当前阅读不受影响，但下次打开时可能无法恢复。' })
+  });
   const [workspaceSplitLeftWidth, setWorkspaceSplitLeftWidth] = useState<number | null>(
     readStoredWorkspaceSplitLeftWidth
   );
@@ -500,7 +377,6 @@ export function App() {
     await saveEditsBeforeWorkspaceChange();
   }, [activeBackgroundJobCount]);
   const resetWorkspaceUi = useCallback(() => {
-    dispatchSurface({ type: 'reset' });
     setActiveContentByEntryId({});
     setSidePane(EMPTY_SIDE_PANE);
     setMarkdownNoteRefreshById({});
@@ -1077,6 +953,15 @@ export function App() {
     dispatchSurface({ type: 'open', surface: { kind: 'library' } });
   });
 
+  const fetchPdfForEntry = async (entryId: string) => {
+    const root = workspace.root;
+    const entry = workspace.entries.find(item => item.id === entryId);
+    if (!root || !entry) throw new Error('当前条目不可用，请重新打开后重试。');
+    await fetchEntryPdf(root, entryId, entry.title);
+    await workspace.refreshEntries(root);
+    notify({ title: 'PDF 已保存', description: '可以打开 PDF 阅读，需要重排内容时再开始解析。', tone: 'success' });
+  };
+
   const attachPdfToEntry = async (entryId: string, pdfPath: string) => {
     await workspace.importPdfForEntry(
       entryId,
@@ -1163,7 +1048,7 @@ export function App() {
     openEntryContentTab(entryId, nextContentId);
   };
 
-  const openAssistantSource = (source: ConversationSourceLink) => {
+  const openAssistantSource = (source: ConversationSourceLink, options?: { replyId: string }) => {
     if (isSciverseConversationSource(source)) {
       notify({
         tone: 'default',
@@ -1174,7 +1059,30 @@ export function App() {
       });
       return;
     }
-    openPdfSegment(source.entry_id, source.segment_uid, source.page_idx);
+    if (!entries.some(entry => entry.id === source.entry_id)) {
+      notify({ tone: 'default', title: '来源条目不可用', description: '来源条目已不在当前资料库中。' });
+      return;
+    }
+    const destination = assistantEvidenceNavigation(surfaceLayout, source, ++pdfJumpCounter.current, options?.replyId);
+    if (!openWorkspaceSurface(destination.surface, destination.pane)) return;
+    setPdfJumpByEntryId(current => ({ ...current, [source.entry_id]: destination.jump }));
+    workspace.setSelectedEntryId(source.entry_id);
+  };
+
+  const openAssistantContext = (item: AssistantContextInput) => {
+    if (item.kind === 'segment') {
+      openAssistantSource({ entry_id: item.entryId, entry_title: item.entryTitle,
+        segment_uid: item.segmentUid, page_idx: item.pageIdx, quote: item.text });
+      return;
+    }
+    const entry = entries.find(entry => entry.id === item.entryId);
+    const noteId = item.contentId?.replace(/^note:/, '');
+    if (!entry || (item.contentKind === 'note' && !entry.contents.some(content => content.kind === 'note' && content.note_id === noteId))) {
+      notify({ title: '引用资料不可用', description: '资料已不在当前资料库中，仍可查看已保存的引用详情。' });
+      return;
+    }
+    openEntryContentTab(item.entryId, item.contentKind === 'note' ? `note:${noteId}`
+      : item.contentKind === 'pdf' || item.contentKind === 'reflow' ? item.contentKind : 'overview');
   };
 
   const addSciversePaperToLibrary = (
@@ -1255,6 +1163,8 @@ export function App() {
           Object.entries({
             description: preparation.abstract ?? source.abstract ?? source.quote,
             来源平台: 'Sciverse',
+            'PDF 来源': preparation.pdf_source_url,
+            'PDF 获取方式': preparation.pdf_source_url ? '开放获取版本（可能与期刊排版不同）' : undefined,
             'Sciverse 文档 ID': source.doc_id,
             DOI: preparation.doi ?? source.doi,
             作者: preparation.authors.length
@@ -1300,8 +1210,7 @@ export function App() {
                 entryId: result.entryId,
                 markdown: buildSciverseRemoteContentMarkdown(source, remoteContent),
                 noteId: note.note_id,
-                root: workspace.root,
-                source
+                root: workspace.root
               });
               await updateNote(
                 workspace.root,
@@ -1384,7 +1293,7 @@ export function App() {
     sourceLinkSurfaceActions(surfaceLayout, entryId, target.originPane).forEach(dispatchSurface);
   };
 
-  const openPdfSegment = (entryId: string, segmentUid: string, pageIdx: number) => {
+  const openPdfSegment = (entryId: string, segmentUid: string, pageIdx: number, pane?: WorkspacePaneId) => {
     const targetEntry = entries.find((entry) => entry.id === entryId) ?? null;
     if (!targetEntry) {
       return;
@@ -1400,7 +1309,7 @@ export function App() {
         requestKey: pdfJumpCounter.current
       }
     }));
-    openEntryContentTab(entryId, 'pdf');
+    openEntryContentTab(entryId, 'pdf', pane);
   };
 
   const openAnnotationRecord = (record: AnnotationCatalogRecord) => {
@@ -1905,7 +1814,7 @@ export function App() {
       <ResearchPaperActionsProvider key={workspace.root ?? 'no-workspace'} root={workspace.root}>
       <AssistantReplyActionsContext.Provider value={{ root: workspace.root, openReply: message => {
         openWorkspaceSurface({ kind: 'assistant-reply', message });
-      }, openSource: openAssistantSource, addSciverseSource: addSciversePaperToLibrary }}>
+      }, openSource: openAssistantSource, openContext: openAssistantContext, addSciverseSource: addSciversePaperToLibrary }}>
       <NoteReviewProvider key={workspace.root ?? 'no-workspace'}
         onOpen={({ proposal }) => openWorkspaceSurface({ kind: 'note-review', proposalId: proposal.id, label: proposal.title, entryId: proposal.entryId, noteId: proposal.noteId })}
         onShowAssistant={() => { setSidePanel('assistant'); setSidebarOpen(true); }}>
@@ -2262,6 +2171,7 @@ export function App() {
           onActiveSegmentChange={setActiveAssistantSegment}
           onApplyEntryTagPaths={workspace.applyEntryTagPaths}
           onUpdateEntry={workspace.updateWorkspaceEntry}
+          onFetchPdf={fetchPdfForEntry}
           onAttachPdf={attachPdfToEntry}
           onCreatePdfVersion={createPdfVersion}
           onImportMineruClientResult={workspace.importMineruClientResultForEntry}

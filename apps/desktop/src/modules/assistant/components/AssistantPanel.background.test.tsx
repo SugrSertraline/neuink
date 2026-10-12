@@ -7,16 +7,21 @@ import { runAssistantHarness } from '../harness/engine';
 import { getAssistantBackgroundRuns, getAssistantMessageQueues, setAssistantBackgroundRun } from './assistantBackgroundRuns';
 import { requestOpenAssistantConversation } from './assistantConversationNavigation';
 import type { Conversation, ConversationMessage } from '@/shared/ipc/assistantApi';
+import { setTaskLlmProfile } from '@/shared/ipc/assistantApi';
 import type { AssistantEntryMetaProposal, AssistantNoteProposal, AssistantTagProposal } from '@/shared/types/assistant';
 import { NoteReviewProvider } from '../review/NoteReviewContext';
 import { NoteReviewPage } from '../review/NoteReviewPage';
 import type { LibraryEntry } from '@/modules/library/components/LibrarySidebar';
 import type { TagMeta } from '@/shared/types/domain';
 import { setAssistantDebug } from '@/shared/lib/assistantDebug';
+import { readLastAssistantEngine, saveLastAssistantEngine, setLocalAgentEnabled } from '@/shared/lib/localAgentSettings';
+import { detectLocalAgent } from '@/shared/ipc/localAgentApi';
+import { runLocalAgentHarness } from '../local-agent/runner';
+import { conversationLocalSession } from '../local-agent/session';
 
-const mocks = vi.hoisted(() => ({ notify: vi.fn(), disks: new Map<string, Conversation>(), nextId: 0 }));
+const mocks = vi.hoisted(() => ({ notify: vi.fn(), dismiss: vi.fn(), disks: new Map<string, Conversation>(), nextId: 0 }));
 vi.mock('@/shared/components/AppearanceProvider', () => ({ useAppearance: () => ({ appearance: 'standard', setAppearance: vi.fn() }) }));
-vi.mock('@/shared/hooks/useToast', () => ({ useToast: () => ({ notify: mocks.notify }) }));
+vi.mock('@/shared/hooks/useToast', () => ({ useToast: () => ({ notify: mocks.notify, dismiss: mocks.dismiss }) }));
 vi.mock('./ExecutionRecovery', () => ({ ExecutionRecovery: () => null }));
 vi.mock('./AssistantComposerEditor', () => ({
   AssistantComposerEditor: ({ actions, onChange, resetKey }: ComponentProps<typeof import('./AssistantComposerEditor').AssistantComposerEditor>) =>
@@ -28,6 +33,8 @@ vi.mock('./useAssistantAutoScroll', () => ({ useAssistantAutoScroll: () => ({
 }) }));
 vi.mock('../harness/engine', () => ({ runAssistantHarness: vi.fn(), AssistantHarnessError: class extends Error {} }));
 vi.mock('../harness/durableHarness', () => ({ acknowledgeExecution: vi.fn() }));
+vi.mock('../local-agent/runner', () => ({runLocalAgentHarness:vi.fn()}));
+vi.mock('@/shared/ipc/localAgentApi', () => ({detectLocalAgent:vi.fn()}));
 vi.mock('@/shared/ipc/assistantProposalApi', () => ({
   decideAssistantProposal: vi.fn(async (_root: string, proposal: AssistantTagProposal | AssistantEntryMetaProposal,
     confirmation: { conversationId: string; messageId: string }, decision: 'apply' | 'reject') => {
@@ -41,6 +48,7 @@ vi.mock('@/shared/ipc/assistantApi', async original => ({
   ...await original<typeof import('@/shared/ipc/assistantApi')>(),
   getLlmSettings: vi.fn(async () => ({ profiles: [{ id: 'test', name: 'test', model: 'test' }], assistant_profile_id: 'test' })),
   subscribeLlmSettings: () => () => {},
+  setTaskLlmProfile: vi.fn(async () => ({profiles:[{id:'test',name:'test',model:'test'}],assistant_profile_id:'test'})),
   getCachedConversations: () => null,
   listConversations: vi.fn(async () => [...mocks.disks.values()].map(({ messages, ...item }) => ({ ...item, message_count: messages.length }))),
   loadConversation: vi.fn(async (_: string, id: string) => structuredClone(mocks.disks.get(id))),
@@ -72,13 +80,172 @@ const pending = new Map<string, Pending>();
 // jsdom has no layout/scroll implementation; Radix uses this when focusing an option.
 HTMLElement.prototype.scrollIntoView = vi.fn();
 beforeEach(() => {
-  mocks.disks.clear(); mocks.nextId = 0; pending.clear(); mocks.notify.mockClear();
+  mocks.disks.clear(); mocks.nextId = 0; pending.clear(); mocks.notify.mockClear(); mocks.dismiss.mockClear();
+  vi.mocked(runLocalAgentHarness).mockReset();
+  vi.mocked(detectLocalAgent).mockReset();
+  vi.mocked(detectLocalAgent).mockResolvedValue({status:'detected',message:'已检测到 Claude Code'});
   vi.mocked(runAssistantHarness).mockImplementation(options => new Promise((resolve, reject) => {
     pending.set(options.question, { options, finish: resolve });
     options.abortSignal?.addEventListener('abort', () => reject(new Error('用户停止')), { once: true });
   }));
 });
 afterEach(() => { cleanup(); setAssistantBackgroundRun(null); setAssistantDebug(false); window.localStorage.clear(); });
+it('remembers the explicitly chosen Agent after remounting and workspace changes', async () => {
+  setLocalAgentEnabled(true);
+  const ui = render(<AssistantPanel {...props} />);
+  await waitFor(() => expect(detectLocalAgent).toHaveBeenCalledWith('claude'));
+  fireEvent.keyDown(ui.getByRole('combobox', { name: '对话模型' }), { key: 'ArrowDown' });
+  fireEvent.click(await ui.findByRole('option', { name: 'Claude Code · 本地 Agent' }));
+  expect(readLastAssistantEngine()).toBe('claude');
+  ui.unmount();
+  const reopened = render(<AssistantPanel {...props} />);
+  await waitFor(() => expect(reopened.getByRole('combobox', { name: '对话模型' }).textContent).toContain('Claude Code'));
+  reopened.rerender(<AssistantPanel {...props} root="another-workspace" />);
+  expect(reopened.getByRole('combobox', { name: '对话模型' }).textContent).toContain('Claude Code');
+  fireEvent.keyDown(reopened.getByRole('combobox', { name: '对话模型' }), { key: 'ArrowDown' });
+  fireEvent.click(await reopened.findByRole('option', { name: 'test · test' }));
+  await waitFor(() => expect(readLastAssistantEngine()).toBe('model'));
+  reopened.unmount();
+  const model = render(<AssistantPanel {...props} />);
+  await waitFor(() => expect(model.getByRole('combobox', { name: '对话模型' }).textContent).toContain('test'));
+});
+it('does not fall back to a cloud model while the remembered Agent is disabled or unavailable', async () => {
+  saveLastAssistantEngine('claude');
+  const ui = render(<AssistantPanel {...props} />);
+  expect(ui.getByRole('combobox', { name: '对话模型' }).textContent).toContain('Claude Code');
+  fireEvent.change(ui.getByLabelText('输入问题'), { target: { value: 'Use my saved Agent' } });
+  expect(ui.getByRole('button', { name: '发送' }).hasAttribute('disabled')).toBe(true);
+  vi.mocked(detectLocalAgent).mockResolvedValue({ status: 'missing', message: '未检测到 Claude Code' });
+  act(() => setLocalAgentEnabled(true));
+  await ui.findByText('未检测到 Claude Code');
+  expect(ui.getByRole('button', { name: '发送' }).hasAttribute('disabled')).toBe(true);
+  expect(readLastAssistantEngine()).toBe('claude');
+});
+it('keeps the latest Agent choice when an earlier cloud model save completes late', async () => {
+  setLocalAgentEnabled(true);
+  saveLastAssistantEngine('claude');
+  let finish!: (value: Awaited<ReturnType<typeof setTaskLlmProfile>>) => void;
+  vi.mocked(setTaskLlmProfile).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const ui = render(<AssistantPanel {...props} />);
+  await waitFor(() => expect(detectLocalAgent).toHaveBeenCalledWith('claude'));
+  fireEvent.keyDown(ui.getByRole('combobox', { name: '对话模型' }), { key: 'ArrowDown' });
+  fireEvent.click(await ui.findByRole('option', { name: 'test · test' }));
+  fireEvent.keyDown(ui.getByRole('combobox', { name: '对话模型' }), { key: 'ArrowDown' });
+  fireEvent.click(await ui.findByRole('option', { name: 'Claude Code · 本地 Agent' }));
+  await act(async () => finish({ profiles: [{ id: 'test', name: 'test', model: 'test' }], assistant_profile_id: 'test' } as Awaited<ReturnType<typeof setTaskLlmProfile>>));
+  expect(readLastAssistantEngine()).toBe('claude');
+  ui.unmount();
+  const reopened = render(<AssistantPanel {...props} />);
+  expect(reopened.getByRole('combobox', { name: '对话模型' }).textContent).toContain('Claude Code');
+});
+it('can undo removal of an unsent external reference without adding it to another workspace', async () => {
+  const item = { kind: 'segment' as const, id: 'segment:source', entryId: 'paper', entryTitle: 'Source paper',
+    pageIdx: 2, segmentUid: 'source', text: 'Complete saved passage', addedAt: '' };
+  const remove = vi.fn(), add = vi.fn();
+  const ui = render(<AssistantPanel {...props} assistantContext={{ items: [item] }} onRemoveAssistantContextItem={remove} onAddAssistantContext={add} />);
+  fireEvent.click(await ui.findByRole('button', { name: /移除引用：Source paper/ }));
+  expect(remove).toHaveBeenCalledExactlyOnceWith(item.id);
+  const undo = render(mocks.notify.mock.lastCall![0].action);
+  fireEvent.click(undo.getByRole('button', { name: '撤销' }));
+  const { addedAt: _addedAt, ...input } = item;
+  expect(add).toHaveBeenCalledExactlyOnceWith(input);
+  expect(mocks.dismiss).toHaveBeenCalledOnce();
+  add.mockClear();
+  ui.rerender(<AssistantPanel {...props} root="another-library" assistantContext={{ items: [] }} onAddAssistantContext={add} />);
+  fireEvent.click(undo.getByRole('button', { name: '撤销' }));
+  expect(add).not.toHaveBeenCalled();
+});
+it.each(['codex','opencode'] as const)('uses the official %s preset and starts a separate history when switching agents',async provider=>{
+  const name=provider === 'codex' ? 'Codex' : 'OpenCode';
+  setLocalAgentEnabled(true);
+  const ui=render(<AssistantPanel {...props}/>);
+  await waitFor(()=>expect(detectLocalAgent).toHaveBeenCalledWith(provider));
+  fireEvent.keyDown(ui.getByRole('combobox',{name:'对话模型'}),{key:'ArrowDown'});
+  fireEvent.click(await ui.findByRole('option',{name:`${name} · 本地 Agent`}));
+  vi.mocked(runLocalAgentHarness).mockImplementation(async (_options,session,initialized)=>{
+    initialized({...session,sessionId:'provider_real_session',initialized:true});return {answer:`${name} 回答`,sources:[]};
+  });
+  fireEvent.change(ui.getByLabelText('输入问题'),{target:{value:'读取文档'}});
+  fireEvent.click(ui.getByRole('button',{name:'发送'}));await ui.findByText(`${name} 回答`);
+  expect(vi.mocked(runLocalAgentHarness).mock.calls[0][1].provider).toBe(provider);
+  expect(conversationLocalSession(mocks.disks.get('conversation-1')!)?.sessionId).toBe('provider_real_session');
+  await waitFor(()=>expect(ui.getByRole('combobox',{name:'对话模型'}).hasAttribute('disabled')).toBe(false));
+  fireEvent.keyDown(ui.getByRole('combobox',{name:'对话模型'}),{key:'ArrowDown'});
+  fireEvent.click(await ui.findByRole('option',{name:'Claude Code · 本地 Agent'}));
+  fireEvent.change(ui.getByLabelText('输入问题'),{target:{value:'另一个 Agent'}});
+  fireEvent.click(ui.getByRole('button',{name:'发送'}));
+  await waitFor(()=>expect(runLocalAgentHarness).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(runLocalAgentHarness).mock.calls[1][1].provider).toBe('claude');
+  expect(mocks.disks.size).toBe(2);
+});
+
+it('enables Claude from settings, uses the existing composer and resumes its saved conversation', async () => {
+  const ui = render(<AssistantPanel {...props} />);
+  await waitFor(() => expect(ui.getByRole('combobox',{name:'对话模型'}).textContent).toContain('test'));
+  expect(detectLocalAgent).not.toHaveBeenCalled();
+  act(() => setLocalAgentEnabled(true));
+  await waitFor(() => expect(detectLocalAgent).toHaveBeenCalled());
+  fireEvent.keyDown(ui.getByRole('combobox',{name:'对话模型'}),{key:'ArrowDown'});
+  fireEvent.click(await ui.findByRole('option',{name:'Claude Code · 本地 Agent'}));
+  vi.mocked(runLocalAgentHarness).mockImplementation(async (_options,session,initialized) => {
+    initialized({...session,initialized:true}); return {answer:'本地 Claude 回答',sources:[]};
+  });
+  fireEvent.change(ui.getByLabelText('输入问题'),{target:{value:'用本地工具整理'}});
+  fireEvent.click(ui.getByRole('button',{name:'发送'}));
+  await ui.findByText('本地 Claude 回答');
+  expect(runAssistantHarness).not.toHaveBeenCalled();
+  const identity = conversationLocalSession(mocks.disks.get('conversation-1')!)!;
+  expect(identity.initialized).toBe(true);
+  fireEvent.change(ui.getByLabelText('输入问题'),{target:{value:'继续'}});
+  fireEvent.click(ui.getByRole('button',{name:'发送'}));
+  await waitFor(() => expect(runLocalAgentHarness).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(runLocalAgentHarness).mock.calls[1][1]).toEqual(identity);
+  await waitFor(() => expect(ui.getByRole('button',{name:'发送'}).hasAttribute('disabled')).toBe(false));
+  act(() => setLocalAgentEnabled(false));
+  expect(ui.getByText('本地 Agent 已关闭，请在设置 → 工具与扩展中启用。')).toBeTruthy();
+  fireEvent.change(ui.getByLabelText('输入问题'),{target:{value:'disabled'}});
+  expect(ui.getByRole('button',{name:'发送'}).hasAttribute('disabled')).toBe(true);
+  expect(mocks.disks.get('conversation-1')!.messages.length).toBe(4);
+});
+
+it('keeps an unavailable Claude disabled without blocking configured model conversations', async () => {
+  vi.mocked(detectLocalAgent).mockResolvedValue({status:'missing',message:'未检测到 Claude Code'});
+  setLocalAgentEnabled(true);
+  const ui = render(<AssistantPanel {...props} />);
+  await waitFor(() => expect(ui.getByRole('combobox',{name:'对话模型'}).textContent).toContain('test'));
+  fireEvent.keyDown(ui.getByRole('combobox',{name:'对话模型'}),{key:'ArrowDown'});
+  const claude = await ui.findByRole('option',{name:'Claude Code · 本地 Agent'});
+  expect(claude.getAttribute('data-disabled')).not.toBeNull();
+  expect(ui.getByRole('option',{name:'test · test'}).getAttribute('data-disabled')).toBeNull();
+});
+
+it('starts separate engine histories while preserving the draft and chosen note', async () => {
+  setLocalAgentEnabled(true);
+  const a = paper('A'), clear = vi.fn();
+  const ui = render(<AssistantPanel {...props} entries={[a]} activeEntry={a} onClearAssistantContext={clear} />);
+  await waitFor(() => expect(ui.getByRole('combobox',{name:'对话模型'}).textContent).toContain('test'));
+  fireEvent.click(ui.getByRole('button',{name:'更换阅读对象：论文 A'}));
+  fireEvent.click(ui.getByRole('button',{name:'笔记'}));
+  fireEvent.click(await ui.findByRole('option',{name:/A 的笔记/}));
+  fireEvent.change(ui.getByLabelText('输入问题'),{target:{value:'model first'}});
+  fireEvent.click(ui.getByRole('button',{name:'发送'}));
+  await waitFor(() => expect(pending.has('model first')).toBe(true));
+  await act(async () => pending.get('model first')!.finish({answer:'模型回答',sources:[]}));
+  fireEvent.change(ui.getByLabelText('输入问题'),{target:{value:'claude next'}});
+  fireEvent.keyDown(ui.getByRole('combobox',{name:'对话模型'}),{key:'ArrowDown'});
+  fireEvent.click(await ui.findByRole('option',{name:'Claude Code · 本地 Agent'}));
+  expect((ui.getByLabelText('输入问题') as HTMLInputElement).value).toBe('claude next');
+  expect(clear).not.toHaveBeenCalled();
+  vi.mocked(runLocalAgentHarness).mockImplementation(async (_options,session,initialized) => {
+    initialized({...session,initialized:true}); return {answer:'另一份历史',sources:[]};
+  });
+  fireEvent.click(ui.getByRole('button',{name:'发送'}));
+  await ui.findByText('另一份历史');
+  expect(mocks.disks.size).toBe(2);
+  expect(conversationLocalSession(mocks.disks.get('conversation-1')!)).toBeNull();
+  expect(conversationLocalSession(mocks.disks.get('conversation-2')!)).not.toBeNull();
+  expect(vi.mocked(runLocalAgentHarness).mock.calls[0][0].currentNote?.noteId).toBe('note-A');
+});
 
 it('protects top-level run failures by default and exposes only safe diagnostics after opt-in', async () => {
   const raw = 'Timeout HTTP 504 Authorization: Bearer sk-private C:\\Users\\Alice\\notes.md REMOTE_BODY';

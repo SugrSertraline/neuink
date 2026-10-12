@@ -2,12 +2,13 @@ import { jsonSchema, tool, type JSONSchema7, type ToolSet } from 'ai';
 import { isResearchTool, runResearchTool, researchPapersFromResult, ResearchImportNotApprovedError } from '@/shared/ipc/researchApi';
 import { assertSuccessfulToolResult, ToolPreconditionError } from './toolFailurePolicy';
 import { AgentToolNotExecutedError } from '../agent-core/agent';
-import { createAgentToolFailure } from '../agent-core/toolFailure';
-import { assistantErrorDiagnostic } from '@/shared/lib/assistantDebug';
 import { researchOutput } from './researchOutput';
+import { researchImportResult } from './researchImportResult';
 import { formatSciverseSearchOutput } from './sciverseOutput';
 export { formatSciverseSearchOutput } from './sciverseOutput';
 import { isPdfTool, runPdfTool } from './pdfTools';
+import { entryContextWindow, formatReadEntryOutput, ENTRY_CONTEXT_MAX_CHARS } from './entryContext';
+export { formatReadEntryOutput } from './entryContext';
 
 import type {
   AssistantContextSnapshot,
@@ -227,7 +228,8 @@ export function normalizeToolInput(
   if (toolName === 'read_entry_assistant_context') {
     return {
       root,
-      entry_id: entryIdOrSingleScope(object.entry_id, scope)
+      entry_id: entryIdOrSingleScope(object.entry_id, scope),
+      ...entryContextWindow(object)
     };
   }
 
@@ -321,22 +323,9 @@ export async function executeTool(
       throw error;
     }
     assertSuccessfulToolResult(result);
-    if (toolName === 'import_papers' && Array.isArray(asObject(result).results)) {
-      const rows = asObject(result).results as unknown[];
-      if (rows.some(row => asObject(row).status === 'failed')) {
-        return { modelOutput: { ...createAgentToolFailure('TOOL_PARTIAL_FAILURE'),
-          results: rows.slice(0, 10).map(row => {
-            const item = asObject(row);
-            return { id: optionalString(item.id), entry_id: optionalString(item.entry_id),
-              status: item.status === 'imported' || item.status === 'already_in_library' ? item.status : 'failed',
-              ...(typeof item.parsed === 'boolean' ? { parsed: item.parsed } : {}),
-              ...(item.status === 'failed' ? { error: assistantErrorDiagnostic(item.error) } : {}) };
-          }), notice: 'PDF 入库不代表已解析或已读全文。请核对已有条目；失败项需要重新确认，不能自动重试整个批次。'
-        }, sources: [], summary: '论文下载入库未全部完成，请核对逐项结果。' };
-      }
-    }
-    return { modelOutput: researchOutput(result, contextBudget), sources: [], researchPapers: toolName === 'search_papers' ? researchPapersFromResult(result) : undefined, summary: toolName === 'import_papers'
-      ? '已完成论文下载尝试；请查看各项结果。' : '已获取外部检索结果（不代表已读论文全文）。' };
+    if (toolName === 'import_papers') return researchImportResult(result, input.paper_ids);
+    return { modelOutput: researchOutput(result, contextBudget), sources: [], researchPapers: toolName === 'search_papers' ? researchPapersFromResult(result) : undefined,
+      summary: '已获取外部检索结果（不代表已读论文全文）。' };
   }
   if (toolName.startsWith('mcp.')) {
     const result = await invokeMcpTool(toolName, input, signal);
@@ -365,7 +354,7 @@ export async function executeTool(
   if (toolName === 'read_entry_assistant_context') {
     const result = await invokeAssistantTool<ReadEntryAssistantContextResponse>(
       'read_entry_assistant_context',
-      input
+      { root: input.root, entry_id: input.entry_id }
     );
     signal?.throwIfAborted();
     if (result.has_pdf && result.parsed_segment_count === 0) {
@@ -373,7 +362,7 @@ export async function executeTool(
       return { ...fallback, modelOutput: { ...fallback.modelOutput, requested_tool: 'read_entry_assistant_context',
         note: 'PDF 尚未完整解析，已自动读取前 3 页以内的文字层；按 next_page 继续 read_pdf_pages，不能把这部分当成全文。' } };
     }
-    return formatReadEntryOutput(result, addSource, contextBudget);
+    return formatReadEntryOutput(result, addSource, contextBudget, input);
   }
 
   if (toolName === 'search_sciverse_evidence') {
@@ -593,49 +582,6 @@ export function formatSciverseContentOutput(
     },
     sources: [source],
     summary: `Read ${result.chars_returned} characters from Sciverse document ${source.doc_id}.`
-  };
-}
-
-export function formatReadEntryOutput(
-  result: ReadEntryAssistantContextResponse,
-  addSource: (source: ConversationSourceLink) => number,
-  contextBudget: number
-) {
-  const originalMarkerToMarker = new Map<number, number>();
-  const originalMarkerToSource = new Map<number, ConversationSourceLink>();
-  const trimmed = trimToBudget(result.markdown, contextBudget);
-  const markdown = trimmed.replace(/\[S(\d+)]/g, (full, markerText: string) => {
-    const originalMarker = Number(markerText);
-    const source = result.sources[originalMarker - 1];
-
-    if (!source) {
-      return full;
-    }
-
-    const existing = originalMarkerToMarker.get(originalMarker);
-    if (existing) {
-      return `[S${existing}]`;
-    }
-
-    const nextMarker = addSource(source);
-    originalMarkerToMarker.set(originalMarker, nextMarker);
-    originalMarkerToSource.set(originalMarker, source);
-    return `[S${nextMarker}]`;
-  });
-  const sources = [...originalMarkerToSource.values()];
-
-  return {
-    modelOutput: {
-      entry_id: result.entry_id,
-      entry_title: result.entry_title,
-      kind: 'read_entry_assistant_context',
-      markdown,
-      source_markers: [...originalMarkerToMarker.values()].map((marker) => `[S${marker}]`)
-    },
-    sources,
-    summary: result.markdown.trim()
-      ? `Read parsed markdown for ${result.entry_title} (${originalMarkerToMarker.size} source markers).`
-      : `${result.entry_title} 暂无解析正文${result.has_pdf ? '，可用 PDF 基础读取工具读取文字层。' : '或可读 PDF，请附加文件或选择其他资料。'}`
   };
 }
 
@@ -1517,6 +1463,9 @@ export function modelInputSchema(descriptor: AssistantToolDescriptor): JSONSchem
     objectSchema.required = ['entry_id', 'segment_uid'];
   } else if (descriptor.name === 'read_entry_assistant_context') {
     objectSchema.required = ['entry_id'];
+    objectSchema.properties.offset = { type: 'integer', minimum: 0, description: 'Start at 0. For continuation, copy the exact next_read returned by this tool.' };
+    objectSchema.properties.limit = { type: 'integer', minimum: 100, maximum: ENTRY_CONTEXT_MAX_CHARS, description: 'Maximum characters per parsed-text chunk; defaults to 8000.' };
+    objectSchema.properties.revision = { type: 'string', pattern: '^[a-f0-9]{8}$', description: 'For offset > 0, copy revision from next_read so changed content cannot be silently mixed.' };
   } else {
     objectSchema.required = (objectSchema.required ?? []).filter((key: string) => key !== 'root');
   }
@@ -1570,7 +1519,7 @@ export function toolDescription(descriptor: AssistantToolDescriptor) {
     return `${descriptor.description} Use this after search_segments when a snippet is not enough.`;
   }
   if (descriptor.name === 'read_entry_assistant_context') {
-    return `${descriptor.description} Use this only for an explicitly selected, named, or confirmed Entry. If no parsed segments exist, the host reads up to the first 3 PDF text-layer pages automatically. Continue with read_pdf_pages / search_pdf_text; respect next_page and incomplete/OCR warnings.`;
+    return `${descriptor.description} Use this only for an explicitly selected, named, or confirmed Entry. Parsed text is returned in bounded chunks: when more is true, call this tool again with the returned next_read arguments. Read all chunks when full reading is requested; otherwise state partial coverage. Never read CLI tool-result files with native Read/shell to obtain the rest. If no parsed segments exist, the host reads up to the first 3 PDF text-layer pages automatically. Continue with read_pdf_pages / search_pdf_text; respect next_page and incomplete/OCR warnings.`;
   }
   if (descriptor.name === 'search_sciverse_evidence') {
     return `${descriptor.description} Preserve every returned marker and source identifier in the answer.`;

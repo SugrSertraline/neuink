@@ -24,13 +24,47 @@ describe('paper download preview', () => {
     expect(approveResearchImport).toHaveBeenCalledWith('root', [paper.id], [paper], expect.any(String));
     expect(rememberResearchConsent).toHaveBeenCalledOnce();
   });
-  it('does not execute after rejection or a failed preview', async () => {
+  it('does not enter confirmation after a failed preview', async () => {
     vi.mocked(previewResearchImport).mockRejectedValue('检索已过期');
     const { result, view } = setup();
-    await view.findByRole('alert');
-    expect((view.getByRole('button', { name: '确认下载 0 篇' }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(view.getByText('拒绝并停止'));
-    expect(await result).toBe(false); expect(approveResearchImport).not.toHaveBeenCalled();
+    await expect(result).rejects.toMatchObject({ code: 'TOOL_PREFLIGHT_FAILED' });
+    expect(view.queryByRole('button', { name: /确认下载/ })).toBeNull();
+    expect(getToolApprovals()).toHaveLength(0);
+    expect(approveResearchImport).not.toHaveBeenCalled();
+  });
+  it.each([{ rows: [] }, { rows: [{ ...paper, pdf_url: null }] }, { rows: [{ ...paper, pdf_url: ' ' }] }])('returns unavailable PDFs without requesting consent (%j)', async ({ rows }) => {
+    vi.mocked(previewResearchImport).mockResolvedValue(rows);
+    const { result, view } = setup();
+    await expect(result).rejects.toMatchObject({ code: 'TOOL_NO_PUBLIC_PDF' });
+    expect(view.queryByRole('button', { name: /确认下载/ })).toBeNull();
+    expect(getToolApprovals()).toHaveLength(0);
+    expect(approveResearchImport).not.toHaveBeenCalled();
+    expect(rememberResearchConsent).not.toHaveBeenCalled();
+  });
+  it('counts only downloadable papers in a mixed preview and preserves the approved snapshot', async () => {
+    const rows = [paper, { ...paper, id: 'crossref:456', title: '无公开 PDF 的论文', pdf_url: null }];
+    vi.mocked(previewResearchImport).mockResolvedValue(rows);
+    const { result, view } = setup();
+    fireEvent.click(await view.findByRole('button', { name: '确认下载 1 篇' }));
+    expect(await result).toBe(true);
+    expect(approveResearchImport).toHaveBeenCalledWith('root', rows.map(row => row.id), rows, expect.any(String));
+  });
+  it('does not create a late confirmation after stopping during preview', async () => {
+    let finish!: (rows: ResearchPaper[]) => void;
+    vi.mocked(previewResearchImport).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    const controller = new AbortController();
+    const { result } = setup(controller.signal);
+    const rejected = expect(result).rejects.toThrow();
+    act(() => controller.abort());
+    await act(async () => finish([paper]));
+    await rejected;
+    expect(getToolApprovals()).toHaveLength(0);
+  });
+  it('does not execute after rejection', async () => {
+    const { result, view } = setup();
+    fireEvent.click(await view.findByText('拒绝并停止'));
+    expect(await result).toBe(false);
+    expect(approveResearchImport).not.toHaveBeenCalled();
   });
   it('keeps a failed approval visible without silently consenting', async () => {
     vi.mocked(approveResearchImport).mockRejectedValue('论文信息已变化');

@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { safeAssistantReadFailure } from './assistantReadFailure';
+import { safeAssistantModelError } from './assistantModelErrors';
 
 export const ASSISTANT_DEBUG_STORAGE_KEY = 'neuink.assistant.debug';
 const CHANGE_EVENT = 'neuink:assistant-debug-change';
@@ -62,6 +63,7 @@ export function assistantToolErrorNotice({ streaming, hasAnswer, runStatus }: {
 /** Arbitrary provider messages can contain credentials, paths, headers or remote bodies.
  * Debug output is an allowlisted diagnostic summary, not a best-effort redacted raw string. */
 export function assistantErrorDiagnostic(error: unknown): string {
+  if (safeAssistantModelError(error)) return '模型服务余额或额度不足 · HTTP 402';
   const knownFailure = safeAssistantReadFailure(error);
   if (knownFailure && /引用|来源核实/.test(knownFailure)) return '引用或输出要求未满足';
   let text = '';
@@ -95,7 +97,7 @@ export function formatAssistantError(error: unknown, options: { debug?: boolean;
   // Once processing has ended, a fixed host-classified read failure is actionable without
   // exposing debug data or falsely warning that a read may have changed user content.
   const message = fallback === ASSISTANT_TOOL_PENDING || fallback === ASSISTANT_TOOL_STOPPED
-    ? fallback : safeAssistantReadFailure(error) ?? fallback;
+    ? fallback : safeAssistantReadFailure(error) ?? safeLocalAgentError(error) ?? safeAssistantModelError(error) ?? fallback;
   return options.debug ? `${message} 调试：${assistantErrorDiagnostic(error)}` : message;
 }
 
@@ -106,3 +108,4 @@ export function formatAssistantToolSummary(summary: string | undefined, debug = 
   if (!summary || !/^(?:Found \d+ segments? for "[\s\S]*" using |No parsed PDF segments matched "[\s\S]*" using )(?:semantic|hybrid)_fallback_keyword\. Embedding search is unavailable:/.test(summary)) return summary;
   return formatAssistantError(summary, { debug, fallback: '向量检索不可用，已使用关键词检索结果；现有证据仍可查看。' });
 }
+import { safeLocalAgentError } from './localAgentErrors';

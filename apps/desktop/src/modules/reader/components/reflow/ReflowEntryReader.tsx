@@ -1,3 +1,4 @@
+import { findSourceSegment } from '@/shared/lib/listItemSegments';
 import type { ComponentProps } from 'react';
 import { readingAssistantContext } from '../readingAssistantContext';
 import { translateTextSelection } from '../../translation/entryTranslation';
@@ -213,7 +214,7 @@ function ReflowEntryReaderBody({
     translation?.segments.some((segment) => segment.status === 'translated')
   );
   const overlaySegment = notePopoverSegmentUid
-    ? segments.find((segment) => segment.uid === notePopoverSegmentUid) ?? null
+    ? findSourceSegment(segments, notePopoverSegmentUid) ?? null
     : null;
   const hiddenSegments = useMemo(
     () => segments.filter((segment) => hiddenSegmentUids.has(segment.uid)),
@@ -446,7 +447,7 @@ function ReflowEntryReaderBody({
 
   useEffect(() => {
     if (!syncSegmentUid) return;
-    const segment = segments.find((item) => item.uid === syncSegmentUid || item.continuation_group_id === syncSegmentUid);
+    const segment = findSourceSegment(segments, syncSegmentUid);
     if (!segment) return;
     setSelectedSegmentUid(segment.uid);
     setFlashSegmentUid(segment.uid);

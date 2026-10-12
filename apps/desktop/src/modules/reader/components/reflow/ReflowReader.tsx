@@ -338,6 +338,8 @@ export function ReflowReader({
                 style={{ transform: `translateY(${virtualRow.start}px)` }}
               >
                 <ReflowSegmentGroupView
+                  activeSegmentUid={activeSegmentUid}
+                  flashSegmentUid={flashSegmentUid ?? navigation.flashUid}
                   active={segmentGroup.segments.some(
                     (segment) => segment.uid === activeSegmentUid,
                   )}

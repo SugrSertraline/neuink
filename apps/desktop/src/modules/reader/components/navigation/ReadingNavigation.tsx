@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from 'react';
 import type { SourceSegment } from '@/shared/types/domain';
-import { useRetainedReadingSnapshot } from './ReadingStateRetention';
+import { usePersistReadingSnapshot, useRetainedReadingSnapshot } from './ReadingStateRetention';
 import { useReadingViewSession, publishReadingView, subscribeReadingView } from './ReadingViewSession';
 
 export type ReadingTarget = { pageIdx: number; segmentUid?: string; rect?: readonly [number, number, number, number]; focus?: boolean };
@@ -34,6 +34,7 @@ function samePosition(a: ReadingPosition | undefined, b: ReadingPosition) {
 export function ReadingNavigationScope({ children, retentionKey }: { children: ReactNode; retentionKey?: string }) {
   const view = useReadingViewSession(), viewRef = useRef(view); viewRef.current = view;
   const snapshot = useRetainedReadingSnapshot(retentionKey);
+  const persistSnapshot = usePersistReadingSnapshot();
   const hasRetainedPosition = useRef(Boolean(snapshot.position)).current;
   const needsRestore = useRef(hasRetainedPosition);
   const adapter = useRef<ReadingAdapter | null>(null);
@@ -75,27 +76,27 @@ export function ReadingNavigationScope({ children, retentionKey }: { children: R
     claimNavigation.current = (localOnly = false) => { following = false; localNavigation.current = localOnly; };
     const identity = viewRef.current;
     const unlink = identity ? subscribeReadingView(identity.group, { id: identity.id,
-      capture: () => viewRef.current?.active ? next.capture() : null,
+      capture: () => viewRef.current?.active && !needsRestore.current && !restoring ? next.capture() : null,
       receive: position => {
       const current = viewRef.current;
-      if (!current?.active || !scroll || scroll.clientWidth <= 0) return;
+      if (!current?.active || !scroll || scroll.clientWidth <= 0 || needsRestore.current) return;
       following = true;
       needsRestore.current = false;
       const local = next.capture();
       next.restore({ ...position, zoom: undefined, left: local?.left ?? 0 });
     } }) : () => {};
-    const capture = () => {
+    const capture = (immediate = false, broadcast = true) => {
       if (restoring || (scroll && scroll.clientWidth <= 0)) return;
       const position = next.capture();
-      if (position) snapshot.position = { ...position };
+      if (position) { snapshot.position = { ...position }; persistSnapshot?.(immediate); }
       const current = viewRef.current;
-      if (position && current?.active && !following && !localNavigation.current) publishReadingView(current.group, current.id, position);
+      if (broadcast && position && current?.active && !following && !localNavigation.current) publishReadingView(current.group, current.id, position);
     };
     const onScroll = () => {
       // The virtualizer commits measured rows during the scroll event. Reading
       // geometry synchronously can retain a row from the previous layout.
       cancelAnimationFrame(captureFrame);
-      captureFrame = requestAnimationFrame(capture);
+      captureFrame = requestAnimationFrame(() => capture());
     };
     const cancel = () => { cancelAnimationFrame(frame); restoring = false; next.cancelRestore?.(); };
     cancelPending.current = cancel;
@@ -105,6 +106,9 @@ export function ReadingNavigationScope({ children, retentionKey }: { children: R
     };
     if (needsRestore.current && snapshot.position) {
       restoring = true;
+      // Each reopened pane owns its saved anchor. Delayed layout scroll events
+      // must not broadcast that restoration over the other pane's position.
+      localNavigation.current = true;
       const position = { ...snapshot.position };
       frame = requestAnimationFrame(() => {
         next.restore(position);
@@ -120,6 +124,11 @@ export function ReadingNavigationScope({ children, retentionKey }: { children: R
     scroll?.addEventListener('wheel', onInput, { passive: true });
     scroll?.addEventListener('pointerdown', onInput);
     scroll?.addEventListener('keydown', onKey);
+    const flush = () => { capture(true, false); persistSnapshot?.(true); };
+    const onHidden = () => { if (document.visibilityState === 'hidden') flush(); };
+    window.addEventListener('pagehide', flush);
+    window.addEventListener('beforeunload', flush);
+    document.addEventListener('visibilitychange', onHidden);
     return () => {
       // Unmount cleanup runs after DOM removal/virtualizer teardown; it is too
       // late to capture reliable geometry. Keep the last visible scroll sample.
@@ -129,6 +138,10 @@ export function ReadingNavigationScope({ children, retentionKey }: { children: R
       scroll?.removeEventListener('wheel', onInput);
       scroll?.removeEventListener('pointerdown', onInput);
       scroll?.removeEventListener('keydown', onKey);
+      window.removeEventListener('pagehide', flush);
+      window.removeEventListener('beforeunload', flush);
+      document.removeEventListener('visibilitychange', onHidden);
+      persistSnapshot?.(true);
       if (adapter.current === next) { adapter.current = null; cancelPending.current = () => {}; }
     };
   }, []);

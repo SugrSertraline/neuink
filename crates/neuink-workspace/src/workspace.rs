@@ -525,15 +525,7 @@ impl Workspace {
         {
             return self.resolve_pdf_text_segment(entry_id, segment_uid);
         }
-        self.read_segments(entry_id)?
-            .into_iter()
-            .find(|segment| {
-                segment.uid == *segment_uid
-                    || segment
-                        .continuation_group_id
-                        .as_deref()
-                        .is_some_and(|group_id| group_id == segment_uid.as_str())
-            })
+        neuink_domain::find_source_segment(&self.read_segments(entry_id)?, segment_uid)
             .ok_or_else(|| WorkspaceError::SegmentMissing(segment_uid.to_string()))
     }
 
@@ -575,6 +567,10 @@ impl Workspace {
             ) {
                 self.read_segments(&entry.id)?
                     .into_iter()
+                    .flat_map(|segment| {
+                        let items = neuink_domain::list_item_segments(&segment);
+                        std::iter::once(segment).chain(items)
+                    })
                     .map(|segment| (segment.uid.clone(), segment))
                     .collect()
             } else {

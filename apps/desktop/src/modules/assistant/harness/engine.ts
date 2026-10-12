@@ -243,6 +243,7 @@ async function executeAssistantHarness(options: RunAssistantHarnessOptions): Pro
     });
 
     let streamedAnswer = false;
+    abortSignal?.throwIfAborted();
     const delegatedCalls = new Set<string>();
     const grounded = await answerWithGroundedAgent({
       budget: options.budget,
@@ -565,7 +566,7 @@ export function verifyGroundedProposals({
     mention.kind === 'tag' || mention.kind === 'pdf' || mention.kind === 'reflow' ||
     mention.kind === 'segment' || mention.kind === 'overview' || mention.role === 'evidence'
   ) || Boolean(browserTarget && (
-    assistantContext?.items.some(item => item.kind === 'segment' || ['pdf', 'reflow', 'overview'].includes(item.contentKind ?? '')) ||
+    assistantContext?.items.some(item => item.kind === 'segment' || (item.kind === 'entry' && ['pdf', 'reflow', 'overview'].includes(item.contentKind ?? ''))) ||
     contextPlan?.items.some(item => item.role !== 'edit_target' &&
       (['pdf', 'reflow', 'segment', 'overview'].includes(item.kind) || (item.role === 'evidence' && item.kind !== 'note')))
   ));

@@ -798,7 +798,8 @@ fn read_entry_assistant_context_from_workspace(
     let mut sources = Vec::with_capacity(segments.len());
     let segments_by_uid = segments
         .iter()
-        .map(|segment| (segment.uid.clone(), segment.clone()))
+        .flat_map(|segment| std::iter::once(segment.clone()).chain(neuink_domain::list_item_segments(segment)))
+        .map(|segment| (segment.uid.clone(), segment))
         .collect::<HashMap<_, _>>();
 
     let mut seen_logical_segment_uids = HashSet::new();

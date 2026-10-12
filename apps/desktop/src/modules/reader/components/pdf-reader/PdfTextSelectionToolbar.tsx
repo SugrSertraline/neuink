@@ -5,7 +5,7 @@ import {
   Send,
   Star
 } from 'lucide-react';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useReaderSelectionPriority } from '@/components/ui/hover-interactions';
 
@@ -20,6 +20,9 @@ import type {
 
 import { describeTranslationFailure } from '../../translation/translationErrorMessage';
 import { ReadingSelectionToolbarControls } from './ReadingSelectionToolbarControls';
+import { ReadingSelectionToolbarContext } from './readingSelectionToolbarContext';
+import { useSelectionToolbarPosition } from './useSelectionToolbarPosition';
+export { calculateFloatingToolbarLayout } from './selectionToolbarLayout';
 
 const HIGHLIGHT_COLORS: Array<{
   color: AnnotationHighlightColor;
@@ -41,30 +44,34 @@ export type PendingPdfTextSelection = {
   selection: Omit<AnnotationTextSelection, 'color'>;
 };
 
-export function PdfTextSelectionToolbar({
+export type PdfTextSelectionToolbarProps = {
+  autoTranslate?: boolean;
+  visible?: boolean;
+  pending: PendingPdfTextSelection | null;
+  onApply?: (input: { content: string; importance: AnnotationImportance; segment: SourceSegment; selection: AnnotationTextSelection }) => Promise<void> | void;
+  onClose: () => void;
+  onTranslate?: (input: { segment: SourceSegment; text: string }) => Promise<string>;
+  onAsk?: (input: { segment: SourceSegment; text: string }, intent: 'ask' | 'explain') => void;
+};
+
+export function PdfTextSelectionToolbar(props: PdfTextSelectionToolbarProps) {
+  const host = useContext(ReadingSelectionToolbarContext);
+  const owner = useId();
+  useEffect(() => { host?.publish(owner, props); }, [host, owner, props.pending, props.visible, props.autoTranslate, props.onApply, props.onClose, props.onTranslate, props.onAsk]);
+  useEffect(() => () => host?.release(owner), [host, owner]);
+  return host ? null : <PdfTextSelectionToolbarContent {...props} />;
+}
+
+export function PdfTextSelectionToolbarContent({
   autoTranslate = false,
   visible = true,
-  pending,
+  pending: incomingPending,
   onApply,
   onClose,
   onTranslate,
   onAsk
-}: {
-  autoTranslate?: boolean;
-  visible?: boolean;
-  pending: PendingPdfTextSelection | null;
-  onApply?: (input: {
-    content: string;
-    importance: AnnotationImportance;
-    segment: SourceSegment;
-    selection: AnnotationTextSelection;
-  }) => Promise<void> | void;
-  onClose: () => void;
-  onTranslate?: (input: { segment: SourceSegment; text: string }) => Promise<string>;
-  onAsk?: (input: { segment: SourceSegment; text: string }, intent: 'ask' | 'explain') => void;
-}) {
+}: PdfTextSelectionToolbarProps) {
   const { notify } = useToast();
-  useReaderSelectionPriority(Boolean(pending) && visible);
   const [panel, setPanel] = useState<ExpandedPanel>(null);
   const [comment, setComment] = useState('');
   const [saving, setSaving] = useState(false);
@@ -76,14 +83,50 @@ export function PdfTextSelectionToolbar({
   const translationRequestRef = useRef(0);
   const autoTranslatedSelectionKeyRef = useRef('');
   const toolbarRef = useRef<HTMLDivElement | null>(null);
-  const [layout, setLayout] = useState<FloatingToolbarLayout | null>(null);
+  const retained = useRef<PendingPdfTextSelection | null>(null);
+  if (incomingPending) retained.current = incomingPending;
+  const position = useSelectionToolbarPosition(toolbarRef, incomingPending ?? retained.current, visible, `${panel}:${translating}:${translation}`);
+  const pending = incomingPending ?? (position.pinned ? retained.current : null);
+  const { layout } = position;
+  useReaderSelectionPriority(Boolean(pending) && visible);
+  const close = () => {
+    position.reset();
+    retained.current = null;
+    translationRequestRef.current += 1;
+    onClose();
+  };
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  useEffect(() => {
+    if (!pending || !visible) return;
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeRef.current();
+    };
+    // Native text selection leaves focus in the reader, not in this portal.
+    // The toolbar also owns Escape while pinned and waiting for a new selection.
+    document.addEventListener('keydown', escape);
+    return () => document.removeEventListener('keydown', escape);
+  }, [Boolean(pending), visible]);
+  useEffect(() => {
+    const dismiss = () => closeRef.current();
+    window.addEventListener('neuink:reader-surface-change', dismiss);
+    return () => {
+      translationRequestRef.current += 1;
+      window.removeEventListener('neuink:reader-surface-change', dismiss);
+    };
+  }, []);
   const selectionKey = pending
     ? `${pending.segment.uid}:${pending.selection.page_idx}:${pending.selection.text}`
     : '';
+  const selectionKeyRef = useRef(selectionKey);
+  selectionKeyRef.current = selectionKey;
 
   useEffect(() => {
     translationRequestRef.current += 1;
-    setPanel(null);
+    setPanel(current => position.pinned ? current : null);
     setComment('');
     setTranslation(null);
     setTranslationError(null);
@@ -91,7 +134,6 @@ export function PdfTextSelectionToolbar({
     setSaving(false);
     setColor('yellow');
     setImportance('normal');
-    setLayout(null);
     if (!selectionKey) {
       autoTranslatedSelectionKeyRef.current = '';
     }
@@ -100,7 +142,7 @@ export function PdfTextSelectionToolbar({
   useEffect(() => {
     if (
       !autoTranslate ||
-      !pending ||
+      !incomingPending ||
       !onTranslate ||
       !selectionKey ||
       autoTranslatedSelectionKeyRef.current === selectionKey
@@ -114,7 +156,7 @@ export function PdfTextSelectionToolbar({
     setTranslation(null);
     setTranslationError(null);
     setTranslating(true);
-    void onTranslate({ segment: pending.segment, text: pending.selection.text })
+    void onTranslate({ segment: incomingPending.segment, text: incomingPending.selection.text })
       .then((translatedText) => {
         if (translationRequestRef.current === requestId) {
           setTranslation(translatedText);
@@ -132,74 +174,16 @@ export function PdfTextSelectionToolbar({
       });
   }, [autoTranslate, notify, onTranslate, pending, selectionKey]);
 
-  useLayoutEffect(() => {
-    if (!pending || !visible || typeof window === 'undefined') {
-      return;
-    }
-
-    let frame = 0;
-    const toolbar = toolbarRef.current;
-    const updateLayout = () => {
-      window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => {
-        const element = toolbarRef.current;
-        if (!element) {
-          return;
-        }
-        const viewport = window.visualViewport;
-        const bounds = element.getBoundingClientRect();
-        const cssScale = element.offsetWidth > 0 ? bounds.width / element.offsetWidth : 1;
-        setLayout(
-          calculateFloatingToolbarLayout({
-            anchor:
-              pending.anchorRect ?? {
-                bottom: pending.position.y,
-                left: pending.position.x,
-                right: pending.position.x,
-                top: pending.position.y
-              },
-            contentHeight: element.scrollHeight * cssScale,
-            contentWidth: bounds.width,
-            cssScale,
-            viewport: {
-              height: viewport?.height ?? window.innerHeight,
-              left: viewport?.offsetLeft ?? 0,
-              top: viewport?.offsetTop ?? 0,
-              width: viewport?.width ?? window.innerWidth
-            }
-          })
-        );
-      });
-    };
-
-    const resizeObserver = toolbar && typeof ResizeObserver !== 'undefined'
-      ? new ResizeObserver(updateLayout)
-      : null;
-    if (toolbar) {
-      resizeObserver?.observe(toolbar);
-    }
-    updateLayout();
-    window.addEventListener('resize', updateLayout);
-    window.visualViewport?.addEventListener('resize', updateLayout);
-    window.visualViewport?.addEventListener('scroll', updateLayout);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      resizeObserver?.disconnect();
-      window.removeEventListener('resize', updateLayout);
-      window.visualViewport?.removeEventListener('resize', updateLayout);
-      window.visualViewport?.removeEventListener('scroll', updateLayout);
-    };
-  }, [panel, pending, selectionKey, translating, translation, visible]);
-
   if (!pending || !visible || typeof document === 'undefined') {
     return null;
   }
 
   // Translation is intentionally non-blocking: highlighting, annotation and copy
   // remain available while the selected text is being translated.
-  const busy = saving;
+  const busy = saving || !incomingPending;
   const apply = async (content: string) => {
-    if (!onApply) return;
+    if (!onApply || !incomingPending) return;
+    const applyingSelection = selectionKey;
     setSaving(true);
     try {
       await onApply({
@@ -208,13 +192,18 @@ export function PdfTextSelectionToolbar({
         segment: pending.segment,
         selection: { ...pending.selection, color }
       });
-      onClose();
+      if (selectionKeyRef.current !== applyingSelection) return;
+      if (position.pinned) {
+        setPanel(null);
+        setComment('');
+        onClose();
+      } else close();
     } finally {
-      setSaving(false);
+      if (selectionKeyRef.current === applyingSelection) setSaving(false);
     }
   };
   const translate = async () => {
-    if (!onTranslate || translating) {
+    if (!onTranslate || !incomingPending || translating) {
       return;
     }
     setPanel('translation');
@@ -255,6 +244,7 @@ export function PdfTextSelectionToolbar({
       ref={toolbarRef}
       data-material="reader-popover"
       data-reading-selection-toolbar
+      data-pinned={position.pinned ? 'true' : 'false'}
       className="fixed z-[var(--z-reader-selection)] w-[min(23rem,calc(100vw-1rem))] overflow-y-auto overscroll-contain rounded-lg border bg-popover p-2 shadow-xl"
       data-placement={layout?.placement}
       role="dialog"
@@ -269,15 +259,19 @@ export function PdfTextSelectionToolbar({
       }}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
-      onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose(); } }}
+      onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); } }}
     >
       <ReadingSelectionToolbarControls text={pending.selection.text} saving={saving} translating={translating}
-        translationFailed={Boolean(translationError)} panel={panel} onClose={onClose}
+        translationFailed={Boolean(translationError)} panel={panel} onClose={close}
+        pinned={position.pinned} onTogglePin={position.toggle} dragHandleProps={position.handleProps}
+        selectionAvailable={Boolean(incomingPending)}
         onTranslate={onTranslate ? () => void translate() : undefined}
-        onAsk={onAsk ? intent => onAsk({ segment:pending.segment, text:pending.selection.text }, intent) : undefined}
+        onAsk={onAsk ? intent => { if (incomingPending) onAsk({ segment:incomingPending.segment, text:incomingPending.selection.text }, intent); } : undefined}
         onHighlight={onApply ? () => void apply('') : undefined}
-        onAnnotate={onApply ? () => setPanel(current => current === 'annotation' ? null : 'annotation') : undefined}
+        onAnnotate={onApply ? () => { if (incomingPending) setPanel(current => current === 'annotation' ? null : 'annotation'); } : undefined}
         onCopy={() => void copy(pending.selection.text.replace(/\n+/g, ' '), '选中文字已复制')} />
+
+      {position.pinned && !incomingPending ? <p className="mt-2 text-xs text-muted-foreground">已固定，选择其他文字可更新内容。</p> : null}
 
       {translating && panel !== 'translation' ? (
         <div className="mt-2 inline-flex w-full items-center gap-2 rounded-md bg-muted/50 px-2 py-1.5 text-[11px] text-muted-foreground">
@@ -311,7 +305,7 @@ export function PdfTextSelectionToolbar({
 
       {panel === 'translation' ? (
         <div className="mt-2 grid gap-2 border-t pt-2">
-          <div className="text-[11px] font-semibold text-muted-foreground">快速翻译</div>
+          <div className="text-[11px] font-semibold text-muted-foreground">选中文字翻译</div>
           {translationError ? <p role="alert" className="text-xs text-destructive">{translationError}，可点击“重试翻译”。</p> : null}
           <div className="max-h-36 overflow-auto whitespace-pre-wrap rounded-md bg-muted/50 p-2 text-sm leading-6">
             {translating ? (
@@ -392,63 +386,4 @@ export function PdfTextSelectionToolbar({
     </div>,
     document.body
   );
-}
-
-type FloatingToolbarLayout = {
-  left: number;
-  maxHeight: number;
-  maxWidth: number;
-  placement: 'above' | 'below';
-  top: number;
-};
-
-export function calculateFloatingToolbarLayout({
-  anchor,
-  contentHeight,
-  contentWidth,
-  cssScale = 1,
-  viewport
-}: {
-  anchor: { bottom: number; left: number; right: number; top: number };
-  contentHeight: number;
-  contentWidth: number;
-  cssScale?: number;
-  viewport: { height: number; left: number; top: number; width: number };
-}): FloatingToolbarLayout {
-  const margin = 8;
-  const gap = 8;
-  const viewportRight = viewport.left + viewport.width;
-  const viewportBottom = viewport.top + viewport.height;
-  const width = Math.min(contentWidth, Math.max(0, viewport.width - margin * 2));
-  const left = clamp(
-    (anchor.left + anchor.right - width) / 2,
-    viewport.left + margin,
-    Math.max(viewport.left + margin, viewportRight - margin - width)
-  );
-  const availableBelow = Math.max(0, viewportBottom - margin - anchor.bottom - gap);
-  const availableAbove = Math.max(0, anchor.top - gap - (viewport.top + margin));
-  const placement: FloatingToolbarLayout['placement'] =
-    contentHeight <= availableBelow || (availableBelow >= availableAbove && contentHeight > availableAbove)
-      ? 'below'
-      : 'above';
-  const availableHeight = placement === 'below' ? availableBelow : availableAbove;
-  const maxHeight = Math.max(0, availableHeight);
-  const visibleHeight = Math.min(contentHeight, maxHeight);
-  const idealTop = placement === 'below'
-    ? anchor.bottom + gap
-    : anchor.top - gap - visibleHeight;
-  const top = clamp(
-    idealTop,
-    viewport.top + margin,
-    Math.max(viewport.top + margin, viewportBottom - margin - visibleHeight)
-  );
-
-  // DOM rectangles are viewport pixels; fixed offsets inherit the app's CSS zoom.
-  const scale = Number.isFinite(cssScale) && cssScale > 0 ? cssScale : 1;
-  return { left: left / scale, maxHeight: maxHeight / scale,
-    maxWidth: Math.max(0, viewport.width - margin * 2) / scale, placement, top: top / scale };
-}
-
-function clamp(value: number, minimum: number, maximum: number) {
-  return Math.min(Math.max(value, minimum), maximum);
 }

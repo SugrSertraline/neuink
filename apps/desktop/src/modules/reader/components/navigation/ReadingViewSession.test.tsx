@@ -2,7 +2,21 @@
 import { cleanup, fireEvent, render, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ReadingViewSession, PdfViewControls, publishReadingView, subscribeReadingView } from './ReadingViewSession';
-afterEach(cleanup);
+afterEach(() => { cleanup(); localStorage.clear(); });
+it('remembers the display mode across restarts without sharing it with another view or workspace', () => {
+  const view = (root = 'a', viewId?: string) => <ReadingViewSession workspaceRoot={root} active surface={{ kind: 'pdf', entryId: 'paper', viewId }}><PdfViewControls /></ReadingViewSession>;
+  const ui = render(view());
+  fireEvent.click(ui.getByRole('button', { name: '译文' }));
+  ui.unmount();
+  const reopened = render(view());
+  expect(reopened.getByRole('button', { name: '译文' }).getAttribute('aria-pressed')).toBe('true');
+  reopened.unmount();
+  const other = render(view('b'));
+  expect(other.getByRole('button', { name: '原文' }).getAttribute('aria-pressed')).toBe('true');
+  other.unmount();
+  const copied = render(view('a', 'copy'));
+  expect(copied.getByRole('button', { name: '原文' }).getAttribute('aria-pressed')).toBe('true');
+});
 it('keeps display mode local while same-document position linking has no switch', () => {
   const result = render(<><section data-testid="a"><ReadingViewSession workspaceRoot="w" active surface={{ kind: 'pdf', entryId: 'a' }}><PdfViewControls />A</ReadingViewSession></section><section data-testid="b"><ReadingViewSession workspaceRoot="w" active surface={{ kind: 'pdf', entryId: 'a', viewId: 'copy' }}><PdfViewControls />B</ReadingViewSession></section></>);
   expect(result.queryByLabelText('阅读视图设置')).toBeNull();

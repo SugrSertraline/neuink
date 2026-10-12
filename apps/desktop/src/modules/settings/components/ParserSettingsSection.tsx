@@ -74,8 +74,8 @@ export function ParserSettingsSection({ props, navigationTarget }: {
               value={props.customParserApiKey} onChange={event => props.onParserApiKeyChange(event.target.value)} />
           </div>
           <AutoParseOnImportSetting />
-          <details className="settings-advanced text-xs text-muted-foreground">
-            <summary>服务响应格式（高级）</summary>
+          <section className="settings-advanced text-xs text-muted-foreground">
+            <h4 className="text-sm font-medium">服务响应格式（高级）</h4>
             <p>服务可以返回 MinerU 兼容 JSON，也可以直接返回解析结果 ZIP。</p>
             <p className="mt-1">ZIP 响应必须满足：</p>
             <ul className="mt-1 list-disc space-y-1 pl-4">
@@ -84,7 +84,7 @@ export function ParserSettingsSection({ props, navigationTarget }: {
               <li>包含 <code>*_content_list_v2.json</code> 或 <code>content_list_v2.json</code>；也兼容 <code>*_content_list.json</code> 或 <code>content_list.json</code>。</li>
               <li><code>*_middle.json</code> 和 <code>images/</code> 可选；内容引用图片时应包含对应图片文件。</li>
             </ul>
-          </details>
+          </section>
           <p className="rounded-md border bg-muted px-3 py-2 text-xs leading-5 text-muted-foreground">
             当前解析请求地址：<span className="ml-1 break-all font-mono text-[11px]">{props.effectiveParserEndpointLabel}</span>
           </p>

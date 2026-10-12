@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { useRef, useState } from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SourceSegment } from '@/shared/types/domain';
 import { ReadingNavigationScope, useReadingNavigation, type ReadingTarget } from './ReadingNavigation';
@@ -15,8 +15,45 @@ function Harness({ target, flash }: { target: ReadingTarget; flash: (uid: string
   usePdfReadingNavigation(ref, sources, true, flash);
   return <div ref={ref} tabIndex={-1}><button onClick={() => nav.navigate(target)}>jump</button></div>;
 }
-afterEach(() => { cleanup(); vi.clearAllMocks(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.clearAllMocks(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 describe('PDF reference navigation adapter', () => {
+  it.each([false, true])('corrects late PDF geometry while giving user input priority (interrupted: %s)', async interrupted => {
+    let resize!: () => void;
+    const disconnect = vi.fn();
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) { resize = callback; }
+      observe() {}
+      disconnect = disconnect;
+    });
+    const flash = vi.fn();
+    function DelayedPage() {
+      const ref = useRef<HTMLDivElement>(null), nav = useReadingNavigation()!;
+      usePdfReadingNavigation(ref, sources, true, flash);
+      return <div ref={ref} data-testid="viewport">
+        <div data-pdf-page-index="0"><div data-guide="pdf-page" /></div>
+        <button onClick={() => nav.navigate({ pageIdx: 3 })}>jump</button><button onClick={nav.back}>back</button>
+      </div>;
+    }
+    const ui = render(<ReadingNavigationScope><DelayedPage /></ReadingNavigationScope>);
+    const viewport = ui.getByTestId('viewport'), page = viewport.querySelector<HTMLElement>('[data-pdf-page-index]')!;
+    let height = 1000;
+    viewport.scrollTop = 250;
+    vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 500, 500));
+    vi.spyOn(page, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, -viewport.scrollTop, 500, height));
+    Object.defineProperty(viewport, 'scrollTo', { configurable: true, value: (options: ScrollToOptions) => { viewport.scrollTop = options.top ?? 0; } });
+    fireEvent.click(ui.getByText('jump'));
+    viewport.scrollTop = 0;
+    fireEvent.click(ui.getByText('back'));
+    expect(viewport.scrollTop).toBe(250);
+    if (interrupted) { fireEvent.wheel(viewport); viewport.scrollTop = 400; }
+    height = 900;
+    page.firstElementChild!.setAttribute('data-pdf-geometry-ready', 'true');
+    act(() => resize());
+    if (interrupted) await act(async () => { await new Promise(resolve => requestAnimationFrame(resolve)); });
+    await waitFor(() => expect(viewport.scrollTop).toBe(interrupted ? 400 : 225));
+    expect(disconnect).toHaveBeenCalled();
+    ui.unmount();
+  });
   it('restores zoom before calculating the original page offset', async () => {
     const flash = vi.fn();
     function ZoomReader() {

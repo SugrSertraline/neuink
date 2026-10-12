@@ -1,4 +1,5 @@
 import { generateText } from 'ai';
+import { translateSelectionService } from '@/shared/ipc/selectionTranslationApi';
 
 import { getLlmSettings, readEntryAssistantContext } from '@/shared/ipc/assistantApi';
 import {
@@ -54,6 +55,8 @@ export async function translateTextSelection({
     successMessage: `选区翻译完成：${entryTitle}`,
     failureMessage: '选区翻译未完成，请返回原选区重试。'
   }, async () => {
+    const serviceTranslation = await translateSelectionService(sourceText);
+    if (serviceTranslation !== null) return serviceTranslation;
     const settings = await getLlmSettings();
     const profile = settings.translation_profile;
     if (!profile) {

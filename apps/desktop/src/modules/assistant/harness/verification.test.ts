@@ -35,6 +35,18 @@ const snapshot = {
   warnings: []
 } as unknown as AssistantContextSnapshot;
 
+it.each([false, true])('retains host-verified external citations without relaxing source policy after failures: %s', hadRecoverableFailures => {
+  const grounded = { answer: '根据[原文](https://example.org/paper)。', sources: [], externalCitationUrls: ['https://example.org/paper'], hadRecoverableFailures };
+  const plan = { ...notePlan(false), needsNoteProposal: false, deliverables: ['chat_answer'] as AssistantTaskPlan['deliverables'], citationPolicy: 'required' as const };
+  const verify = (sourcePolicy: AgentInvocationPlan['sourcePolicy']) => verifyHarnessResult({
+    activeExecution, grounded, invocationPlan: { ...invocationPlan, sourcePolicy }, plan, snapshot
+  });
+  expect(verify('mixed').errors).toEqual([]);
+  expect(verify('workspace_only').errors).toContain('The task required workspace-only evidence, but an external source was included.');
+  expect(verify('sciverse_only').errors.length).toBeGreaterThan(0);
+  expect(verifyHarnessResult({ activeExecution, grounded: { ...grounded, hadRecoverableFailures: false, externalCitationUrls: [] }, invocationPlan, plan, snapshot }).errors.length).toBeGreaterThan(0);
+});
+
 describe('verifyHarnessResult note citations', () => {
   it('keeps a failure explanation instead of rejecting missing deliverables again at delivery', () => {
     const grounded: GroundedAnswer = { answer: '读取失败，没有足够证据生成笔记。', sources: [], hadRecoverableFailures: true };

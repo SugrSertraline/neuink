@@ -1,6 +1,7 @@
 import katex from 'katex';
 
 import type { SegmentType } from '@/shared/types/domain';
+import { repairOcrArrayMath } from './sourceSnapshotArrayMath';
 
 export function normalizeMathMarkdown(value: string, segmentType?: SegmentType) {
   if (segmentType === 'code') {
@@ -11,13 +12,24 @@ export function normalizeMathMarkdown(value: string, segmentType?: SegmentType) 
     return normalizeDisplayMathMarkdown(value);
   }
 
-  const input = stripBrokenParagraphMath(value);
+  // Code is literal even when it contains math delimiters or LaTeX examples.
+  return value.split(/(`{3,}[^\n]*\n[\s\S]*?\n`{3,}|~{3,}[^\n]*\n[\s\S]*?\n~{3,}|`+[^`]*`+)/g)
+    .map((part, index) => index % 2 ? part : normalizeParagraphMath(part))
+    .join('');
+}
+
+function normalizeParagraphMath(value: string) {
+  const input = stripBrokenParagraphMath(repairOcrArrayMath(value));
   const normalized = input
-    .replace(/\\\[([\s\S]+?)\\\]/g, (_match, body: string) => `\n$$${body.trim()}$$\n`)
+    .replace(/\\\[([\s\S]+?)\\\]/g, (_match, body: string) => `\n$$\n${body.trim()}\n$$\n`)
     .replace(/\\\(([\s\S]+?)\\\)/g, (_match, body: string) => `$${body.trim()}$`);
-  const repaired = promoteLongInlineMath(
-    repairLooseInlineMath(wrapBareLatexFragments(repairBracketedDisplayMath(normalized)))
-  );
+  // Explicit delimiters own inline/display layout; only inferred formulas need
+  // the OCR repair and long-formula promotion heuristics.
+  const repaired = splitProtectedMath(normalized).map((part) =>
+    isProtectedMathPart(part) ? displayTaggedMath(part) : promoteLongInlineMath(
+      repairLooseInlineMath(wrapBareLatexFragments(repairBracketedDisplayMath(part)))
+    )
+  ).join('');
 
   if (
     !containsMathDelimiter(repaired) &&
@@ -29,9 +41,15 @@ export function normalizeMathMarkdown(value: string, segmentType?: SegmentType) 
   return repaired;
 }
 
+function displayTaggedMath(value: string) {
+  // remark-math treats single-line $$ as inline; equation tags need a block.
+  return value.startsWith('$$') && /\\tag\b/.test(value) && !value.includes('\n')
+    ? `\n$$\n${value.slice(2, -2).trim()}\n$$\n` : value;
+}
+
 function normalizeDisplayMathMarkdown(value: string) {
   const body = unwrapDisplayMathDelimiters(value.trim());
-  const normalized = normalizeMineruMathContent(body);
+  const normalized = normalizeMineruMathContent(repairOcrArrayMath(body));
   return normalized ? `$$\n${normalized}\n$$` : '';
 }
 
@@ -50,15 +68,17 @@ function unwrapDisplayMathDelimiters(value: string) {
 }
 
 function stripBrokenParagraphMath(value: string) {
-  const restore = (body: string, delimiter: string) =>
-    isPlausibleParagraphMath(body) ? `${delimiter}${body}${delimiter}` : body;
-
-  return value
-    .replace(/\$\$([\s\S]*?)\$\$/g, (_match, body: string) => restore(body, '$$'))
-    .replace(/\$([^$\n]{1,1200})\$/g, (_match, body: string) => restore(body, '$'))
-    .replace(/\$\$/g, '')
-    .replace(/\\left\(/g, '(')
-    .replace(/\\right\)/g, ')');
+  return splitProtectedMath(value).map((part) => {
+    if (isProtectedMathPart(part)) {
+      const delimiter = part.startsWith('$$') ? '$$' : '$';
+      const body = part.slice(delimiter.length, -delimiter.length);
+      return isPlausibleParagraphMath(body) || /\\begin\s*\{array\}/.test(body) || canRenderLatex(body, delimiter === '$$')
+        ? part : body;
+    }
+    return part.replace(/\$\$/g, '')
+      .replace(/\\left\(/g, '(')
+      .replace(/\\right\)/g, ')');
+  }).join('');
 }
 
 function isPlausibleParagraphMath(value: string) {
@@ -100,7 +120,10 @@ function repairLooseInlineMath(value: string) {
 }
 
 function wrapBareLatexFragments(value: string) {
-  const withEnvironments = splitProtectedMath(value)
+  const withArrays = splitProtectedMath(value).map((part) =>
+    isProtectedMathPart(part) ? part : wrapStandaloneArrayEquations(part)
+  ).join('');
+  const withEnvironments = splitProtectedMath(withArrays)
     .map((part) =>
       isProtectedMathPart(part) ? part : wrapBareLatexEnvironments(part)
     )
@@ -111,6 +134,21 @@ function wrapBareLatexFragments(value: string) {
       isProtectedMathPart(part) ? part : wrapBareLatexCommandRuns(part)
     )
     .join('');
+}
+
+function wrapStandaloneArrayEquations(value: string) {
+  // Keep the lhs, delimiters and equation number together. Wrapping just the
+  // array environment leaves \left/\right and \tag outside the math boundary.
+  return value.replace(/(^|\n)([^\n]*?\\begin\s*\{array\}[\s\S]*?\\end\s*\{array\}[^\n]*)(?=\n|$)/g,
+    (match, prefix: string, expression: string) => {
+      const normalized = normalizeMineruMathContent(expression);
+      const outsideCommands = normalized
+        .replace(/\\begin\s*\{array\}\s*\{[clr|:\s]+\}|\\end\s*\{array\}/g, '')
+        .replace(/\\(?:text(?:bf|it|rm|sf|tt)?|mathrm|operatorname|tag)\{[^{}]*\}/g, '')
+        .replace(/\\[A-Za-z]+/g, '');
+      if (/[`$]|[\p{Script=Han}]|[A-Za-z]{3,}/u.test(outsideCommands) || !canRenderLatex(normalized, true)) return match;
+      return `${prefix}\n$$\n${normalized}\n$$\n`;
+    });
 }
 
 function wrapBareLatexEnvironments(value: string) {
@@ -134,7 +172,7 @@ function wrapBareLatexCommandRuns(value: string) {
       continue;
     }
 
-    const start = findBareLatexStart(value, match.index);
+    const start = Math.max(cursor, findBareLatexStart(value, match.index));
     const maxEnd = findBareLatexEnd(value, match.index + match[0].length);
     const candidate = findRenderableBareLatexCandidate(
       value,
@@ -164,8 +202,14 @@ function findBareLatexStart(value: string, commandIndex: number) {
     value.lastIndexOf('?', commandIndex - 1),
     value.lastIndexOf('!', commandIndex - 1)
   );
-  const boundary = sentenceBoundary >= 0 ? sentenceBoundary + 1 : 0;
+  // A Chinese explanation is a boundary too, even without whitespace.
+  const proseBoundary = [...value.slice(0, commandIndex).matchAll(/[\p{Script=Han}，。；、！？（）]/gu)].pop()?.index ?? -1;
+  const boundary = Math.max(sentenceBoundary, proseBoundary) + 1;
   const prefix = value.slice(boundary, commandIndex);
+  const adjacentVariable = prefix.match(/(?:^|[^A-Za-z0-9_\\])([A-Za-z])\s*$/);
+  if (adjacentVariable && /^\\(?:in|notin|times|cdot|leq|geq|neq)\b/.test(value.slice(commandIndex))) {
+    return commandIndex - adjacentVariable[1].length - (prefix.match(/\s*$/)?.[0].length ?? 0);
+  }
   const mathStart = firstLikelyMathStart(prefix);
 
   if (mathStart === null) {
@@ -215,6 +259,10 @@ function findBareLatexEnd(value: string, afterCommandIndex: number) {
     }
 
     if (braceDepth === 0) {
+      if (/[\p{Script=Han}，。；、！？（）]/u.test(char) ||
+        (char === '.' && !/\d/.test(value[index + 1] ?? ''))) {
+        break;
+      }
       if (/[.!?]/.test(char) && /^\s+[A-Z]/.test(value.slice(index + 1))) {
         break;
       }
@@ -242,7 +290,8 @@ function findRenderableBareLatexCandidate(
 
   for (const end of ends) {
     const raw = value.slice(start, end).trim();
-    const normalized = normalizeMineruMathContent(raw);
+    // OCR/Markdown exports sometimes escape a subscript followed by a group.
+    const normalized = normalizeMineruMathContent(raw.replace(/\\_\s*(?=\{)/g, '_'));
 
     if (
       looksLikeBareLatexCandidate(normalized) &&
@@ -384,8 +433,8 @@ function repairVerticalMathFragments(value: string) {
 }
 
 function promoteLongInlineMath(value: string) {
-  return value.replace(/\$([^$\n]{64,})\$/g, (match, body: string) =>
-    shouldPromoteInlineMath(body) ? `\n$$${compactLooseMathExpression(body)}$$\n` : match
+  return value.replace(/(\$\$[\s\S]*?\$\$)|\$([^$\n]{64,})\$/g, (match, display: string | undefined, body: string) =>
+    !display && shouldPromoteInlineMath(body) ? `\n$$${compactLooseMathExpression(body)}$$\n` : match
   );
 }
 
@@ -436,7 +485,9 @@ function normalizeMineruMathContent(value: string) {
     .replace(/\s*([_^])\s*/g, '$1')
     .replace(/\{\s*([^{}]+?)\s*\}/g, (_match, body: string) => `{${body.trim()}}`)
     .replace(/\s*([,:;=+\-*/])\s*/g, '$1')
-    .replace(/\s*(\\(?:rightarrow|Rightarrow|leftarrow|in|notin|geq|leq|neq))\s*/g, '$1')
+    .replace(/\s*(\\(?:rightarrow|Rightarrow|leftarrow|in|notin|geq|leq|neq))\b\s*/g,
+      (_match, command: string, offset: number, source: string) =>
+        command + (/[A-Za-z]/.test(source[offset + _match.length] ?? '') ? ' ' : ''))
     .replace(/[ \t]{2,}/g, ' ')
     .trim();
 }

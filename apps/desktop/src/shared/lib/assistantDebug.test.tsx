@@ -3,6 +3,7 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ASSISTANT_DEBUG_STORAGE_KEY, assistantErrorDiagnostic, formatAssistantError, formatAssistantToolSummary, readAssistantDebug, setAssistantDebug, useAssistantDebug } from './assistantDebug';
 import { ASSISTANT_READ_FAILURES } from './assistantReadFailure';
+import { ASSISTANT_MODEL_BILLING_ERROR, safeAssistantModelError } from './assistantModelErrors';
 
 beforeEach(() => { setAssistantDebug(false); window.localStorage.clear(); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllEnvs(); setAssistantDebug(false); window.localStorage.clear(); });
@@ -40,6 +41,18 @@ describe('local assistant debug preference', () => {
 });
 
 describe('safe assistant error presentation', () => {
+  it('explains billing failures before and after persistence without exposing provider details', () => {
+    const failure = Object.assign(new Error('private-provider-body'), { statusCode: 402 });
+    expect(formatAssistantError(failure)).toBe(ASSISTANT_MODEL_BILLING_ERROR);
+    expect(formatAssistantError(JSON.parse(JSON.stringify(safeAssistantModelError(failure))))).toBe(ASSISTANT_MODEL_BILLING_ERROR);
+    expect(assistantErrorDiagnostic(failure)).toBe('模型服务余额或额度不足 · HTTP 402');
+    expect(formatAssistantError('Insufficient Balance')).toBe(ASSISTANT_MODEL_BILLING_ERROR);
+    expect(formatAssistantError(failure, { fallback: '工具未完成，助手正在处理。' })).toBe('工具未完成，助手正在处理。');
+    expect(formatAssistantError(failure, { fallback: '本次执行已停止，部分操作未完成；请先核对已有结果。' })).toBe('本次执行已停止，部分操作未完成；请先核对已有结果。');
+    expect(safeAssistantModelError({ statusCode: 401, message: '402' })).toBeNull();
+    expect(safeAssistantModelError(`${ASSISTANT_MODEL_BILLING_ERROR} private body`)).toBeNull();
+    expect(safeAssistantModelError({ get statusCode() { throw new Error('private'); } })).toBeNull();
+  });
   const raw = 'Timeout HTTP 504 Authorization: Bearer sk-secret X-API-Key: private-key C:\\Users\\Alice\\private.pdf /home/alice/private <html>remote private body</html>';
   it('keeps actionable fixed read guidance after completion without exposing arbitrary lookalikes', () => {
     const safe = ASSISTANT_READ_FAILURES.noText;

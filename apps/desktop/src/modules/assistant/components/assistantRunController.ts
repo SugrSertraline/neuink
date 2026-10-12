@@ -1,6 +1,10 @@
 import type { ApplicationActions } from '../runtime/applicationActions';
+import { rejectedAnswerContent } from './rejectedAnswerContent';
 import { requestToolApproval } from '../runtime/toolApproval';
+import { AgentStoppedError } from '../agent-core/agent';
 import { requestUserInput } from '../runtime/userInput';
+import { runLocalAgentHarness } from '../local-agent/runner';
+import { selectionLocalProvider, createLocalSession, conversationLocalSession } from '../local-agent/session';
 import type {
   Dispatch,
   MutableRefObject,
@@ -45,7 +49,7 @@ import {
   mergeScopeWithContextEntries,
 } from "./assistantScope";
 import {
-  buildAssistantMessageParts,
+  buildAssistantMessageParts as buildBaseMessageParts,
   createOptimisticMessage,
   createOptimisticMessageId,
   mergeToolTraceEvent,
@@ -186,6 +190,13 @@ export async function runAssistantPanelTask({
   let draftPersistPromise: Promise<void> = Promise.resolve();
   let acceptingEvents = true;
   let resultDelivered = false;
+  const localProvider = conversationLocalSession(conversation)?.provider ?? selectionLocalProvider(selectedProfile.id);
+  let localSession = localProvider ? createLocalSession(conversation,localProvider) : null;
+  const buildAssistantMessageParts = (input: Parameters<typeof buildBaseMessageParts>[0]) => {
+    const parts = buildBaseMessageParts(input);
+    if (localSession) parts.push({ ...localSession });
+    return parts;
+  };
   try {
     const conversationMessages = conversation?.messages ?? [];
     const baseScope = assistantRunBaseScope({
@@ -370,16 +381,21 @@ export async function runAssistantPanelTask({
     };
 
     const runEntries = entries;
-    const grounded = await runAssistantHarness({
+    const execute = localSession ? (options: Parameters<typeof runAssistantHarness>[0]) => runLocalAgentHarness(options, localSession!, session => {
+      if (!acceptingEvents || runAbortController.signal.aborted) return;
+      localSession = session;
+      persistAssistantDraft(true);
+    }) : runAssistantHarness;
+    const grounded = await execute({
       resumeExecutionId,
       applicationActions,
       requestUserInput: async (request, signal) => {
         try { return await requestUserInput(root, currentConversation.id)(request, signal); }
-        catch (error) { runAbortController.abort(error); throw error; }
+        catch (error) { if (!signal?.aborted) runAbortController.abort(error); throw error; }
       },
       requestToolApproval: async (request, signal) => {
         const approved = await requestToolApproval(root, currentConversation.id)(request, signal);
-        if (!approved) runAbortController.abort(new Error('用户已拒绝本次操作，任务已停止。'));
+        if (!approved) runAbortController.abort(new AgentStoppedError('用户已拒绝本次操作，任务已停止，未执行待确认操作。'));
         return approved;
       },
       abortSignal: runAbortController.signal,
@@ -627,11 +643,15 @@ export async function runAssistantPanelTask({
     }
     const failedAgentRun =
       caught instanceof AssistantHarnessError ? caught.agentRun : undefined;
+    const stopped = runAbortController.signal.aborted;
+    const stopMessage = '任务已停止，未继续执行后续操作。';
+    const terminalError = stopped ? null : caught instanceof Error ? caught.message : String(caught);
     if (root && persistedConversationId && persistedAssistantMessageId) {
       const conversationId = persistedConversationId;
       const assistantMessageId = persistedAssistantMessageId;
       const errorMessage = caught instanceof Error ? caught.message : String(caught);
-      const fallbackContent = streamedAnswer;
+      const fallbackContent = stopped ? [streamedAnswer, stopMessage].filter(Boolean).join('\n\n')
+        : rejectedAnswerContent(errorMessage, assistantToolEvents) ?? streamedAnswer;
       const fallbackParts = buildAssistantMessageParts({
         agentRun: failedAgentRun,
         content: fallbackContent,
@@ -640,7 +660,7 @@ export async function runAssistantPanelTask({
           caught instanceof AssistantHarnessError ? caught.taskState : undefined,
         toolEvents: assistantToolEvents,
       });
-      fallbackParts.push({
+      if (!stopped) fallbackParts.push({
         message: errorMessage,
         type: "error",
       });
@@ -660,7 +680,7 @@ export async function runAssistantPanelTask({
           { content: fallbackContent, parts: fallbackParts, tool_events: assistantToolEvents },
           conversationId,
         ),
-        error: errorMessage,
+        error: terminalError,
         streamingMessageId: null,
       });
       await updateConversationMessage(root, conversationId, assistantMessageId, {
@@ -683,9 +703,9 @@ export async function runAssistantPanelTask({
     }
     setOptimisticMessages([]);
     setStreamingMessageId(null);
-    setError(caught instanceof Error ? caught.message : String(caught));
+    setError(terminalError);
     syncAssistantBackgroundRunState({ abortController: runAbortController,
-      error: caught instanceof Error ? caught.message : String(caught), streamingMessageId: null });
+      error: terminalError, streamingMessageId: null });
   } finally {
     acceptingEvents = false;
     if (streamRenderTimer !== null) {

@@ -120,7 +120,7 @@ pub fn open_dev_workspace<R: Runtime>(
     };
     remember_workspace(&mut settings, workspace.layout().root());
     write_settings(&app, &settings)?;
-    open_workspace_response(workspace)
+    open_workspace_response(&app, workspace)
 }
 
 #[tauri::command]
@@ -212,7 +212,7 @@ pub fn create_and_set_workspace_root<R: Runtime>(
     let mut settings = read_settings(&app)?;
     set_active_workspace(&mut settings, workspace.layout().root());
     write_settings(&app, &settings)?;
-    open_workspace_response(workspace)
+    open_workspace_response(&app, workspace)
 }
 
 #[tauri::command]
@@ -229,7 +229,7 @@ pub fn reset_workspace_root<R: Runtime>(
     settings.workspace_root = None;
     remember_workspace(&mut settings, workspace.layout().root());
     write_settings(&app, &settings)?;
-    open_workspace_response(workspace)
+    open_workspace_response(&app, workspace)
 }
 
 #[tauri::command]
@@ -286,7 +286,7 @@ fn switch_workspace_root_impl<R: Runtime>(
     let mut settings = read_settings(app)?;
     set_active_workspace(&mut settings, workspace.layout().root());
     write_settings(app, &settings)?;
-    open_workspace_response(workspace)
+    open_workspace_response(app, workspace)
 }
 
 fn inspect_workspace_path_value(
@@ -406,9 +406,15 @@ fn same_path_text(left: &str, right: &str) -> bool {
     }
 }
 
-fn open_workspace_response(
+fn open_workspace_response<R: Runtime>(
+    app: &AppHandle<R>,
     workspace: neuink_workspace::Workspace,
 ) -> Result<OpenDevWorkspaceResponse, String> {
+    // Picker grants last only for that process. Restore access to this verified
+    // library on startup too, including UNC shares and arbitrary mapped drives.
+    app.asset_protocol_scope()
+        .allow_directory(workspace.layout().root(), true)
+        .map_err(|_| "无法启用资料库图片访问，请重新打开资料库。".to_string())?;
     let entries = workspace
         .list_entries()
         .map_err(|error| error.to_string())?;
@@ -528,6 +534,9 @@ fn copy_dir_recursive(from: &Path, to: &Path) -> Result<(), String> {
 #[cfg(windows)]
 fn display_path(path: &Path) -> PathBuf {
     let text = path.to_string_lossy();
+    if let Some(stripped) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{stripped}"));
+    }
     if let Some(stripped) = text.strip_prefix(r"\\?\") {
         return PathBuf::from(stripped);
     }
@@ -542,6 +551,59 @@ fn display_path(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn network_workspace_paths_remain_absolute_when_saved() {
+        for (input, expected) in [
+            (r"\\?\UNC\office\NeuInk\资料库", r"\\office\NeuInk\资料库"),
+            (r"\\office\NeuInk\资料库", r"\\office\NeuInk\资料库"),
+            (r"\\?\D:\neuink_data", r"D:\neuink_data"),
+            (r"Z:\", r"Z:\"),
+        ] {
+            let root = display_path(Path::new(input));
+            assert_eq!(root, PathBuf::from(expected));
+            assert!(root.is_absolute());
+            let mut settings = AppSettings::default();
+            set_active_workspace(&mut settings, Path::new(input));
+            let saved = serde_json::to_vec(&settings).expect("serialize settings");
+            let restored: AppSettings = serde_json::from_slice(&saved).expect("restore settings");
+            assert_eq!(restored.workspace_root.as_deref(), Some(expected));
+            assert_eq!(restored.recent_workspaces[0].root, expected);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "Requires an accessible localhost administrative SMB share; synthetic workspace only"]
+    fn real_smb_workspace_round_trip_smoke() {
+        let temp = tempfile::tempdir().expect("synthetic workspace directory");
+        let local = temp.path().join("library");
+        neuink_workspace::Workspace::create(&local).expect("create synthetic workspace");
+        let absolute = display_path(&fs::canonicalize(&local).expect("canonical local path"));
+        let text = absolute.to_str().expect("local path text");
+        assert_eq!(text.as_bytes().get(1), Some(&b':'));
+        let remote = PathBuf::from(format!(r"\\localhost\{}${}", &text[..1], &text[2..]));
+        let inspected = inspect_workspace_path_value(&remote, None).expect("inspect over SMB");
+        assert!(matches!(inspected.kind, WorkspacePathKind::ValidWorkspace));
+        assert!(inspected.root.is_absolute());
+        let mut settings = AppSettings::default();
+        set_active_workspace(&mut settings, &inspected.root);
+        let saved = serde_json::to_vec(&settings).expect("serialize network workspace");
+        let restored: AppSettings =
+            serde_json::from_slice(&saved).expect("restore network workspace");
+        let reopened = neuink_workspace::Workspace::open_existing(restored.workspace_root.unwrap())
+            .expect("reopen saved SMB workspace");
+        let shared_note = reopened.layout().root().join("connection-test.md");
+        for contents in [b"first write".as_slice(), b"updated from remote".as_slice()] {
+            neuink_workspace::atomic_write(&shared_note, contents)
+                .expect("atomic write through SMB");
+            assert_eq!(
+                fs::read(local.join("connection-test.md")).unwrap(),
+                contents
+            );
+        }
+    }
 
     fn test_root(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(

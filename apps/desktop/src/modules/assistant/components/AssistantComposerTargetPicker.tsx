@@ -20,10 +20,11 @@ const kinds: Array<{ kind: ComposerPickerKind; label: string }> = [
 ];
 
 /** Point-and-click context selection. The editor owns the inserted mention. */
-export function AssistantComposerTargetPicker<T>({ items, disabled, onSelect }: {
+export function AssistantComposerTargetPicker<T>({ items, disabled, onSelect, onOpenChange }: {
   items: ComposerPickerItem<T>[];
   disabled: boolean;
   onSelect: (value: T) => void;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<ComposerPickerKind>('tag');
@@ -37,8 +38,9 @@ export function AssistantComposerTargetPicker<T>({ items, disabled, onSelect }: 
   }, [items, kind, query]);
   const virtualizer = useVirtualizer({ count: matches.length, getScrollElement: () => scrollRef.current,
     estimateSize: () => 48, initialRect: { width: 384, height: 224 }, overscan: 5 });
-  const choose = (value: T) => { selectedRef.current = true; onSelect(value); setOpen(false); setQuery(''); };
-  return <Popover open={open && !disabled} onOpenChange={value => { setOpen(value); if (!value) setQuery(''); }}>
+  const changeOpen = (value: boolean) => { setOpen(value); onOpenChange?.(value); if (!value) setQuery(''); };
+  const choose = (value: T) => { selectedRef.current = true; onSelect(value); changeOpen(false); };
+  return <Popover open={open && !disabled} onOpenChange={changeOpen}>
     <PopoverTrigger asChild><Button data-guide="context-picker" size="xs" variant="outline" type="button" disabled={disabled} aria-label="选择元素">选择元素</Button></PopoverTrigger>
     <PopoverContent viewportAligned align="start" side="top" className="w-[min(24rem,calc(100vw-2rem))] min-w-0 gap-2 p-2"
       onCloseAutoFocus={event => { if (selectedRef.current) event.preventDefault(); selectedRef.current = false; }}>

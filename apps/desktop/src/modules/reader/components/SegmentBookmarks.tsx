@@ -50,22 +50,40 @@ export function usePublishSegmentNotes(notes: SegmentBlockNote[]) {
   useEffect(() => { replace?.(notes); }, [notes, replace]);
 }
 
-export function SegmentBookmarkButton({ segment, menu = false, disabled = false, onDone }: {
+type SegmentBookmarkButtonProps = {
   segment: SourceSegment; menu?: boolean; disabled?: boolean; onDone?: () => void;
-}) {
+  beforeRemember?: () => Promise<boolean | void> | boolean | void;
+};
+export function SegmentBookmarkButton(props: SegmentBookmarkButtonProps) {
   const bookmarks = useSegmentBookmarks();
-  if (!bookmarks) return null;
+  return bookmarks ? <SegmentBookmarkControl {...props} bookmarks={bookmarks} /> : null;
+}
+function SegmentBookmarkControl({ segment, menu = false, disabled = false, onDone, beforeRemember, bookmarks }:
+  SegmentBookmarkButtonProps & { bookmarks: NonNullable<ReturnType<typeof useSegmentBookmarks>> }) {
+  const [savingDraft, setSavingDraft] = useState(false);
+  const pendingDraft = useRef(false);
+  const { notify } = useToast();
   const uid = logicalSegmentUid(segment);
   const marked = bookmarks.notes.some(note => (note.segment_uid === uid || note.segment_uid === segment.uid) && note.bookmarked);
-  const busy = bookmarks.pending.has(uid);
+  const busy = bookmarks.pending.has(uid) || savingDraft;
   const label = marked ? '取消收藏位置' : '记住此处';
   const icon = busy ? <Loader2 size={14} className="animate-spin" aria-hidden="true" />
     : marked ? <BookmarkCheck size={14} aria-hidden="true" /> : <Bookmark size={14} aria-hidden="true" />;
-  const toggle = () => { void bookmarks.set(uid, !marked); onDone?.(); };
-  if (menu) return <SegmentMenuButton icon={icon} label={label} disabled={disabled || busy} onClick={toggle} />;
+  const toggle = async () => {
+    if (busy || pendingDraft.current) return;
+    pendingDraft.current = true; setSavingDraft(true);
+    try {
+      if (!marked && beforeRemember && await beforeRemember() === false) return;
+      const saved = bookmarks.set(uid, !marked); onDone?.(); await saved;
+    } catch (error) { notify({ tone: 'danger', title: '保存位置失败', description: String(error) }); }
+    finally { pendingDraft.current = false; setSavingDraft(false); }
+  };
+  if (menu) return <SegmentMenuButton icon={icon} label={label}
+    description={busy ? '正在保存…' : marked ? '取消收藏位置，保留原笔记' : '收藏原文位置，方便继续阅读'}
+    disabled={disabled || busy} onClick={() => void toggle()} />;
   return <Button size="xs" variant="ghost"
     aria-label={label} aria-pressed={marked} disabled={disabled || busy}
-    onClick={event => { event.stopPropagation(); toggle(); }}>
+    onClick={event => { event.stopPropagation(); void toggle(); }}>
     {icon}
     {label}
   </Button>;

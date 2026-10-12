@@ -16,6 +16,20 @@ afterEach(() => {
 });
 
 describe('ChatMessage performance boundaries', () => {
+  it('offers reading consistently for completed replies and not for user, empty or streaming messages', () => {
+    const actions = { root: 'root', openReply: vi.fn(), openSource: vi.fn(), addSciverseSource: vi.fn() };
+    const show = (message: ConversationMessage, streaming: boolean) => <AssistantReplyActionsContext.Provider value={actions}>
+      <ChatMessage message={message} streaming={streaming} onOpenSource={vi.fn()} />
+    </AssistantReplyActionsContext.Provider>;
+    const ui = render(show(createMessage(), false));
+    expect(ui.getByRole('button', { name: '展开阅读' }).getAttribute('data-variant')).toBe('outline');
+    ui.rerender(show(createMessage(), true));
+    expect(ui.queryByRole('button', { name: '展开阅读' })).toBeNull();
+    ui.rerender(show({ ...createMessage(), role: 'user' }, false));
+    expect(ui.queryByRole('button', { name: '展开阅读' })).toBeNull();
+    ui.rerender(show({ ...createMessage(), content: '  ' }, false));
+    expect(ui.queryByRole('button', { name: '展开阅读' })).toBeNull();
+  });
   it('opens completed replies through workspace navigation rather than a dialog', () => {
     const openReply = vi.fn();
     const ui = render(<AssistantReplyActionsContext.Provider value={{ root: 'root', openReply, openSource: vi.fn(), addSciverseSource: vi.fn() }}>

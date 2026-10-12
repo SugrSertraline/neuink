@@ -161,7 +161,10 @@ impl Workspace {
                     }
                 }
 
-                let segments = self.read_segments(&entry.id)?;
+                let segments: Vec<_> = self.read_segments(&entry.id)?.into_iter().flat_map(|segment| {
+                    let items = neuink_domain::list_item_segments(&segment);
+                    std::iter::once(segment).chain(items)
+                }).collect();
                 let segments_by_uid = segments
                     .iter()
                     .map(|segment| (segment.uid.clone(), segment))

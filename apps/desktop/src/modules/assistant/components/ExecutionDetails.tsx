@@ -18,7 +18,8 @@ export function ExecutionDetails({ children, streaming, hasAnswer, run, events, 
   const [expanded, setExpanded] = useState(false);
   const debug = useAssistantDebug();
   const detailsId = useId();
-  const errors = events.filter(event => event.status === 'error' || Boolean(event.error));
+  const errors = events.filter(event => !event.recovered && (event.status === 'error' || Boolean(event.error)));
+  const recovered = events.some(event => event.recovered);
   const failed = run?.status === 'failed' || errors.length > 0;
   const errorNotice = assistantToolErrorNotice({ streaming, hasAnswer, runStatus: run?.status });
   const answered = errorNotice === ASSISTANT_TOOL_ANSWERED;
@@ -28,7 +29,8 @@ export function ExecutionDetails({ children, streaming, hasAnswer, run, events, 
     ? running?.toolName === 'agent.memory' ? '正在整理记录' : resolveAssistantRunStatus({
       busy: true, error: null, queued: false, streaming: hasAnswer, toolEvents: events,
     }).label
-    : run?.status === 'canceled' ? '已停止' : failed ? answered ? '已回答 · 部分操作未完成' : '本次未完成' : '执行详情';
+    : run?.status === 'canceled' ? '已停止' : failed ? answered ? '已回答 · 部分操作未完成' : '本次未完成'
+      : recovered ? '已完成 · 已纠正读取请求' : '执行详情';
   const latestError = errors[errors.length - 1]?.error
     ?? errors[errors.length - 1]?.summary
     ?? run?.nodes.find(node => node.status === 'failed')?.error;

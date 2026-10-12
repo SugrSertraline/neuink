@@ -19,7 +19,7 @@ export function ModelSettingsSection({ props }: { props: SettingsPanelLayoutProp
             <SettingsPage tab="models" title="模型与助手" description="选择助手使用的模型，管理服务商连接。">
                 <SettingsGroup title="默认模型">
                   <TaskModelSetting props={props} task="assistant" />
-                  <Button size="sm" variant="ghost" onClick={() => props.onSetActiveSettingsTab('translation')}>设置阅读翻译模型 →</Button>
+                  <Button size="sm" variant="ghost" onClick={() => props.onSetActiveSettingsTab('translation')}>设置选中文字与整体翻译 →</Button>
                 </SettingsGroup>
                 <SettingsGroup id="models-connections" title="模型连接" action={
                   <Button disabled={props.modelsUnavailable || taskBusy(props)} size="sm" type="button" variant="outline" onClick={() => {
@@ -40,7 +40,7 @@ export function ModelSettingsSection({ props }: { props: SettingsPanelLayoutProp
                           <span className="min-w-0 truncate text-[13px] font-semibold" title={profile.name}>{profile.name}</span>
                           <span className="flex flex-wrap gap-1">
                             {settings.assistant_profile_id === profile.id && <Badge variant="secondary">对话</Badge>}
-                            {settings.translation_profile_id === profile.id && <Badge variant="secondary">翻译</Badge>}
+                            {settings.translation_profile_id === profile.id && <Badge variant="secondary">整体翻译</Badge>}
                           </span>
                         </div>
                         <p className="mt-1 truncate text-xs" title={profile.model}>{profile.model}</p>

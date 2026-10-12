@@ -1,5 +1,6 @@
 import { ReadingStateRetention } from './navigation/ReadingStateRetention';
 import { ReadingViewSession } from './navigation/ReadingViewSession';
+import { readingViewStorageKey } from './navigation/readingViewStorage';
 import { jumpForSurface } from '../sourceJump';
 import { BrowserSurface, type BrowserSurfaceMetadata } from '@/modules/browser/BrowserSurface';
 import { AssistantReplyReader } from '@/modules/assistant/components/AssistantReplyReader';
@@ -74,6 +75,7 @@ import { useHeavyReaderRetention } from './useHeavyReaderRetention';
 import { hasUnsavedSegmentEditors } from './segmentEditorDirtyRegistry';
 import { useSourceBacklinks } from './useSourceBacklinks';
 import { setSegmentNoteBookmark } from '@/shared/ipc/workspaceApi';
+import { SEGMENT_BOOKMARK_CHANGED } from '@/shared/ipc/noteCatalogApi';
 
 const SettingsPanel = lazy(() => import('../../settings/components/SettingsPanel')
   .then((module) => ({ default: module.SettingsPanel })));
@@ -280,6 +282,7 @@ export function ReaderPane({
   onActiveSegmentChange,
   onApplyEntryTagPaths,
   onUpdateEntry,
+  onFetchPdf,
   onAttachPdf,
   onCreatePdfVersion,
   onImportMineruClientResult,
@@ -320,6 +323,14 @@ export function ReaderPane({
   const [segmentNoteReloadByEntryId, setSegmentNoteReloadByEntryId] = useState<
     Record<string, number>
   >({});
+  useEffect(() => {
+    const changed = (event: Event) => {
+      const detail = (event as CustomEvent<{ root: string; entryId: string }>).detail;
+      if (detail?.root === workspaceRoot) setSegmentNoteReloadByEntryId(current => ({ ...current, [detail.entryId]: (current[detail.entryId] ?? 0) + 1 }));
+    };
+    window.addEventListener(SEGMENT_BOOKMARK_CHANGED, changed);
+    return () => window.removeEventListener(SEGMENT_BOOKMARK_CHANGED, changed);
+  }, [workspaceRoot]);
   const [segmentNoteDraftsByEntryId, setSegmentNoteDraftsByEntryId] = useState<
     Record<string, Record<string, string>>
   >({});
@@ -790,7 +801,7 @@ export function ReaderPane({
         }
         onApplyEntryTagPaths={onApplyEntryTagPaths}
         onUpdateEntry={onUpdateEntry}
-        onAttachPdf={onAttachPdf}
+        onFetchPdf={onFetchPdf} onAttachPdf={onAttachPdf}
         onCreatePdfVersion={onCreatePdfVersion}
         onImportMineruClientResult={onImportMineruClientResult}
         onCreateMarkdownSourceLink={onCreateMarkdownSourceLink}
@@ -922,7 +933,6 @@ export function ReaderPane({
         onSetSegmentBookmark={async (uid, bookmarked) => {
           if (!workspaceRoot) throw new Error('请先打开资料库');
           const notes = await setSegmentNoteBookmark(workspaceRoot, parsed.entryId, uid, bookmarked);
-          setSegmentNoteReloadByEntryId(current => ({ ...current, [parsed.entryId]: (current[parsed.entryId] ?? 0) + 1 }));
           return notes;
         }}
         onDeleteSegmentNote={deleteLinkedSegmentNote}
@@ -1123,7 +1133,7 @@ export function ReaderPane({
       activeSurface || hasUnsavedSegmentEditors(key) || !isHeavyReaderSurface(surface) || !expiredHeavySurfaceKeys.has(key);
     return (
         <RelationReturnFrame visible={hasRelationsPage && relationOrigins.has(key)} onReturn={() => onOpenSurface({ kind: 'relations' })}>
-          <ReadingStateRetention key={workspaceRoot}>
+          <ReadingStateRetention key={workspaceRoot} storageKey={surface.kind === 'pdf' || surface.kind === 'reflow' ? readingViewStorageKey(workspaceRoot, key) : undefined}>
             <ReadingViewSession surface={surface} workspaceRoot={workspaceRoot} active={activeSurface}>
             {shouldMount ? renderSurface(surface, sibling, pane) : null}
             </ReadingViewSession>

@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { runLocalBackgroundJob } from '../lib/localBackgroundJobs';
+import { noteMutation, SEGMENT_BOOKMARK_CHANGED } from './noteCatalogApi';
 
 import type {
   EntryId,
@@ -647,9 +648,11 @@ export type RefreshParseStatusResponse = {
 };
 
 export async function setSegmentNoteBookmark(root: string, entryId: string, segmentUid: string, bookmarked: boolean) {
-  return invoke<SegmentBlockNote[]>('set_segment_note_bookmark', {
+  const notes = await noteMutation(root, invoke<SegmentBlockNote[]>('set_segment_note_bookmark', {
     request: { root, entry_id: entryId, segment_uid: segmentUid, bookmarked }
-  });
+  }));
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(SEGMENT_BOOKMARK_CHANGED, { detail: { root, entryId } }));
+  return notes;
 }
 
 export type PdfReaderResponse = {
@@ -1093,14 +1096,14 @@ export async function upsertSegmentNote(
   segmentUid: string,
   text: string
 ): Promise<SegmentBlockNote[]> {
-  return invoke<SegmentBlockNote[]>('upsert_segment_note', {
+  return noteMutation(root, invoke<SegmentBlockNote[]>('upsert_segment_note', {
     request: {
       root,
       entry_id: entryId,
       segment_uid: segmentUid,
       text
     }
-  });
+  }));
 }
 
 export async function listAnnotations(root: string): Promise<AnnotationCatalogRecord[]> {
@@ -1230,13 +1233,13 @@ export async function deleteSegmentNote(
   entryId: EntryId,
   segmentUid: string
 ): Promise<SegmentBlockNote[]> {
-  return invoke<SegmentBlockNote[]>('delete_segment_note', {
+  return noteMutation(root, invoke<SegmentBlockNote[]>('delete_segment_note', {
     request: {
       root,
       entry_id: entryId,
       segment_uid: segmentUid
     }
-  });
+  }));
 }
 
 export async function getSearchIndexBuildStatus(

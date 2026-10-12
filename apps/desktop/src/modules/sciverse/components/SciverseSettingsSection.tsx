@@ -13,7 +13,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { SettingsDisclosure, SettingSwitch } from '@/modules/settings/components/SettingsPrimitives';
+import { SettingsServiceSection, SettingSwitch } from '@/modules/settings/components/SettingsPrimitives';
 import { registerSegmentEditorCloseHandler, setSegmentEditorDirty } from '@/modules/reader/components/segmentEditorDirtyRegistry';
 
 import {
@@ -300,8 +300,7 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
       : '';
 
   return (
-    <SettingsDisclosure id="tools-services" title="Sciverse" description="科学文献检索与远程全文读取，需服务 Token。"
-      onToggle={open => { if (!open) { revealEpoch.current++; setShowToken(false); setRevealedToken(null); } }}
+    <SettingsServiceSection id="tools-services" title="Sciverse" description="科学文献检索与远程全文读取，需服务 Token。"
       status={writing ? '保存中…' : tokenDraft ? '未保存' : notice?.tone === 'danger' || connectionError ? '操作失败' : busy === 'load' ? '读取中…' : loadError ? '读取失败' : !settings ? '未就绪' : settings.enabled ? '已启用' : hasToken ? '未启用' : '未配置'}>
       <div className="sciverse-settings grid min-w-0 gap-3">
         {notice && <p role={notice.tone === 'danger' ? 'alert' : 'status'} className={`text-xs [overflow-wrap:anywhere] ${notice.tone === 'danger' ? 'text-destructive' : 'text-muted-foreground'}`}>{notice.title}{notice.description ? `：${notice.description}` : ''}</p>}
@@ -502,7 +501,7 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
           </>
         ) : null}
       </div>
-    </SettingsDisclosure>
+    </SettingsServiceSection>
   );
 }
 

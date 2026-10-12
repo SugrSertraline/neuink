@@ -38,7 +38,11 @@ export async function localizeSciverseImages(
 async function replaceAsync(value: string, pattern: RegExp, replacer: (...matches: string[]) => Promise<string>) {
   const matches = [...value.matchAll(pattern)];
   if (matches.length === 0) return value;
-  const replacements = await Promise.all(matches.map(match => replacer(...match)));
+  const replacements: string[] = [];
+  // Avoid flooding /resource when an article contains dozens of figures.
+  for (let start = 0; start < matches.length; start += 3) {
+    replacements.push(...await Promise.all(matches.slice(start, start + 3).map(match => replacer(...match))));
+  }
   let offset = 0;
   return matches.reduce((result, match, index) => {
     const start = match.index! + offset;

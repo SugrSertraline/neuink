@@ -5,6 +5,13 @@ export type PdfLayerSize = {
   width: number;
 };
 
+/** PDF coordinates exclude the decorative page border, including under CSS zoom. */
+export function pdfPageContentRect(root: HTMLElement) {
+  const surface = root.querySelector<HTMLElement>('[data-guide="pdf-page"]') ?? root.querySelector<HTMLElement>('.pdf-text-layer');
+  const rect = surface?.getBoundingClientRect();
+  return rect && rect.width > 0 && rect.height > 0 ? rect : root.getBoundingClientRect();
+}
+
 export function copyPdfTextSelection(
   event: ReactClipboardEvent<HTMLDivElement>,
   textLayerElement: HTMLDivElement | null

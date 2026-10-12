@@ -17,6 +17,7 @@ import {
   type PdfRenderJobHandle
 } from './pdfRenderQueue';
 import { schedulePdfRenderContinuation } from './pdfRenderScheduler';
+import { bindPdfTextSelectionEdges } from './pdfTextSelectionEdges';
 import { PdfTranslationPageMask } from './PdfTranslationPageMask';
 import type { SegmentRegionItem } from './types';
 
@@ -62,6 +63,11 @@ function PdfCanvasPageImpl({
   const [pageSize, setPageSize] = useState<{ height: number; width: number } | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [renderAttempt, setRenderAttempt] = useState(0);
+
+  useEffect(() => {
+    const layer = textLayerRef.current;
+    if (layer && renderEnabled) return bindPdfTextSelectionEdges(layer);
+  }, [renderEnabled]);
 
   renderPriorityRef.current = renderPriority;
   searchActiveRef.current = searchActive;
@@ -324,6 +330,7 @@ function PdfCanvasPageImpl({
   return (
     <div
       data-guide="pdf-page"
+      data-pdf-geometry-ready={pageSize ? 'true' : undefined}
       className="relative z-[2] isolate bg-white"
       style={{
         height: `${pageWidth * displayAspectRatio}px`,

@@ -132,23 +132,27 @@ impl SciverseClient {
         .await
     }
 
-    pub async fn resource(
+    pub async fn resource(&self, file_name: &str) -> SciverseResult<SciverseBinaryResource> {
+        self.resource_limited(file_name, MAX_RESOURCE_BYTES).await
+    }
+
+    pub async fn resource_limited(
         &self,
-        doc_id: &str,
         file_name: &str,
+        max_bytes: u64,
     ) -> SciverseResult<SciverseBinaryResource> {
-        let doc_id = doc_id.trim();
+        let max_bytes = max_bytes.min(MAX_RESOURCE_BYTES);
         let file_name = file_name.trim();
-        if doc_id.is_empty()
-            || file_name.is_empty()
+        if file_name.is_empty()
             || file_name.starts_with('/')
             || file_name.contains('\\')
-            || file_name.split('/').any(|segment| segment == "..")
+            || file_name.contains("..")
+            || file_name.contains([':', '?', '#', '\0'])
         {
             return Err(SciverseError::Api {
                 status: StatusCode::BAD_REQUEST,
                 code: Some("INVALID_REQUEST".to_string()),
-                message: "resource requires doc_id and a safe relative file_name".to_string(),
+                message: "resource requires a safe relative file_name".to_string(),
                 request_id: None,
             });
         }
@@ -156,7 +160,7 @@ impl SciverseClient {
         let mut response = self
             .send_response(|| {
                 self.authorized(self.http.get(self.endpoint("resource")))
-                    .query(&[("doc_id", doc_id), ("file_name", file_name)])
+                    .query(&[("file_name", file_name)])
             })
             .await?;
         let content_type = response
@@ -171,22 +175,22 @@ impl SciverseClient {
             .map(ToString::to_string);
         if response
             .content_length()
-            .is_some_and(|length| length > MAX_RESOURCE_BYTES)
+            .is_some_and(|length| length > max_bytes)
         {
             return Err(SciverseError::Api {
                 status: StatusCode::PAYLOAD_TOO_LARGE,
                 code: Some("RESOURCE_TOO_LARGE".to_string()),
-                message: "Sciverse resource exceeds the 64 MB import limit".to_string(),
+                message: "Sciverse resource exceeds the import limit".to_string(),
                 request_id: None,
             });
         }
         let mut bytes = Vec::new();
         while let Some(chunk) = response.chunk().await? {
-            if bytes.len() + chunk.len() > MAX_RESOURCE_BYTES as usize {
+            if bytes.len() + chunk.len() > max_bytes as usize {
                 return Err(SciverseError::Api {
                     status: StatusCode::PAYLOAD_TOO_LARGE,
                     code: Some("RESOURCE_TOO_LARGE".to_string()),
-                    message: "Sciverse resource exceeds the 64 MB import limit".to_string(),
+                    message: "Sciverse resource exceeds the import limit".to_string(),
                     request_id: None,
                 });
             }
@@ -407,7 +411,6 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/resource"))
             .and(header("authorization", "Bearer test-token"))
-            .and(query_param("doc_id", "doc-1"))
             .and(query_param("file_name", "papers/doc-1.pdf"))
             .respond_with(
                 ResponseTemplate::new(200)
@@ -418,16 +421,40 @@ mod tests {
             .await;
 
         let client = SciverseClient::new(server.uri(), "test-token").unwrap();
-        let resource = client.resource("doc-1", "papers/doc-1.pdf").await.unwrap();
+        let resource = client.resource("papers/doc-1.pdf").await.unwrap();
 
         assert_eq!(resource.content_type.as_deref(), Some("application/pdf"));
         assert_eq!(resource.bytes, b"%PDF-1.7 test");
+        let requests = server.received_requests().await.unwrap();
+        assert!(!requests[0]
+            .url
+            .query_pairs()
+            .any(|(name, _)| name == "doc_id"));
+    }
+
+    #[tokio::test]
+    async fn image_resources_apply_the_callers_size_limit() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/resource"))
+            .and(header("authorization", "Bearer test-token"))
+            .and(query_param("file_name", "dt=2026-06-07/figure.jpg"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![0; 64]))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = SciverseClient::new(server.uri(), "test-token").unwrap();
+        let error = client
+            .resource_limited("dt=2026-06-07/figure.jpg", 32)
+            .await
+            .unwrap_err();
+        assert_eq!(error.status(), Some(StatusCode::PAYLOAD_TOO_LARGE));
     }
 
     #[tokio::test]
     async fn rejects_parent_directory_resource_paths_before_requesting() {
         let client = SciverseClient::new("https://example.com", "test-token").unwrap();
-        let error = client.resource("doc-1", "../secret.pdf").await.unwrap_err();
+        let error = client.resource("../secret.pdf").await.unwrap_err();
 
         assert_eq!(error.status(), Some(StatusCode::BAD_REQUEST));
         assert_eq!(error.code(), Some("INVALID_REQUEST"));

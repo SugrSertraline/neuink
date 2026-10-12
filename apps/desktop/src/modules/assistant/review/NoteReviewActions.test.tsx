@@ -79,6 +79,8 @@ it('disables decisions for another or running conversation and invalid compariso
   render(wrap({ ...props, invalid: true }));
   expect(screen.getByRole('button', { name: '确认应用' }).hasAttribute('disabled')).toBe(true);
   expect(screen.getByRole('button', { name: '忽略修改' }).hasAttribute('disabled')).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: '另一入口确认' }));
+  expect(apply).not.toHaveBeenCalled();
 });
 
 it('folds only unchanged context and can reveal every line', () => {

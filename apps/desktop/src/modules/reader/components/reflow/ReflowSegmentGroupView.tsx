@@ -1,9 +1,13 @@
+import { InteractiveListContent, ListItemInteractionProvider } from './InteractiveListContent';
+import { findSourceSegment, listItemAddress, requiresListItemChoice } from '@/shared/lib/listItemSegments';
+import { isPdfBlockDragControl, usePdfBlockDrag } from '../pdf-reader/usePdfBlockDrag';
+import { PdfBlockDragPreview } from '../pdf-reader/PdfBlockDragPreview';
 import { PaperTextPreview as SourceSnapshotPreview } from '../navigation/PaperReferences';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { createPortal } from "react-dom";
-import { Check, Copy, EyeOff, Link2, MessageCircle, StickyNote } from "lucide-react";
+import { EyeOff, Link2, MessageCircle, StickyNote } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { Badge } from "@/components/ui/badge";
@@ -65,6 +69,8 @@ import {
 
 export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
   active,
+  activeSegmentUid,
+  flashSegmentUid,
   annotationsBySegmentUid,
   entryId,
   flashed,
@@ -94,6 +100,8 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
   onTranslateSegment,
 }: {
   active: boolean;
+  activeSegmentUid?: string | null;
+  flashSegmentUid?: string | null;
   annotationsBySegmentUid: Map<string, Annotation[]>;
   entryId: string;
   flashed: boolean;
@@ -150,6 +158,12 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
   );
   const isHeading = segmentGroup.body.segment_type === "heading";
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const [menuSegment, setMenuSegment] = useState(segmentGroup.body);
+  const blockDrag = usePdfBlockDrag(`${workspaceRoot}:${entryId}:${segmentGroup.body.uid}`, Boolean(onAddAssistantContext));
+  const targetSegment = (target: EventTarget | null) => {
+    const uid = target instanceof Element ? target.closest<HTMLElement>('[data-reflow-list-item]')?.dataset.reflowListItem : undefined;
+    return (uid && findSourceSegment(segmentGroup.segments, uid)) || segmentGroup.body;
+  };
   const [isHiding, setIsHiding] = useState(false);
   const hideTimerRef = useRef<number | null>(null);
 
@@ -202,6 +216,8 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
   };
 
   return (
+    <ListItemInteractionProvider value={{ activeUid: activeSegmentUid, flashUid: flashSegmentUid,
+      dragUid: blockDrag.dragItem?.segment.uid, translations: translationBySegmentUid }}>
     <section
       className={cn(
         "group relative min-w-0 scroll-mt-3 border-b border-border/65 px-2 py-4 outline-none transition-[background-color,opacity,transform] duration-200",
@@ -213,30 +229,59 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
       id={`reflow-segment-${segmentGroup.body.uid}`}
       style={{ fontSize: `${componentTextScale}em` }}
       tabIndex={0}
-      onClick={(event) => {
-        const selection = window.getSelection();
-        if (selection?.toString().trim() && selection.anchorNode && event.currentTarget.contains(selection.anchorNode)) return;
-        if (altClickOpensNote && event.altKey) {
-          onOpenSegmentNote(segmentGroup.body);
+      {...blockDrag.pointerHandlers}
+      onPointerDownCapture={event => {
+        const segment = targetSegment(event.target);
+        if (event.button === 0 && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey && !isPdfBlockDragControl(event.target) && requiresListItemChoice(segment)) {
+          event.preventDefault(); event.stopPropagation(); onPreviewChange(null);
+          setMenuSegment(segment); setMenuPosition({ x: event.clientX, y: event.clientY });
           return;
         }
-        onActivateSegment(segmentGroup.body, { jumpToPdf: true });
+        if (blockDrag.start(event, { entryId, workspaceRoot, segment,
+          bbox: segment.bbox?.length === 4 ? segment.bbox as [number, number, number, number] : [0, 0, 1000, 1000] })) {
+          onPreviewChange(null);
+          setMenuPosition(null);
+        }
+      }}
+      onClick={(event) => {
+        if (blockDrag.consumeClick()) { event.preventDefault(); event.stopPropagation(); return; }
+        if ((event.target as Element).closest('button, a, input, textarea, [data-paper-reference]')) return;
+        const selection = window.getSelection();
+        if (selection?.toString().trim() && selection.anchorNode && event.currentTarget.contains(selection.anchorNode)) return;
+        const segment = targetSegment(event.target);
+        if (requiresListItemChoice(segment)) {
+          setMenuSegment(segment); setMenuPosition({ x: event.clientX, y: event.clientY }); return;
+        }
+        if (altClickOpensNote && event.altKey) {
+          onOpenSegmentNote(segment);
+          return;
+        }
+        onActivateSegment(segment, { jumpToPdf: true });
       }}
       onContextMenu={(event) => {
+        const selection = window.getSelection();
+        if (selection?.toString().trim() && selection.anchorNode && event.currentTarget.contains(selection.anchorNode)) return;
         event.preventDefault();
+        setMenuSegment(targetSegment(event.target));
+        onPreviewChange(null);
         setMenuPosition({ x: event.clientX, y: event.clientY });
       }}
       onKeyDown={(event) => {
-        if (event.target !== event.currentTarget) return;
+        if (event.target !== event.currentTarget && !(event.target as HTMLElement).hasAttribute('data-reflow-list-item')) return;
         if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
           event.preventDefault();
-          const bounds = event.currentTarget.getBoundingClientRect();
+          const bounds = (event.target as HTMLElement).getBoundingClientRect();
+          setMenuSegment(targetSegment(event.target));
           setMenuPosition({ x: bounds.left + 16, y: bounds.top + 24 });
           return;
         }
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          onActivateSegment(segmentGroup.body, { jumpToPdf: true });
+          const segment = targetSegment(event.target);
+          if (requiresListItemChoice(segment)) {
+            const bounds = (event.target as HTMLElement).getBoundingClientRect();
+            setMenuSegment(segment); setMenuPosition({ x: bounds.left + 16, y: bounds.top + 24 });
+          } else onActivateSegment(segment, { jumpToPdf: true });
         }
       }}
       onMouseLeave={
@@ -254,6 +299,7 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
           : undefined
       }
     >
+      <PdfBlockDragPreview item={blockDrag.dragItem} preview={blockDrag.preview} showSource={false} />
       <div
         aria-hidden="true"
         className="absolute bottom-0 left-0 top-0 z-[1] w-12 -translate-x-12"
@@ -323,10 +369,11 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
           canCopyContent={true}
           canCopySourceLink={true}
           position={menuPosition}
-          segment={segmentGroup.body}
+          segment={menuSegment}
+          wholeListSegment={listItemAddress(menuSegment.uid) ? segmentGroup.body : undefined}
           sourceBacklinks={
-            sourceBacklinksBySegmentUid[segmentGroup.body.uid] ??
-            sourceBacklinksBySegmentUid[logicalSegmentUid(segmentGroup.body)] ??
+            sourceBacklinksBySegmentUid[menuSegment.uid] ??
+            sourceBacklinksBySegmentUid[logicalSegmentUid(menuSegment)] ??
             []
           }
           onClose={() => setMenuPosition(null)}
@@ -337,7 +384,7 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
           onCopySourceLink={onCopySourceLink}
           onAddAssistantContext={onAddAssistantContext}
           onTranslateSegment={onTranslateSegment}
-          displayActions={<ReflowSegmentContentActions component={componentKey} value={content} overridden={Boolean(segmentPreferences.override)}
+          displayActions={listItemAddress(menuSegment.uid) ? undefined : <ReflowSegmentContentActions component={componentKey} value={content} overridden={Boolean(segmentPreferences.override)}
             sentenceTranslationDisabled={!paragraphTranslation.context?.ready}
             onChange={patch => {
               segmentPreferences.update(patch);
@@ -351,11 +398,12 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
           translationActions={paragraphTranslation.context ? <ParagraphTranslationActions segment={segmentGroup.body} close={() => setMenuPosition(null)}
             hasDocumentTranslation={hasMatchingDocumentTranslation(segmentGroup.body, translationBySegmentUid.get(segmentGroup.body.uid))}
             viewControls={false} onTranslate={view => segmentPreferences.update({ translation: true, ...(view ? { translationView: view } : {}) })} /> : undefined}
-          onHideSegment={onHideSegment}
+          onHideSegment={listItemAddress(menuSegment.uid) ? undefined : onHideSegment}
           onOpenSourceBacklink={onOpenSourceBacklink}
         />
       ) : null}
     </section>
+    </ListItemInteractionProvider>
   );
 });
 
@@ -633,79 +681,6 @@ function headingClassName(segment: SourceSegment) {
   );
 }
 
-type ReflowListItem = {
-  copyText: string;
-  index: number;
-  markdown: string;
-};
-
-function ensureListMarkdown(text: string, segment: SourceSegment) {
-  const trimmed = text.trim();
-  if (/^(?:[-*+] |\d+[.)] )/m.test(trimmed)) {
-    return trimmed;
-  }
-
-  const ordered = isOrderedListSegment(segment);
-  return trimmed
-    .split(/\r?\n/)
-    .map((line, index) => line.trim())
-    .filter(Boolean)
-    .map((line, index) => `${ordered ? `${index + 1}.` : "-"} ${line}`)
-    .join("\n");
-}
-
-function parseMarkdownListItems(markdown: string): ReflowListItem[] {
-  const items: ReflowListItem[] = [];
-  const lines = markdown.trim().split(/\r?\n/);
-
-  for (const line of lines) {
-    const match = line.match(/^\s*(?:([-*+])|(\d+[.)]))\s+(.*)$/);
-    if (match) {
-      const index = items.length;
-      items.push({
-        copyText: plainTextFromMarkdown(match[3]),
-        index,
-        markdown: match[3],
-      });
-      continue;
-    }
-
-    const continuation = line.trim();
-    const current = items[items.length - 1];
-    if (continuation && current) {
-      current.markdown = `${current.markdown}\n${continuation}`;
-      current.copyText = plainTextFromMarkdown(current.markdown);
-    }
-  }
-
-  return items;
-}
-
-function plainTextFromMarkdown(markdown: string) {
-  return markdown
-    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/[*_~]/g, "")
-    .replace(/<[^>]+>/g, "")
-    .trim();
-}
-
-function isOrderedListSegment(segment: SourceSegment) {
-  const metadata = segment.mineru_metadata ?? {};
-  const raw = [metadata.list_type, segment.sub_type, metadata.sub_type, segment.raw_type]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-  return (
-    raw.includes("ordered") ||
-    raw.includes("number") ||
-    raw.includes("decimal") ||
-    raw.includes("ref_text") ||
-    raw.includes("index")
-  );
-}
-
 function RoleText({
   entryId,
   hoverPreviewEnabled,
@@ -777,232 +752,6 @@ function RoleText({
         size="standard" imageDetailEnabled={componentPreferences.imageClickToOpen} />
     </div>
   );
-}
-
-function InteractiveListContent({
-  entryId,
-  hoverPreviewEnabled,
-  onPreviewChange,
-  pdfDocument,
-  reflowTranslationMode,
-  relatedImagePath,
-  segment,
-  translatedText,
-  workspaceRoot,
-}: {
-  entryId: string;
-  hoverPreviewEnabled: boolean;
-  onPreviewChange: (next: ReflowPreviewPointerState | null) => void;
-  pdfDocument: PDFDocumentProxy | null;
-  reflowTranslationMode: ReflowTranslationMode;
-  relatedImagePath?: string | null;
-  segment: SourceSegment;
-  translatedText: string | null;
-  workspaceRoot: string | null;
-}) {
-  const originalText = ensureListMarkdown(segment.markdown ?? segment.text, segment);
-  const translatedListText = translatedText?.trim()
-    ? ensureListMarkdown(translatedText, segment)
-    : null;
-
-  if (reflowTranslationMode === "translation") {
-    return (
-      <InteractiveListItems
-        copyPrefix="translation"
-        entryId={entryId}
-        hoverPreviewEnabled={hoverPreviewEnabled}
-        hoverMarkdown={originalText}
-        markdown={translatedListText ?? originalText}
-        onPreviewChange={onPreviewChange}
-        pdfDocument={pdfDocument}
-        relatedImagePath={relatedImagePath}
-        segment={segment}
-        workspaceRoot={workspaceRoot}
-      />
-    );
-  }
-
-  if (reflowTranslationMode === "bilingual" && translatedListText) {
-    return (
-      <div className="grid min-w-0 gap-2">
-        <InteractiveListItems
-          copyPrefix="source"
-          entryId={entryId}
-          hoverPreviewEnabled={hoverPreviewEnabled}
-          hoverMarkdown={originalText}
-          markdown={originalText}
-          onPreviewChange={onPreviewChange}
-          pdfDocument={pdfDocument}
-          relatedImagePath={relatedImagePath}
-          segment={segment}
-          workspaceRoot={workspaceRoot}
-        />
-        <div className="min-w-0 border-t pt-2 text-[0.95em] text-muted-foreground">
-          <InteractiveListItems
-            copyPrefix="translation"
-            entryId={entryId}
-            hoverPreviewEnabled={hoverPreviewEnabled}
-            hoverMarkdown={originalText}
-            markdown={translatedListText}
-            onPreviewChange={onPreviewChange}
-            pdfDocument={pdfDocument}
-            segment={segment}
-            workspaceRoot={workspaceRoot}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <InteractiveListItems
-      copyPrefix="source"
-      entryId={entryId}
-      hoverPreviewEnabled={hoverPreviewEnabled}
-      hoverMarkdown={originalText}
-      markdown={originalText}
-      onPreviewChange={onPreviewChange}
-      pdfDocument={pdfDocument}
-      relatedImagePath={relatedImagePath}
-      segment={segment}
-      workspaceRoot={workspaceRoot}
-    />
-  );
-}
-
-function InteractiveListItems({
-  copyPrefix,
-  entryId,
-  hoverPreviewEnabled,
-  hoverMarkdown,
-  markdown,
-  onPreviewChange,
-  pdfDocument,
-  relatedImagePath,
-  segment,
-  workspaceRoot,
-}: {
-  copyPrefix: string;
-  entryId: string;
-  hoverPreviewEnabled: boolean;
-  hoverMarkdown: string;
-  markdown: string;
-  onPreviewChange: (next: ReflowPreviewPointerState | null) => void;
-  pdfDocument: PDFDocumentProxy | null;
-  relatedImagePath?: string | null;
-  segment: SourceSegment;
-  workspaceRoot: string | null;
-}) {
-  const componentPreferences = useReflowComponentPreferences();
-  const { notify } = useToast();
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const items = useMemo(() => parseMarkdownListItems(markdown), [markdown]);
-  const hoverItems = useMemo(() => parseMarkdownListItems(hoverMarkdown), [hoverMarkdown]);
-
-  if (items.length === 0) {
-    return (
-      <SegmentText
-        entryId={entryId}
-        originalText={markdown}
-        reflowTranslationMode="source"
-        relatedImagePath={relatedImagePath}
-        segment={segment}
-        translatedText={null}
-        workspaceRoot={workspaceRoot}
-      />
-    );
-  }
-
-  const copyItem = async (item: ReflowListItem) => {
-    try {
-      await navigator.clipboard.writeText(item.copyText);
-      const key = `${copyPrefix}:${item.index}`;
-      setCopiedKey(key);
-      window.setTimeout(() => {
-        setCopiedKey((current) => (current === key ? null : current));
-      }, 1200);
-      notify({ title: "列表项已复制", tone: "success", durationMs: 1400 });
-    } catch {
-      notify({ title: "复制列表项失败", tone: "danger", durationMs: 1800 });
-    }
-  };
-
-  return (
-    <div className="grid min-w-0 gap-1" role="list">
-      {items.map((item) => {
-        const key = `${copyPrefix}:${item.index}`;
-        const copied = copiedKey === key;
-        return (
-          <div
-            className="group/list-item grid min-w-0 cursor-copy grid-cols-[minmax(0,1fr)_1.75rem] items-start gap-2 rounded-sm px-2 py-1.5 transition-colors hover:bg-muted/70 focus-visible:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            key={key}
-            role="listitem"
-            tabIndex={0}
-            data-reflow-list-item
-            onMouseMove={(event) => {
-              event.stopPropagation();
-              if (!hoverPreviewEnabled || event.buttons !== 0 || hoverInteractionBlocked()) {
-                onPreviewChange(null);
-                return;
-              }
-              const previewSegment = listItemPreviewSegment(segment, hoverItems[item.index] ?? item);
-              warmReflowPreviewAssets({
-                entryId,
-                markdown: previewSegment.markdown ?? previewSegment.text,
-                pdfDocument,
-                relatedImagePath,
-                segment: previewSegment,
-                workspaceRoot,
-              });
-              onPreviewChange({
-                position: { x: event.clientX, y: event.clientY },
-                relatedImagePath,
-                segment: previewSegment,
-              });
-            }}
-            title="复制这一项"
-            onClick={(event) => {
-              event.stopPropagation();
-              void copyItem(item);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                event.stopPropagation();
-                void copyItem(item);
-              }
-            }}
-          >
-            <div className="min-w-0">
-              <SourceSnapshotPreview
-                allowScroll={false}
-                flush
-                markdown={item.markdown}
-                relatedImagePath={relatedImagePath}
-                segmentType={segment.segment_type}
-                sourceEntryId={entryId || null}
-                showMermaidDiagrams
-                workspaceRoot={workspaceRoot}
-              />
-            </div>
-            <span className="grid size-6 place-items-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover/list-item:opacity-100 group-focus-within/list-item:opacity-100">
-              {copied ? <Check size={13} /> : <Copy size={13} />}
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function listItemPreviewSegment(segment: SourceSegment, item: ReflowListItem): SourceSegment {
-  return {
-    ...segment,
-    bbox: null,
-    markdown: item.markdown,
-    text: item.copyText,
-    uid: `${segment.uid}:list-item:${item.index}`,
-  };
 }
 
 function SegmentText({

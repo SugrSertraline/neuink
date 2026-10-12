@@ -119,6 +119,9 @@ import {
   scopeLabel
 } from './assistantContextTargets';
 import { planAssistantContext } from '../harness/contextPlanner';
+import { LOCAL_AGENTS, localAgentName, readLastAssistantEngine, saveLastAssistantEngine, useLocalAgentEnabled, type AssistantEngine } from '@/shared/lib/localAgentSettings';
+import { localAgentProfile, localAgentSelection, selectionLocalProvider, conversationLocalSession } from '../local-agent/session';
+import { useLocalAgentDetections } from '@/shared/lib/useLocalAgentDetections';
 import { latestConversationMemory } from '../harness/conversationMemory';
 import {
   analyzeConversationLength,
@@ -194,10 +197,14 @@ export function AssistantPanel({
   onReplaceAssistantContext,
   onRemoveAssistantContextItem
 }: AssistantPanelProps) {
-  const { notify } = useToast();
+  const { notify, dismiss } = useToast();
   const { appearance, setAppearance } = useAppearance();
   const [profiles, setProfiles] = useState<LlmProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const localAgentEnabled = useLocalAgentEnabled();
+  const [selectedEngine, setSelectedEngine] = useState<AssistantEngine>(readLastAssistantEngine);
+  const engineSelectionRevision = useRef(0);
+  const {results:localDetections} = useLocalAgentDetections(localAgentEnabled,true);
   const [conversations, setConversations] = useState<ConversationMeta[]>([]);
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const toolApprovals = useSyncExternalStore(subscribeToolApprovals, getToolApprovals);
@@ -260,10 +267,12 @@ export function AssistantPanel({
     () => buildAssistantScope({ activeEntry: readingContext.entry, activeTag: readingContext.bound || readingContext.entry || readingContext.surface.kind !== 'library' ? null : activeTag, entries, selectedTagIds, tags }),
     [readingContext.entry, readingContext.bound, readingContext.surface.kind, activeTag, entries, selectedTagIds, tags]
   );
-  const selectedProfile = useMemo(
-    () => profiles.find((profile) => profile.id === selectedProfileId) ?? null,
-    [profiles, selectedProfileId]
-  );
+  const localConversation = conversationLocalSession(conversation)?.provider ?? null;
+  const localProvider = conversation?.messages.length ? localConversation : selectedEngine === 'model' ? null : selectedEngine;
+  const usingLocalAgent = Boolean(localProvider);
+  const localDetection = localProvider ? localDetections[localProvider] : null;
+  const selectedProfile = localProvider ? (localAgentEnabled && localDetection?.status === 'detected' ? localAgentProfile(localProvider) : null)
+    : profiles.find(profile => profile.id === selectedProfileId) ?? null;
   const visibleMessages = useMemo(
     () => [...(conversation?.messages ?? []), ...optimisticMessages],
     [conversation?.messages, optimisticMessages]
@@ -334,7 +343,7 @@ export function AssistantPanel({
   const composerDisabled = !root || !selectedProfile;
 
   useEffect(() => {
-    if (root && selectedProfile) void warmAssistantRouter();
+    if (root && selectedProfile && !usingLocalAgent) void warmAssistantRouter();
   }, [root, selectedProfile?.id]);
 
   useEffect(() => {
@@ -373,8 +382,10 @@ export function AssistantPanel({
   useEffect(() => {
     let mounted = true;
     if (previousRootRef.current !== root) {
+      engineSelectionRevision.current += 1;
       previousRootRef.current = root;
       setConversation(null);
+      setSelectedEngine(readLastAssistantEngine());
       setBusy(false);
       setError(null);
       setMessageQueues([]);
@@ -597,13 +608,27 @@ export function AssistantPanel({
   };
 
   const selectProfile = async (profileId: string) => {
+    const selectionRevision = ++engineSelectionRevision.current;
+    const nextProvider = selectionLocalProvider(profileId);
+    const nextEngine = nextProvider ?? 'model';
+    if (conversation?.messages.length && nextProvider !== localConversation) {
+      // Switching execution engines starts a separate history, preserving the reading target.
+      startNewConversation(true);
+    }
+    setSelectedEngine(nextEngine);
+    const remember = () => {
+      if (!saveLastAssistantEngine(nextEngine)) setError('本次选择已生效，但未能保存；下次打开时可能无法恢复。');
+    };
+    if (nextProvider) { remember(); return; }
     setSelectedProfileId(profileId);
     try {
       const settingsState = await setTaskLlmProfile('assistant', profileId);
+      if (selectionRevision !== engineSelectionRevision.current) return;
       setProfiles(settingsState.profiles);
       setSelectedProfileId(settingsState.assistant_profile_id ?? profileId);
+      remember();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      if (selectionRevision === engineSelectionRevision.current) setError(caught instanceof Error ? caught.message : String(caught));
     }
   };
 
@@ -628,6 +653,7 @@ export function AssistantPanel({
       const latest = findAssistantBackgroundRun(root, conversationId);
       if (!latest) syncAssistantMessageQueueConversation(root, loaded);
       setConversation(latest?.conversation ?? loaded);
+      setSelectedEngine(conversationLocalSession(loaded)?.provider ?? 'model');
       setStreamingMessageId(latest?.streamingMessageId ?? null);
       setToolEventsByMessageId(latest?.toolEventsByMessageId ?? {});
       setNoteProposalsByMessageId(latest?.noteProposalsByMessageId ?? {});
@@ -812,19 +838,20 @@ export function AssistantPanel({
     }
   };
 
-  const startNewConversation = () => {
-    setReadingChoice({ root, value: null });
+  const startNewConversation = (preserveContext = false) => {
+    setSelectedEngine(readLastAssistantEngine());
+    if (!preserveContext) setReadingChoice({ root, value: null });
     viewRef.current = { generation: viewRef.current.generation + 1, conversationId: null };
     runAbortControllerRef.current = null;
     setBusy(false);
     setError(null);
-    setComposerResetKey(key => key + 1);
+    if (!preserveContext) setComposerResetKey(key => key + 1);
     setConversation(null);
     setOptimisticMessages([]);
     setStreamingMessageId(null);
     setToolEventsByMessageId({});
     setNoteProposalsByMessageId({});
-    onClearAssistantContext();
+    if (!preserveContext) onClearAssistantContext();
     setHistoryOpen(false);
   };
 
@@ -1035,7 +1062,7 @@ export function AssistantPanel({
                 aria-label="新建对话"
                 type="button"
                 variant="ghost"
-                onClick={startNewConversation}
+                onClick={() => startNewConversation()}
               >
                 <MessageSquarePlus />
               </Button>
@@ -1053,14 +1080,15 @@ export function AssistantPanel({
 
           <div className="mt-2 min-w-0">
             <Select
-              disabled={profiles.length === 0 || busy}
-              value={selectedProfile?.id ?? ''}
+              disabled={(!localAgentEnabled && profiles.length === 0 && !usingLocalAgent) || busy}
+              value={localProvider ? localAgentSelection(localProvider) : selectedProfile?.id ?? ''}
               onValueChange={(value) => void selectProfile(value)}
             >
               <SelectTrigger className="w-full" size="sm" aria-label="对话模型">
                 <SelectValue placeholder="Select model" />
               </SelectTrigger>
               <SelectContent>
+                {(localAgentEnabled || usingLocalAgent) && LOCAL_AGENTS.map(agent => <SelectItem key={agent.id} value={localAgentSelection(agent.id)} disabled={!localAgentEnabled || localDetections[agent.id]?.status !== 'detected'}>{agent.name} · 本地 Agent</SelectItem>)}
                 {profiles.map((profile) => (
                   <SelectItem key={profile.id} value={profile.id}>
                     {profile.name} · {profile.model}
@@ -1072,7 +1100,8 @@ export function AssistantPanel({
 
           {!selectedProfile ? (
             <div className="mt-2 rounded-md border bg-muted/30 p-2 text-xs leading-5 text-muted-foreground">
-              Add an OpenAI-compatible model in Settings first.
+              {usingLocalAgent ? !localAgentEnabled ? '本地 Agent 已关闭，请在设置 → 工具与扩展中启用。'
+                : localDetection?.message ?? `正在检测 ${localProvider ? localAgentName(localProvider) : '本地 Agent'}…` : '请先在设置中配置模型或启用本地 Agent。'}
             </div>
           ) : null}
 
@@ -1193,7 +1222,7 @@ export function AssistantPanel({
                       size="xs"
                       type="button"
                       variant="ghost"
-                      onClick={startNewConversation}
+                      onClick={() => startNewConversation()}
                     >
                       <MessageSquarePlus size={12} aria-hidden="true" />
                       New chat
@@ -1206,7 +1235,15 @@ export function AssistantPanel({
 
           <AssistantExternalContextItems
             items={externalContextItems}
-            onRemove={onRemoveAssistantContextItem}
+            onRemove={id => {
+              const item = externalContextItems.find(item => item.id === id);
+              onRemoveAssistantContextItem(id);
+              if (!item) return;
+              const toastId = notify({ title: '已移除引用', action: <Button size="xs" variant="ghost" onClick={() => {
+                if (currentRootRef.current === root) onAddAssistantContext(contextItemToInput(item));
+                dismiss(toastId);
+              }}>撤销</Button> });
+            }}
           />
 
           <AssistantReadingContextControl context={readingContext} entries={entries} tags={tags} busy={busy} choice={chosenReadingObject}
@@ -1240,6 +1277,7 @@ export function AssistantPanel({
               发送
             </Button>}
             composerDraft={composerDraft}
+            workspaceRoot={root}
             contextItems={assistantContext.items}
             disabled={composerDisabled}
             draftQuestion={composerPrefill ?? draftQuestion}

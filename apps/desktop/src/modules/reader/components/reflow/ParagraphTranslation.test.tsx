@@ -130,7 +130,7 @@ describe('paragraph translation', () => {
       onOpenSegmentAnnotation={noop} onOpenSegmentNote={noop} onOpenSourceBacklink={noop} onClose={close}
       translationActions={<><button role="menuitem">翻译此段</button><button role="menuitemradio">逐句对照</button></>} />);
     const menu = screen.getByRole('menu');
-    expect(document.activeElement?.textContent).toBe('编辑片段笔记（浮窗）');
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: '为此处写笔记' }));
     fireEvent.keyDown(document.activeElement!, { key: 'End' });
     expect(document.activeElement?.textContent).toBe('逐句对照');
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' });

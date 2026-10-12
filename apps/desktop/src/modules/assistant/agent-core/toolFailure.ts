@@ -2,7 +2,7 @@
 export type AgentToolNotExecutedCode =
   | 'TOOL_NOT_AVAILABLE' | 'TOOL_INVALID_ARGUMENTS' | 'TOOL_PREFLIGHT_FAILED'
   | 'TOOL_NOT_EXECUTED' | 'TOOL_APPROVAL_UNAVAILABLE' | 'TOOL_REPEAT_SKIPPED'
-  | 'TOOL_WRITE_BLOCKED' | 'TOOL_LIMIT_REACHED';
+  | 'TOOL_WRITE_BLOCKED' | 'TOOL_LIMIT_REACHED' | 'TOOL_NO_PUBLIC_PDF';
 export type AgentToolFailureCode = AgentToolNotExecutedCode
   | 'TOOL_EXECUTION_FAILED' | 'TOOL_PARTIAL_FAILURE' | 'TOOL_OUTCOME_UNKNOWN';
 export type AgentToolFailure = {
@@ -23,6 +23,10 @@ export type AgentToolFailure = {
 
 type FailureTemplate = Pick<AgentToolFailure, 'message' | 'outcome' | 'recovery'>;
 const templates: Record<AgentToolFailureCode, FailureTemplate> = {
+  TOOL_NO_PUBLIC_PDF: {
+    message: '本次所选论文的检索记录均没有可下载的公开 PDF，未下载或添加任何条目。此结果交回主 Agent 继续处理：必须在面向用户的回复正文中明确提示“当前检索来源未提供可下载的公开 PDF，本次未下载或添加论文”，不能仅留在工具记录里。可继续检索其他公开来源，或提供已有原文链接并说明下一步；不要重复提交这些记录的下载确认，也不要声称论文不存在或一定无法获取。', outcome: 'not_executed',
+    recovery: { action: 'retry_or_alternative', retryable: false, writesBlocked: false }
+  },
   TOOL_NOT_AVAILABLE: {
     message: '工具不可用，本次未执行。请选择当前可用工具，或说明能力限制。', outcome: 'not_executed',
     recovery: { action: 'use_available_tool', retryable: false, writesBlocked: false }

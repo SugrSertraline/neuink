@@ -487,9 +487,7 @@ impl Workspace {
                     segments_by_entry
                         .get(&source.entry_id)
                         .and_then(|segments| {
-                            segments
-                                .iter()
-                                .find(|segment| segment.uid == source.segment_uid)
+                            neuink_domain::find_source_segment(segments, &source.segment_uid)
                         })
                 {
                     if source.snapshot_asset_path.is_none() {

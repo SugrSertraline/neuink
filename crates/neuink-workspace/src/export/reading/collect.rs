@@ -107,6 +107,10 @@ pub(super) fn collect(
     } else {
         Vec::new()
     };
+    let segments: Vec<_> = segments.into_iter().flat_map(|segment| {
+        let items = neuink_domain::list_item_segments(&segment);
+        std::iter::once(segment).chain(items)
+    }).collect();
     let segment_by_id: BTreeMap<_, _> = segments
         .iter()
         .map(|segment| (segment.uid.as_str(), segment))

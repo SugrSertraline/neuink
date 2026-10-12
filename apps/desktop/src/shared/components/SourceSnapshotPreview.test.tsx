@@ -14,6 +14,18 @@ vi.mock('./MermaidDiagramPreview', () => ({
 describe('SourceSnapshotPreview', () => {
   afterEach(() => cleanup());
 
+  it('renders the reported effective and maximum processing rates as complete formulas', () => {
+    const markdown = String.raw`\mu_{s}^{e f f} ( t )由其最大潜在加工速率$$\mu _ { s , \mathrm { m a x } }`;
+    const { container } = render(<SourceSnapshotPreview markdown={markdown} />);
+    expect(container.querySelectorAll('.katex')).toHaveLength(2);
+    expect(container.querySelector('.katex-error')).toBeNull();
+    expect([...container.querySelectorAll('annotation[encoding="application/x-tex"]')].map(node => node.textContent)).toEqual([
+      String.raw`\mu_{s}^{e f f} ( t )`, String.raw`\mu_{ s,\mathrm{m a x} }`,
+    ]);
+    expect(container.querySelector('.katex msubsup')).not.toBeNull();
+    expect(container.textContent).toContain('由其最大潜在加工速率');
+  });
+
   it('keeps multiple HTML tables, captions, intervening text, headers and merged cells intact', () => {
     render(<SourceSnapshotPreview tableDetailEnabled compact markdown={'<p>实验结果</p><table><caption>表一</caption><thead><tr><th colspan="2">模型</th></tr></thead><tbody><tr><td rowspan="2">A</td><td>81</td></tr><tr><td>82</td></tr></tbody></table><p>下面是消融实验</p><table><tr><th>配置</th><th>得分</th></tr><tr><td>B</td><td>73</td></tr></table><p>表后结论</p>'} />);
     const tables = screen.getAllByRole('table');
@@ -29,6 +41,37 @@ describe('SourceSnapshotPreview', () => {
   it('renders math in HTML table cells without losing cell semantics', () => {
     const { container } = render(<SourceSnapshotPreview markdown={'<table><tr><th>表达式</th></tr><tr><td>$x^2 + y^2$</td></tr></table>'} />);
     expect(container.querySelector('td .katex'), container.innerHTML).not.toBeNull();
+  });
+
+  it('renders repaired buffer-inventory relations while keeping Chinese text outside math', () => {
+    const markdown = '`qs`' + String.raw` ( t ) \in\mathbb{R}\_{\geq0}表示工位$$s \in { \mathcal { S } } .的连续缓冲区库存量（等效产品单位）`;
+    const { container } = render(<SourceSnapshotPreview markdown={markdown} />);
+    const formulas = [...container.querySelectorAll('.katex')];
+    expect(formulas).toHaveLength(2);
+    expect(container.querySelector('.katex-error')).toBeNull();
+    expect(formulas.every((formula) => !/表示|工位|库存/.test(formula.textContent ?? ''))).toBe(true);
+    expect(container.querySelector('code')?.textContent).toBe('qs');
+    expect(container.querySelector('.katex msub')).not.toBeNull();
+    expect(container.textContent).toContain('的连续缓冲区库存量（等效产品单位）');
+  });
+
+  it('keeps a valid inline station formula and a display equation renderable', () => {
+    const { container } = render(<SourceSnapshotPreview markdown={String.raw`工位$$s \in \mathcal{S}$$的库存量。` + '\n\n$$\nx = 1\n$$'} />);
+    expect(container.querySelectorAll('.katex')).toHaveLength(2);
+    expect(container.querySelectorAll('.katex-display')).toHaveLength(1);
+    expect(container.querySelector('.katex-error')).toBeNull();
+  });
+
+  it.each([
+    [String.raw`其中，q_s(t) \in \mathbb{R}_{\geq0}表示库存。`, String.raw`q_s(t)\in\mathbb{R}_{\geq0}`],
+    [String.raw`工位s \in S的库存。`, String.raw`s\in S`],
+    [String.raw`当x \geq y时成立。`, String.raw`x\geq y`],
+  ])('renders complete relations without raw commands: %s', (markdown, latex) => {
+    const { container } = render(<SourceSnapshotPreview markdown={markdown} />);
+    expect(container.querySelectorAll('.katex')).toHaveLength(1);
+    expect(container.querySelector('.katex-error')).toBeNull();
+    expect(container.querySelector('annotation[encoding="application/x-tex"]')?.textContent).toBe(latex);
+    expect(container.querySelector('.katex-display')).toBeNull();
   });
 
   it('provides a bounded scroll owner and a full-table viewer without truncating rows', () => {

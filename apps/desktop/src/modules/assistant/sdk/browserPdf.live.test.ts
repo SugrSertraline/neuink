@@ -1,5 +1,6 @@
 // @vitest-environment node
 // Opt-in: NEUINK_LIVE_BROWSER_PDF=1 NEUINK_LIVE_SETTINGS=<app settings.json>
+// Optional NEUINK_LIVE_PROFILE_ID selects a configured profile for this test only.
 // Optional NEUINK_LIVE_PDF_PATH must be the same URL's bytes captured by a prior Rust
 // probe in an isolated temporary directory. It skips PDF download, not the real model.
 // Real configured model + public PDF bytes + production tool/extractor/Agent.
@@ -54,6 +55,7 @@ it.skipIf(!enabled)('live main agent uses default PDF page bounds and summarizes
   let fileReadMs = 0; let pdfDownloads = 0; let usedCapturedPdfFile = false;
   let toolStarted = 0; let toolMs = 0; let passed = false;
   let observed: Record<string, unknown> | undefined;
+  let answerChecks: Record<string, boolean> | undefined;
   let readInput: unknown;
   const controller = new AbortController();
   const deadline = setTimeout(() => controller.abort(new Error('Live test deadline exceeded (details redacted).')), 150_000);
@@ -65,7 +67,8 @@ it.skipIf(!enabled)('live main agent uses default PDF page bounds and summarizes
     const saved = JSON.parse(await readFile(settingsPath, 'utf8')) as {
       llm_profiles?: LlmProfile[]; assistant_llm_profile_id?: string;
     };
-    const profile = saved.llm_profiles?.find(item => item.id === saved.assistant_llm_profile_id);
+    const selectedId = process.env.NEUINK_LIVE_PROFILE_ID ?? saved.assistant_llm_profile_id;
+    const profile = saved.llm_profiles?.find(item => item.id === selectedId);
     if (!profile?.model || !profile.base_url) throw new Error('Configured main profile required.');
     // Only the in-memory run is output-bounded; user settings and credentials are never changed.
     const settings = { ...profile, max_output_tokens: Math.min(profile.max_output_tokens ?? 2048, 2048) };
@@ -144,6 +147,14 @@ it.skipIf(!enabled)('live main agent uses default PDF page bounds and summarizes
     });
     const answer = await agent.run();
     phase = 'assertions';
+    answerChecks = {
+      substantive: answer.length > 100,
+      sourceUrl: answer.includes(PDF_URL),
+      noLocalMarkers: !/\[S\d+\]/.test(answer),
+      pageRange: /1\s*[-–—~至到]\s*8/.test(answer),
+      unreadScope: /(?:其余|剩余|后续)[\s\S]{0,30}(?:未|没有)|(?:未|没有)[\s\S]{0,20}(?:全篇|全文|全部)|并非全文/.test(answer),
+      truncation: answer.includes('截断'),
+    };
     expect(agent.status).toBe('completed');
     expect(reads).toBe(1); expect(validations).toBe(1); expect(budget.toolCalls).toBe(1);
     expect(pdfDownloads).toBe(capturedPdfPath ? 0 : 1);
@@ -160,9 +171,13 @@ it.skipIf(!enabled)('live main agent uses default PDF page bounds and summarizes
     expect(/(?:其余|剩余|后续)[\s\S]{0,30}(?:未|没有)|(?:未|没有)[\s\S]{0,20}(?:全篇|全文|全部)|并非全文/.test(answer)).toBe(true);
     expect(answer.includes('截断')).toBe(true);
     passed = true;
-  } catch {
+  } catch (error) {
     // No cause: SDK exceptions/assertion diffs may contain keys, prompts or response text.
-    throw new Error(`Live browser PDF verification failed at ${phase} (details redacted).`);
+    const failure = error as { statusCode?: unknown; name?: unknown; reason?: unknown };
+    const status = typeof failure?.statusCode === 'number' ? failure.statusCode : 'none';
+    const kind = typeof failure?.name === 'string' && /^[A-Za-z_]{1,64}$/.test(failure.name) ? failure.name : 'unknown';
+    const limit = ['output_length', 'context_capacity', 'turn_limit'].includes(String(failure?.reason)) ? failure.reason : 'none';
+    throw new Error(`Live browser PDF verification failed at ${phase}: kind=${kind}, HTTP=${status}, limit=${limit} (details redacted).`);
   } finally {
     clearTimeout(deadline); controller.abort(); live.invoke.mockReset();
     quiet.forEach(spy => spy.mockRestore());
@@ -174,5 +189,6 @@ it.skipIf(!enabled)('live main agent uses default PDF page bounds and summarizes
       characters: typeof observed?.text === 'string' ? observed.text.length : 0,
       truncated: observed?.truncated === true,
       modelTurns: turns, readCalls: reads, identityValidations: validations }));
+    if (answerChecks) report('[browser-pdf-answer-checks]', JSON.stringify(answerChecks));
   }
 }, 170_000);

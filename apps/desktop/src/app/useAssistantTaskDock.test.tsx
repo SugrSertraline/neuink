@@ -70,7 +70,7 @@ it('observes waiting approvals without a run update and releases the subscriptio
   const view = renderHook(() => { renders++; return useAssistantTaskDock('A', vi.fn()); });
   const abort = new AbortController();
   let pending!: Promise<unknown>;
-  act(() => { pending = requestToolApproval('A', 'conversation')({ toolCallId: 'tool', toolName: 'import_papers', input: {} }, abort.signal).catch(() => undefined); });
+  act(() => { pending = requestToolApproval('A', 'conversation')({ toolCallId: 'tool', toolName: 'claude.Bash', input: {command:'echo example'} }, abort.signal).catch(() => undefined); });
   expect(view.result.current.tasks[0].status).toBe('waiting');
   view.unmount();
   const count = renders;
