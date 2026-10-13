@@ -190,6 +190,15 @@ test('the connection test verifies both uploads and a server-side replacement us
   assert.equal(storage.events.filter(e => e.type === 'expire').at(-1).key, result.copyKey);
 });
 
+test('small CDN files are verified by bounded SHA256 even with missing length or a representation ETag', async t => {
+  const { directory, group } = await fixture(t);
+  const [, file] = await verifyArtifacts(directory, [group], tag, commit);
+  for (const headers of [{}, { etag: 'gzip-representation' }]) {
+    await verifyPublic(file.name, file, { attempts: 1, request: async () => new Response(fs.readFileSync(file.file), { headers }) });
+  }
+  await assert.rejects(verifyPublic(file.name, file, { attempts: 1, request: async () => new Response(Buffer.alloc(file.size + 1)) }), /expected file/);
+});
+
 test('promotion rejects a missing or changed archive before replacing a download', async t => {
   const { directory, group } = await fixture(t);
   const [file] = await verifyArtifacts(directory, [group], tag, commit);

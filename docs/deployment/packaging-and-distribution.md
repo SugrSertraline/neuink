@@ -139,7 +139,7 @@ Mac 包仅 ad-hoc 签名，不是 Developer ID 签名，也未 notarization；�
 2. 人工验收后发布 Release，触发七牛同步。维护者通过页面发布可触发工作流；使用 GitHub Actions 的默认 `GITHUB_TOKEN` 自动发布通常不会触发第二个工作流，需要显式调用同步流程。
 3. 脚本确认标签已包含在 `origin/main`，版本与源码一致，平台的 ZIP、版本信息、SHA256 清单齐全；逐个计算 SHA256，并拒绝包含受限演示素材的包。
 4. 先上传并核验 `releases/<版本标签>/` 下的版本副本，再由七牛在桶内复制到根目录的同名固定下载文件，避免再次传输完整安装包；复制前后均检查文件信息。刷新 URL 缓存后，最后写入 `releases/latest.json`。
-5. 以 CDN 实际返回的 ETag、长度核验每个文件，小文件还下载内容验证 SHA256。ZIP 的 SHA256 在上传前校验，上传及 CDN 响应则核对本地计算的七牛分块 ETag；不把 CDN 的 ETag 当作 SHA256。
+5. ZIP 以 CDN 实际返回的 ETag、长度核验；小文件下载实际内容，按字节长度和 SHA256 核验，兼容 CDN 分块传输或压缩响应。ZIP 的 SHA256 在上传前校验，上传及 CDN 响应则核对本地计算的七牛分块 ETag；不把 CDN 的 ETag 当作 SHA256。
 
 只处理已知的 Windows / macOS ZIP、版本信息和校验文件，不上传整个构建目录。Windows 三个文件必需；macOS 可缺席，但出现某个平台的任一附件时必须包含完整三件套。未包含的平台保留原下载文件，`latest.json` 只列本次发布的平台。
 

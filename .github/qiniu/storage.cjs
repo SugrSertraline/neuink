@@ -82,20 +82,34 @@ function sameObject(remote, file) { return remote && remote.hash === file.etag &
 
 async function verifyPublic(key, file, { attempts = 18, pause = delay, request = fetch } = {}) {
   const url = publicUrl(key);
+  let lastResponse = 'no response';
   for (let attempt = 0; attempt < attempts; attempt++) {
     try {
       const response = await request(url, { method: file.size <= 32768 ? 'GET' : 'HEAD', headers: { 'Accept-Encoding': 'identity' }, signal: AbortSignal.timeout(30000) });
       const etag = (response.headers.get('etag') || '').replace(/^W\//, '').replaceAll('"', '');
-      if (response.ok && Number(response.headers.get('content-length')) === file.size && etag === file.etag) {
-        if (file.size > 32768) return;
-        const actual = crypto.createHash('sha256').update(Buffer.from(await response.arrayBuffer())).digest('hex');
-        if (actual === file.sha256) return;
+      lastResponse = `HTTP ${response.status}, length=${response.headers.get('content-length') || 'unknown'}, etag=${etag || 'missing'}`;
+      if (response.ok) {
+        if (file.size > 32768 && Number(response.headers.get('content-length')) === file.size && etag === file.etag) return;
+        if (file.size <= 32768 && response.body) {
+          // A CDN may send JSON chunked or change its ETag for a compressed representation.
+          // The bounded, decoded bytes and SHA256 are authoritative for these small files.
+          const hash = crypto.createHash('sha256');
+          let received = 0;
+          for await (const chunk of response.body) {
+            received += chunk.length;
+            if (received > file.size) break;
+            hash.update(chunk);
+          }
+          const actual = hash.digest('hex');
+          if (received === file.size && actual === file.sha256) return;
+          lastResponse += `, bodyLength=${received}, sha256=${actual}`;
+        }
       }
       await response.body?.cancel();
     } catch { /* Cache propagation and temporary network failures are retried within this bound. */ }
     if (attempt + 1 < attempts) await pause(10000);
   }
-  throw new Error(`CDN did not serve the expected file: ${key}`);
+  throw new Error(`CDN did not serve the expected file: ${key} (${lastResponse})`);
 }
 
 async function uploadChecked(storage, key, file, options) {
