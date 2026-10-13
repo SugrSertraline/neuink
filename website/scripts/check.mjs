@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { imageDimensions } from './image-dimensions.mjs';
 import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(root, 'dist');
@@ -39,7 +40,10 @@ const screenshots = Object.keys(screenshotSizes);
 for (const file of await fs.readdir(path.join(out, 'assets/screenshots'))) if (!screenshots.includes(file)) failures.push('Unexpected screenshot: ' + file);
 for (const file of screenshots) {
   const bytes = await fs.readFile(path.join(out, 'assets/screenshots', file));
-  if (bytes.toString('hex', 0, 8) !== '89504e470d0a1a0a' || bytes.readUInt32BE(16) !== screenshotSizes[file][0] || bytes.readUInt32BE(20) !== screenshotSizes[file][1]) failures.push('Screenshot must match reviewed PNG dimensions: ' + file);
+  try {
+    const [width, height] = imageDimensions(bytes);
+    if (width !== screenshotSizes[file][0] || height !== screenshotSizes[file][1]) failures.push('Screenshot must match reviewed dimensions: ' + file);
+  } catch { failures.push('Invalid screenshot: ' + file); }
 }
 const diagramSizes = JSON.parse(await fs.readFile(path.join(root, 'diagrams.json'), 'utf8'));
 for (const name of await fs.readdir(path.join(out, 'assets/diagrams'))) if (!(name in diagramSizes)) failures.push('Unexpected diagram: ' + name);

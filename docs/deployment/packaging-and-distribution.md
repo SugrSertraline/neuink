@@ -1,6 +1,6 @@
 # 打包与发行
 
-> 当前版本：0.1.0
+> 当前版本：0.1.1（预览版）
 >
 > 状态：Tauri 与 Windows Actions 构建流程已配置；云端运行结果以 Actions 为准。签名、应用内自动更新及 macOS 验收尚未完成。
 
@@ -106,7 +106,7 @@ embedding 由 `embedding-resources.cjs` 从 Hugging Face 固定 revision 下载�
 
 首次启用：将流程提交推送到 main，等待 Actions 全部成功，再下载测试。需要正式更新 Releases 时创建新的版本标签，不修改旧标签、不覆盖 Beta 1 附件。公共下载推荐链接到 Releases 列表；预发布不会必然成为 `/releases/latest`。
 
-版本门禁：`release-version.cjs` 在构建前检查根目录/桌面端 package.json、npm lock 中的对应版本、Tauri 配置和 Rust workspace 版本一致。标签必须与完整版本严格对应，包括 beta 后缀：发布 `v0.1.0-beta.2` 前，以上版本必须同步为 `0.1.0-beta.2`，并更新 Cargo.lock 后提交。当前 `0.1.0` 不会被自动改版本或以 beta.2 冒名发布。Windows/Mac 附件准备时再次校验。
+版本门禁：`release-version.cjs` 在构建前检查根目录/桌面端 package.json、npm lock 中的对应版本、Tauri 配置和 Rust workspace 版本一致。标签必须与完整版本严格对应，包括 beta 后缀：发布 `v0.1.0-beta.2` 前，以上版本必须同步为 `0.1.0-beta.2`，并更新 Cargo.lock 后提交。当前 `0.1.1` 不会被自动改版本或以其他版本标签冒名发布。Windows/Mac 附件准备时再次校验。
 
 ### macOS 预览包
 

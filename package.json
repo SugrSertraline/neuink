@@ -1,7 +1,7 @@
 {
   "name": "neuink",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "workspaces": [
     "apps/desktop",

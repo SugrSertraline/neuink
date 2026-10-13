@@ -3206,14 +3206,14 @@ dependencies = [
 
 [[package]]
 name = "neuink-config"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "neuink-desktop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "neuink-ipc",
  "serde",
@@ -3226,7 +3226,7 @@ dependencies = [
 
 [[package]]
 name = "neuink-domain"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "nanoid",
@@ -3237,7 +3237,7 @@ dependencies = [
 
 [[package]]
 name = "neuink-ipc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "blake3",
@@ -3272,7 +3272,7 @@ dependencies = [
 
 [[package]]
 name = "neuink-job"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "nanoid",
@@ -3282,7 +3282,7 @@ dependencies = [
 
 [[package]]
 name = "neuink-parser"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "neuink-domain",
  "reqwest 0.12.28",
@@ -3296,7 +3296,7 @@ dependencies = [
 
 [[package]]
 name = "neuink-sciverse"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "reqwest 0.12.28",
  "serde",
@@ -3309,7 +3309,7 @@ dependencies = [
 
 [[package]]
 name = "neuink-search"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "fastembed",
  "neuink-domain",
@@ -3321,7 +3321,7 @@ dependencies = [
 
 [[package]]
 name = "neuink-workspace"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "blake3",

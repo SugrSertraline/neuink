@@ -37,6 +37,16 @@
 
 [产品官网](https://sugrsertraline.github.io/neuink/) · [作者主页](https://sugrsertraline.github.io/homepage/) · [核心功能](#核心功能) · [开始使用](#开始使用) · [本地与在线能力](#本地与在线能力) · [开发与构建](#开发与构建) · [项目文档](#项目文档)
 
+## 0.1.1 预览版更新
+
+- **阅读与引用**：改善 PDF 选字边缘与悬停冲突；按住 Ctrl 拖动一个片段到聊天输入框，拖入时显示遮罩。草稿和已发送消息中的引用都可悬停预览、点击回到原文，未发送引用可删除并撤销。
+- **准确选择列表项**：参考文献、编号列表与项目列表按单项添加上下文、笔记和批注；整段列表仍可显式选择。
+- **继续上次阅读**：恢复资料库中的标签页、分屏和支持的阅读位置；新对话沿用上次选择的模型或本地 Agent。
+- **本地 Agent**：可启用已安装的 Claude Code；另提供 Codex、OpenCode 接入。授权可按次确认或记住，之后可在设置中撤销。各客户端的真实验证范围见[发行说明](CHANGELOG.md)。
+- **补齐材料与笔记体验**：无 PDF 的条目可在详情页“获取 PDF”；改进 SciVerse PDF 与图片保存、笔记图片缩放和公式显示。划词翻译可独立选择 Azure、DeepL 或 Qwen-MT。
+
+查看[本版改动与验证范围](CHANGELOG.md)，或阅读[助手与引用教程](https://sugrsertraline.github.io/neuink/assistant.html)。
+
 ## Windows 便携版下载
 
 **[下载 Neuink Windows x64 便携版（ZIP，CDN 直链）](https://cdn.sugrsertraline.top/Neuink-windows-x64-portable.zip)**
@@ -105,7 +115,7 @@ README 提供概览，详细用法收录于 [22 篇专题手册](website/README.
 ### 4. 检索与 AI 研究：从资料中找答案，继续寻找文献
 
 - **本地搜索**：关键词搜索覆盖条目、标签、字段、文档笔记、片段笔记、PDF 页面和解析片段；配置本地 embedding 资源后可使用语义与混合搜索。模型缺失或不可用时明确提示降级。
-- **带上下文的助手**：关联当前阅读对象，或用 `@` 附加条目、标签、笔记与片段；也可取消内容关联。对话保留来源、工具过程和提案状态。
+- **带上下文的助手**：关联当前阅读对象，用 `@` 附加 PDF 或文档笔记，通过“选择元素”附加条目和标签，或 Ctrl 拖入片段；也可取消内容关联。对话保留来源、工具过程和提案状态。
 - **可审查的修改**：助手修改文档笔记、标签或元数据时先提出 Proposal，展示修改预览，经你确认后应用。标签综合笔记的通用 Agent 写入仍未接通。
 - **在线研究**：内置论文搜索、网页搜索和正文读取；按配置使用 arXiv、Crossref、OpenAlex，以及可选 Tavily、Sciverse。候选论文由用户确认后添加，明确区分 PDF 入库和仅元数据结果。
 - **模型配置**：支持 OpenAI-compatible、Anthropic 和 Google 协议，可为助手与翻译分别指定模型。
@@ -145,7 +155,7 @@ Windows 原生应用支持内嵌网页标签、地址栏、前进后退、独立
 
 完整解压后双击 `Neuink.exe`，保留随包资源目录。无需安装 Node.js 或 Rust，系统需有 Microsoft Edge WebView2 Runtime。便携包沿用应用的资料库与设置位置，用户数据不一定存放在 EXE 旁边。
 
-当前项目版本为 **0.1.0**。Windows 提供便携包构建流程；签名、应用内自动更新及原生发行验收仍有待完成。自动构建、下载方式和各平台验收状态见[打包与发行](docs/deployment/packaging-and-distribution.md)。
+当前项目版本为 **0.1.1**。Windows 提供便携包构建流程；签名、应用内自动更新及原生发行验收仍有待完成。自动构建、下载方式和各平台验收状态见[打包与发行](docs/deployment/packaging-and-distribution.md)。
 
 ### 第一次整理一篇论文
 

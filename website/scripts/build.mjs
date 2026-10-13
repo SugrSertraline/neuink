@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { imageDimensions } from './image-dimensions.mjs';
 import { fileURLToPath } from 'node:url';
 import MarkdownIt from 'markdown-it';
 import { shell, home } from './templates.mjs';
@@ -23,7 +24,8 @@ const screenshotSizes = new Map();
 for (const directory of ['screenshots', 'diagrams']) {
  for (const name of await fs.readdir(path.join(root, 'public', directory))) {
   const bytes = await fs.readFile(path.join(root, 'public', directory, name));
-  screenshotSizes.set(`${directory}/${name}`, { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) });
+  const [width, height] = imageDimensions(bytes);
+  screenshotSizes.set(`${directory}/${name}`, { width, height });
  }
 }
 const renderImage = md.renderer.rules.image;
