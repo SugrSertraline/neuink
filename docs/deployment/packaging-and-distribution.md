@@ -120,7 +120,57 @@ embedding 使用 HTTPS curl 下载并校验后安装。Tauri 将 embedding、许
 
 Mac 包仅 ad-hoc 签名，不是 Developer ID 签名，也未 notarization；正式分发仍需开发者身份、公证与实机验收。Gatekeeper 可能阻止运行，不建议关闭系统安全防护。Windows 内嵌网页和视频字幕运行时尚未移植，元数据明确为 false。其余功能也需实机验收，不能由脚本测试推断功能完全对等。
 
-## 6. 尚未完成
+## 6. 七牛 CDN 自动同步
+
+工作流 `.github/workflows/qiniu-publish.yml` 使用独立、锁定版本的七牛官方 Node.js SDK（`.github/qiniu`），不进入桌面安装包。目标为 `sugrsertraline` 空间、华南广东 `z2`，下载域名 `https://cdn.sugrsertraline.top`。
+
+### 一次性配置
+
+在仓库 Settings → Secrets and variables → Actions → Repository secrets 配置：
+
+- `QINIU_ACCESS_KEY`：七牛 AccessKey；
+- `QINIU_SECRET_KEY`：七牛 SecretKey。
+
+使用发布专用 IAM 子账号，允许目标空间中的文件上传/覆盖（包括分片上传 v2）、文件信息查询，以及 CDN URL 缓存刷新。连接检查通过上传策略将小型测试文件设为一天后删除，不需要遍历或删除资料库。七牛 `cdn/Refresh` 是服务级权限，不能声称已限制到某个文件目录；不必授予桶管理、域名配置或账号管理权限。密钥只作为部署步骤的环境变量读取，不提交仓库、不写入安装包或日志。详细权限以[七牛 Kodo IAM 文档](https://developer.qiniu.com/af/12495/kodo-iam-actions)及[CDN IAM 文档](https://developer.qiniu.com/af/12493/cdn-actions)为准。
+
+### 日常发布
+
+1. 按前述流程，从已确认并合入 `main` 的提交构建版本、创建版本标签和 Release 草稿。
+2. 人工验收后发布 Release，触发七牛同步。维护者通过页面发布可触发工作流；使用 GitHub Actions 的默认 `GITHUB_TOKEN` 自动发布通常不会触发第二个工作流，需要显式调用同步流程。
+3. 脚本确认标签已包含在 `origin/main`，版本与源码一致，平台的 ZIP、版本信息、SHA256 清单齐全；逐个计算 SHA256，并拒绝包含受限演示素材的包。
+4. 先上传并核验 `releases/<版本标签>/` 下的版本副本，再更新根目录的同名固定下载文件、刷新 URL 缓存，最后写入 `releases/latest.json`。
+5. 以 CDN 实际返回的 ETag、长度核验每个文件，小文件还下载内容验证 SHA256。ZIP 的 SHA256 在上传前校验，上传及 CDN 响应则核对本地计算的七牛分块 ETag；不把 CDN 的 ETag 当作 SHA256。
+
+只处理已知的 Windows / macOS ZIP、版本信息和校验文件，不上传整个构建目录。Windows 三个文件必需；macOS 可缺席，但出现某个平台的任一附件时必须包含完整三件套。未包含的平台保留原下载文件，`latest.json` 只列本次发布的平台。
+
+已有版本副本只能重用相同内容，不能用不同字节覆盖。固定下载文件按顺序更新，跨文件没有原子事务；失败时不会报告成功，也不会先发布最新清单。重新运行可继续完成已有副本和固定链接的更新。
+
+### 检查与重试
+
+在 Actions → **Publish downloads to Qiniu** → Run workflow 中选择 `main`：
+
+| action | 用途 | tag |
+| --- | --- | --- |
+| `check`（默认） | 用一个小文件实测首次上传、覆盖、文件信息、CDN 刷新与两次下载；不更新安装包链接 | 留空 |
+| `verify` | 下载并校验已发布 Release，不写七牛 | 已发布标签 |
+| `archive` | 只同步版本副本，不更新固定下载链接 | 已发布标签 |
+| `publish` | 完整同步并更新固定下载链接 | 最新发布的标签 |
+
+较旧 Release 只能使用 `archive`，避免重跑旧任务覆盖新下载。更新固定链接前，脚本以 GitHub 最近发布记录确认标签。流程启用之前已经发布的版本、以及早于本流程的标签，可从 `main` 手动运行。旧版仅有 ZIP、缺少元数据或校验清单时会失败，必须补齐经过实际验证的发布产物，不能临时编造校验结果。
+
+上传任务串行执行且不主动取消正在进行的上传；PR 和 `beta` 提交只运行脚本测试，不读取七牛凭据。发布步骤始终检出 `main`，不会执行标签或 PR 内替换过的发布脚本。
+
+本地验证：
+
+```powershell
+npm ci --prefix .github/qiniu --ignore-scripts
+npm test --prefix .github/qiniu
+```
+
+这些测试验证包校验、main 来源限制、不可覆盖的版本副本、失败时停止更新清单、重试和 CDN 缓存过期处理。真实 AK/SK 权限与公网下载需以 `check` / `publish` 的 Actions 运行结果确认。
+
+
+## 7. 尚未完成
 
 - Windows 代码签名和 SmartScreen 验收；
 - macOS codesign、notarization 和实际 bundle 验收；

@@ -1,0 +1,72 @@
+name: Publish downloads to Qiniu
+
+on:
+  release:
+    types: [published]
+  push:
+    branches: [main, beta]
+    paths: ['.github/qiniu/**', '.github/workflows/qiniu-publish.yml']
+  pull_request:
+    branches: [main]
+    paths: ['.github/qiniu/**', '.github/workflows/qiniu-publish.yml']
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'check: test connection; verify: validate Release; archive: version files only; publish: update downloads'
+        required: true
+        type: choice
+        default: check
+        options: [check, verify, archive, publish]
+      tag:
+        description: 'Published Release tag (required except for check), e.g. v0.1.1'
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'release' && 'main' || github.ref }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: .github/qiniu/package-lock.json
+      - run: npm ci --prefix .github/qiniu --ignore-scripts --no-audit --no-fund
+      - run: npm test --prefix .github/qiniu
+
+  deploy:
+    needs: test
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    concurrency:
+      group: qiniu-cdn-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: .github/qiniu/package-lock.json
+      - run: npm ci --prefix .github/qiniu --ignore-scripts --no-audit --no-fund
+      - name: Upload and verify Qiniu CDN
+        run: node .github/qiniu/run.cjs
+        env:
+          QINIU_ACCESS_KEY: ${{ secrets.QINIU_ACCESS_KEY }}
+          QINIU_SECRET_KEY: ${{ secrets.QINIU_SECRET_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          PUBLISH_ACTION: ${{ github.event_name == 'release' && 'publish' || inputs.action }}
+          RELEASE_TAG: ${{ inputs.tag }}
