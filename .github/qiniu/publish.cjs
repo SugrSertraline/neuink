@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { fingerprint } = require('./artifacts.cjs');
-const { verifyPublic, uploadChecked, publicUrl } = require('./storage.cjs');
+const { verifyPublic, uploadChecked, copyChecked, publicUrl } = require('./storage.cjs');
 
 async function publish({ storage, files, release, directory, archiveOnly = false, verify = verifyPublic, log = console.log }) {
   const prefix = `releases/${release.tag_name}`;
@@ -15,7 +15,7 @@ async function publish({ storage, files, release, directory, archiveOnly = false
   for (const file of files) await verify(`${prefix}/${file.name}`, file);
   if (archiveOnly) return { prefix, aliasesUpdated: false };
   for (const file of files) {
-    await uploadChecked(storage, file.name, file);
+    await copyChecked(storage, `${prefix}/${file.name}`, file.name, file);
     log(`Updated download: ${file.name}`);
   }
   await storage.refresh(files.map(file => file.name));
@@ -46,7 +46,18 @@ async function checkConnection({ storage, directory, verify = verifyPublic, log 
     await verify(key, item);
     log(`Connection check revision ${revision}: upload, stat, refresh and public download verified`);
   }
-  return { key, expiresAfterDays: 1 };
+  // Both temporary objects already exist and expire; exercise replacement without touching installers.
+  const copyKey = key.replace(/\.txt$/, '-copy.txt');
+  fs.writeFileSync(file, 'Neuink CDN copy target\n');
+  await uploadChecked(storage, copyKey, { file, ...await fingerprint(file) }, { temporary: true });
+  fs.writeFileSync(file, 'Neuink CDN connection check\nrevision=2\n');
+  const latest = { file, ...await fingerprint(file) };
+  await copyChecked(storage, key, copyKey, latest);
+  await storage.expireCheckObject(copyKey);
+  await storage.refresh([copyKey]);
+  await verify(copyKey, latest);
+  log('Connection check: server-side replacement and public download verified');
+  return { key, copyKey, expiresAfterDays: 1 };
 }
 
 module.exports = { publish, checkConnection };

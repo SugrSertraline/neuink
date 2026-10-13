@@ -6,7 +6,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const crypto = require('node:crypto');
 const { PLATFORMS, fingerprint, releaseFiles, sourceCommit, verifyArtifacts } = require('./artifacts.cjs');
-const { verifyPublic, uploadChecked, publicUrl } = require('./storage.cjs');
+const { verifyPublic, uploadChecked, copyChecked, publicUrl } = require('./storage.cjs');
 const { publish, checkConnection } = require('./publish.cjs');
 const { assertNewestRelease } = require('./run.cjs');
 
@@ -39,6 +39,12 @@ function mockStorage() {
       objects.set(key, { hash: data.etag, fsize: data.size });
       return { key, hash: data.etag };
     },
+    async copy(source, key) {
+      events.push({ type: 'copy', source, key });
+      if (!objects.has(source)) throw new Error('Missing source');
+      objects.set(key, { ...objects.get(source) });
+    },
+    async expireCheckObject(key) { events.push({ type: 'expire', key }); },
     async refresh(keys) { events.push({ type: 'refresh', keys }); },
   };
 }
@@ -114,10 +120,12 @@ test('archives finish before fixed URLs change, and the manifest is written last
   } });
   assert.equal(result.aliasesUpdated, true);
   const events = storage.events;
-  const firstAlias = events.findIndex(e => e.type === 'upload' && e.key === group.zip);
+  const firstAlias = events.findIndex(e => e.type === 'copy' && e.key === group.zip);
   assert.equal(events.slice(0, firstAlias).filter(e => e.type === 'verify').length, 3);
   assert.equal(events.filter(e => e.type === 'upload').at(-1).key, 'releases/latest.json');
   assert.equal(events.at(-1).key, 'releases/latest.json');
+  assert.equal(events.filter(e => e.type === 'copy').length, 3);
+  assert.equal(events.filter(e => e.type === 'upload' && e.key.endsWith('.zip')).length, 1);
 });
 
 test('archive conflicts or verification failures leave fixed downloads untouched', async t => {
@@ -166,15 +174,51 @@ test('CDN validation waits for the real URL to change and also checks small resp
   assert.throws(() => publicUrl('../secret'), /Invalid/);
 });
 
-test('the connection test replaces one expiring small object and verifies both revisions', async t => {
+test('the connection test verifies both uploads and a server-side replacement using temporary files', async t => {
   const storage = mockStorage();
   let verified = 0;
   const result = await checkConnection({ storage, directory: temp(t), log() {}, verify: async () => { verified++; } });
   const uploads = storage.events.filter(e => e.type === 'upload');
-  assert.equal(verified, 2);
-  assert.equal(new Set(uploads.map(e => e.key)).size, 1);
+  assert.equal(verified, 3);
+  assert.equal(new Set(uploads.map(e => e.key)).size, 2);
   assert.ok(uploads.every(e => e.options.temporary));
   assert.match(result.key, /^releases\/_checks\//);
+  assert.equal(storage.events.filter(e => e.type === 'copy').length, 1);
+  assert.match(result.copyKey, /^releases\/_checks\//);
+  assert.equal(storage.events.filter(e => e.type === 'expire').at(-1).key, result.copyKey);
+});
+
+test('promotion rejects a missing or changed archive before replacing a download', async t => {
+  const { directory, group } = await fixture(t);
+  const [file] = await verifyArtifacts(directory, [group], tag, commit);
+  const storage = mockStorage();
+  storage.objects.set(group.zip, { hash: 'old', fsize: 1 });
+  await assert.rejects(copyChecked(storage, 'archive.zip', group.zip, file), /source verification/);
+  storage.objects.set('archive.zip', { hash: 'unexpected', fsize: file.size });
+  await assert.rejects(copyChecked(storage, 'archive.zip', group.zip, file), /source verification/);
+  assert.equal(storage.events.length, 0);
+  assert.equal(storage.objects.get(group.zip).hash, 'old');
+});
+
+test('promotion is idempotent and detects a copy that returned success without matching bytes', async t => {
+  const { directory, group } = await fixture(t);
+  const [file] = await verifyArtifacts(directory, [group], tag, commit);
+  const storage = mockStorage();
+  storage.objects.set('archive.zip', { hash: file.etag, fsize: file.size });
+  await copyChecked(storage, 'archive.zip', group.zip, file);
+  await copyChecked(storage, 'archive.zip', group.zip, file);
+  assert.equal(storage.events.filter(e => e.type === 'copy').length, 1);
+  storage.objects.set(group.zip, { hash: 'old', fsize: 1 });
+  await assert.rejects(copyChecked({ ...storage, copy: async () => {} }, 'archive.zip', group.zip, file), /Copied object verification/);
+});
+
+test('failed server-side promotion never writes the latest manifest', async t => {
+  const { directory, group } = await fixture(t);
+  const files = await verifyArtifacts(directory, [group], tag, commit);
+  const storage = mockStorage();
+  storage.copy = async () => { throw new Error('copy denied'); };
+  await assert.rejects(publish({ storage, files, release, directory, log() {}, verify: async () => {} }), /copy denied/);
+  assert.equal(storage.objects.has('releases/latest.json'), false);
 });
 
 test('older Releases cannot replace current downloads and drafts do not affect ordering', () => {

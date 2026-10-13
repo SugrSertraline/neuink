@@ -101,6 +101,7 @@ async function downloadArtifacts(release, groups, repository, directory) {
     if (!(asset.size > 0 && asset.size <= limit)) throw new Error(`Unexpected release asset size: ${name}`);
     // Published assets are public: never forward GitHub credentials to their download hosts.
     const url = `https://github.com/${repository}/releases/download/${release.tag_name}/${name}`;
+    console.log(`Downloading: ${name} (${asset.size} bytes)`);
     const response = await fetch(url, { signal: AbortSignal.timeout(20 * 60 * 1000) });
     if (!response.ok || !response.body) throw new Error(`Download failed: ${name} (HTTP ${response.status})`);
     let received = 0;
@@ -112,6 +113,7 @@ async function downloadArtifacts(release, groups, repository, directory) {
       }
     }, fs.createWriteStream(path.join(directory, name), { flags: 'wx' }));
     if (received !== asset.size) throw new Error(`Truncated download: ${name}`);
+    console.log(`Downloaded: ${name}`);
   }
 }
 

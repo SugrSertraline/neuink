@@ -32,9 +32,26 @@ function createStorage(env = process.env) {
       publicUrl(key);
       const policy = new qiniu.rs.PutPolicy({ scope: `${BUCKET}:${key}`, insertOnly: immutable ? 1 : 0, expires: 3600, ...(temporary ? { deleteAfterDays: 1 } : {}) });
       const extra = qiniu.resume_up.PutExtra.create();
+      let lastProgress = 0;
+      console.log(`Uploading: ${key}`);
+      extra.progressCallback = (uploaded, total) => {
+        if (Date.now() - lastProgress >= 15000 || uploaded === total) {
+          console.log(`Upload progress: ${key} ${uploaded}/${total} bytes (${Math.floor(uploaded / total * 100)}%)`);
+          lastProgress = Date.now();
+        }
+      };
       const uploaded = await sdkResult(uploader.putFileV2(policy.uploadToken(mac), key, file, extra), `Upload ${key}`);
       if (uploaded.key !== key) throw new Error(`Unexpected uploaded key: ${key}`);
       return uploaded;
+    },
+    async copy(source, destination) {
+      publicUrl(source); publicUrl(destination);
+      await sdkResult(manager.copy(BUCKET, source, BUCKET, destination, { force: true }), `Copy ${destination}`);
+    },
+    async expireCheckObject(key) {
+      publicUrl(key);
+      if (!key.startsWith('releases/_checks/') || !key.endsWith('.txt')) throw new Error('Only connection-check objects may expire');
+      await sdkResult(manager.deleteAfterDays(BUCKET, key, 1), `Expire connection check ${key}`);
     },
     async refresh(keys) {
       const urls = keys.map(publicUrl);
@@ -79,4 +96,11 @@ async function uploadChecked(storage, key, file, options) {
   if (uploaded.hash !== file.etag || !sameObject(await storage.stat(key), file)) throw new Error(`Uploaded object verification failed: ${key}`);
 }
 
-module.exports = { BUCKET, REGION, DOMAIN, createStorage, publicUrl, sameObject, verifyPublic, uploadChecked };
+async function copyChecked(storage, source, destination, file) {
+  if (!sameObject(await storage.stat(source), file)) throw new Error(`Copy source verification failed: ${source}`);
+  if (sameObject(await storage.stat(destination), file)) return;
+  await storage.copy(source, destination);
+  if (!sameObject(await storage.stat(destination), file)) throw new Error(`Copied object verification failed: ${destination}`);
+}
+
+module.exports = { BUCKET, REGION, DOMAIN, createStorage, publicUrl, sameObject, verifyPublic, uploadChecked, copyChecked };
