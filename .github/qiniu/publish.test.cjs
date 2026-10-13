@@ -6,7 +6,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const crypto = require('node:crypto');
 const { PLATFORMS, fingerprint, releaseFiles, sourceCommit, verifyArtifacts } = require('./artifacts.cjs');
-const { verifyPublic, uploadChecked, copyChecked, publicUrl } = require('./storage.cjs');
+const { verifyPublic, uploadChecked, copyChecked, fetchChecked, publicUrl } = require('./storage.cjs');
 const { publish, checkConnection } = require('./publish.cjs');
 const { assertNewestRelease } = require('./run.cjs');
 
@@ -39,12 +39,14 @@ function mockStorage() {
       objects.set(key, { hash: data.etag, fsize: data.size });
       return { key, hash: data.etag };
     },
-    async copy(source, key) {
-      events.push({ type: 'copy', source, key });
+    async copy(source, key, options) {
+      events.push({ type: 'copy', source, key, options });
+      if (options?.immutable && objects.has(key)) throw new Error('Immutable destination exists');
       if (!objects.has(source)) throw new Error('Missing source');
       objects.set(key, { ...objects.get(source) });
     },
     async expireCheckObject(key) { events.push({ type: 'expire', key }); },
+    async expireTransferObject(key) { events.push({ type: 'expire-transfer', key }); },
     async refresh(keys) { events.push({ type: 'refresh', keys }); },
   };
 }
@@ -137,7 +139,7 @@ test('archive conflicts or verification failures leave fixed downloads untouched
   assert.equal(storage.events.length, 0);
   storage.objects.clear();
   await assert.rejects(publish({ storage, files, release, directory, log() {}, verify: async () => { throw new Error('offline'); } }), /offline/);
-  assert.ok(storage.events.every(event => event.key.startsWith(`releases/${tag}/`)));
+  assert.ok(storage.events.every(event => event.key?.startsWith(`releases/${tag}/`) || event.keys?.every(key => key.startsWith(`releases/${tag}/`))));
 });
 
 test('refresh failures never claim success or write a latest manifest', async t => {
@@ -225,4 +227,38 @@ test('older Releases cannot replace current downloads and drafts do not affect o
   const releases = [release, { ...release, tag_name: 'v0.1.2', published_at: '2026-10-14T00:00:00Z' }, { ...release, tag_name: 'v0.1.3', draft: true, published_at: null }];
   assert.throws(() => assertNewestRelease(releases, tag), /newest/);
   assertNewestRelease(releases, 'v0.1.2');
+});
+
+test('server fetch validates temporary bytes before a non-overwriting archive copy, then expires staging', async t => {
+  const { directory, group } = await fixture(t);
+  const [file] = await verifyArtifacts(directory, [group], tag, commit);
+  file.sourceUrl = `https://github.com/SugrSertraline/neuink/releases/download/${tag}/${file.name}`;
+  const storage = mockStorage();
+  storage.fetchRelease = async (url, key) => { assert.equal(url, file.sourceUrl); storage.objects.set(key, { hash: file.etag, fsize: file.size }); };
+  const key = `releases/${tag}/${file.name}`;
+  await fetchChecked(storage, key, file);
+  assert.equal(storage.objects.get(key).hash, file.etag);
+  assert.equal(storage.events[0].type, 'copy');
+  assert.equal(storage.events[0].options.immutable, true);
+  assert.equal(storage.events.at(-1).type, 'expire-transfer');
+  const count = storage.events.length;
+  await fetchChecked(storage, key, file);
+  assert.equal(storage.events.length, count);
+});
+
+test('server fetch rejects wrong bytes, existing versions and unexpected source URLs', async t => {
+  const { directory, group } = await fixture(t);
+  const [file] = await verifyArtifacts(directory, [group], tag, commit);
+  file.sourceUrl = `https://github.com/SugrSertraline/neuink/releases/download/${tag}/${file.name}`;
+  const storage = mockStorage();
+  storage.fetchRelease = async (_url, key) => storage.objects.set(key, { hash: 'wrong', fsize: file.size });
+  const key = `releases/${tag}/${file.name}`;
+  await assert.rejects(fetchChecked(storage, key, file), /Fetched file verification/);
+  assert.equal(storage.objects.has(key), false);
+  assert.ok(storage.events.every(event => event.type === 'expire-transfer'));
+  storage.objects.set(key, { hash: 'existing', fsize: 1 });
+  await assert.rejects(fetchChecked(storage, key, file), /different bytes/);
+  for (const sourceUrl of ['https://example.invalid/file.zip', file.sourceUrl + '?token=secret', file.sourceUrl.replace('SugrSertraline', 'someone-else')]) {
+    await assert.rejects(fetchChecked(storage, key, { ...file, sourceUrl }), /Unexpected/);
+  }
 });

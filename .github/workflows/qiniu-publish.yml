@@ -21,6 +21,11 @@ on:
         description: 'Published Release tag (required except for check), e.g. v0.1.1'
         type: string
         required: false
+      transport:
+        description: 'upload: runner sends files; fetch: Qiniu pulls verified public Release assets'
+        type: choice
+        default: upload
+        options: [upload, fetch]
 
 permissions:
   contents: read
@@ -70,3 +75,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PUBLISH_ACTION: ${{ github.event_name == 'release' && 'publish' || inputs.action }}
           RELEASE_TAG: ${{ inputs.tag }}
+          PUBLISH_TRANSPORT: ${{ inputs.transport || 'upload' }}

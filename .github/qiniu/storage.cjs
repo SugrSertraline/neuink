@@ -44,9 +44,19 @@ function createStorage(env = process.env) {
       if (uploaded.key !== key) throw new Error(`Unexpected uploaded key: ${key}`);
       return uploaded;
     },
-    async copy(source, destination) {
+    async copy(source, destination, { immutable = false } = {}) {
       publicUrl(source); publicUrl(destination);
-      await sdkResult(manager.copy(BUCKET, source, BUCKET, destination, { force: true }), `Copy ${destination}`);
+      await sdkResult(manager.copy(BUCKET, source, BUCKET, destination, { force: !immutable }), `Copy ${destination}`);
+    },
+    async fetchRelease(url, key) {
+      publicUrl(key);
+      console.log(`Fetching public release into Qiniu: ${key}`);
+      await sdkResult(manager.fetch(url, BUCKET, key), `Fetch ${key}`);
+    },
+    async expireTransferObject(key) {
+      publicUrl(key);
+      if (!key.startsWith('releases/_transfers/')) throw new Error('Only transfer staging objects may expire');
+      await sdkResult(manager.deleteAfterDays(BUCKET, key, 1), `Expire transfer ${key}`, true);
     },
     async expireCheckObject(key) {
       publicUrl(key);
@@ -103,4 +113,24 @@ async function copyChecked(storage, source, destination, file) {
   if (!sameObject(await storage.stat(destination), file)) throw new Error(`Copied object verification failed: ${destination}`);
 }
 
-module.exports = { BUCKET, REGION, DOMAIN, createStorage, publicUrl, sameObject, verifyPublic, uploadChecked, copyChecked };
+async function fetchChecked(storage, key, file) {
+  const url = new URL(file.sourceUrl);
+  const prefix = 'https://github.com/SugrSertraline/neuink/releases/download/';
+  if (!url.href.startsWith(prefix) || url.search || url.hash || !/^v[\w.-]+\/[\w.-]+$/.test(url.href.slice(prefix.length)) || !url.pathname.endsWith(`/${file.name}`)) throw new Error('Unexpected public Release source');
+  const before = await storage.stat(key);
+  if (sameObject(before, file)) return;
+  if (before) throw new Error(`Published version already contains different bytes: ${key}`);
+  const temporary = `releases/_transfers/${crypto.randomUUID()}/${file.name}`;
+  try {
+    await storage.fetchRelease(url.href, temporary);
+    if (!sameObject(await storage.stat(temporary), file)) throw new Error(`Fetched file verification failed: ${file.name}`);
+    // Never overwrite an immutable version or copy unverified remote bytes into it.
+    await storage.copy(temporary, key, { immutable: true });
+    if (!sameObject(await storage.stat(key), file)) throw new Error(`Fetched archive verification failed: ${key}`);
+  } finally {
+    // Set expiration only after copying, so the permanent archive cannot inherit it.
+    await storage.expireTransferObject(temporary);
+  }
+}
+
+module.exports = { BUCKET, REGION, DOMAIN, createStorage, publicUrl, sameObject, verifyPublic, uploadChecked, copyChecked, fetchChecked };

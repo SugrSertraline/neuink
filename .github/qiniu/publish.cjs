@@ -2,16 +2,19 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { fingerprint } = require('./artifacts.cjs');
-const { verifyPublic, uploadChecked, copyChecked, publicUrl } = require('./storage.cjs');
+const { verifyPublic, uploadChecked, copyChecked, fetchChecked, publicUrl } = require('./storage.cjs');
 
 async function publish({ storage, files, release, directory, archiveOnly = false, verify = verifyPublic, log = console.log }) {
   const prefix = `releases/${release.tag_name}`;
   // Complete and verify the immutable archive before touching any fixed download URL.
   for (const file of files) {
     const key = `${prefix}/${file.name}`;
-    await uploadChecked(storage, key, file, { immutable: true });
+    if (file.sourceUrl) await fetchChecked(storage, key, file);
+    else await uploadChecked(storage, key, file, { immutable: true });
     log(`Verified archive: ${key}`);
   }
+  // A user may have visited a version URL before the file existed; clear cached misses too.
+  await storage.refresh(files.map(file => `${prefix}/${file.name}`));
   for (const file of files) await verify(`${prefix}/${file.name}`, file);
   if (archiveOnly) return { prefix, aliasesUpdated: false };
   for (const file of files) {
