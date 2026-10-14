@@ -146,6 +146,8 @@ export type OpenDevWorkspaceResponse = {
 };
 
 export type WorkspaceSettings = {
+  data_root?: string | null;
+  legacy_import_notice?: string | null;
   default_root: string;
   root: string;
   custom_root: string | null;
@@ -176,12 +178,6 @@ export type TranslationAutomationSettings = {
   segment_types: string[];
 };
 
-export type MigrateWorkspaceRootResponse = {
-  from_root: string;
-  root: string;
-  restart_requested: boolean;
-};
-
 export async function openDevWorkspace(): Promise<OpenDevWorkspaceResponse> {
   return invoke<OpenDevWorkspaceResponse>('open_dev_workspace');
 }
@@ -210,12 +206,6 @@ export async function updateTranslationAutomationSettings(
 
 export async function setWorkspaceRoot(root: string): Promise<OpenDevWorkspaceResponse> {
   return invoke<OpenDevWorkspaceResponse>('set_workspace_root', {
-    request: { root }
-  });
-}
-
-export async function migrateWorkspaceRoot(root: string): Promise<MigrateWorkspaceRootResponse> {
-  return invoke<MigrateWorkspaceRootResponse>('migrate_workspace_root', {
     request: { root }
   });
 }

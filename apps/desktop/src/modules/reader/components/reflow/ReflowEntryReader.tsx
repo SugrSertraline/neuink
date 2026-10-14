@@ -1,3 +1,4 @@
+import { workspaceStorageIdentity } from '@/shared/lib/workspaceStorageIdentity';
 import { findSourceSegment } from '@/shared/lib/listItemSegments';
 import type { ComponentProps } from 'react';
 import { readingAssistantContext } from '../readingAssistantContext';
@@ -894,6 +895,6 @@ function persistHiddenSegmentUids(entryId: string, segmentUids: Set<string>) {
 }
 
 export function ReflowEntryReader(props: ComponentProps<typeof ReflowEntryReaderBody>) {
-  const key = JSON.stringify(['reflow', props.workspaceRoot, props.entry.id, props.entry.pdfFileName]);
+  const key = JSON.stringify(['reflow', props.workspaceRoot ? workspaceStorageIdentity(props.workspaceRoot) : null, props.entry.id, props.entry.pdfFileName]);
   return <ReadingNavigationScope key={key} retentionKey={key}><ReflowEntryReaderBody {...props} /></ReadingNavigationScope>;
 }

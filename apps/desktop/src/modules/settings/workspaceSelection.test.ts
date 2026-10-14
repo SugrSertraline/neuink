@@ -32,12 +32,4 @@ describe('resolveWorkspaceSelection', () => {
     });
   });
 
-  it('only allows migration to an empty directory', () => {
-    expect(resolveWorkspaceSelection('migrate', inspection('empty_directory'))).toEqual({
-      intent: 'migrate'
-    });
-    expect(resolveWorkspaceSelection('migrate', inspection('valid_workspace'))).toEqual({
-      message: 'status:valid_workspace'
-    });
-  });
 });

@@ -1,3 +1,4 @@
+import { workspaceStorageIdentity } from '@/shared/lib/workspaceStorageIdentity';
 import { PaperReferencesProvider } from './navigation/PaperReferences';
 import type { ComponentProps } from 'react';
 import { ReadingNavigationScope, useReadingNavigation } from './navigation/ReadingNavigation';
@@ -1480,6 +1481,6 @@ function clampCanvasCoordinate(value: number, max: number) {
 }
 
 export function MineruPdfReader(props: ComponentProps<typeof MineruPdfReaderBody>) {
-  const key = JSON.stringify(['pdf', props.workspaceRoot, props.entry.id, props.entry.pdfFileName]);
+  const key = JSON.stringify(['pdf', props.workspaceRoot ? workspaceStorageIdentity(props.workspaceRoot) : null, props.entry.id, props.entry.pdfFileName]);
   return <ReadingNavigationScope key={key} retentionKey={key}><ReadingSelectionToolbarProvider><MineruPdfReaderBody {...props} /></ReadingSelectionToolbarProvider></ReadingNavigationScope>;
 }

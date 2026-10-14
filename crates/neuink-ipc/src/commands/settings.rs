@@ -1,10 +1,8 @@
-use std::{fs, path::PathBuf};
-
 use chrono::Utc;
 use neuink_config::{AppSettings, LlmApiProtocol, LlmProfile, LlmSettings};
-use neuink_workspace::atomic_write_json;
 use serde::Deserialize;
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Runtime};
+pub(crate) use crate::storage::{read_settings, write_settings};
 
 #[derive(Debug, Deserialize)]
 pub struct SaveLlmSettingsRequest {
@@ -184,15 +182,6 @@ pub fn set_task_llm_profile<R: Runtime>(
     Ok(settings_state(&settings))
 }
 
-pub(crate) fn read_settings<R: Runtime>(app: &AppHandle<R>) -> Result<AppSettings, String> {
-    let path = settings_path(app)?;
-    if !path.exists() {
-        return Ok(AppSettings::default());
-    }
-    let bytes = fs::read(path).map_err(|error| error.to_string())?;
-    serde_json::from_slice(&bytes).map_err(|error| error.to_string())
-}
-
 pub(crate) fn read_translation_profile<R: Runtime>(
     app: &AppHandle<R>,
 ) -> Result<Option<LlmProfile>, String> {
@@ -211,23 +200,6 @@ pub(crate) fn read_assistant_profile<R: Runtime>(
     let profile = task_profile(settings.assistant_llm_profile_id.as_deref(), &settings).cloned();
     write_settings(app, &settings)?;
     Ok(profile)
-}
-
-pub(crate) fn write_settings<R: Runtime>(
-    app: &AppHandle<R>,
-    settings: &AppSettings,
-) -> Result<(), String> {
-    let path = settings_path(app)?;
-    atomic_write_json(path, settings).map_err(|error| error.to_string())
-}
-
-fn settings_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
-    let config_dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|error| error.to_string())?;
-    fs::create_dir_all(&config_dir).map_err(|error| error.to_string())?;
-    Ok(config_dir.join("settings.json"))
 }
 
 fn ensure_legacy_profile(settings: &mut AppSettings) {

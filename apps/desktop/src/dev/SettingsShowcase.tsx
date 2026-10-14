@@ -25,7 +25,7 @@ if (params.has('longModels')) llm.profiles.push(
   { ...llm.profiles[0], id: 'other', name: '备用模型', model: 'example-reasoning', api_protocol: 'anthropic', max_context_length: 200000 },
 );
 if (state === 'empty') llm = { ...llm, profiles: [], assistant_profile_id: null, translation_profile_id: null };
-let workspace = { root: 'settings-showcase', default_root: 'settings-showcase', recent_workspaces: [], translation_automation: { auto_translate_pdf: false, segment_types: ['paragraph', 'heading'] } };
+let workspace = { data_root: 'E:\\Neuink\\data', root: 'settings-showcase', default_root: 'settings-showcase', recent_workspaces: [], translation_automation: { auto_translate_pdf: false, segment_types: ['paragraph', 'heading'] } };
 let research = { papers_enabled: true, web_enabled: true, use_tavily: false, has_web_key: false };
 let sciverse = { enabled: false, base_url: 'https://api.sciverse.space', has_api_token: false, token_source: 'none' };
 // Every IPC is intercepted. This page cannot read or write an actual library.
@@ -67,7 +67,7 @@ function SettingsShowcase() {
   const [key, setKey] = useState('');
   const [search, setSearch] = useState(false);
   const [sidebar, setSidebar] = useState(false);
-  const [target, setTarget] = useState<SettingsNavigationTarget | undefined>(params.has('tools') ? { id: 'tools-research', nonce: 1 } : undefined);
+  const [target, setTarget] = useState<SettingsNavigationTarget | undefined>(params.has('data') ? { id: 'data-workspace', nonce: 1 } : params.has('tools') ? { id: 'tools-research', nonce: 1 } : undefined);
   const nonce = useRef(0);
   const navigate = (id: string) => setTarget({ id, nonce: ++nonce.current });
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);

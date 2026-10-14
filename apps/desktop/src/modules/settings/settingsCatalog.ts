@@ -53,7 +53,7 @@ const ALL_SETTINGS_CATALOG: SettingDefinition[] = [
   { id: 'parser-auto', tab: 'parser', title: '导入 PDF 后自动解析', description: '默认关闭；开启后使用已配置的解析服务，客户端 ZIP 导入不受影响。', keywords: '上传PDF后自动开始解析 导入 解析' },
   { id: 'parser-service', tab: 'parser', title: 'MinerU 服务连接', description: '配置解析服务地址和可选 API Key。', keywords: 'MinerU URL 密钥 API Key token 凭据 解析 Base URL' },
   { id: 'parser-zip', tab: 'parser', title: '导入 MinerU 客户端 ZIP', description: '使用客户端生成的解析结果。', keywords: '离线 解析 导入 ZIP content_list' },
-  { id: 'data-workspace', tab: 'data', title: '资料库位置与切换', description: '打开、新建、迁移资料库，以及最近使用记录。', keywords: '工作区 workspace 位置 路径 目录 迁移 最近使用 默认文库' },
+  { id: 'data-workspace', tab: 'data', title: '数据位置', description: '数据固定保存在程序文件夹内，随程序一起移动。', keywords: '工作区 workspace 位置 路径 目录 data 便携 U盘 USB' },
   { id: 'models-connections', tab: 'models', title: '模型连接配置', description: '选择公开模型预设，自动填入参数；配置 API Key、接口地址和模型 ID。', keywords: '大模型 大语言模型 密钥 API Key token 凭据 Base URL Provider Ollama OpenAI 模型预设 models.dev OpenRouter 公开目录 自动填充' },
   { id: 'models-advanced', tab: 'models', title: '模型高级参数', description: '在模型编辑中设置上下文、最大输出、Temperature 和 Top P。', keywords: '采样 温度 token 上下文窗口 参数' },
   { id: 'models-assistant', tab: 'models', title: '助手对话模型', description: '指定对话与资料问答使用的模型。', keywords: '任务模型 助手 对话 AI' },

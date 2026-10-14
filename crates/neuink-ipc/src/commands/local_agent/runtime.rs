@@ -189,10 +189,7 @@ pub async fn run_local_agent<R: tauri::Runtime>(
         );
     }
     let _guard = RunGuard(request.run_id.clone());
-    let cwd = window
-        .app_handle()
-        .path()
-        .app_cache_dir()
+    let cwd = crate::storage::cache_dir(window.app_handle())
         .map_err(|_| "无法准备 Agent 工作目录。")?
         .join("local-agent")
         .join(key);
