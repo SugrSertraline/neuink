@@ -1566,3 +1566,5 @@ Hover 即时反馈（2026-09-17）：按用户要求删除 PDF 600ms 冷却、�
 - Claude Code 接收起始、增量和完整 thinking 块并去重；Codex 接收分段摘要／文本及完整快照，避免重复表示；OpenCode 接收 ACP 思考文本。只展示实际返回内容，不修改模型思考配置。
 - 复用聊天执行详情，运行中显示两行预览，展开查看返回全文，完成后保留入口；沿用消息 parts 保存，取消后忽略迟到事件。单条详情持有展开状态，原聊天列表负责外层滚动，详情保留 256px 内层滚动及共享按钮键盘行为。
 - 本次隔离后的 main 上 62 项协议、消息组件、控制器和 runner 回归通过。beta 的浏览器演示已核对普通／窄面板、125% 缩放及键盘展开；未进行真实模型联调，原生 Tauri 视觉验收尚未完成。后续打包保留 D:\Neuink-USB\data，并校验替换前后的数据一致性。
+- 交付完成：main `dbfafc7` 的 release optimized 构建及 TypeScript／前端生产构建通过（保留既有大包警告）。`D:\Neuink-USB` 的 1165 个程序文件与新包一致，只替换 2 个不同文件；2625 个 data 文件的逐文件 SHA256 完全一致。旧程序与说明／构建信息保存在原仓库 release/portable-backup-before-thinking-20261014。桌面快捷方式仍指向该程序。
+- 新干净包 `D:\Neuink-portable-20261014-思考展示.zip` 共 1166 个文件，均与构建目录逐文件校验一致；SHA256 `194ea40f4f3dc0499cf511da10f60a297c4d638c5eebaca5c9aaf441b2ecebb1`。包不含个人 data；个人资料保留在现有 D:\Neuink-USB\data。未推送、未更新 CDN，未调用真实模型或完成原生 Tauri 视觉验收。
