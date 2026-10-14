@@ -166,7 +166,13 @@ function ChatMessageComponent({
       </div>
       {isPlanningRequest ? <div className="mb-1 text-[11px] text-muted-foreground">仅规划 · 只读</div> : null}
       {message.role === 'assistant' && (streaming || resolvedAgentRun || resolvedPlan || resolvedMemory || resolvedToolEvents.length > 0 || reasoning) ? (
-        <ExecutionDetails key={message.message_id} awaitingApproval={awaitingApproval} streaming={streaming} hasAnswer={Boolean(content.trim())} run={resolvedAgentRun} events={resolvedToolEvents}>
+        <ExecutionDetails key={message.message_id} awaitingApproval={awaitingApproval} streaming={streaming} hasAnswer={Boolean(content.trim())} run={resolvedAgentRun} events={resolvedToolEvents} reasoning={reasoning}>
+      {reasoning ? (
+        <section className="text-[11px] leading-4 text-muted-foreground" aria-label="思考过程">
+          <div className="mb-1 font-medium">思考过程</div>
+          <div className="whitespace-pre-wrap break-words">{reasoning}</div>
+        </section>
+      ) : null}
       {resolvedAgentRun ? (
         <AgentRunSummary run={resolvedAgentRun} errorNotice={toolErrorNotice} onRetry={onRetryAgentRun} />
       ) : null}
@@ -176,12 +182,6 @@ function ChatMessageComponent({
       ) : null}
       {resolvedToolEvents.length > 0 ? (
         <ToolTrace events={resolvedToolEvents} errorNotice={toolErrorNotice} />
-      ) : null}
-      {reasoning ? (
-        <section className="text-[11px] leading-4 text-muted-foreground" aria-label="思考过程">
-          <div className="mb-1 font-medium">思考过程</div>
-          <div className="whitespace-pre-wrap break-words">{reasoning}</div>
-        </section>
       ) : null}
         </ExecutionDetails>
       ) : null}

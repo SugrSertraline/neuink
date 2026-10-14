@@ -3,6 +3,7 @@ import { localAgentName, type LocalAgentProvider } from '@/shared/lib/localAgent
 import { PdfReadingAudit } from './pdfReading';
 import { protocolObject as object } from './protocol';
 import { ASSISTANT_READ_FAILURES } from '@/shared/lib/assistantReadFailure';
+import { ReasoningBlocks } from './reasoningBlocks';
 
 export type AgentStreamCallbacks = {text:(delta:string)=>void; reset:()=>void; reasoning:(delta:string)=>void;
   tool:(event:AssistantToolTraceEvent)=>void; initialized:(sessionId?:string)=>void};
@@ -12,6 +13,8 @@ export class RpcAgentStream {
   private messageId = '';
   private messageText = '';
   private tools = new Map<string, {name:string;input:unknown}>();
+  private reasoning = new ReasoningBlocks(text => this.callbacks.reasoning(text));
+  private reasoningFormats = new Map<string, 'summary' | 'content'>();
   readonly pdfReading = new PdfReadingAudit(id => this.callbacks.tool({id,toolName:`${this.provider}.mcp__neuink__read_pdf_pages`,
     status:'error',recovered:true,summary:'读取请求已调整，后续调用已覆盖原请求页码。'}));
   constructor(private provider: Exclude<LocalAgentProvider,'claude'>, private callbacks:AgentStreamCallbacks) {}
@@ -24,12 +27,24 @@ export class RpcAgentStream {
       if (value.method === 'item/agentMessage/delta' && typeof params.delta === 'string') {
         this.startMessage(String(params.itemId)); this.messageText+=params.delta; this.callbacks.text(params.delta);
       }
-      if ((value.method === 'item/reasoning/summaryTextDelta' || value.method === 'item/reasoning/textDelta') && typeof params.delta === 'string') this.callbacks.reasoning(params.delta);
+      if ((value.method === 'item/reasoning/summaryTextDelta' || value.method === 'item/reasoning/textDelta') && typeof params.delta === 'string' && params.delta) {
+        const id = String(params.itemId ?? 'reasoning');
+        const format = value.method === 'item/reasoning/summaryTextDelta' ? 'summary' : 'content';
+        const selected = this.reasoningFormats.get(id) ?? format;
+        this.reasoningFormats.set(id, selected);
+        if (selected === format) this.reasoning.append(`${id}:${format}:${String(params.summaryIndex ?? params.contentIndex ?? 0)}`, params.delta);
+      }
       if (value.method === 'item/started' || value.method === 'item/completed') {
         const item=object(params.item), id=String(item.id ?? '');
         if (item.type === 'agentMessage' && value.method === 'item/completed' && typeof item.text === 'string') {
           this.startMessage(id);
           if (item.text !== this.messageText) { this.messageText=item.text; this.callbacks.reset(); this.callbacks.text(item.text); }
+        } else if (item.type === 'reasoning' && value.method === 'item/completed') {
+          const summary = Array.isArray(item.summary) ? item.summary.filter((part): part is string => typeof part === 'string') : [];
+          const content = Array.isArray(item.content) ? item.content.filter((part): part is string => typeof part === 'string') : [];
+          const format = this.reasoningFormats.get(id) ?? (summary.some(part => part.trim()) ? 'summary' : 'content');
+          this.reasoningFormats.set(id, format);
+          (format === 'summary' ? summary : content).forEach((text, index) => this.reasoning.complete(`${id}:${format}:${index}`, text));
         } else if (['mcpToolCall','commandExecution','fileChange','dynamicToolCall','webSearch'].includes(String(item.type))) {
           const name=item.type === 'mcpToolCall' ? `mcp__${String(item.server)}__${String(item.tool)}` : String(item.type);
           this.tool(id,name,item.arguments ?? item.command ?? item.changes,value.method === 'item/started' ? 'running'
@@ -42,7 +57,9 @@ export class RpcAgentStream {
         if (typeof update.messageId === 'string') this.startMessage(update.messageId);
         this.messageText+=content.text; this.callbacks.text(content.text);
       }
-      if (update.sessionUpdate === 'agent_thought_chunk' && typeof content.text === 'string') this.callbacks.reasoning(content.text);
+      if (update.sessionUpdate === 'agent_thought_chunk' && content.type === 'text' && typeof content.text === 'string') {
+        this.reasoning.append(`acp:${String(update.messageId ?? 'thought')}`, content.text);
+      }
       if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
         const id=String(update.toolCallId ?? ''), previous=this.tools.get(id);
         const name=(typeof update.name === 'string' ? update.name : previous?.name ?? String(update.title ?? update.kind ?? 'tool')).replace(/^neuink_/, 'mcp__neuink__');

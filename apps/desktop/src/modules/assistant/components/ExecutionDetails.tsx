@@ -7,17 +7,19 @@ import { resolveAssistantRunStatus } from './AssistantRunStatus';
 import { ASSISTANT_TOOL_ANSWERED, assistantToolErrorNotice, formatAssistantError, useAssistantDebug } from '@/shared/lib/assistantDebug';
 
 /** Each message owns its disclosure; only the expanded details own an inner scroll area. */
-export function ExecutionDetails({ children, streaming, hasAnswer, run, events, awaitingApproval = false }: {
+export function ExecutionDetails({ children, streaming, hasAnswer, run, events, reasoning = '', awaitingApproval = false }: {
   awaitingApproval?: boolean;
   children: ReactNode;
   streaming: boolean;
   hasAnswer: boolean;
   run?: AssistantAgentRun | null;
   events: AssistantToolTraceEvent[];
+  reasoning?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const debug = useAssistantDebug();
   const detailsId = useId();
+  const reasoningPreview = reasoning.slice(-220).replace(/\s+/g, ' ').trim();
   const errors = events.filter(event => !event.recovered && (event.status === 'error' || Boolean(event.error)));
   const recovered = events.some(event => event.recovered);
   const failed = run?.status === 'failed' || errors.length > 0;
@@ -47,9 +49,11 @@ export function ExecutionDetails({ children, streaming, hasAnswer, run, events, 
         {[0, 1, 2].map(index => <span key={index} className="size-1 rounded-full bg-current motion-safe:animate-pulse motion-reduce:animate-none" style={{ animationDelay: `${index * 200}ms` }} />)}
       </span> : null}
       <span role="status" className={failed && !streaming ? answered ? 'truncate text-warning' : 'truncate text-destructive' : 'truncate'}>{label}</span>
+      {reasoningPreview ? <span className="shrink-0">· 思考过程</span> : null}
       {!streaming && run?.durationMs !== undefined
         ? <span className="shrink-0 tabular-nums">· {(run.durationMs / 1000).toFixed(1)} 秒</span> : null}
     </Button>
+    {streaming && !expanded && reasoningPreview ? <p aria-label="思考预览" className="line-clamp-2 break-words pl-1 text-muted-foreground">{reasoningPreview}</p> : null}
     {!streaming && failed ? <p className={`line-clamp-2 break-words ${answered ? 'text-warning' : 'text-destructive'}`}>{formatAssistantError(latestError, { debug, fallback: errorNotice })}</p> : null}
     <div id={detailsId} hidden={!expanded}>
       {expanded ? <div className="my-1 max-h-64 overflow-y-auto overscroll-contain border-l pl-2 pr-1 break-words">
