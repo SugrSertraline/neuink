@@ -48,32 +48,8 @@ function createStorage(env = process.env) {
       publicUrl(source); publicUrl(destination);
       await sdkResult(manager.copy(BUCKET, source, BUCKET, destination, { force: !immutable }), `Copy ${destination}`);
     },
-    async fetchRelease(url, key, file) {
+    async fetchRelease(url, key) {
       publicUrl(key);
-      if (file.size > 32768) {
-        const endpoint = `https://api-${REGION}.qiniuapi.com/sisyphus/fetch`;
-        const body = JSON.stringify({ url, bucket: BUCKET, key, etag: file.etag });
-        const headers = {
-          'Content-Type': 'application/json',
-          'X-Qiniu-Date': new Date().toISOString().slice(0, 19).replace(/[-:]/g, '') + 'Z',
-        };
-        headers.Authorization = qiniu.util.generateAccessTokenV2(mac, endpoint, 'POST', headers['Content-Type'], body, headers);
-        let response;
-        try {
-          response = await fetch(endpoint, { method: 'POST', headers, body, signal: AbortSignal.timeout(30000) });
-        } catch { throw new Error(`Queue fetch ${key}: Qiniu transport failure`); }
-        if (!response.ok) throw new Error(`Queue fetch ${key}: Qiniu HTTP ${response.status}`);
-        const task = await response.json();
-        if (typeof task.id !== 'string' || !task.id) throw new Error(`Queue fetch ${key}: missing task ID`);
-        console.log(`Qiniu fetch queued: ${key}`);
-        for (let attempt = 0; attempt < 120; attempt++) {
-          await delay(10000);
-          const remote = await sdkResult(manager.stat(BUCKET, key), `Inspect ${key}`, true);
-          if (sameObject(remote, file)) return;
-          if (remote) throw new Error(`Fetched file verification failed: ${key}`);
-        }
-        throw new Error(`Qiniu fetch did not complete: ${key}`);
-      }
       console.log(`Fetching public release into Qiniu: ${key}`);
       await sdkResult(manager.fetch(url, BUCKET, key), `Fetch ${key}`);
     },
@@ -160,7 +136,7 @@ async function fetchChecked(storage, key, file) {
   if (before) throw new Error(`Published version already contains different bytes: ${key}`);
   const temporary = `releases/_transfers/${crypto.randomUUID()}/${file.name}`;
   try {
-    await storage.fetchRelease(url.href, temporary, file);
+    await storage.fetchRelease(url.href, temporary);
     if (!sameObject(await storage.stat(temporary), file)) throw new Error(`Fetched file verification failed: ${file.name}`);
     // Never overwrite an immutable version or copy unverified remote bytes into it.
     await storage.copy(temporary, key, { immutable: true });
