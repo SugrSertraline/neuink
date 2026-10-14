@@ -10,7 +10,15 @@
   <a href="https://sugrsertraline.github.io/neuink/start.html">Start reading</a> · <a href="https://sugrsertraline.github.io/neuink/screenshots.html">Screenshot guide</a> · <a href="https://cdn.sugrsertraline.top/Neuink-windows-x64-portable.zip">Download for Windows</a>
 </p>
 
-## What's new in the 0.1.1 preview
+## What's new in the 0.1.2 preview
+
+- **Carry your data with the app:** on Windows, papers, notes, chats, settings and reading state live in `data` beside the executable. Close Neuink before copying the complete folder to a USB drive.
+- **Import legacy data automatically:** startup checks `neuink_data` beside the app and at the drive root, retains current files on conflicts, and moves the old folder to the Recycle Bin only after verification succeeds.
+- **Read returned Agent reasoning:** preview thinking text or summaries supplied by Claude Code, Codex or OpenCode, expand the returned content, and revisit it in saved chats.
+
+Experimental global memory and LAN sharing are excluded. See [release notes and validation limits](CHANGELOG.md).
+
+## Reading improvements from 0.1.1
 
 - **Reading and citations:** improved PDF text selection and hover behavior. Hold Ctrl and drag a block into the composer; a translucent overlay marks the drop target. Preview citations on hover and click to return to the source, in drafts and sent messages. Draft references can be removed and restored.
 - **Individual list items:** references, numbered lists, and bullet lists now retain item-level context, notes, and annotations, with an explicit whole-list option.
@@ -26,7 +34,7 @@ Read the [release changes and validation scope](CHANGELOG.md) or the [assistant 
 
 Fully extract the ZIP, keep the bundled resource folders, and run `Neuink.exe`. Do not run it from inside the archive.
 
-Windows requires Windows 10 1903+ / 11 x64 and WebView2. To update, close the app, extract the new version to a new folder, and reopen your existing workspace.
+Windows requires Windows 10 1903+ / 11 x64 and WebView2. To update, close the app and back up the entire `data` folder. Keep your original `data` beside the new program files; never overwrite it with the empty folder from a public download.
 
 macOS preview builds for Apple Silicon and Intel are available from successful [automated builds](https://github.com/SugrSertraline/neuink/actions/workflows/windows-portable.yml). They are not notarized or validated on a physical Mac; Gatekeeper may block launch. Embedded web pages and the video-caption runtime have not been ported. See [downloads and platform details](docs/deployment/packaging-and-distribution.md).
 
@@ -128,7 +136,7 @@ Read the [illustrated user guide](https://sugrsertraline.github.io/neuink/screen
 
 Extract the complete archive and open `Neuink.exe`, keeping its resource directories beside it. Node.js and Rust are not needed; Microsoft Edge WebView2 Runtime is required. Portable builds use the application's existing workspace and settings locations, so user data is not necessarily stored beside the executable.
 
-The project version is **0.1.1**. A Windows portable build workflow exists; signing, in-app updates, and native distribution validation still have outstanding work. See [packaging and distribution](docs/deployment/packaging-and-distribution.md) for automated builds, downloads, and platform validation status.
+The project version is **0.1.2**. A Windows portable build workflow exists; signing, in-app updates, and native distribution validation still have outstanding work. See [packaging and distribution](docs/deployment/packaging-and-distribution.md) for automated builds, downloads, and platform validation status.
 
 ### Your first paper
 

@@ -37,7 +37,15 @@
 
 [产品官网](https://sugrsertraline.github.io/neuink/) · [作者主页](https://sugrsertraline.github.io/homepage/) · [核心功能](#核心功能) · [开始使用](#开始使用) · [本地与在线能力](#本地与在线能力) · [开发与构建](#开发与构建) · [项目文档](#项目文档)
 
-## 0.1.1 预览版更新
+## 0.1.2 预览版更新
+
+- **数据随程序移动**：Windows 默认把论文、笔记、聊天、设置和阅读状态保存在程序旁的 `data`。退出后复制整个程序文件夹，即可随 U 盘携带。
+- **自动整理旧资料**：启动时检查程序目录旁和所在磁盘根目录的 `neuink_data`，补入缺少的文件；冲突保留当前数据，校验成功后旧目录进入回收站。
+- **查看 Agent 思考内容**：Claude Code、Codex、OpenCode 返回思考文本或摘要时，在对话中显示实时预览，展开可查看已返回全文并随消息保存。
+
+实验中的全局记忆和局域网共享不在本版范围内。查看[发行说明与验证边界](CHANGELOG.md)。
+
+## 0.1.1 阅读体验更新
 
 - **阅读与引用**：改善 PDF 选字边缘与悬停冲突；按住 Ctrl 拖动一个片段到聊天输入框，拖入时显示遮罩。草稿和已发送消息中的引用都可悬停预览、点击回到原文，未发送引用可删除并撤销。
 - **准确选择列表项**：参考文献、编号列表与项目列表按单项添加上下文、笔记和批注；整段列表仍可显式选择。
@@ -51,7 +59,7 @@
 
 **[下载 Neuink Windows x64 便携版（ZIP，CDN 直链）](https://cdn.sugrsertraline.top/Neuink-windows-x64-portable.zip)**
 
-完整解压后双击 `Neuink.exe`，保留随包资源目录，不要在压缩包内直接运行。运行成品不需要安装 Node.js 或 Rust，系统需有 WebView2 Runtime。更新时先关闭旧版，将新版解压到新文件夹，再打开原有资料库。
+完整解压后双击 `Neuink.exe`，保留随包资源目录，不要在压缩包内直接运行。运行成品不需要安装 Node.js 或 Rust，系统需有 WebView2 Runtime。更新前关闭程序并备份整个 `data`；将新程序文件与原 `data` 放在一起，不要用新包的空 `data` 覆盖个人数据。旧版 `neuink_data` 的自动整理范围见[数据说明](https://sugrsertraline.github.io/neuink/data.html)。
 
 ## macOS 预览构建
 
@@ -155,7 +163,7 @@ Windows 原生应用支持内嵌网页标签、地址栏、前进后退、独立
 
 完整解压后双击 `Neuink.exe`，保留随包资源目录。无需安装 Node.js 或 Rust，系统需有 Microsoft Edge WebView2 Runtime。便携包沿用应用的资料库与设置位置，用户数据不一定存放在 EXE 旁边。
 
-当前项目版本为 **0.1.1**。Windows 提供便携包构建流程；签名、应用内自动更新及原生发行验收仍有待完成。自动构建、下载方式和各平台验收状态见[打包与发行](docs/deployment/packaging-and-distribution.md)。
+当前项目版本为 **0.1.2**。Windows 提供便携包构建流程；签名、应用内自动更新及原生发行验收仍有待完成。自动构建、下载方式和各平台验收状态见[打包与发行](docs/deployment/packaging-and-distribution.md)。
 
 ### 第一次整理一篇论文
 

@@ -17,17 +17,17 @@ Neuink 把文献、阅读位置、笔记和证据放进一个本地资料库。�
 
 **[下载 Windows x64 便携版（ZIP，CDN 直链）](https://cdn.sugrsertraline.top/Neuink-windows-x64-portable.zip)**
 
-下载后将整个压缩包解压到一个文件夹，再双击 `Neuink.exe`，不要在压缩包内直接运行。更新时先关闭旧版，将新版解压到新文件夹，再打开原有资料库。
+下载后将整个压缩包解压到一个文件夹，再双击 `Neuink.exe`，不要在压缩包内直接运行。更新前关闭应用并备份整个 `data`；将新版程序与原 `data` 放在一起，不要用新包的空目录覆盖已有数据。
 
 从 [GitHub Releases](https://github.com/SugrSertraline/neuink/releases) 查看维护者已发布的版本、平台与说明。没有适合的平台产物时，可按仓库的[构建说明](https://github.com/SugrSertraline/neuink/blob/main/docs/deployment/packaging-and-distribution.md)从源码运行；下载前查看对应版本的支持平台与使用说明。
 
 Windows 便携包需要完整解压，再运行 `Neuink.exe`。保留随包的资源目录；运行成品不需要 Node.js 或 Rust，系统需有 WebView2 Runtime。请以该版本的发布说明为准，不将调试目录中的程序当成便携版。
 
-## 建立一个自己的资料库
+## 数据默认保存在程序旁
 
-打开设置中的“资料库与数据”，选择“新建资料库”，或打开一个已有 Neuink Workspace。资料库是普通本地文件夹，但已有库需要包含有效的 `neuink.workspace.json`；随意选择一个有文件的目录不会自动把它变成资料库。
+Windows 0.1.2 首次启动会在程序文件夹内建立 `data`，资料库位于 `data/library`，无需新建或选择路径。请把程序完整解压到可写目录，例如自己的文件夹或 U 盘，避免放在需要管理员写入权限的位置。
 
-建议为一个长期研究范围使用一个资料库，再用标签细分课题。论文属于多个主题时，增加标签即可，不必重复复制文献。资料库位置与 EXE 所在位置是两回事，详见[数据管理](data.md)。
+论文、笔记、聊天、设置和阅读状态随整个 `data` 保留。保存并退出后复制完整程序文件夹，即可携带到另一台 Windows 电脑；本地 Agent 仍需在那里单独安装和登录。旧版 `neuink_data` 的自动整理与冲突处理见[数据管理](data.md)。
 
 ## 先导入，再决定要不要解析
 
