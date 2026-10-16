@@ -10,6 +10,13 @@
   <a href="https://sugrsertraline.github.io/neuink/start.html">Start reading</a> · <a href="https://sugrsertraline.github.io/neuink/screenshots.html">Screenshot guide</a> · <a href="https://cdn.sugrsertraline.top/Neuink-windows-x64-portable.zip">Download for Windows</a>
 </p>
 
+## What's new in the 0.1.3 preview
+
+- **Reliable shutdown:** finish active assistant work before closing and stop child processes launched by the app. Codex connections can reconnect after a disconnect.
+- **Web citations:** retain verified bracketed web citations in assistant answers.
+
+This update contains verified fixes from the stable branch. The experimental research memory feature is excluded. See the [release notes](CHANGELOG.md).
+
 ## What's new in the 0.1.2 preview
 
 - **Carry your data with the app:** on Windows, papers, notes, chats, settings and reading state live in `data` beside the executable. Close Neuink before copying the complete folder to a USB drive.
@@ -136,7 +143,7 @@ Read the [illustrated user guide](https://sugrsertraline.github.io/neuink/screen
 
 Extract the complete archive and open `Neuink.exe`, keeping its resource directories beside it. Node.js and Rust are not needed; Microsoft Edge WebView2 Runtime is required. Portable builds use the application's existing workspace and settings locations, so user data is not necessarily stored beside the executable.
 
-The project version is **0.1.2**. A Windows portable build workflow exists; signing, in-app updates, and native distribution validation still have outstanding work. See [packaging and distribution](docs/deployment/packaging-and-distribution.md) for automated builds, downloads, and platform validation status.
+The project version is **0.1.3**. A Windows portable build workflow exists; signing, in-app updates, and native distribution validation still have outstanding work. See [packaging and distribution](docs/deployment/packaging-and-distribution.md) for automated builds, downloads, and platform validation status.
 
 ### Your first paper
 
