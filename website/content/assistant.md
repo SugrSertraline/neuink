@@ -30,7 +30,7 @@
 
 ![Neuink 0.1.1 界面演示：PDF 与引用输入框（浏览器运行真实组件，使用示例数据）](../public/screenshots/reading-citations-011.jpg)
 
-这张图展示当前阅读器与输入组件，不是原生 Tauri 窗口实拍；示例不调用模型服务。
+这张历史图展示当时的阅读器与输入组件，不是 0.1.3 原生窗口实拍；示例不调用模型服务。
 
 ![Neuink 0.1.1 界面演示：引用拖入时的遮罩提示（浏览器，示例数据）](../public/screenshots/reading-drop-011.jpg)
 

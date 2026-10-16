@@ -17,7 +17,7 @@ Neuink 把文献、阅读位置、笔记和证据放进一个本地资料库。�
 
 **[下载 Windows x64 便携版（ZIP，CDN 直链）](https://cdn.sugrsertraline.top/Neuink-windows-x64-portable.zip)**
 
-下载后将整个压缩包解压到一个文件夹，再双击 `Neuink.exe`，不要在压缩包内直接运行。更新前关闭应用并备份整个 `data`；将新版程序与原 `data` 放在一起，不要用新包的空目录覆盖已有数据。
+下载后将整个压缩包解压到一个文件夹，再双击 `Neuink.exe`，不要在压缩包内直接运行。更新前关闭应用并备份整个 `data`；将新版程序与原 `data` 放在一起，不要用新包的模板目录覆盖已有数据。
 
 从 [GitHub Releases](https://github.com/SugrSertraline/neuink/releases) 查看维护者已发布的版本、平台与说明。没有适合的平台产物时，可按仓库的[构建说明](https://github.com/SugrSertraline/neuink/blob/main/docs/deployment/packaging-and-distribution.md)从源码运行；下载前查看对应版本的支持平台与使用说明。
 
@@ -25,7 +25,7 @@ Windows 便携包需要完整解压，再运行 `Neuink.exe`。保留随包的�
 
 ## 数据默认保存在程序旁
 
-Windows 0.1.3 首次启动会在程序文件夹内建立 `data`，资料库位于 `data/library`，无需新建或选择路径。请把程序完整解压到可写目录，例如自己的文件夹或 U 盘，避免放在需要管理员写入权限的位置。
+Windows 0.1.3 便携包已经带有 `data` 目录和一份说明；首次启动会在其中建立资料库，位置为 `data/library`，无需选择路径。请把程序完整解压到可写目录，例如自己的文件夹或 U 盘，避免放在需要管理员写入权限的位置。
 
 论文、笔记、聊天、设置和阅读状态随整个 `data` 保留。保存并退出后复制完整程序文件夹，即可携带到另一台 Windows 电脑；本地 Agent 仍需在那里单独安装和登录。旧版 `neuink_data` 的自动整理与冲突处理见[数据管理](data.md)。
 
@@ -62,7 +62,7 @@ PDF 原文阅读不依赖解析。解析失败时，也不需要为了继续阅�
 - 想整理同一主题：查看[标签](library.md)与[平行阅读](parallel.md)。
 - 想交给同学或导师：查看[导出分享](export.md)，选择实际需要的成果范围。
 
-## 使用 0.1.1 的新交互
+## 0.1.1 起支持的交互
 
 阅读 PDF 时按住 Ctrl 拖动一个片段到助手输入框，再输入具体问题。引用可以悬停预览、点击回到原文；未发送的引用可删除。没有 PDF 的条目可在详情尝试“获取 PDF”。
 
