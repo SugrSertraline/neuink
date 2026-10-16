@@ -3,7 +3,7 @@ import { beginEditAssistantQueuedMessage, cancelAssistantQueuedMessage, cancelEd
   resumeAssistantMessageQueue, saveAssistantQueuedMessage, updateAssistantQueuedMessageEdit,
   syncAssistantMessageQueueConversation,
   findAssistantBackgroundRun, finishAssistantBackgroundRun, getAssistantBackgroundRuns, queueAssistantBackgroundRun,
-  setAssistantBackgroundRun, stopAssistantBackgroundRun, subscribeAssistantBackgroundRun, syncAssistantBackgroundRunState,
+  setAssistantBackgroundRun, stopAssistantBackgroundRun, stopAssistantBackgroundWorkForClose, subscribeAssistantBackgroundRun, syncAssistantBackgroundRunState,
   type AssistantBackgroundRunSnapshot } from './assistantBackgroundRuns';
 import type { QueuedAssistantDraft } from './assistantRunController';
 
@@ -34,6 +34,30 @@ it('keeps execution alive without a view subscriber and delivers its last snapsh
   expect(newView).toHaveBeenLastCalledWith(expect.objectContaining({ error: 'background failure' }));
   expect(run.abortController.signal.aborted).toBe(false);
   close();
+});
+
+it('stops every running assistant, drops queued messages, and waits for cleanup', async () => {
+  const first = task(), second = task('workspace-B');
+  setAssistantBackgroundRun(first); setAssistantBackgroundRun(second);
+  const dispatch = vi.fn();
+  queueAssistantBackgroundRun(first.abortController, { question: 'unsent' } as QueuedAssistantDraft, dispatch);
+  const settled = stopAssistantBackgroundWorkForClose();
+  expect(first.abortController.signal.aborted).toBe(true);
+  expect(second.abortController.signal.aborted).toBe(true);
+  expect(getAssistantMessageQueues()).toHaveLength(0);
+  const late = task(); setAssistantBackgroundRun(late);
+  expect(late.abortController.signal.aborted).toBe(true);
+  finishAssistantBackgroundRun(first.abortController);
+  finishAssistantBackgroundRun(second.abortController);
+  expect(await settled).toBe(true);
+  await Promise.resolve();
+  expect(dispatch).not.toHaveBeenCalled();
+});
+
+it('bounds close cleanup if an assistant does not settle', async () => {
+  const run = task(); setAssistantBackgroundRun(run);
+  expect(await stopAssistantBackgroundWorkForClose(1)).toBe(false);
+  expect(run.abortController.signal.aborted).toBe(true);
 });
 
 it('continues a queued request with the final conversation even when no view is attached', async () => {

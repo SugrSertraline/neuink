@@ -42,6 +42,7 @@ type MessageQueue = Omit<AssistantMessageQueueSnapshot, 'items'> & {
 const runs = new Map<AbortController, AssistantBackgroundRunSnapshot>();
 const queues = new Map<string, MessageQueue>();
 const listeners = new Set<(finished?: AssistantBackgroundRunSnapshot) => void>();
+let closingWindow = false;
 const emit = (finished?: AssistantBackgroundRunSnapshot) => { for (const listener of listeners) listener(finished); };
 
 export function getAssistantBackgroundRuns(root?: string) {
@@ -58,11 +59,15 @@ export function findAssistantBackgroundRun(root: string, conversationId: string)
 
 export function setAssistantBackgroundRun(run: AssistantBackgroundRunSnapshot | null) {
   if (run) {
+    if (closingWindow) {
+      run.abortController.abort();
+      return;
+    }
     runs.set(run.abortController, run);
     const queue = [...queues.values()].find(item => item.root === run.root &&
       item.conversationId !== null && item.conversationId === run.conversationId);
     if (queue) { queue.controller = run.abortController; queue.conversation = run.conversation; }
-  } else { runs.clear(); queues.clear(); }
+  } else { runs.clear(); queues.clear(); closingWindow = false; }
   emit();
 }
 
@@ -86,7 +91,7 @@ export function finishAssistantBackgroundRun(controller: AbortController) {
 export function queueAssistantBackgroundRun(controller: AbortController, draft: QueuedAssistantDraft,
   next: QueueItem['execute']) {
   const current = runs.get(controller);
-  if (!current?.conversationId || controller.signal.aborted || current.taskKind === 'paper-import') return false;
+  if (closingWindow || !current?.conversationId || controller.signal.aborted || current.taskKind === 'paper-import') return false;
   let queue = [...queues.values()].find(item => item.controller === controller);
   if (!queue) {
     queue = { id: crypto.randomUUID(), root: current.root, conversationId: current.conversationId,
@@ -104,6 +109,33 @@ export function stopAssistantBackgroundRun(controller: AbortController) {
   if (queue) { queue.paused = true; queue.pauseReason = 'stopped'; }
   controller.abort();
   emit();
+}
+
+/** Stop every window-owned assistant task and drop unsent messages before exit. */
+export function stopAssistantBackgroundWorkForClose(timeoutMs = 5_000): Promise<boolean> {
+  closingWindow = true;
+  queues.clear();
+  for (const controller of [...runs.keys()]) stopAssistantBackgroundRun(controller);
+  emit();
+  if (runs.size === 0) return Promise.resolve(true);
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = (completed: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      listeners.delete(check);
+      resolve(completed);
+    };
+    const check = () => { if (runs.size === 0) finish(true); };
+    listeners.add(check);
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    check();
+  });
+}
+
+export function resumeAssistantBackgroundWorkAfterFailedClose() {
+  closingWindow = false;
 }
 
 /** Snapshots omit execution callbacks; unsent messages never become conversation history. */
@@ -126,7 +158,7 @@ export function syncAssistantMessageQueueConversation(root: string, conversation
 }
 
 function drainQueue(queue: MessageQueue) {
-  if (queues.get(queue.id) !== queue || queue.controller || queue.dispatching) return;
+  if (closingWindow || queues.get(queue.id) !== queue || queue.controller || queue.dispatching) return;
   if (!queue.items.length) { queues.delete(queue.id); emit(); return; }
   if (queue.paused || queue.items[0].editing || !queue.conversation) return;
   const item = queue.items.shift()!;

@@ -4,6 +4,7 @@ import { ASSISTANT_READ_FAILURES } from '@/shared/lib/assistantReadFailure';
 import { paperPresentationError, paperRecords, presentedPaperRecords } from '../research/paperPresentation';
 import { citationCorrection, matchedExternalCitationUrls, returnedExternalCitationUrls, taskVerificationCorrection } from './citationContract';
 import { hasConfirmedPaperImportOnly } from './researchCompletion';
+import { hasAssistantToolMarkup } from './assistantAnswerMarkup';
 
 /** The same evidence/completion contract applies to SDK and native Agent answers. */
 export function answerVerification({ answer, question, plan, sources, events, observations,
@@ -15,6 +16,7 @@ export function answerVerification({ answer, question, plan, sources, events, ob
 }): { message: string; correction: string } | undefined {
   const records = paperRecords(events.flatMap(event => event.status === 'done' ? event.researchPapers ?? [] : []), [...sources.values()]);
   const presentationError = paperPresentationError(answer, records);
+  const toolMarkup = hasAssistantToolMarkup(answer);
   const invalidCitation = [...answer.matchAll(/\[S(\d+)]/g)].some(match => !sources.has(Number(match[1])));
   const externalUrls = returnedExternalCitationUrls(observations);
   const citedExternalSource = matchedExternalCitationUrls(answer, externalUrls, records).length > 0;
@@ -28,11 +30,13 @@ export function answerVerification({ answer, question, plan, sources, events, ob
     (evidenceRead || (externalUrls.size > 0 && !hasConfirmedPaperImportOnly(observations))))) &&
     !hasProposals && !citedExternalSource && !citedSciversePaper &&
     ![...answer.matchAll(/\[S(\d+)]/g)].some(match => sources.has(Number(match[1])));
-  if (!presentationError && !missing.length && !invalidCitation && !uncited && (answer.trim() || hasProposals)) return;
+  if (!presentationError && !toolMarkup && !missing.length && !invalidCitation && !uncited && (answer.trim() || hasProposals)) return;
   return {
-    message: invalidCitation || uncited ? ASSISTANT_READ_FAILURES.citation : ASSISTANT_READ_FAILURES.contract,
+    message: toolMarkup ? '模型返回了不完整的工具标签，未能形成最终回答。'
+      : invalidCitation || uncited ? ASSISTANT_READ_FAILURES.citation : ASSISTANT_READ_FAILURES.contract,
     correction: taskVerificationCorrection(question, [
-      presentationError ?? '', missing.length ? `Call these required tools before answering: ${missing.join(', ')}.` : '',
+      presentationError ?? '', toolMarkup ? 'Do not print tool-control tags or partial tool calls. Use only the declared tool API, or give a normal user-facing answer from verified observations.' : '',
+      missing.length ? `Call these required tools before answering: ${missing.join(', ')}.` : '',
       invalidCitation || uncited ? citationCorrection(sources.keys(), externalUrls) : '',
       !answer.trim() && !hasProposals ? 'Complete the requested answer or proposal using the actual observations above.' : ''
     ])

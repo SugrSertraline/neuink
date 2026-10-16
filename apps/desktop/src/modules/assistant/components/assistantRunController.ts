@@ -4,6 +4,7 @@ import { requestToolApproval } from '../runtime/toolApproval';
 import { AgentStoppedError } from '../agent-core/agent';
 import { requestUserInput } from '../runtime/userInput';
 import { runLocalAgentHarness } from '../local-agent/runner';
+import { visibleAssistantAnswer } from '../sdk/assistantAnswerMarkup';
 import { selectionLocalProvider, createLocalSession, conversationLocalSession } from '../local-agent/session';
 import type {
   Dispatch,
@@ -180,6 +181,11 @@ export async function runAssistantPanelTask({
     streamingMessageId: null,
     toolEventsByMessageId,
   });
+  if (runAbortController.signal.aborted) {
+    if (runAbortControllerRef.current === runAbortController) runAbortControllerRef.current = null;
+    setBusy(false);
+    return;
+  }
   let persistedConversationId: string | null = null;
   let persistedAssistantMessageId: string | null = null;
   let streamedAnswer = "";
@@ -290,7 +296,7 @@ export async function runAssistantPanelTask({
         return;
       }
       lastDraftPersistedAt = now;
-      const draftContent = streamedAnswer;
+      const draftContent = visibleAssistantAnswer(streamedAnswer);
       const draftReasoning = streamedReasoning;
       const draftToolEvents = assistantToolEvents;
       const draftNoteProposals = assistantNoteProposals;
@@ -335,8 +341,9 @@ export async function runAssistantPanelTask({
         window.clearTimeout(streamRenderTimer);
         streamRenderTimer = null;
       }
+      const visibleAnswer = visibleAssistantAnswer(streamedAnswer);
       const draftParts = buildAssistantMessageParts({
-        content: streamedAnswer,
+        content: visibleAnswer,
         noteProposals: assistantNoteProposals,
         reasoning: streamedReasoning,
         toolEvents: assistantToolEvents,
@@ -347,7 +354,7 @@ export async function runAssistantPanelTask({
           current,
           messageId,
           {
-            content: streamedAnswer,
+            content: visibleAnswer,
             note_proposals: assistantNoteProposals,
             parts: draftParts,
             tool_events: assistantToolEvents,
@@ -474,8 +481,9 @@ export async function runAssistantPanelTask({
         if (!acceptingEvents || runAbortController.signal.aborted) return;
         assistantToolEvents = mergeToolTraceEvent(assistantToolEvents, event);
         const messageId = persistedAssistantMessageId ?? assistantMessageId;
+        const visibleAnswer = visibleAssistantAnswer(streamedAnswer);
         const draftParts = buildAssistantMessageParts({
-          content: streamedAnswer,
+          content: visibleAnswer,
           noteProposals: assistantNoteProposals,
           reasoning: streamedReasoning,
           toolEvents: assistantToolEvents,
@@ -485,7 +493,7 @@ export async function runAssistantPanelTask({
             current,
             messageId,
             {
-              content: streamedAnswer,
+              content: visibleAnswer,
               note_proposals: assistantNoteProposals,
               parts: draftParts,
               tool_events: assistantToolEvents,
@@ -650,8 +658,9 @@ export async function runAssistantPanelTask({
       const conversationId = persistedConversationId;
       const assistantMessageId = persistedAssistantMessageId;
       const errorMessage = caught instanceof Error ? caught.message : String(caught);
-      const fallbackContent = stopped ? [streamedAnswer, stopMessage].filter(Boolean).join('\n\n')
-        : rejectedAnswerContent(errorMessage, assistantToolEvents) ?? streamedAnswer;
+      const visibleAnswer = visibleAssistantAnswer(streamedAnswer);
+      const fallbackContent = stopped ? [visibleAnswer, stopMessage].filter(Boolean).join('\n\n')
+        : rejectedAnswerContent(errorMessage, assistantToolEvents) ?? visibleAnswer;
       const fallbackParts = buildAssistantMessageParts({
         agentRun: failedAgentRun,
         content: fallbackContent,

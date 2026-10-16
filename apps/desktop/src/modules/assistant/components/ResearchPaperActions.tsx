@@ -68,6 +68,7 @@ export function ResearchPaperActionsProvider({ root, children }: { root: string 
       question: `添加论文：${paper.title}`, error: null, streamingMessageId: null,
       noteProposalsByMessageId: {}, toolEventsByMessageId: {} });
     try {
+      controller.signal.throwIfAborted();
       await approveResearchImport(root, [id], [paper], callId);
       controller.signal.throwIfAborted();
       rememberResearchConsent(root, callId, callId);

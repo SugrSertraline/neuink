@@ -63,6 +63,7 @@ import { NoteDiffLines, NoteRenderedContent } from '../review/NoteDiffLines';
 import { buildRenderedNoteDiff } from '../review/renderedNoteDiff';
 import { canReviewNoteProposal } from '../review/noteReviewDiff';
 import { ASSISTANT_ACTION_INCOMPLETE, assistantToolErrorNotice, formatAssistantError, formatAssistantToolSummary, useAssistantDebug } from '@/shared/lib/assistantDebug';
+import { visibleAssistantAnswer } from '../sdk/assistantAnswerMarkup';
 
 type ChatMessageProps = {
   reading?: boolean;
@@ -109,7 +110,8 @@ function ChatMessageComponent({
 }: ChatMessageProps) {
   const readingActions = useAssistantReading();
   const messageParts = message.parts ?? [];
-  const content = message.content || textFromParts(messageParts);
+  const rawContent = message.content || textFromParts(messageParts);
+  const content = message.role === 'assistant' ? visibleAssistantAnswer(rawContent) : rawContent;
   const resolvedToolEvents =
     toolEvents.length > 0 ? toolEvents : toolEventsFromParts(messageParts);
   const diagrams = resolvedToolEvents.filter(event => event.status === 'done' && event.diagram);
