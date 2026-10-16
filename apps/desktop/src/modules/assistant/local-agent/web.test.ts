@@ -70,24 +70,28 @@ describe.each(['claude', 'codex', 'opencode'] as const)('%s web integration', pr
     expect(readBrowserTab).not.toHaveBeenCalled();
   });
 
-  it('reads the exact captured tab through host tools and retains its verified URL citation', async () => {
+  it.each([
+    ['Markdown link', '[来源](https://example.org/article)'],
+    ['bracketed original URL', '[https://example.org/article]'],
+  ])('reads the captured tab and retains its verified URL citation as a %s', async (_kind, citation) => {
     vi.mocked(runLocalAgent).mockImplementation(async (_request, _signal, _event, handle) => {
       const result = await call(handle, 'read_browser_tab', {});
       expect(result.isError).not.toBe(true);
       expect(result.value).toMatchObject({ status: 'read', truncated: true, limitations: ['Partial text.'] });
-      return { result: '以下仅基于已取得的部分正文。[来源](https://example.org/article)' };
+      return { result: `以下仅基于已取得的部分正文。${citation}` };
     });
     const result = await runLocalAgentHarness(options({ currentSurface }), { ...session, provider, initialized: true }, vi.fn());
     expect(readBrowserTab).toHaveBeenCalledExactlyOnceWith(browserTab, expect.any(AbortSignal), 'text');
     expect(result.sources).toEqual([]);
     expect(result.externalCitationUrls).toEqual(['https://example.org/article']);
+    if (_kind === 'bracketed original URL') expect(result.answer).toContain('[原始来源](https://example.org/article)');
   });
 
   it('provides public search and URL reading without requiring native web tools or extra approval', async () => {
     const approval = vi.fn();
     vi.mocked(runLocalAgent).mockImplementation(async (request, _signal, _event, handle) => {
       expect(JSON.parse(request.prompt).capabilities).toMatchObject({ search_web: true, read_webpage: true, read_browser_tab: false });
-      expect(request.prompt).toContain('Prefer the available neuink MCP web tools');
+      expect(request.prompt).toContain('host can verify citations only against URLs returned by those tools');
       expect(request.prompt).toContain('exact returned URLs');
       expect((await call(handle, 'read_webpage', { url: 12 })).isError).toBe(true);
       expect(runResearchTool).not.toHaveBeenCalled();

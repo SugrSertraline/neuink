@@ -37,7 +37,7 @@ import type {
 import type { AgentExecutionSelection, AgentRuntimeSettings } from '@/shared/types/agentRuntime';
 import { buildAgentSystemPrompt } from '@/shared/lib/agentRuntimeSettings';
 import { assistantErrorDiagnostic } from '@/shared/lib/assistantDebug';
-import { matchedExternalCitationUrls, returnedExternalCitationUrls } from './citationContract';
+import { matchedExternalCitationUrls, normalizeReturnedExternalCitationLinks, returnedExternalCitationUrls } from './citationContract';
 import { answerVerification } from './answerVerification';
 
 import { createAgentDriver, agentExecutors } from './agentDriver';
@@ -307,7 +307,7 @@ export async function answerWithGroundedAgent({
   });
   let answer: string;
   try {
-    answer = await agent.run();
+    answer = normalizeReturnedExternalCitationLinks(await agent.run(), returnedExternalCitationUrls(runtime.observations));
   } catch (error) {
     agentLoopState.status = abortSignal?.aborted ? 'cancelled' : 'failed';
     agentLoopState.stopReason = assistantErrorDiagnostic(error);

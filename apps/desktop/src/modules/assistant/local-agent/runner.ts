@@ -25,7 +25,7 @@ import { createAgentToolFailure, isAgentToolFailure } from '../agent-core/toolFa
 import { TOOL_FAILURE_INSTRUCTIONS } from '../sdk/toolFailurePolicy';
 import { RpcAgentStream, type AgentStreamCallbacks } from './rpcProtocol';
 import { localAgentWebContext } from './webContext';
-import { matchedExternalCitationUrls, returnedExternalCitationUrls } from '../sdk/citationContract';
+import { matchedExternalCitationUrls, normalizeReturnedExternalCitationLinks, returnedExternalCitationUrls } from '../sdk/citationContract';
 import { RESEARCH_READ_TOOLS } from '@/shared/ipc/researchApi';
 import { describeAssistantReadFailure } from '@/shared/lib/assistantReadFailure';
 import { researchFailureMessage } from '../sdk/researchRecovery';
@@ -217,7 +217,8 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
       await checkpoint.settled();
       session = {...session,initialized:true}; onSession(session);
       await checkpoint.finishNativeTurn();
-      answer = typeof result.result === 'string' ? result.result : '';
+      answer = normalizeReturnedExternalCitationLinks(
+        typeof result.result === 'string' ? result.result : '', returnedExternalCitationUrls(runtime.observations));
       const issue = answerVerification({ answer, question:options.question, plan, sources:ledger.sources,
         events:runtime.events, observations:runtime.observations,
         hasProposals:Boolean(proposals.length || entryMetaProposals.length || tagProposals.length || runtime.snapshot().createdEntries.length),

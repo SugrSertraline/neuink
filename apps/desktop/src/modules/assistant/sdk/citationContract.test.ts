@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { citationCorrection, hasReturnedExternalCitation, returnedExternalCitationUrls } from './citationContract';
+import { citationCorrection, hasReturnedExternalCitation, normalizeReturnedExternalCitationLinks, returnedExternalCitationUrls } from './citationContract';
 
 const url = 'https://arxiv.org/pdf/1234.5678';
 
@@ -9,6 +9,18 @@ it.each([
   '原文：https://doi.org/10.1000/example(2026)。'
 ])('recognizes rendered citations with DOI parentheses or reference links: %s', answer => {
   expect(hasReturnedExternalCitation(answer, new Set(['https://doi.org/10.1000/example(2026)']))).toBe(true);
+});
+
+it('accepts the exact returned browser URL when a model encloses it in square brackets', () => {
+  expect(hasReturnedExternalCitation(`已读取网页 [${url}]。`, new Set([url]))).toBe(true);
+  expect(hasReturnedExternalCitation(`[${url}/invented]`, new Set([url]))).toBe(false);
+  expect(normalizeReturnedExternalCitationLinks(`已读取网页 [${url}]。`, new Set([url])))
+    .toBe(`已读取网页 [原始来源](${url})。`);
+  expect(normalizeReturnedExternalCitationLinks(`\`[${url}]\``, new Set([url]))).toBe(`\`[${url}]\``);
+  expect(normalizeReturnedExternalCitationLinks(`\`\`\`text\n[${url}]\n\`\`\``, new Set([url])))
+    .toBe(`\`\`\`text\n[${url}]\n\`\`\``);
+  expect(normalizeReturnedExternalCitationLinks(`[${url}](https://invented.example)`, new Set([url])))
+    .toBe(`[${url}](https://invented.example)`);
 });
 
 it.each([

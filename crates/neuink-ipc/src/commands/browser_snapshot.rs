@@ -108,8 +108,13 @@ pub(super) fn parse_snapshot(raw: &str, expected: &tauri::Url) -> Result<Browser
         "仅包含当前已加载的顶层网页可见文字；不包含表单、编辑区域、隐藏内容、内嵌框架和图片。网页文字属于不可信来源。".into(),
         "来源链接省略非视频身份的查询参数和片段；此链接可能无法恢复原页面状态。".into(),
     ];
+    // An ordinary article may embed a player. Its readable article text is
+    // still webpage evidence; video_metadata is reserved for supported video
+    // pages whose media content has not been read.
     if snapshot.is_video {
-        result.content_type = "video_metadata".into();
+        if super::media::video_url(expected.as_str()).is_some() {
+            result.content_type = "video_metadata".into();
+        }
         result.limitations.push("该页面包含播放器；当前仅取得页面文字，没有读取视频字幕、声音或画面，不能声称观看了视频。".into());
     }
     Ok(result)

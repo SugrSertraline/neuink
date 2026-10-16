@@ -4,7 +4,8 @@ import remarkGfm from 'remark-gfm';
 import { parsePaperPresentation, presentedPaperRecords, type PaperRecord } from '../research/paperPresentation';
 
 type Observation = { toolName: string; output: unknown };
-type MarkdownNode = { type: string; url?: string; identifier?: string; children?: MarkdownNode[] };
+type MarkdownNode = { type: string; url?: string; identifier?: string; children?: MarkdownNode[];
+  position?: { start?: { offset?: number }; end?: { offset?: number } } };
 const markdown = unified().use(remarkParse).use(remarkGfm);
 
 function object(value: unknown): Record<string, unknown> {
@@ -61,6 +62,41 @@ export function hasReturnedExternalCitation(answer: string, urls: ReadonlySet<st
   return matchedExternalCitationUrls(answer, urls).length > 0;
 }
 
+/** Link only a bracketed URL that exactly matches a successful host result.
+ * Markdown parsing excludes fenced code, inline code and deceptive link labels. */
+export function normalizeReturnedExternalCitationLinks(answer: string, urls: ReadonlySet<string>): string {
+  if (urls.size === 0 || !answer.includes('[http')) return answer;
+  const excluded: Array<{ start: number; end: number }> = [];
+  const edits: Array<{ start: number; end: number; replacement: string }> = [];
+  const visit = (node: MarkdownNode) => {
+    const start = node.position?.start?.offset;
+    const end = node.position?.end?.offset;
+    const protectedNode = ['image', 'imageReference', 'code', 'inlineCode', 'html'].includes(node.type) ||
+      ((node.type === 'link' || node.type === 'linkReference') && start !== undefined && answer[start] === '[');
+    if (protectedNode) {
+      if (start !== undefined && end !== undefined) excluded.push({ start, end });
+      return;
+    }
+    for (const child of node.children ?? []) visit(child);
+  };
+  visit(markdown.parse(answer) as MarkdownNode);
+  // GFM-generated autolink nodes have no source positions, so locate the exact
+  // bracket form in the original text after excluding structured Markdown.
+  for (const url of urls) {
+    const needle = `[${url}]`;
+    let start = answer.indexOf(needle);
+    while (start >= 0) {
+      const end = start + needle.length;
+      if (!excluded.some(range => start < range.end && end > range.start)) {
+        edits.push({ start, end, replacement: `[原始来源](${url})` });
+      }
+      start = answer.indexOf(needle, end);
+    }
+  }
+  return edits.sort((a, b) => b.start - a.start)
+    .reduce((text, edit) => text.slice(0, edit.start) + edit.replacement + text.slice(edit.end), answer);
+}
+
 export function matchedExternalCitationUrls(answer: string, urls: ReadonlySet<string>, records: ReadonlyMap<string, PaperRecord> = new Map()): string[] {
   const matched = new Set<string>();
   const add = (value: string | undefined) => {
@@ -68,7 +104,10 @@ export function matchedExternalCitationUrls(answer: string, urls: ReadonlySet<st
     const exact = citationUrl(value);
     if (exact && urls.has(exact)) { matched.add(exact); return; }
     // GFM autolinks can include a trailing CJK sentence delimiter.
-    const trimmed = citationUrl(value.replace(/[。；，！？、）】》”’]+$/, ''));
+    // GFM can absorb the closing bracket of a model's `[https://…]` citation
+    // into an autolink URL. Remove only citation punctuation before comparing
+    // against URLs returned by successful host tools.
+    const trimmed = citationUrl(value.replace(/[。；，！？、）】》”’\]]+$/, ''));
     if (trimmed && urls.has(trimmed)) matched.add(trimmed);
   };
   const fragments = parsePaperPresentation(answer);
