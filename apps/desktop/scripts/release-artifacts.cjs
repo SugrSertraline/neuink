@@ -25,7 +25,8 @@ async function prepareRelease({ root = path.resolve(__dirname, '../../..'), comm
   fs.writeFileSync(path.join(output, 'build-info.json'), JSON.stringify(metadata, null, 2) + '\n', { flag: 'wx' });
   fs.writeFileSync(path.join(output, 'SHA256SUMS.txt'), `${metadata.zipSha256}  ${name}\n${await hashFile(path.join(output, 'build-info.json'))}  build-info.json\n`, { flag: 'wx' });
   fs.writeFileSync(path.join(output, 'RELEASE_NOTES.md'), [
-    '# Windows x64 便携版', '', `源码提交：${sha}`, '',
+    `# Neuink ${version} · Windows x64 便携版`, '', `源码提交：${sha}`, '',
+    ...releaseChanges(root, version),
     '下载 Neuink-windows-x64-portable.zip，完整解压后运行 Neuink.exe。不要只复制 EXE。',
     '包含本地 embedding 模型、网页/PDF/视频字幕读取组件及第三方声明；不包含个人资料库、API Key 或聊天记录。',
     availability.included ? '包含离线演示素材。' : '本包不含离线演示 PDF/解析素材，新手演示不可用；正常导入与阅读不受影响。', '',
@@ -37,6 +38,15 @@ async function prepareRelease({ root = path.resolve(__dirname, '../../..'), comm
     '此条目由 Actions 生成草稿，维护者人工测试后再发布。', ''
   ].join('\n'), { flag: 'wx' });
   return metadata;
+}
+function releaseChanges(root, version) {
+  const file = path.join(root, 'CHANGELOG.md');
+  if (!fs.existsSync(file)) return [];
+  const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
+  const start = lines.findIndex(line => line === `## ${version}` || line.startsWith(`## ${version} `));
+  if (start < 0) return [];
+  const next = lines.findIndex((line, index) => index > start && line.startsWith('## '));
+  return [...lines.slice(start, next < 0 ? lines.length : next).join('\n').trimEnd().split('\n'), ''];
 }
 module.exports = { prepareRelease };
 if (require.main === module) prepareRelease().then(info => console.log(JSON.stringify(info)))
