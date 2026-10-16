@@ -3,6 +3,12 @@ pub fn run() {
     use tauri::Manager;
     use tauri_plugin_dialog::DialogExt;
 
+    // Children inherit this job, so closing NeuInk also stops active local tools.
+    #[cfg(windows)]
+    let process_guard = neuink_ipc::commands::local_agent::guard_app_process();
+    #[cfg(windows)]
+    let process_error = process_guard.as_ref().err().cloned();
+
     let portable = std::env::current_exe()
         .map_err(|_| "无法确定程序所在目录。".to_string())
         .and_then(|exe| neuink_ipc::storage::PortablePaths::detect(&exe))
@@ -64,6 +70,15 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
         .setup(move |app| {
+            #[cfg(windows)]
+            if let Some(error) = process_error {
+                app.dialog()
+                    .message(&error)
+                    .title("NeuInk 无法保护子进程")
+                    .kind(tauri_plugin_dialog::MessageDialogKind::Error)
+                    .blocking_show();
+                return Err(std::io::Error::other(error).into());
+            }
             if let Some(error) = startup_error {
                 app.dialog()
                     .message(&error)
@@ -103,4 +118,6 @@ pub fn run() {
     if let Err(error) = builder.run(context) {
         eprintln!("error while running tauri application: {error}");
     }
+    #[cfg(windows)]
+    drop(process_guard);
 }

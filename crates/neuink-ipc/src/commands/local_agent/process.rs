@@ -86,7 +86,7 @@ impl ProcessTree {
             System::{JobObjects::*, Threading::*},
         };
         unsafe {
-            let job = CreateJobObjectW(None, None).map_err(|_| "无法管理 Claude Code 子进程。")?;
+            let job = CreateJobObjectW(None, None).map_err(|_| "无法管理 NeuInk 子进程。")?;
             let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
             info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
             if SetInformationJobObject(
@@ -98,20 +98,20 @@ impl ProcessTree {
             .is_err()
             {
                 let _ = CloseHandle(job);
-                return Err("无法管理 Claude Code 子进程。".into());
+                return Err("无法管理 NeuInk 子进程。".into());
             }
             let process = match OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, false, pid) {
                 Ok(p) => p,
                 Err(_) => {
                     let _ = CloseHandle(job);
-                    return Err("无法管理 Claude Code 子进程。".into());
+                    return Err("无法管理 NeuInk 子进程。".into());
                 }
             };
             let assigned = AssignProcessToJobObject(job, process);
             let _ = CloseHandle(process);
             if assigned.is_err() {
                 let _ = CloseHandle(job);
-                return Err("无法管理 Claude Code 子进程。".into());
+                return Err("无法管理 NeuInk 子进程。".into());
             }
             Ok(Self(job.0 as usize))
         }

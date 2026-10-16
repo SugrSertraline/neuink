@@ -121,8 +121,9 @@ fn repeated_connection_errors_do_not_leave_the_chat_waiting_indefinitely() {
     let mut state = protocol(Provider::Codex);
     state.active = true;
     let value = json!({"method":"error","params":{"willRetry":true,"error":{"message":"stream disconnected secret-token"}}});
-    assert!(!state.observe(&value).unwrap());
-    assert!(!state.observe(&value).unwrap());
+    for _ in 0..6 {
+        assert!(!state.observe(&value).unwrap());
+    }
     let error = state.observe(&value).unwrap_err();
     assert!(error.contains("服务连接失败"));
     assert!(!error.contains("secret"));

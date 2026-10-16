@@ -3,6 +3,13 @@ mod mcp;
 mod process;
 mod rpc;
 pub mod runtime;
+#[cfg(windows)]
+pub use process::ProcessTree as AppProcessGuard;
+
+#[cfg(windows)]
+pub fn guard_app_process() -> Result<AppProcessGuard, String> {
+    process::ProcessTree::attach(std::process::id())
+}
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, process::Stdio, time::Duration};
 use tokio::{io::AsyncReadExt, process::Command};
