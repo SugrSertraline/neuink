@@ -1,5 +1,5 @@
-// A small, bundled reading lexicon. Exact matches keep ambiguous or technical
-// words from being guessed through stemming; unknown words use the configured translator.
+// Reviewed paper terms take precedence over the general dictionary. The larger
+// frequency-filtered ECDICT shards load only when a selected word needs them.
 const WORDS: Record<string, string> = {
   ability: '能力', able: '能够的', above: '以上；上方', across: '跨越；遍及',
   action: '行动；作用', actual: '实际的', additional: '额外的', address: '处理；地址',
@@ -115,15 +115,93 @@ const WORDS: Record<string, string> = {
   workflow: '工作流程', zero: '零'
 };
 
-export function singleEnglishWord(text: string): string | null {
-  const word = text.trim();
-  return /^[A-Za-z]{2,40}$/.test(word) ? word.toLowerCase() : null;
+const PAPER_TERMS: Record<string, string> = {
+  and: '和；并且', are: '是；处于', as: '作为；如同；随着',
+  at: '在；以', by: '由；通过；在……旁边', can: '能够；可能',
+  for: '为了；对于；持续', from: '从；来自', has: '有；已经',
+  into: '进入；转化为', is: '是；处于', it: '它；这',
+  may: '可能；可以', of: '……的；关于', on: '在……上；关于',
+  or: '或；或者', should: '应该', than: '比',
+  that: '那个；那；引导从句', the: '这；该（定冠词）',
+  these: '这些', those: '那些', to: '到；向；用于',
+  was: '是；处于（过去式）', were: '是；处于（过去式）',
+  which: '哪一个；引导定语从句', with: '与；用；带有',
+  ablation: '消融；消融实验', abstraction: '抽象；抽象化', accelerator: '加速器',
+  adversarial: '对抗性的', agent: '智能体；代理', ambiguity: '歧义；模糊性',
+  amplify: '放大；增强', analytic: '解析的；分析的', anisotropic: '各向异性的',
+  arithmetic: '算术；算术的', association: '关联；协会', asynchronous: '异步的',
+  autoregressive: '自回归的', auxiliary: '辅助的', backbone: '骨干网络；主干',
+  bayesian: '贝叶斯的', calibration: '校准；标定', caption: '图注；说明文字',
+  checkpoint: '检查点；模型存档', classifier: '分类器', convolution: '卷积',
+  convolutional: '卷积的', corpus: '语料库', covariance: '协方差',
+  derivative: '导数；衍生物', diffusion: '扩散', discriminative: '判别式的',
+  discriminator: '判别器', dropout: '随机失活', eigenvalue: '特征值',
+  entropy: '熵', epoch: '训练轮次；时期', equilibrium: '平衡；均衡',
+  falsifiable: '可证伪的', finetune: '微调', generative: '生成式的',
+  hallucination: '幻觉；模型虚构内容', heuristic: '启发式的；启发式方法',
+  hyperparameter: '超参数', imputation: '缺失值填补', inductive: '归纳的',
+  kernel: '核；内核', likelihood: '似然', logit: '对数几率；未归一化得分',
+  logits: '未归一化得分', manifold: '流形', masking: '掩码处理',
+  modality: '模态', multimodal: '多模态的', multimodality: '多模态性',
+  momentum: '动量', neuron: '神经元', nonlinear: '非线性的',
+  overfit: '过拟合', overfitting: '过拟合', perturbation: '扰动',
+  perplexity: '困惑度', phenotype: '表型', pretrained: '预训练的',
+  pretraining: '预训练', projection: '投影', quantization: '量化',
+  quantize: '量化', receptive: '感受的；接受的', recurrence: '递归；循环',
+  recurrent: '循环的；递归的', reinforcement: '强化', replicability: '可重复性',
+  reproducibility: '可复现性', reshape: '重塑；调整形状', robustness: '稳健性',
+  sampling: '采样', segmentation: '分割；分段', sigmoid: 'S 形函数',
+  sparsity: '稀疏性', spectral: '谱的；光谱的', standardization: '标准化',
+  tensor: '张量', tokenizer: '分词器', tokenization: '分词；词元化',
+  topological: '拓扑的', topology: '拓扑结构', trajectory: '轨迹',
+  transductive: '转导的', unsupervised: '无监督的',
+  'cross-validation': '交叉验证', 'end-to-end': '端到端的',
+  'few-shot': '少样本的', 'fine-tuned': '经过微调的',
+  'fine-tuning': '微调', 'high-dimensional': '高维的',
+  'in-context': '上下文中的', 'large-scale': '大规模的',
+  'long-term': '长期的', 'out-of-distribution': '分布外的',
+  'pre-trained': '预训练的', 'real-world': '真实世界的',
+  'self-supervised': '自监督的', 'state-of-the-art': '当前最先进的',
+  'zero-shot': '零样本的'
+};
+
+type DictionaryShard = {
+  words: Record<string, string>;
+  forms: Record<string, string>;
+};
+
+const dictionaryLoaders = import.meta.glob<{ default: DictionaryShard }>('./localEnglishDictionary/*.json');
+
+async function loadDictionaryShard(word: string): Promise<DictionaryShard | null> {
+  const load = dictionaryLoaders[`./localEnglishDictionary/${word[0]}.json`];
+  return load ? (await load()).default : null;
 }
 
-export function translateLocalEnglishWord(text: string): string | null {
+export function singleEnglishWord(text: string): string | null {
+  const word = text.trim()
+    .replace(/^[“”‘’"'([{\s]+|[“”‘’"')\]},.;:!?，。；：！？\s]+$/g, '')
+    .replace(/[‐‑–]/g, '-');
+  return /^[A-Za-z]{2,40}(?:-[A-Za-z]{2,40}){0,3}$/.test(word)
+    ? word.toLowerCase()
+    : null;
+}
+
+export async function translateLocalEnglishWord(text: string): Promise<string | null> {
   const word = singleEnglishWord(text);
   if (!word) return null;
-  if (WORDS[word]) return WORDS[word];
+  const reviewed = PAPER_TERMS[word] ?? WORDS[word];
+  if (reviewed) return reviewed;
+
+  const shard = await loadDictionaryShard(word);
+  if (shard?.words[word]) return shard.words[word];
+  const base = shard?.forms[word];
+  if (base) {
+    const baseTranslation = PAPER_TERMS[base] ?? WORDS[base] ??
+      (await loadDictionaryShard(base))?.words[base];
+    if (baseTranslation) return baseTranslation;
+  }
+
+  // Preserve plural lookup for reviewed terms absent from the source dictionary.
   const candidates = word.endsWith('ies')
     ? [`${word.slice(0, -3)}y`]
     : word.endsWith('es')
@@ -131,5 +209,5 @@ export function translateLocalEnglishWord(text: string): string | null {
       : word.endsWith('s')
         ? [word.slice(0, -1)]
         : [];
-  return candidates.map(candidate => WORDS[candidate]).find(Boolean) ?? null;
+  return candidates.map(candidate => PAPER_TERMS[candidate] ?? WORDS[candidate]).find(Boolean) ?? null;
 }

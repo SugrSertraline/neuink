@@ -49,7 +49,7 @@ export async function translateTextSelection({
     throw new Error('没有可翻译的文字。');
   }
   const word = singleEnglishWord(sourceText);
-  const localTranslation = word ? translateLocalEnglishWord(word) : null;
+  const localTranslation = word ? await translateLocalEnglishWord(word) : null;
   if (localTranslation) return localTranslation;
   return runLocalBackgroundJob({
     idPrefix: 'selection-translation',
