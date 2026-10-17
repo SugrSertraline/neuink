@@ -132,6 +132,9 @@ export function ReflowSourcePreview({
                     <Badge variant="outline">{annotation.kind}</Badge>
                     <span>重要性 {annotation.importance}</span>
                   </div>
+                  <div className="mb-0.5 text-[11px] font-semibold text-muted-foreground">批注原文</div>
+                  <p className="mb-1 whitespace-pre-wrap break-words text-foreground">{annotation.text_selection?.text?.trim() || segment.text.trim()}</p>
+                  {annotation.content.trim() ? <div className="border-t pt-1 text-[11px] font-semibold text-muted-foreground">批注内容</div> : null}
                   <p className="whitespace-pre-wrap break-words text-foreground">{annotation.content}</p>
                 </div>
               ))}

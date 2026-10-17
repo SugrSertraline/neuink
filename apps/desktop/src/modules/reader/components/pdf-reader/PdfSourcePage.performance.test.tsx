@@ -324,6 +324,42 @@ describe('PdfSourcePage performance boundaries', () => {
     expect(layer.dataset.activeHighlights).toBe('1');
   });
 
+  it('shows only the hit selection annotation, then restores the segment preview with source text', () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('PointerEvent', MouseEvent);
+    const annotation = {
+      annotation_id: 'annotation-1', segment_uid: 'segment-0', kind: 'translation',
+      content: 'B 的译文', importance: 'normal' as const,
+      text_selection: { color: 'yellow' as const, page_idx: 0,
+        rects: [[100, 100, 300, 140] as [number, number, number, number]], text: 'B' },
+      created_at: '2026-09-05T00:00:00Z', updated_at: '2026-09-05T00:00:00Z',
+    };
+    const otherAnnotation = {
+      ...annotation, annotation_id: 'annotation-2', content: 'C 的译文',
+      text_selection: { ...annotation.text_selection,
+        rects: [[310, 100, 350, 140] as [number, number, number, number]], text: 'C' },
+    };
+    const ui = render(cloneElement(pdfSourcePage(createPage(1), null,
+      new Map([['segment-0', [annotation, otherAnnotation]]])), { hoverPreviewShowAnnotation: true }));
+    const hit = ui.getByTestId('pdf-page-hit-layer-0');
+    vi.spyOn(hit, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 1000, 1000));
+
+    fireEvent.pointerEnter(hit, { buttons: 0, clientX: 200, clientY: 120 });
+    const selectionPreview = ui.getByRole('region', { name: '选区批注悬停预览' });
+    expect(selectionPreview.textContent).toContain('B 的译文');
+    expect(selectionPreview.textContent).toContain('批注原文B');
+    expect(selectionPreview.textContent).not.toContain('C 的译文');
+    expect(ui.queryByRole('region', { name: '片段悬停预览' })).toBeNull();
+
+    fireEvent.pointerMove(hit, { buttons: 0, clientX: 400, clientY: 400 });
+    act(() => vi.advanceTimersByTime(20));
+    expect(ui.queryByRole('region', { name: '选区批注悬停预览' })).toBeNull();
+    const segmentPreview = ui.getByRole('region', { name: '片段悬停预览' });
+    expect(segmentPreview.textContent).toContain('批注原文B');
+    expect(segmentPreview.textContent).toContain('B 的译文');
+    expect(segmentPreview.textContent).toContain('C 的译文');
+  });
+
 });
 
 function renderPdfSourcePage(page: PageSegments) {

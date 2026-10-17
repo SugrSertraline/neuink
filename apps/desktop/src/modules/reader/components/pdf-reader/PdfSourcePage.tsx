@@ -8,6 +8,7 @@ import type {
 } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { PointerPreview } from '@/components/ui/pointer-preview';
 import { HOVER_TIMING, hoverInteractionBlocked, useHoverDismiss } from '@/components/ui/hover-interactions';
 import { isMineruImagePath } from "@/shared/components/SourceSnapshotPreview";
 import type { TranslatedSegment } from "@/shared/ipc/workspaceApi";
@@ -38,6 +39,7 @@ import { requiresListItemChoice } from '@/shared/lib/listItemSegments';
 import type { PageSegments } from "./types";
 import { PdfAnnotationTabs } from './PdfAnnotationTabs';
 import { PdfBlockDragPreview } from './PdfBlockDragPreview';
+import { annotationPaperProps } from '@/modules/annotations/annotationPaper';
 import { isPdfBlockDragControl, usePdfBlockDrag } from './usePdfBlockDrag';
 import { layoutTranslatedParagraphs } from './translationLayout';
 import { pdfOriginalContentWindows } from './PdfTranslationPageMask';
@@ -176,6 +178,10 @@ function PdfSourcePageImpl({
     segmentBottom: number;
   } | null>(null);
   const [previewRegionId, setPreviewRegionId] = useState<string | null>(null);
+  const [hoveredAnnotation, setHoveredAnnotation] = useState<{
+    annotation: Annotation;
+    anchor: { x: number; top: number; bottom: number };
+  } | null>(null);
   const [localHoveredGroupUid, setLocalHoveredGroupUid] = useState<string | null>(null);
   const [actionMenu, setActionMenu] = useState<{
     position: { x: number; y: number };
@@ -240,6 +246,7 @@ function PdfSourcePageImpl({
     setPreviewPosition(null);
     setPreviewRegionId(null);
     setLocalHoveredGroupUid(null);
+    setHoveredAnnotation(null);
   }, [hoverPreviewEnabled, suppressRegions]);
 
   const clearFloatingSegmentUi = () => {
@@ -261,6 +268,7 @@ function PdfSourcePageImpl({
     setPreviewPosition(null);
     setPreviewRegionId(null);
     setLocalHoveredGroupUid(null);
+    setHoveredAnnotation(null);
 
   };
 
@@ -286,6 +294,7 @@ function PdfSourcePageImpl({
         setPreviewPosition(null);
         setPreviewRegionId(null);
         setLocalHoveredGroupUid(null);
+        setHoveredAnnotation(null);
       }
     }, HOVER_TIMING.close);
   };
@@ -347,6 +356,7 @@ function PdfSourcePageImpl({
     previewRegionIdRef.current = null;
     setPreviewRegionId((current) => current === null ? current : null);
     setPreviewPosition((current) => current === null ? current : null);
+    setHoveredAnnotation(null);
   };
 
   useHoverDismiss(() => {
@@ -381,6 +391,30 @@ function PdfSourcePageImpl({
     cancelListPreviewClear();
 
     const hitLayerRect = pdfPageContentRect(element);
+    const annotationHit = hoverPreviewEnabled && hoverPreviewShowAnnotation && buttons === 0
+      ? findPdfAnnotationAtPoint(pageTextSelectionAnnotations, hitLayerRect, clientX, clientY)
+      : null;
+    if (annotationHit) {
+      cancelListPreviewClear();
+      hoveredGroupUidRef.current = null;
+      previewRegionIdRef.current = null;
+      setLocalHoveredGroupUid(null);
+      setPreviewRegionId(null);
+      setPreviewPosition(null);
+      const [, top, right, bottom] = annotationHit.rect;
+      const anchor = {
+        x: hitLayerRect.left + (right / 1000) * hitLayerRect.width,
+        top: hitLayerRect.top + (top / 1000) * hitLayerRect.height,
+        bottom: hitLayerRect.top + (bottom / 1000) * hitLayerRect.height,
+      };
+      setHoveredAnnotation((current) =>
+        current?.annotation === annotationHit.annotation &&
+        current.anchor.x === anchor.x && current.anchor.top === anchor.top &&
+        current.anchor.bottom === anchor.bottom ? current : { annotation: annotationHit.annotation, anchor },
+      );
+      return;
+    }
+    setHoveredAnnotation((current) => current === null ? current : null);
     const region = findRegionAtPoint(
       element,
       clientX,
@@ -721,6 +755,27 @@ function PdfSourcePageImpl({
 
         <PdfTextSelectionHighlightLayer highlights={pageTextSelectionHighlights} />
 
+        {hoveredAnnotation && hoverPreviewEnabled && !suppressRegions && !blockDrag.dragItem ? (
+          <PointerPreview
+            anchor={hoveredAnnotation.anchor}
+            width={Math.min(360, window.innerWidth - 24)}
+            className="pdf-segment-preview p-3 font-sans"
+            role="region"
+            aria-label="选区批注悬停预览"
+          >
+            <div {...annotationPaperProps(hoveredAnnotation.annotation)} className="grid gap-2 text-sm leading-5">
+              <div className="text-[11px] font-semibold text-muted-foreground">批注原文</div>
+              <p className="whitespace-pre-wrap break-words text-foreground">{hoveredAnnotation.annotation.text_selection?.text}</p>
+              {hoveredAnnotation.annotation.content.trim() ? (
+                <>
+                  <div className="border-t pt-2 text-[11px] font-semibold text-muted-foreground">批注</div>
+                  <p className="whitespace-pre-wrap break-words text-foreground">{hoveredAnnotation.annotation.content}</p>
+                </>
+              ) : null}
+            </div>
+          </PointerPreview>
+        ) : null}
+
         <PdfBlockDragPreview item={blockDragItem} preview={blockDrag.preview} />
 
         {renderSegmentLayer ? (
@@ -1024,6 +1079,27 @@ function sourceBacklinksForSegment(
 
 function isPdfTextLayerTarget(target: EventTarget | null) {
   return target instanceof Element && Boolean(target.closest('.pdf-text-layer'));
+}
+
+export function findPdfAnnotationAtPoint(
+  annotations: readonly Annotation[],
+  pageRect: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'>,
+  clientX: number,
+  clientY: number,
+): { annotation: Annotation; rect: AnnotationTextSelection['rects'][number] } | null {
+  if (pageRect.width <= 0 || pageRect.height <= 0) return null;
+  const x = ((clientX - pageRect.left) / pageRect.width) * 1000;
+  const y = ((clientY - pageRect.top) / pageRect.height) * 1000;
+  let closest: { annotation: Annotation; rect: AnnotationTextSelection['rects'][number] } | null = null;
+  for (const annotation of annotations) {
+    for (const rect of annotation.text_selection?.rects ?? []) {
+      if (x < rect[0] || x >= rect[2] || y < rect[1] || y >= rect[3]) continue;
+      if (!closest || regionArea(rect) < regionArea(closest.rect)) {
+        closest = { annotation, rect };
+      }
+    }
+  }
+  return closest;
 }
 
 function intersectionArea(
