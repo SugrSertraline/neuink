@@ -94,7 +94,7 @@ export function SelectionTranslationSettings({ active, children }: { active: boo
         else change({ [field]: event.target.value });
       }} />
   </div>;
-  return <SettingsGroup id="translation-service" title="选中文字翻译" description="选择一句或一段文字，快速查看中文译文。可单独配置翻译 API，无需下载模型；保存后从下一次选中文字翻译生效。">
+  return <SettingsGroup id="translation-service" title="选中文字翻译" description="常见英文单词优先使用本地词库；句子、段落和词库未收录的单词使用下方服务或阅读模型。保存后从下一次选中文字翻译生效。">
     {!draft ? <>{busy ? <p role="status" className="text-xs">正在读取配置…</p> : <Button size="sm" variant="outline" onClick={() => setAttempt(value => value + 1)}>重新读取配置</Button>}</> : <div className="grid min-w-0 gap-3">
       <SettingSelect label="选中文字翻译服务" value={draft.provider} disabled={busy}
         options={Object.entries(presets).map(([value, preset]) => ({ value, label: preset.label }))}

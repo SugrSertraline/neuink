@@ -60,6 +60,7 @@ export type ReaderPreferences = {
   hoverPreviewShowNote: boolean;
   hoverPreviewShowAnnotation: boolean;
   inlineAnnotationHoverEnabled: boolean;
+  paperReferenceHoverEnabled: boolean;
   hoverPreviewShowTranslation: boolean;
   leftClickOpensNotePane: boolean;
   segmentNoteOpenGesture: 'button' | 'single' | 'modifier';
@@ -88,6 +89,7 @@ const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
   hoverPreviewShowNote: true,
   hoverPreviewShowAnnotation: true,
   inlineAnnotationHoverEnabled: true,
+  paperReferenceHoverEnabled: true,
   hoverPreviewShowTranslation: true,
   leftClickOpensNotePane: false,
   segmentNoteOpenGesture: 'button',
@@ -144,6 +146,7 @@ export function equalReaderPreferences(left: ReaderPreferences, right: ReaderPre
     left.hoverPreviewShowNote === right.hoverPreviewShowNote &&
     left.hoverPreviewShowAnnotation === right.hoverPreviewShowAnnotation &&
     left.inlineAnnotationHoverEnabled === right.inlineAnnotationHoverEnabled &&
+    left.paperReferenceHoverEnabled === right.paperReferenceHoverEnabled &&
     left.hoverPreviewShowTranslation === right.hoverPreviewShowTranslation &&
     left.leftClickOpensNotePane === right.leftClickOpensNotePane &&
     left.segmentNoteOpenGesture === right.segmentNoteOpenGesture &&
@@ -218,6 +221,10 @@ function normalizeReaderPreferences(value: unknown): ReaderPreferences {
       typeof candidate.inlineAnnotationHoverEnabled === 'boolean'
         ? candidate.inlineAnnotationHoverEnabled
         : candidate.hoverPreviewEnabled !== false && candidate.hoverPreviewShowAnnotation !== false,
+    paperReferenceHoverEnabled:
+      typeof candidate.paperReferenceHoverEnabled === 'boolean'
+        ? candidate.paperReferenceHoverEnabled
+        : DEFAULT_READER_PREFERENCES.paperReferenceHoverEnabled,
     hoverPreviewShowTranslation:
       typeof candidate.hoverPreviewShowTranslation === 'boolean'
         ? candidate.hoverPreviewShowTranslation

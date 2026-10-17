@@ -77,6 +77,7 @@ export function ReflowReader({
   hoverPreviewShowTranslation,
   hoverPreviewShowNote,
   hoverPreviewShowAnnotation,
+  paperReferenceHoverEnabled = true,
   notesBySegmentUid,
   pdfDocument,
   reflowBackgroundColor,
@@ -118,6 +119,7 @@ export function ReflowReader({
   hoverPreviewShowTranslation: boolean;
   hoverPreviewShowNote: boolean;
   hoverPreviewShowAnnotation: boolean;
+  paperReferenceHoverEnabled?: boolean;
   notesBySegmentUid: Map<string, SegmentBlockNote>;
   pdfDocument: PDFDocumentProxy | null;
   reflowBackgroundColor: string;
@@ -286,7 +288,7 @@ export function ReflowReader({
   }, [hoverPreviewEnabled]);
 
   return (
-    <PaperReferencesProvider segments={segments} entryId={entryId} workspaceRoot={workspaceRoot} pdfDocument={pdfDocument} onRequirePdfDocument={onRequirePdfDocument} pdfPreviewError={pdfPreviewError} onRetryPdfPreview={onRetryPdfPreview}>
+    <PaperReferencesProvider segments={segments} entryId={entryId} workspaceRoot={workspaceRoot} pdfDocument={pdfDocument} hoverEnabled={paperReferenceHoverEnabled} onRequirePdfDocument={onRequirePdfDocument} pdfPreviewError={pdfPreviewError} onRetryPdfPreview={onRetryPdfPreview}>
     <ReflowComponentPreferencesProvider value={reflowComponents}>
     <ParagraphTranslationProvider root={workspaceRoot} entryId={entryId}>
     <ReflowSegmentPreferencesProvider root={workspaceRoot} entryId={entryId}>

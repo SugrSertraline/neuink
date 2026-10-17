@@ -24,6 +24,7 @@ describe('ReaderToolbar', () => {
       pdfHoverPreviewSize: 'standard' as const,
       hoverPreviewShowAnnotation: true,
       inlineAnnotationHoverEnabled: true,
+      paperReferenceHoverEnabled: true,
       hoverPreviewShowNote: true,
       hoverPreviewShowOriginal: true,
       hoverPreviewShowRegion: true,
@@ -83,6 +84,15 @@ describe('ReaderToolbar', () => {
     fireEvent.click(screen.getByRole('switch', { name: '悬停批注' }));
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({
       inlineAnnotationHoverEnabled: true, hoverPreviewShowAnnotation: false,
+    }));
+  });
+  it('changes reference hover without changing segment or annotation preview', () => {
+    const onChange = vi.fn();
+    renderWithTooltipProvider(<HoverPreviewControls preferences={buildPreferences()} onChange={onChange} />);
+    fireEvent.click(screen.getByRole('button', { name: '悬停配置' }));
+    fireEvent.click(screen.getByRole('switch', { name: '文内引用悬停' }));
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      paperReferenceHoverEnabled: false, hoverPreviewEnabled: true, inlineAnnotationHoverEnabled: true,
     }));
   });
 

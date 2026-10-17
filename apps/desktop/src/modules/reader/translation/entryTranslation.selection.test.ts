@@ -15,6 +15,30 @@ beforeEach(() => {
 });
 
 describe('selection translation task lifecycle', () => {
+  it('answers a known word locally without a service, model or background task', async () => {
+    const { translateTextSelection } = await import('./entryTranslation');
+    const registry = await import('@/shared/lib/localBackgroundJobs');
+    await expect(translateTextSelection({ ...request, text: '  Embedding  ' })).resolves.toBe('嵌入表示');
+    expect(mocks.service).not.toHaveBeenCalled();
+    expect(mocks.settings).not.toHaveBeenCalled();
+    expect(registry.getLocalBackgroundJobs()).toEqual([]);
+  });
+  it('sends only an unknown single word to the selected service', async () => {
+    mocks.service.mockResolvedValue('新词');
+    const { translateTextSelection } = await import('./entryTranslation');
+    await expect(translateTextSelection({ ...request, text: ' inventedword ' })).resolves.toBe('新词');
+    expect(mocks.service).toHaveBeenCalledWith('inventedword');
+    expect(mocks.generate).not.toHaveBeenCalled();
+  });
+  it('omits paragraph context and paper title when an unknown word uses the model', async () => {
+    mocks.generate.mockResolvedValue({ text: '新词' });
+    const { translateTextSelection } = await import('./entryTranslation');
+    await expect(translateTextSelection({ ...request, text: 'inventedword' })).resolves.toBe('新词');
+    const input = mocks.generate.mock.calls[0][0];
+    expect(input.prompt).toBe('inventedword');
+    expect(input.prompt).not.toContain(request.context);
+    expect(input.prompt).not.toContain(request.entryTitle);
+  });
   it('uses the selected API without loading a model or sending paragraph context', async () => {
     mocks.service.mockResolvedValue('快速译文');
     const { translateTextSelection } = await import('./entryTranslation');

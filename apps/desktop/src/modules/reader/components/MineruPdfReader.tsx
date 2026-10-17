@@ -1044,7 +1044,7 @@ function MineruPdfReaderBody({
   }
 
   return (
-    <PaperReferencesProvider segments={segments} entryId={entry.id} workspaceRoot={workspaceRoot} pdfDocument={pdfState.status === "ready" ? pdfState.document : null}>
+    <PaperReferencesProvider segments={segments} entryId={entry.id} workspaceRoot={workspaceRoot} pdfDocument={pdfState.status === "ready" ? pdfState.document : null} hoverEnabled={readerPreferences.paperReferenceHoverEnabled && !readingSession?.resizing}>
     <ReaderSurfaceFrame className="pdf-reader-surface bg-muted/30" toolbar={
       <ReaderToolbar
         navigation={<ReadingNavigationControls segments={segments} entryId={entry.id} workspaceRoot={workspaceRoot} />}

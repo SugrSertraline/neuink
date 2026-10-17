@@ -647,6 +647,7 @@ function ReflowEntryReaderBody({
           hoverPreviewShowTranslation={readerPreferences.hoverPreviewShowTranslation}
           hoverPreviewShowNote={readerPreferences.hoverPreviewShowNote}
           hoverPreviewShowAnnotation={readerPreferences.hoverPreviewShowAnnotation}
+          paperReferenceHoverEnabled={readerPreferences.paperReferenceHoverEnabled && !readingSession?.resizing}
           notesBySegmentUid={notesBySegmentUid}
           pdfDocument={pdfState.status === 'ready' ? pdfState.document : null}
           reflowBackgroundColor={readerPreferences.reflowBackgroundColor}

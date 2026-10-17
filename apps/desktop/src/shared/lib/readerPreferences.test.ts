@@ -68,6 +68,16 @@ describe('reader preferences', () => {
     persistReaderPreferences(segmentOnly);
     expect(readStoredReaderPreferences()).toEqual(segmentOnly);
   });
+  it('keeps reference hover independent of PDF and annotation previews', () => {
+    const original = readStoredReaderPreferences();
+    const disabled = { ...original, hoverPreviewEnabled: false, inlineAnnotationHoverEnabled: false,
+      paperReferenceHoverEnabled: false };
+    persistReaderPreferences(disabled);
+    expect(readStoredReaderPreferences()).toEqual(disabled);
+    expect(equalReaderPreferences(original, disabled)).toBe(false);
+    window.localStorage.setItem('neuink.reader.preferences', JSON.stringify({ hoverPreviewEnabled: false }));
+    expect(readStoredReaderPreferences().paperReferenceHoverEnabled).toBe(true);
+  });
 
   it('defaults pageDisplayMode to single', () => {
     expect(readStoredReaderPreferences().pageDisplayMode).toBe('single');

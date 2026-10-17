@@ -10,11 +10,11 @@ import { useReadingNavigation } from './ReadingNavigation';
 import { readCachedPdfSegmentSnapshot } from '../reflow/pdfSourceSnapshot';
 
 type ReferenceContext = { segments: SourceSegment[]; index: ReturnType<typeof buildPaperReferenceIndex>;
-  entryId: string; workspaceRoot: string | null; pdfDocument: PDFDocumentProxy | null; onRequirePdfDocument?: () => void; pdfPreviewError?: string | null; onRetryPdfPreview?: () => void };
+  entryId: string; workspaceRoot: string | null; pdfDocument: PDFDocumentProxy | null; hoverEnabled?: boolean; onRequirePdfDocument?: () => void; pdfPreviewError?: string | null; onRetryPdfPreview?: () => void };
 const Context = createContext<ReferenceContext | null>(null);
-export function PaperReferencesProvider({ segments, entryId, workspaceRoot, pdfDocument, children, onRequirePdfDocument, pdfPreviewError, onRetryPdfPreview }: Omit<ReferenceContext, 'index'> & { children: ReactNode }) {
+export function PaperReferencesProvider({ segments, entryId, workspaceRoot, pdfDocument, hoverEnabled = true, children, onRequirePdfDocument, pdfPreviewError, onRetryPdfPreview }: Omit<ReferenceContext, 'index'> & { children: ReactNode }) {
   const index = useMemo(() => buildPaperReferenceIndex(segments), [segments]);
-  const value = useMemo(() => ({ segments, index, entryId, workspaceRoot, pdfDocument, onRequirePdfDocument, pdfPreviewError, onRetryPdfPreview }), [segments, index, entryId, workspaceRoot, pdfDocument, onRequirePdfDocument, pdfPreviewError, onRetryPdfPreview]);
+  const value = useMemo(() => ({ segments, index, entryId, workspaceRoot, pdfDocument, hoverEnabled, onRequirePdfDocument, pdfPreviewError, onRetryPdfPreview }), [segments, index, entryId, workspaceRoot, pdfDocument, hoverEnabled, onRequirePdfDocument, pdfPreviewError, onRetryPdfPreview]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 export function usePaperReferences() { return useContext(Context); }
@@ -27,6 +27,7 @@ export function PaperReferenceLink({ label, targets, placement }: { label: strin
   const [error, setError] = useState('');
   const trigger = useRef<HTMLButtonElement>(null);
   const jumped = useRef(false);
+  useEffect(() => { if (context?.hoverEnabled === false) setOpen(false); }, [context?.hoverEnabled]);
   if (!context || !navigation) return <>{label}</>;
   const jump = (target: PaperReference) => {
     if (navigation.navigate(target)) { jumped.current = true; setOpen(false); setChooserOpen(false); setError(''); }
@@ -40,9 +41,9 @@ export function PaperReferenceLink({ label, targets, placement }: { label: strin
       <PaperReferencePreview target={target} />
     </div>)}
   </>;
-  return <Popover open={chooserOpen} onOpenChange={setChooserOpen}><HoverCard open={open && !chooserOpen} onOpenChange={setOpen}>
+  return <Popover open={chooserOpen} onOpenChange={setChooserOpen}><HoverCard open={context.hoverEnabled !== false && open && !chooserOpen} onOpenChange={next => setOpen(context.hoverEnabled !== false && next)}>
     <HoverCardTrigger asChild><PopoverTrigger asChild><button ref={trigger} type="button" data-paper-reference style={placement} className="pointer-events-auto inline cursor-pointer rounded-sm text-primary underline decoration-primary/40 underline-offset-2 hover:bg-primary/10 hover:decoration-primary focus-visible:outline focus-visible:outline-ring"
-      aria-label={`${label}，预览或定位原文`} onFocus={() => setOpen(true)}
+      aria-label={`${label}，预览或定位原文`} onFocus={() => { if (context.hoverEnabled !== false) setOpen(true); }}
       onMouseMove={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()}
       onContextMenu={event => event.stopPropagation()}
       onClick={event => { event.preventDefault(); event.stopPropagation(); if (targets.length === 1) jump(targets[0]); else { jumped.current = false; setOpen(false); setChooserOpen(true); } }}

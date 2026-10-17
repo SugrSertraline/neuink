@@ -765,7 +765,7 @@ export function HoverPreviewControls({
     mode === 'pdf'
       ? preferences.hoverPreviewEnabled
       : preferences.reflowHoverSourceEnabled;
-  const active = enabled || (mode === 'pdf' && preferences.inlineAnnotationHoverEnabled);
+  const active = enabled || preferences.paperReferenceHoverEnabled || (mode === 'pdf' && preferences.inlineAnnotationHoverEnabled);
   const update = (changes: Partial<ReaderPreferences>) => {
     onChange({ ...preferences, ...changes });
   };
@@ -819,6 +819,11 @@ export function HoverPreviewControls({
             onClick={() => update({ inlineAnnotationHoverEnabled: !preferences.inlineAnnotationHoverEnabled })}
           />
         ) : null}
+        <HoverPreviewToggle
+          checked={preferences.paperReferenceHoverEnabled}
+          label="文内引用悬停"
+          onClick={() => update({ paperReferenceHoverEnabled: !preferences.paperReferenceHoverEnabled })}
+        />
         <div className="mt-2 grid gap-1 border-t pt-2">
           {mode === 'pdf' ? (
             <HoverPreviewToggle
