@@ -765,6 +765,7 @@ export function HoverPreviewControls({
     mode === 'pdf'
       ? preferences.hoverPreviewEnabled
       : preferences.reflowHoverSourceEnabled;
+  const active = enabled || (mode === 'pdf' && preferences.inlineAnnotationHoverEnabled);
   const update = (changes: Partial<ReaderPreferences>) => {
     onChange({ ...preferences, ...changes });
   };
@@ -775,11 +776,11 @@ export function HoverPreviewControls({
         <Button
           aria-label="悬停配置"
           className="shrink-0"
-          aria-pressed={enabled}
+          aria-pressed={active}
           size="sm"
-          title="配置鼠标悬停片段时显示的原文、译文、笔记和批注"
+          title="配置片段悬停预览与行内批注"
           type="button"
-          variant={enabled ? 'secondary' : 'outline'}
+          variant={active ? 'secondary' : 'outline'}
         >
           <Eye size={14} aria-hidden="true" />
           <span className="pdf-reader-toolbar-label">悬停配置</span>
@@ -811,6 +812,13 @@ export function HoverPreviewControls({
             )
           }
         />
+        {mode === 'pdf' ? (
+          <HoverPreviewToggle
+            checked={preferences.inlineAnnotationHoverEnabled}
+            label="行内批注"
+            onClick={() => update({ inlineAnnotationHoverEnabled: !preferences.inlineAnnotationHoverEnabled })}
+          />
+        ) : null}
         <div className="mt-2 grid gap-1 border-t pt-2">
           {mode === 'pdf' ? (
             <HoverPreviewToggle
@@ -841,7 +849,7 @@ export function HoverPreviewControls({
           <HoverPreviewToggle
             checked={preferences.hoverPreviewShowAnnotation}
             disabled={!enabled}
-            label="批注"
+            label="悬停批注"
             onClick={() => update({ hoverPreviewShowAnnotation: !preferences.hoverPreviewShowAnnotation })}
           />
         </div>

@@ -58,6 +58,7 @@ function PdfSourcePageImpl({
   hoverPreviewShowOriginal,
   hoverPreviewShowNote,
   hoverPreviewShowAnnotation,
+  inlineAnnotationHoverEnabled,
   hoverPreviewShowTranslation,
   annotationsBySegmentUid,
   notesBySegmentUid,
@@ -106,6 +107,7 @@ function PdfSourcePageImpl({
   hoverPreviewShowOriginal: boolean;
   hoverPreviewShowNote: boolean;
   hoverPreviewShowAnnotation: boolean;
+  inlineAnnotationHoverEnabled: boolean;
   hoverPreviewShowTranslation: boolean;
   annotationsBySegmentUid: Map<string, Annotation[]>;
   notesBySegmentUid: Map<string, SegmentBlockNote>;
@@ -228,7 +230,7 @@ function PdfSourcePageImpl({
   const previewRegionIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!suppressRegions && hoverPreviewEnabled) {
+    if (!suppressRegions && hoverPreviewEnabled && inlineAnnotationHoverEnabled) {
       return;
     }
 
@@ -241,13 +243,15 @@ function PdfSourcePageImpl({
     if (suppressRegions) {
       setActionMenu(null);
     }
-    hoveredGroupUidRef.current = null;
-    previewRegionIdRef.current = null;
-    setPreviewPosition(null);
-    setPreviewRegionId(null);
-    setLocalHoveredGroupUid(null);
-    setHoveredAnnotation(null);
-  }, [hoverPreviewEnabled, suppressRegions]);
+    if (!hoverPreviewEnabled || suppressRegions) {
+      hoveredGroupUidRef.current = null;
+      previewRegionIdRef.current = null;
+      setPreviewPosition(null);
+      setPreviewRegionId(null);
+      setLocalHoveredGroupUid(null);
+    }
+    if (!inlineAnnotationHoverEnabled || suppressRegions) setHoveredAnnotation(null);
+  }, [hoverPreviewEnabled, inlineAnnotationHoverEnabled, suppressRegions]);
 
   const clearFloatingSegmentUi = () => {
     if (previewClearTimerRef.current !== null) {
@@ -368,7 +372,7 @@ function PdfSourcePageImpl({
     }
     pendingHoverSampleRef.current = null;
     clearHoveredRegion();
-  }, hoverPreviewEnabled || Boolean(onAddAssistantContext));
+  }, hoverPreviewEnabled || inlineAnnotationHoverEnabled || Boolean(onAddAssistantContext));
 
   const updateHoveredSegmentAtPoint = (
     element: HTMLDivElement,
@@ -376,7 +380,7 @@ function PdfSourcePageImpl({
     clientY: number,
     buttons: number,
   ) => {
-    if (suppressRegions || (!hoverPreviewEnabled && !onAddAssistantContext) || hoverInteractionBlocked()) {
+    if (suppressRegions || (!hoverPreviewEnabled && !inlineAnnotationHoverEnabled && !onAddAssistantContext) || hoverInteractionBlocked()) {
       clearHoveredRegion();
       return;
     }
@@ -391,7 +395,7 @@ function PdfSourcePageImpl({
     cancelListPreviewClear();
 
     const hitLayerRect = pdfPageContentRect(element);
-    const annotationHit = hoverPreviewEnabled && hoverPreviewShowAnnotation && buttons === 0
+    const annotationHit = inlineAnnotationHoverEnabled && buttons === 0
       ? findPdfAnnotationAtPoint(pageTextSelectionAnnotations, hitLayerRect, clientX, clientY)
       : null;
     if (annotationHit) {
@@ -415,6 +419,10 @@ function PdfSourcePageImpl({
       return;
     }
     setHoveredAnnotation((current) => current === null ? current : null);
+    if (!hoverPreviewEnabled && !onAddAssistantContext) {
+      clearHoveredRegion();
+      return;
+    }
     const region = findRegionAtPoint(
       element,
       clientX,
@@ -755,7 +763,7 @@ function PdfSourcePageImpl({
 
         <PdfTextSelectionHighlightLayer highlights={pageTextSelectionHighlights} />
 
-        {hoveredAnnotation && hoverPreviewEnabled && !suppressRegions && !blockDrag.dragItem ? (
+        {hoveredAnnotation && inlineAnnotationHoverEnabled && !suppressRegions && !blockDrag.dragItem ? (
           <PointerPreview
             anchor={hoveredAnnotation.anchor}
             width={Math.min(360, window.innerWidth - 24)}

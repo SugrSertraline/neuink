@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import type { EntryTranslation } from '@/shared/ipc/workspaceApi';
 
-import { ReaderToolbar } from './ReaderToolbar';
+import { HoverPreviewControls, ReaderToolbar } from './ReaderToolbar';
 import { ReadingSessionContext } from '../../parallel-reading/ReadingSessionContext';
 import { ReadingViewSession } from '../navigation/ReadingViewSession';
 
@@ -23,6 +23,7 @@ describe('ReaderToolbar', () => {
       pdfHoverPreviewFontSize: 'standard' as const,
       pdfHoverPreviewSize: 'standard' as const,
       hoverPreviewShowAnnotation: true,
+      inlineAnnotationHoverEnabled: true,
       hoverPreviewShowNote: true,
       hoverPreviewShowOriginal: true,
       hoverPreviewShowRegion: true,
@@ -69,6 +70,21 @@ describe('ReaderToolbar', () => {
       progress: 100,
     };
   }
+
+  it('changes inline and segment annotation switches independently', () => {
+    const onChange = vi.fn();
+    renderWithTooltipProvider(<HoverPreviewControls preferences={buildPreferences()} onChange={onChange} />);
+    fireEvent.click(screen.getByRole('button', { name: '悬停配置' }));
+    fireEvent.click(screen.getByRole('switch', { name: '行内批注' }));
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      inlineAnnotationHoverEnabled: false, hoverPreviewShowAnnotation: true,
+    }));
+    onChange.mockClear();
+    fireEvent.click(screen.getByRole('switch', { name: '悬停批注' }));
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      inlineAnnotationHoverEnabled: true, hoverPreviewShowAnnotation: false,
+    }));
+  });
 
   it('uses a single compact row in parallel reading and keeps navigation, search, zoom and export operable', () => {
     const onCurrentPageChange = vi.fn();

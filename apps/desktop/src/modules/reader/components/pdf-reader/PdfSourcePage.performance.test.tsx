@@ -340,7 +340,9 @@ describe('PdfSourcePage performance boundaries', () => {
         rects: [[310, 100, 350, 140] as [number, number, number, number]], text: 'C' },
     };
     const ui = render(cloneElement(pdfSourcePage(createPage(1), null,
-      new Map([['segment-0', [annotation, otherAnnotation]]])), { hoverPreviewShowAnnotation: true }));
+      new Map([['segment-0', [annotation, otherAnnotation]]])), {
+        hoverPreviewShowAnnotation: true, inlineAnnotationHoverEnabled: true,
+      }));
     const hit = ui.getByTestId('pdf-page-hit-layer-0');
     vi.spyOn(hit, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 1000, 1000));
 
@@ -358,6 +360,32 @@ describe('PdfSourcePage performance boundaries', () => {
     expect(segmentPreview.textContent).toContain('批注原文B');
     expect(segmentPreview.textContent).toContain('B 的译文');
     expect(segmentPreview.textContent).toContain('C 的译文');
+  });
+
+  it.each([
+    { segment: false, inline: true, master: true, selected: true, whole: false },
+    { segment: true, inline: false, master: true, selected: false, whole: true },
+    { segment: false, inline: true, master: false, selected: true, whole: false },
+  ])('keeps inline and segment annotation hover independent: %j', ({ segment, inline, master, selected, whole }) => {
+    vi.stubGlobal('PointerEvent', MouseEvent);
+    const annotation = {
+      annotation_id: 'annotation-1', segment_uid: 'segment-0', kind: 'translation',
+      content: 'B 的译文', importance: 'normal' as const,
+      text_selection: { color: 'yellow' as const, page_idx: 0,
+        rects: [[100, 100, 300, 140] as [number, number, number, number]], text: 'B' },
+      created_at: '2026-09-05T00:00:00Z', updated_at: '2026-09-05T00:00:00Z',
+    };
+    const ui = render(cloneElement(pdfSourcePage(createPage(1), null,
+      new Map([['segment-0', [annotation]]])), {
+        hoverPreviewEnabled: master,
+        hoverPreviewShowAnnotation: segment,
+        inlineAnnotationHoverEnabled: inline,
+      }));
+    const hit = ui.getByTestId('pdf-page-hit-layer-0');
+    vi.spyOn(hit, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 1000, 1000));
+    fireEvent.pointerEnter(hit, { buttons: 0, clientX: 200, clientY: 120 });
+    expect(Boolean(ui.queryByRole('region', { name: '选区批注悬停预览' }))).toBe(selected);
+    expect(Boolean(ui.queryByRole('region', { name: '片段悬停预览' }))).toBe(whole);
   });
 
 });
@@ -382,6 +410,7 @@ function pdfSourcePage(
       hoverPreviewShowOriginal={false}
       hoverPreviewShowNote={false}
       hoverPreviewShowAnnotation={false}
+      inlineAnnotationHoverEnabled={false}
       hoverPreviewShowRegion={false}
       hoverPreviewShowTranslation={false}
       notesBySegmentUid={new Map()}

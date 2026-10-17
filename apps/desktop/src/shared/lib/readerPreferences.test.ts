@@ -48,6 +48,27 @@ describe('reader preferences', () => {
     expect(readStoredReaderPreferences().autoTranslateTextSelection).toBe(true);
   });
 
+  it('migrates the old shared annotation hover choice, then persists independent choices', () => {
+    window.localStorage.setItem('neuink.reader.preferences', JSON.stringify({
+      hoverPreviewEnabled: true, hoverPreviewShowAnnotation: false,
+    }));
+    expect(readStoredReaderPreferences().inlineAnnotationHoverEnabled).toBe(false);
+    window.localStorage.setItem('neuink.reader.preferences', JSON.stringify({
+      hoverPreviewEnabled: false, hoverPreviewShowAnnotation: true,
+    }));
+    expect(readStoredReaderPreferences().inlineAnnotationHoverEnabled).toBe(false);
+
+    const original = readStoredReaderPreferences();
+    const inlineOnly = { ...original, inlineAnnotationHoverEnabled: true, hoverPreviewShowAnnotation: false };
+    expect(equalReaderPreferences(original, inlineOnly)).toBe(false);
+    persistReaderPreferences(inlineOnly);
+    expect(readStoredReaderPreferences()).toEqual(inlineOnly);
+
+    const segmentOnly = { ...inlineOnly, inlineAnnotationHoverEnabled: false, hoverPreviewShowAnnotation: true };
+    persistReaderPreferences(segmentOnly);
+    expect(readStoredReaderPreferences()).toEqual(segmentOnly);
+  });
+
   it('defaults pageDisplayMode to single', () => {
     expect(readStoredReaderPreferences().pageDisplayMode).toBe('single');
   });

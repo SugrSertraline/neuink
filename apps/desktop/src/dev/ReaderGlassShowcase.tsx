@@ -134,6 +134,7 @@ function PdfPreviewBody({ compact, paper, jumpRequest = null, onAddContext }: Pd
             flashSegmentUid={flashSegmentUid} hoveredSegmentUid={null} annotationsBySegmentUid={annotationsBySegmentUid} notesBySegmentUid={new Map()}
             hoverPreviewEnabled={interactionCheck} hoverPreviewFontSize="standard" hoverPreviewSize="standard" hoverPreviewShowRegion={interactionCheck} hoverPreviewShowOriginal={interactionCheck}
             hoverPreviewShowNote={false} hoverPreviewShowAnnotation={false} hoverPreviewShowTranslation={false} showRegions={blockDragCheck} suppressRegions={false}
+            inlineAnnotationHoverEnabled={false}
             sourceBacklinksBySegmentUid={{}} translationBySegmentUid={new Map()} translationStatus={null} translationMode="hover" translationVisible={false} workspaceRoot={null}
             onCtrlWheelZoom={({direction})=>setZoom(v=>Math.max(.5,Math.min(2,v+direction*.1)))} onOpenSegmentAnnotation={segment=>{setSelectedSegment(segment);setAuxOpen(true);}} onOpenSegmentNote={noop}
             onOpenSourceBacklink={noop} onCloseSegmentOverlay={noop} onCreateTextSelectionAnnotation={({content,importance,selection,segment})=>setAnnotations(current=>[...current,{

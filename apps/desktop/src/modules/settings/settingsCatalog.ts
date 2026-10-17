@@ -39,6 +39,7 @@ const ALL_SETTINGS_CATALOG: SettingDefinition[] = [
   { id: 'reader-open-pdf', tab: 'reader', title: '有 PDF 时直接打开 PDF', description: '打开条目时优先阅读 PDF；关闭后或没有 PDF 时显示条目概览。', keywords: '默认打开PDF 默认打开 PDF 打开条目 直接阅读 阅读方式 概览 详情' },
   { id: 'reader-preview', tab: 'reader', title: 'PDF 悬停预览', description: '悬停时查看对应片段。', keywords: '阅读 鼠标 预览 浮层 卡片' },
   { id: 'reader-reflow-preview', tab: 'reader', title: '重排悬停预览', description: '重排视图悬停时查看对应片段。', keywords: '阅读 reflow 鼠标 预览' },
+  { id: 'reader-inline-annotation-hover', tab: 'reader', title: '行内批注', description: '悬停 PDF 选区批注时查看该处原文和批注。', keywords: '划词 高亮 选中文字 悬停 批注' },
   { id: 'reader-preview-content', tab: 'reader', title: '预览显示内容', description: '原文、译文、片段记录和批注；PDF 与重排共用。', keywords: '悬停 片段笔记 区域 内容' },
   { id: 'reader-preview-size', tab: 'reader', title: 'PDF 预览大小', description: '预览文字大小和卡片宽度。', keywords: '悬停 字体大小 预览卡片大小' },
   { id: 'reader-regions', tab: 'reader', title: '默认显示 PDF 分段框', description: '控制 PDF 上分段区域框的默认显示。', keywords: '默认显示区域 框线 阅读 高亮' },

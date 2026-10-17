@@ -55,6 +55,7 @@ export function PdfReaderDocumentPane({
   hoverPreviewShowOriginal,
   hoverPreviewShowNote,
   hoverPreviewShowAnnotation,
+  inlineAnnotationHoverEnabled,
   hoverPreviewShowTranslation,
   rows,
   searchMatchCountsByPage,
@@ -113,6 +114,7 @@ export function PdfReaderDocumentPane({
   hoverPreviewShowOriginal: boolean;
   hoverPreviewShowNote: boolean;
   hoverPreviewShowAnnotation: boolean;
+  inlineAnnotationHoverEnabled: boolean;
   hoverPreviewShowTranslation: boolean;
   rows: PageSegments[][];
   searchMatchCountsByPage?: Map<number, number>;
@@ -270,6 +272,7 @@ export function PdfReaderDocumentPane({
                     hoverPreviewShowOriginal={hoverPreviewShowOriginal}
                     hoverPreviewShowNote={hoverPreviewShowNote}
                     hoverPreviewShowAnnotation={hoverPreviewShowAnnotation}
+                    inlineAnnotationHoverEnabled={inlineAnnotationHoverEnabled}
                     hoverPreviewShowTranslation={hoverPreviewShowTranslation}
                     key={page.pageIdx}
                     notesBySegmentUid={notesBySegmentUid}

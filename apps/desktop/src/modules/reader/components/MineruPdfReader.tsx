@@ -1253,6 +1253,7 @@ function MineruPdfReaderBody({
             hoverPreviewShowOriginal={readerPreferences.hoverPreviewShowOriginal}
             hoverPreviewShowNote={readerPreferences.hoverPreviewShowNote}
             hoverPreviewShowAnnotation={readerPreferences.hoverPreviewShowAnnotation}
+            inlineAnnotationHoverEnabled={readerPreferences.inlineAnnotationHoverEnabled}
             hoverPreviewShowTranslation={readerPreferences.hoverPreviewShowTranslation}
             pdfScrollRef={pdfScrollRef}
             pdfState={pdfState}

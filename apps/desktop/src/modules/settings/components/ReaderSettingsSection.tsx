@@ -4,7 +4,7 @@ import { SettingsPage, SettingsGroup, SettingSelect, SettingSwitch, SettingCheck
 
 const PREVIEW_CONTENT = [
   ['hoverPreviewShowOriginal', '解析后原文'], ['hoverPreviewShowTranslation', '译文'],
-  ['hoverPreviewShowNote', '片段记录'], ['hoverPreviewShowAnnotation', '批注']
+  ['hoverPreviewShowNote', '片段记录'], ['hoverPreviewShowAnnotation', '悬停批注']
 ] as const;
 
 export function ReaderSettingsSection({ props }: { props: SettingsPanelLayoutProps }) {
@@ -18,6 +18,7 @@ export function ReaderSettingsSection({ props }: { props: SettingsPanelLayoutPro
     <SettingsGroup title="悬停预览">
       <SettingSwitch id="reader-preview" label="PDF 悬停预览" description="鼠标悬停在 PDF 片段上时显示内容预览。" checked={p.hoverPreviewEnabled} onCheckedChange={hoverPreviewEnabled => update({ hoverPreviewEnabled })} />
       <SettingSwitch id="reader-reflow-preview" label="重排悬停预览" description="鼠标悬停在重排内容上时显示对应片段。" checked={p.reflowHoverSourceEnabled} onCheckedChange={reflowHoverSourceEnabled => update({ reflowHoverSourceEnabled })} />
+      <SettingSwitch id="reader-inline-annotation-hover" label="行内批注" description="悬停在 PDF 的选区批注高亮上时，只预览该处原文和批注；可独立于片段悬停预览使用。" checked={p.inlineAnnotationHoverEnabled} onCheckedChange={inlineAnnotationHoverEnabled => update({ inlineAnnotationHoverEnabled })} />
       <SettingsGroup id="reader-preview-content" title="预览显示内容" description={previewDisabled ? '请先开启 PDF 或重排悬停预览；当前选择会保留。' : 'PDF 与重排预览共用以下内容选择。'}>
         <div className="settings-checkbox-grid">{PREVIEW_CONTENT.map(([key, label]) => <SettingCheckbox key={key} label={label} checked={p[key]} disabled={previewDisabled} onCheckedChange={checked => update({ [key]: checked })} />)}</div>
         <SettingCheckbox label="PDF 预览时高亮对应区域" checked={p.hoverPreviewShowRegion} disabled={!p.hoverPreviewEnabled} onCheckedChange={hoverPreviewShowRegion => update({ hoverPreviewShowRegion })} />
