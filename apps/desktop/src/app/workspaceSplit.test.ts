@@ -4,6 +4,7 @@ import {
   clampWorkspaceSplitLeftWidth,
   getWorkspaceSplitMinimums,
   getWorkspaceSplitWidthBounds,
+  workspaceSplitLeftWidthFromRatio,
   WORKSPACE_SPLIT_DIVIDER_WIDTH,
   WORKSPACE_SPLIT_MIN_RESIZE_RANGE
 } from './workspaceSplit';
@@ -53,5 +54,13 @@ describe('workspace split sizing', () => {
     expect(bounds).toEqual({ minLeftWidth: 272, maxLeftWidth: 368 });
     expect(clampWorkspaceSplitLeftWidth(280, 650)).toBe(280);
     expect(clampWorkspaceSplitLeftWidth(350, 650)).toBe(350);
+  });
+
+  it('restores the preferred ratio after a side panel temporarily narrows the workspace', () => {
+    const preferredRatio = 0.68;
+
+    expect(workspaceSplitLeftWidthFromRatio(preferredRatio, 1200)).toBe(816);
+    expect(workspaceSplitLeftWidthFromRatio(preferredRatio, 650)).toBe(368);
+    expect(workspaceSplitLeftWidthFromRatio(preferredRatio, 1200)).toBe(816);
   });
 });
