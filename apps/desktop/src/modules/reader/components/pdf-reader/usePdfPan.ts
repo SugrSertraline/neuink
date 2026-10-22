@@ -20,7 +20,7 @@ type Pan = {
 
 function isControl(target: EventTarget | null) {
   return isPdfBlockDragControl(target) || (target instanceof Element && Boolean(target.closest(
-    '[contenteditable]:not([contenteditable="false"]), [role="button"], [role="textbox"], [role="slider"], [role="dialog"], [role="menu"]',
+    '[contenteditable]:not([contenteditable="false"]), [role="button"], [role="switch"], [role="textbox"], [role="slider"], [role="dialog"], [role="menu"]',
   )));
 }
 
@@ -33,6 +33,7 @@ export function usePdfPan({ scrollRef, context, enabled }: {
   const [active, setActive] = useState(false);
   const held = useRef(false);
   const hovered = useRef(false);
+  const pointerFocusedButton = useRef<Element | null>(null);
   const pressed = useRef(false);
   const pan = useRef<Pan | null>(null);
   const frame = useRef<number | null>(null);
@@ -82,14 +83,24 @@ export function usePdfPan({ scrollRef, context, enabled }: {
         release();
         return;
       }
-      if (event.code !== 'Space' && event.key !== ' ') return;
-      if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || isControl(event.target)) return;
+      if (event.code !== 'Space' && event.key !== ' ') {
+        pointerFocusedButton.current = null;
+        return;
+      }
+      if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+      // A mouse click can leave focus on a sidebar/toolbar button. Once the
+      // pointer returns to PDF content, Space belongs to panning, not that button.
+      const takePointerFocus = hovered.current && event.target === pointerFocusedButton.current &&
+        event.target === document.activeElement;
+      if (isControl(event.target) && !takePointerFocus) return;
       if (!hovered.current && !element.contains(document.activeElement) &&
         !(event.target instanceof Node && element.contains(event.target))) return;
       if (pressed.current && !held.current) return;
       if (event.repeat && !held.current) return;
       event.preventDefault();
+      event.stopPropagation();
       if (held.current) return;
+      if (takePointerFocus) element.focus({ preventScroll: true });
       held.current = true;
       element.dataset.pdfPan = 'ready';
       dismissHoverInteractions();
@@ -98,11 +109,19 @@ export function usePdfPan({ scrollRef, context, enabled }: {
     const keyUp = (event: KeyboardEvent) => {
       if ((event.code === 'Space' || event.key === ' ') && held.current) {
         event.preventDefault();
+        event.stopPropagation();
         release(true);
       }
     };
-    const pointerDown = () => { pressed.current = true; };
+    const pointerDown = (event: PointerEvent) => {
+      pressed.current = true;
+      const target = event.target instanceof Element ? event.target : null;
+      pointerFocusedButton.current = event.button === 0 && !target?.closest(
+        'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="slider"], [role="combobox"], [role="listbox"], [role="dialog"], [role="alertdialog"], [role="menu"], [data-hover-surface], [data-reading-selection-toolbar]',
+      ) ? target?.closest('button, [role="button"], [role="switch"]') ?? null : null;
+    };
     const pointerMove = (event: PointerEvent) => {
+      hovered.current = event.target instanceof Node && element.contains(event.target) && !isControl(event.target);
       const drag = pan.current;
       if (!drag || event.pointerId !== drag.pointerId) return;
       if (!(event.buttons & 1)) { release(); pressed.current = false; return; }
@@ -132,7 +151,10 @@ export function usePdfPan({ scrollRef, context, enabled }: {
     };
     const cancel = () => { pressed.current = false; hovered.current = false; release(); };
     const visibility = () => { if (document.hidden) cancel(); };
-    const focus = (event: FocusEvent) => { if (isControl(event.target) || !element.contains(event.target as Node)) release(); };
+    const focus = (event: FocusEvent) => {
+      if (event.target !== pointerFocusedButton.current) pointerFocusedButton.current = null;
+      if (isControl(event.target) || !element.contains(event.target as Node)) release();
+    };
     window.addEventListener('keydown', keyDown, true);
     window.addEventListener('keyup', keyUp, true);
     window.addEventListener('pointerdown', pointerDown, true);
@@ -164,7 +186,7 @@ export function usePdfPan({ scrollRef, context, enabled }: {
 
   return {
     active,
-    onPointerEnter: () => { hovered.current = true; },
+    onPointerEnter: (event: ReactPointerEvent<HTMLDivElement>) => { hovered.current = !isControl(event.target); },
     onPointerLeave: () => { hovered.current = false; },
     onPointerDownCapture: (event: ReactPointerEvent<HTMLDivElement>) => {
       ignoreClick.current = false;

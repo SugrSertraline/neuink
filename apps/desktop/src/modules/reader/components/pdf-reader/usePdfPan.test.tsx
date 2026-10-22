@@ -124,6 +124,93 @@ it('uses the hovered reader only, without stealing Space elsewhere', () => {
   expect(other.dataset.pdfPan).toBeUndefined();
 });
 
+it('takes Space from a mouse-focused sidebar switch after the pointer returns to the PDF', () => {
+  const ui = setup();
+  const onKeyDown = vi.fn(), onKeyUp = vi.fn(), onClick = vi.fn();
+  const sidebar = render(<button role="switch" aria-checked="false" onClick={onClick}
+    onKeyDown={onKeyDown} onKeyUp={onKeyUp}>Assistant</button>);
+  const toggle = sidebar.getByRole('switch');
+  fireEvent.pointerDown(toggle, { button: 0, buttons: 1 });
+  act(() => toggle.focus());
+  fireEvent.pointerUp(toggle, { button: 0 });
+  fireEvent.click(toggle);
+  // Opening a sidebar can resize the PDF before the pointer returns.
+  ui.rerender(<Harness context="resized-paper" />);
+  fireEvent.pointerEnter(ui.viewport);
+  expect(fireEvent.keyDown(toggle, { code: 'Space', key: ' ' })).toBe(false);
+  expect(onKeyDown).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(ui.viewport);
+  expect(ui.viewport.dataset.pdfPan).toBe('ready');
+  ui.down(); ui.move(); ui.up();
+  expect(ui.viewport.scrollTop).toBe(450);
+  expect(fireEvent.keyUp(toggle, { code: 'Space', key: ' ' })).toBe(false);
+  expect(onKeyUp).not.toHaveBeenCalled();
+  expect(onClick).toHaveBeenCalledOnce();
+});
+
+it.each(['Tab', 'ArrowRight', 'Enter'])('preserves keyboard control focus after %s even with the pointer over the PDF', key => {
+  const ui = setup();
+  const button = ui.getByRole('button');
+  fireEvent.pointerDown(button, { button: 0, buttons: 1 });
+  act(() => button.focus());
+  fireEvent.pointerUp(button, { button: 0 });
+  fireEvent.pointerMove(ui.text, { buttons: 0 });
+  fireEvent.keyDown(button, { key });
+  expect(fireEvent.keyDown(button, { code: 'Space', key: ' ' })).toBe(true);
+  expect(ui.viewport.dataset.pdfPan).toBeUndefined();
+  expect(document.activeElement).toBe(button);
+});
+
+it.each(['Comment', 'Editor', 'Action'])('does not take Space while the pointer is still over %s', label => {
+  const ui = setup();
+  const control = label === 'Comment' ? ui.getByLabelText(label) : ui.getByText(label);
+  fireEvent.pointerEnter(ui.viewport);
+  fireEvent.pointerDown(control, { button: 0, buttons: 1 });
+  act(() => control.focus());
+  fireEvent.pointerUp(control, { button: 0 });
+  fireEvent.pointerMove(control, { buttons: 0 });
+  expect(fireEvent.keyDown(control, { code: 'Space', key: ' ' })).toBe(true);
+  expect(ui.viewport.dataset.pdfPan).toBeUndefined();
+});
+
+it.each(['Comment', 'Editor'])('keeps typing Space in a mouse-focused %s when the pointer returns to the PDF', label => {
+  const ui = setup();
+  const control = label === 'Comment' ? ui.getByLabelText(label) : ui.getByText(label);
+  fireEvent.pointerDown(control, { button: 0, buttons: 1 });
+  act(() => control.focus());
+  fireEvent.pointerUp(control, { button: 0 });
+  fireEvent.pointerMove(ui.text, { buttons: 0 });
+  expect(fireEvent.keyDown(control, { code: 'Space', key: ' ' })).toBe(true);
+  expect(ui.viewport.dataset.pdfPan).toBeUndefined();
+});
+
+it('does not steal Space from a dialog control over a reader', () => {
+  const ui = setup();
+  const dialog = render(<div role="dialog"><button>Confirm</button></div>);
+  const button = dialog.getByText('Confirm');
+  fireEvent.pointerDown(button, { button: 0, buttons: 1 });
+  act(() => button.focus());
+  fireEvent.pointerUp(button, { button: 0 });
+  fireEvent.pointerEnter(ui.viewport);
+  expect(fireEvent.keyDown(button, { code: 'Space', key: ' ' })).toBe(true);
+  expect(ui.viewport.dataset.pdfPan).toBeUndefined();
+});
+
+it('hands mouse-retained button focus to only the hovered reader in a split view', () => {
+  const ui = setup();
+  const button = ui.getByText('Action');
+  const second = render(<Harness context="other" />);
+  const other = second.container.firstElementChild as HTMLElement;
+  fireEvent.pointerDown(button, { button: 0, buttons: 1 });
+  act(() => button.focus());
+  fireEvent.pointerUp(button, { button: 0 });
+  fireEvent.pointerMove(other, { buttons: 0 });
+  fireEvent.keyDown(button, { code: 'Space', key: ' ' });
+  expect(ui.viewport.dataset.pdfPan).toBeUndefined();
+  expect(other.dataset.pdfPan).toBe('ready');
+  expect(document.activeElement).toBe(other);
+});
+
 it('ignores other pointers, clamps to document edges and continues outside the viewport', () => {
   const ui = setup(); ui.space(); ui.down();
   ui.move({ pointerId: 8 }); ui.up({ pointerId: 8 });
