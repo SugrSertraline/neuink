@@ -16,6 +16,11 @@ afterEach(() => {
 });
 
 describe('ChatMessage performance boundaries', () => {
+  it('hides old assistant replies that contain only a serialized tool call', () => {
+    const raw = '<tool_call><function=search_papers></function></tool_call>';
+    const ui = render(<ChatMessage message={{ ...createMessage(), content: raw }} streaming={false} onOpenSource={() => undefined} />);
+    expect(ui.container.textContent).not.toContain('<tool_call>');
+  });
   it('offers reading consistently for completed replies and not for user, empty or streaming messages', () => {
     const actions = { root: 'root', openReply: vi.fn(), openSource: vi.fn(), addSciverseSource: vi.fn() };
     const show = (message: ConversationMessage, streaming: boolean) => <AssistantReplyActionsContext.Provider value={actions}>

@@ -7,7 +7,7 @@ export const GUIDE_ACTIONS: Record<string, { action: string; result: string }> =
   'nav-search': { action:'观察高亮的搜索入口；本步不要求输入关键词。', result:'左侧自动切到搜索面板；之后可在这里寻找论文与笔记。' },
   'nav-assistant': { action:'观察助手入口，本步不用发送问题。', result:'左侧切到对话，右侧演示 PDF 继续保留。' },
   'nav-tags': { action:'观察高亮的标签阅读入口；本步不要求选择标签。', result:'侧栏切到按标签组织的阅读面板；空范围会显示空状态。' },
-  'nav-settings': { action:'观察设置入口；以后可从“资料库与数据”回放教程。', result:'设置作为阅读标签打开，不会替换资料库数据。' },
+  'nav-settings': { action:'观察设置入口；以后可从“入门与教程”回放教程。', result:'设置作为阅读标签打开，不会替换资料库数据。' },
   'parse-choices': { action:'可点击高亮的“查看客户端导入图文教程”，或直接继续。', result:'教程会在新标签打开，并进入下一步的截图说明。' },
   'parse-zip': { action:'依次看下载、打包和导入截图；需要时点击“复制链接”。', result:'复制成功会有提示；本步不会上传或解析你的 PDF。' },
   'parse-service': { action:'可选：填写 MinerU URL；服务需要密钥时再填写下方 API Key。', result:'配置保留在解析设置中，不会自动调用聊天模型。' },

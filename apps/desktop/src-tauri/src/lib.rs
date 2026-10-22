@@ -1,6 +1,11 @@
+#[cfg(windows)]
+pub mod restore_preview;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     use tauri::Manager;
+    #[cfg(windows)]
+    use tauri::{Emitter, Listener};
     use tauri_plugin_dialog::DialogExt;
 
     // Children inherit this job, so closing NeuInk also stops active local tools.
@@ -102,6 +107,18 @@ pub fn run() {
                 app.default_window_icon().cloned(),
             ) {
                 let _ = window.set_icon(icon);
+                #[cfg(windows)]
+                {
+                    restore_preview::install(&window)?;
+                    let handle = app.handle().clone();
+                    app.listen("neuink:prepare-minimize", move |_| {
+                        let reply = handle.clone();
+                        std::thread::spawn(move || {
+                            restore_preview::capture();
+                            let _ = reply.emit("neuink:preview-ready", ());
+                        });
+                    });
+                }
             }
             if let Some(warning) = scan_warning {
                 app.dialog()

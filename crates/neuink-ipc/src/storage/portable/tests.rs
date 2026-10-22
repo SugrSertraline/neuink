@@ -40,6 +40,19 @@ fn windows_installed_and_portable_modes_always_use_adjacent_data() {
     }
 }
 
+#[cfg(debug_assertions)]
+#[test]
+fn debug_data_override_requires_an_existing_absolute_library() {
+    let root = tempfile::tempdir().unwrap();
+    assert!(PortablePaths::validate_dev_data_root(root.path().to_path_buf()).is_err());
+    fs::create_dir(root.path().join("library")).unwrap();
+    assert_eq!(
+        PortablePaths::validate_dev_data_root(root.path().to_path_buf()).unwrap(),
+        root.path()
+    );
+    assert!(PortablePaths::validate_dev_data_root(PathBuf::from("relative/data")).is_err());
+}
+
 #[test]
 fn moved_package_keeps_settings_and_data_without_old_absolute_paths() {
     let (root, paths) = fixture();

@@ -158,13 +158,48 @@ async fn pre_cancelled_run_never_spawns_a_process() {
     let result = execute(
         &request,
         std::path::Path::new("nonexistent"),
-        PathBuf::from("nonexistent.exe"),
+        PathBuf::from("nonexistent.exe").into(),
         rx,
         replies,
         Arc::new(|_| panic!("No event before startup")),
     )
     .await;
     assert_eq!(result.unwrap_err(), "任务已停止。");
+}
+
+#[tokio::test]
+async fn npm_script_entry_runs_the_actual_conversation_transport() {
+    let temp = tempfile::tempdir().unwrap();
+    let script = temp.path().join("测试 CLI with spaces.cjs");
+    std::fs::write(&script, r#"
+const args = process.argv.slice(2);
+if (!args.includes('--mcp-config') || !args.includes('--permission-prompt-tool') || !args.includes('--session-id')) process.exit(2);
+let input = ''; process.stdin.setEncoding('utf8');
+process.stdin.on('data', part => { input += part; });
+process.stdin.on('end', () => {
+  const value = JSON.parse(input);
+  console.log(JSON.stringify({type:'result',subtype:'success',is_error:false,result:value.message.content}));
+});
+"#).unwrap();
+    let program = super::super::installation::tests::test_node();
+    let executable = super::super::installation::AgentExecutable::Node { program, script };
+    let request:Request = serde_json::from_value(json!({"runId":"550e8400-e29b-41d4-a716-446655440000","root":temp.path(),"conversationId":"fixture","sessionId":"550e8400-e29b-41d4-a716-446655440001","resume":false,"prompt":"synthetic quoted & spaced content","tools":[]})).unwrap();
+    let (_tx, rx) = watch::channel(false);
+    let result = tokio::time::timeout(
+        Duration::from_secs(10),
+        execute(
+            &request,
+            temp.path(),
+            executable,
+            rx,
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(|_| Ok(())),
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(result["result"], request.prompt);
 }
 
 /// Explicit opt-in: uses the user's configured CLI against an isolated scratch directory.

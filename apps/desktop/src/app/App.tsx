@@ -66,8 +66,8 @@ import { WorkspaceTabsBar } from './WorkspaceTabsBar';
 import { assistantSurfaceContext } from './assistantSurfaceContext';
 import { useBrowserTabRequests } from './useBrowserTabRequests';
 import {
-  clampWorkspaceSplitLeftWidth,
-  getWorkspaceSplitMinimums
+  getWorkspaceSplitMinimums,
+  workspaceSplitLeftWidthFromRatio
 } from './workspaceSplit';
 import { AssistantPanel } from '../modules/assistant/components/AssistantPanel';
 import type { AssistantComposerDraft } from '../modules/assistant/components/AssistantComposerEditor';
@@ -180,6 +180,7 @@ import {
   SIDEBAR_WIDTH_STORAGE_KEY,
   SIDE_PANEL_STORAGE_KEY,
   WORKSPACE_SPLIT_WIDTH_STORAGE_KEY,
+  WORKSPACE_SPLIT_RATIO_STORAGE_KEY,
   conversationToMarkdown,
   formatVectorStatus,
   getWorkspaceSplitContainerWidth,
@@ -190,6 +191,7 @@ import {
   readStoredSidePanel,
   readStoredSidebarWidth,
   readStoredWorkspaceSplitLeftWidth,
+  readStoredWorkspaceSplitRatio,
   toLibraryEntry
 } from './appSupport';
 
@@ -274,6 +276,8 @@ export function App() {
   }));
   const appShellRef = useRef<HTMLElement | null>(null);
   const workspaceSplitPreviewWidthRef = useRef<number | null>(workspaceSplitLeftWidth);
+  const workspaceSplitInitialWidthRef = useRef(workspaceSplitLeftWidth);
+  const workspaceSplitDesiredRatioRef = useRef<number | null>(readStoredWorkspaceSplitRatio());
   const [activeContentByEntryId, setActiveContentByEntryId] = useState<Record<string, string | null>>({});
   const [sidePane, setSidePane] = useState<SidePaneState>(EMPTY_SIDE_PANE);
   const [markdownNoteRefreshById, setMarkdownNoteRefreshById] = useState<Record<string, number>>({});
@@ -426,11 +430,17 @@ export function App() {
     }
     const containerWidth = getWorkspaceSplitContainerWidth();
     const minimums = getWorkspaceSplitMinimums(surfaceLayout.left, rightSurface);
-    const nextWidth = clampWorkspaceSplitLeftWidth(
-      workspaceSplitLeftWidth ?? containerWidth / 2,
-      containerWidth,
-      minimums
-    );
+    const desiredRatio = workspaceSplitDesiredRatioRef.current ??
+      workspaceSplitLeftWidthFromRatio(
+        (workspaceSplitLeftWidth ?? containerWidth / 2) / containerWidth,
+        containerWidth,
+        minimums
+      ) / containerWidth;
+    const nextWidth = workspaceSplitLeftWidthFromRatio(desiredRatio, containerWidth, minimums);
+    if (workspaceSplitDesiredRatioRef.current === null) {
+      workspaceSplitDesiredRatioRef.current = desiredRatio;
+      window.localStorage.setItem(WORKSPACE_SPLIT_RATIO_STORAGE_KEY, String(desiredRatio));
+    }
     workspaceSplitPreviewWidthRef.current = nextWidth;
     setWorkspaceSplitLeftWidth(nextWidth);
   }, [surfaceLayout.left, surfaceLayout.right, workspaceSplitLeftWidth]);
@@ -467,29 +477,47 @@ export function App() {
       return undefined;
     }
 
-    const clampStoredWidth = () => {
+    const restorePreferredSplitWidth = () => {
       const containerWidth = split.getBoundingClientRect().width;
-      if (containerWidth <= 0) {
+      if (containerWidth <= 0 || !surfaceLayout.right) {
         return;
       }
-      setWorkspaceSplitLeftWidth((current) => {
-        if (current === null) {
-          return current;
-        }
-        if (!surfaceLayout.right) {
-          return current;
-        }
-        const minimums = getWorkspaceSplitMinimums(surfaceLayout.left, surfaceLayout.right);
-        const nextWidth = clampWorkspaceSplitLeftWidth(current, containerWidth, minimums);
-        workspaceSplitPreviewWidthRef.current = nextWidth;
-        return nextWidth;
-      });
+      const minimums = getWorkspaceSplitMinimums(surfaceLayout.left, surfaceLayout.right);
+      const desiredRatio = workspaceSplitDesiredRatioRef.current ??
+        workspaceSplitLeftWidthFromRatio(
+          (workspaceSplitInitialWidthRef.current ?? containerWidth / 2) / containerWidth,
+          containerWidth,
+          minimums
+        ) / containerWidth;
+      if (workspaceSplitDesiredRatioRef.current === null) {
+        workspaceSplitDesiredRatioRef.current = desiredRatio;
+        window.localStorage.setItem(WORKSPACE_SPLIT_RATIO_STORAGE_KEY, String(desiredRatio));
+      }
+      const nextWidth = workspaceSplitLeftWidthFromRatio(desiredRatio, containerWidth, minimums);
+      workspaceSplitPreviewWidthRef.current = nextWidth;
+      appShellRef.current?.style.setProperty('--app-workspace-left-width', `${nextWidth}px`);
+      setWorkspaceSplitLeftWidth(current => current === nextWidth ? current : nextWidth);
     };
 
-    clampStoredWidth();
-    const observer = new ResizeObserver(clampStoredWidth);
+    restorePreferredSplitWidth();
+    let resizeTimer: number | null = null;
+    const schedulePreferredSplitWidth = () => {
+      if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+      // Native window restoration reports intermediate WebView widths. Keep
+      // the last paper/chat ratio until the new window geometry settles.
+      resizeTimer = window.setTimeout(() => {
+        resizeTimer = null;
+        restorePreferredSplitWidth();
+      }, 180);
+    };
+    const observer = new ResizeObserver(schedulePreferredSplitWidth);
     observer.observe(split);
-    return () => observer.disconnect();
+    window.addEventListener('focus', schedulePreferredSplitWidth);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('focus', schedulePreferredSplitWidth);
+      if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+    };
   }, [surfaceLayout.left, surfaceLayout.right]);
 
   const trashedEntries = useMemo(
@@ -757,6 +785,12 @@ export function App() {
     workspaceSplitPreviewWidthRef.current = width;
     setWorkspaceSplitLeftWidth(width);
     if (typeof window !== 'undefined') {
+      const containerWidth = getWorkspaceSplitContainerWidth();
+      if (containerWidth > 0) {
+        const ratio = width / containerWidth;
+        workspaceSplitDesiredRatioRef.current = ratio;
+        window.localStorage.setItem(WORKSPACE_SPLIT_RATIO_STORAGE_KEY, String(ratio));
+      }
       window.localStorage.setItem(WORKSPACE_SPLIT_WIDTH_STORAGE_KEY, String(width));
     }
   };

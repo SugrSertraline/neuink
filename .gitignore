@@ -21,6 +21,14 @@ coverage/
 .vitest/
 .cache/
 
+# Local promotional exports and disposable visual checks.
+/output/
+/design-previews/seal-ui-alpha-v9/
+
+# Use the repository's npm workspaces and root package-lock.json.
+/apps/desktop/pnpm-lock.yaml
+/apps/desktop/pnpm-workspace.yaml
+
 # === Local Claude config (per-user permissions, not project config) ===
 .claude/
 

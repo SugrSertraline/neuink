@@ -47,9 +47,11 @@ export function SourceSnapshotTable({ children, node, allowScroll, detailEnabled
     style={{ minWidth: columns * 88, maxWidth: 'none' }}>{children}</table>;
   const scroller = (detail = false) => <div
     className={cn('source-table-scroll min-h-0 min-w-0 max-w-full outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
-      allowScroll ? 'overflow-auto overscroll-contain' : 'overflow-visible',
+      // Reflow uses allowScroll=false to keep the full table height in the reading list.
+      // Wide tables still need their own horizontal scroll owner in a narrow split pane.
+      allowScroll ? 'overflow-auto overscroll-contain' : 'overflow-x-auto overscroll-x-contain',
       detail ? 'h-full' : detailEnabled && 'max-h-[min(32vh,18rem)]')}
-    role="region" aria-label={detail ? '完整表格' : '表格内容'} tabIndex={allowScroll ? 0 : undefined}>{table}</div>;
+    role="region" aria-label={detail ? '完整表格' : '表格内容'} tabIndex={0}>{table}</div>;
   if (!detailEnabled) return <div className="source-snapshot-table my-1 min-w-0 max-w-full rounded-sm border">{scroller()}</div>;
   return <Dialog>
     <div className="source-snapshot-table my-2 min-w-0 max-w-full overflow-hidden rounded-sm border bg-card">

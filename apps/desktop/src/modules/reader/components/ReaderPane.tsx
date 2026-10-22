@@ -318,7 +318,7 @@ export function ReaderPane({
     Record<string, PdfJumpRequest | null>
   >({});
   const [linkedReflowSegmentByEntryId, setLinkedReflowSegmentByEntryId] = useState<
-    Record<string, { requestKey: number; segmentUid: string } | null>
+    Record<string, { requestKey: number; segmentUid: string; sentenceIndex?: number } | null>
   >({});
   const [segmentNoteReloadByEntryId, setSegmentNoteReloadByEntryId] = useState<
     Record<string, number>
@@ -841,7 +841,8 @@ export function ReaderPane({
             if (pairedReflowPane) {
               setLinkedReflowSegmentByEntryId((current) => ({
                 ...current,
-                [segment.entryId]: { requestKey: nextLinkedRequestKey(), segmentUid: segment.segmentUid }
+                [segment.entryId]: { requestKey: nextLinkedRequestKey(), segmentUid: segment.segmentUid,
+                  ...(segment.sentenceIndex === undefined ? {} : { sentenceIndex: segment.sentenceIndex }) }
               }));
             }
           }

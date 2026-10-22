@@ -12,7 +12,23 @@ pub struct PortablePaths {
 
 impl PortablePaths {
     pub fn detect(executable: &Path) -> Result<Option<Self>, String> {
-        Self::detect_mode(executable, cfg!(target_os = "windows"))
+        let mut paths = Self::detect_mode(executable, cfg!(target_os = "windows"))?;
+        #[cfg(debug_assertions)]
+        if let (Some(paths), Some(data_root)) = (
+            paths.as_mut(),
+            std::env::var_os("NEUINK_DEV_DATA_DIR"),
+        ) {
+            paths.data = Self::validate_dev_data_root(PathBuf::from(data_root))?;
+        }
+        Ok(paths)
+    }
+
+    #[cfg(debug_assertions)]
+    fn validate_dev_data_root(data_root: PathBuf) -> Result<PathBuf, String> {
+        if !data_root.is_absolute() || !data_root.join("library").is_dir() {
+            return Err("开发数据目录必须是包含 library 的绝对路径。".into());
+        }
+        Ok(data_root)
     }
 
     fn detect_mode(executable: &Path, windows_install: bool) -> Result<Option<Self>, String> {

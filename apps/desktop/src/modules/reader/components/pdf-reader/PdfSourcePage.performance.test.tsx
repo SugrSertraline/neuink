@@ -40,6 +40,125 @@ afterEach(() => {
 });
 
 describe('PdfSourcePage performance boundaries', () => {
+  it.each([
+    { label: 'matching text', sourceText: 'Traffic flow changes rapidly. The model predicts future traffic.', linked: true },
+    { label: 'unrelated OCR text with the same sentence count', sourceText: 'Road conditions vary quickly. Another algorithm predicts demand.', linked: false },
+    { label: 'different sentence count', sourceText: 'MinerU extracted a different paragraph.', linked: false },
+  ])('highlights a PDF sentence with $label', ({ sourceText, linked }) => {
+    vi.useFakeTimers();
+    vi.stubGlobal('PointerEvent', MouseEvent);
+    const page = createPage(1);
+    const source = page.regions[0].sourceSegment;
+    Object.assign(source, { segment_type: 'paragraph', text: sourceText, markdown: sourceText });
+    page.regions[0].bbox = [0, 0, 1000, 1000];
+    const onToggleSegment = vi.fn();
+    const ui = render(cloneElement(pdfSourcePage(page), { sentenceHoverEnabled: true, sentenceLinkEnabled: true, onToggleSegment }));
+    const hit = ui.getByTestId('pdf-page-hit-layer-0');
+    vi.spyOn(hit, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 1000, 1000));
+    const layer = document.createElement('div');
+    layer.className = 'pdf-text-layer';
+    vi.spyOn(layer, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 1000, 1000));
+    ['Traffic flow changes rapidly. ', 'The model predicts future traffic.'].forEach((line, index) => {
+      const span = document.createElement('span');
+      span.textContent = line;
+      vi.spyOn(span, 'getBoundingClientRect').mockReturnValue(new DOMRect(20, 30 + 30 * index, 400, 20));
+      layer.append(span);
+    });
+    hit.append(layer);
+    Object.defineProperty(Range.prototype, 'getClientRects', { configurable: true, value(this: Range) {
+      return [this.startContainer.parentElement!.getBoundingClientRect()] as unknown as DOMRectList;
+    } });
+    try {
+      fireEvent.pointerEnter(hit, { buttons: 0, clientX: 100, clientY: 70 });
+      act(() => vi.advanceTimersByTime(20));
+      expect(ui.container.querySelector('[data-pdf-hover-sentence="1"]')).toBeTruthy();
+      expect(ui.queryByRole('region', { name: 'PDF 整句悬停预览' })).toBeNull();
+      ui.rerender(cloneElement(pdfSourcePage(page), { sentenceHoverEnabled: true, sentenceLinkEnabled: true,
+        sentenceHoverShowOriginal: true, onToggleSegment }));
+      const sentencePreview = ui.getByRole('region', { name: 'PDF 整句悬停预览' });
+      expect(sentencePreview.textContent).toContain('The model predicts future traffic.');
+      expect(sentencePreview.textContent).not.toMatch(/第\s*2\s*句|点击定位/);
+      fireEvent.pointerDown(hit, { button: 0, buttons: 1, clientX: 100, clientY: 70 });
+      fireEvent.click(hit, { button: 0, clientX: 100, clientY: 70 });
+      expect(onToggleSegment).toHaveBeenCalledWith(...(linked ? [source, 1] as const : [source] as const));
+      fireEvent.pointerDown(hit, { button: 0, buttons: 1, clientX: 100, clientY: 40 });
+      fireEvent.click(hit, { button: 0, clientX: 100, clientY: 40 });
+      expect(onToggleSegment).toHaveBeenLastCalledWith(...(linked ? [source, 0] as const : [source] as const));
+      layer.remove();
+      fireEvent.pointerMove(hit, { buttons: 0, clientX: 100, clientY: 70 });
+      act(() => vi.advanceTimersByTime(20));
+      expect(ui.container.querySelector('[data-pdf-hover-sentence]')).toBeNull();
+      expect(ui.queryByRole('region', { name: '片段悬停预览' })).toBeNull();
+      ui.rerender(cloneElement(pdfSourcePage(page), { hoverPreviewEnabled: false, sentenceHoverEnabled: false,
+        sentenceLinkEnabled: true, onToggleSegment }));
+      expect(ui.container.querySelector('[data-pdf-hover-sentence]')).toBeNull();
+      ui.rerender(cloneElement(pdfSourcePage(page), { hoverPreviewEnabled: false, sentenceHoverEnabled: true,
+        sentenceLinkEnabled: true, onToggleSegment }));
+      hit.append(layer);
+      fireEvent.pointerMove(hit, { buttons: 0, clientX: 100, clientY: 70 });
+      act(() => vi.advanceTimersByTime(20));
+      expect(ui.container.querySelector('[data-pdf-hover-sentence="1"]')).toBeTruthy();
+      expect(ui.queryByRole('region', { name: 'PDF 整句悬停预览' })).toBeNull();
+      onToggleSegment.mockClear();
+      fireEvent.pointerDown(hit, { button: 0, buttons: 1, clientX: 100, clientY: 70 });
+      fireEvent.click(hit, { button: 0, clientX: 100, clientY: 70 });
+      expect(onToggleSegment).toHaveBeenCalledWith(...(linked ? [source, 1] as const : [source] as const));
+      fireEvent.pointerDown(hit, { button: 0, buttons: 1, clientX: 100, clientY: 40 });
+      fireEvent.click(hit, { button: 0, clientX: 100, clientY: 40 });
+      expect(onToggleSegment).toHaveBeenLastCalledWith(...(linked ? [source, 0] as const : [source] as const));
+      if (linked) {
+        const translation: TranslatedSegment = { error: null, page_idx: 0, segment_type: 'paragraph',
+          segment_uid: source.uid, source_hash: 'hash', source_text: sourceText, status: 'translated',
+          translated_text: '交通流量迅速变化。模型预测未来交通流量。', updated_at: '' };
+        ui.rerender(cloneElement(pdfSourcePage(page), { hoverPreviewEnabled: false, sentenceHoverEnabled: true,
+          sentenceLinkEnabled: true, sentenceHoverShowOriginal: false, sentenceHoverShowTranslation: true,
+          translationBySegmentUid: new Map([[source.uid, translation]]), onToggleSegment }));
+        fireEvent.pointerMove(hit, { buttons: 0, clientX: 100, clientY: 70 });
+        act(() => vi.advanceTimersByTime(20));
+        const translatedPreview = ui.getByRole('region', { name: 'PDF 整句悬停预览' });
+        expect(translatedPreview.textContent).toContain('模型预测未来交通流量。');
+        expect(translatedPreview.textContent).not.toContain('The model predicts future traffic.');
+      }
+    } finally { delete (Range.prototype as { getClientRects?: () => DOMRectList }).getClientRects; }
+  });
+
+  it('shows the matching saved sentence translation with only the PDF pane open', () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('PointerEvent', MouseEvent);
+    const page = createPage(1);
+    const source = page.regions[0].sourceSegment;
+    const sourceText = 'Earlier traffic patterns changed. Traffic flow changes rapidly. The model predicts future traffic.';
+    Object.assign(source, { segment_type: 'paragraph', text: sourceText, markdown: sourceText });
+    page.regions[0].bbox = [0, 0, 1000, 1000];
+    const translation: TranslatedSegment = { error: null, page_idx: 0, segment_type: 'paragraph',
+      segment_uid: source.uid, source_hash: 'hash', source_text: sourceText, status: 'translated',
+      translated_text: '早期交通模式发生变化。交通流量迅速变化。模型预测未来交通流量。', updated_at: '' };
+    const ui = render(cloneElement(pdfSourcePage(page), { hoverPreviewEnabled: false,
+      sentenceHoverEnabled: true, sentenceLinkEnabled: false, sentenceHoverShowOriginal: false,
+      sentenceHoverShowTranslation: true, translationBySegmentUid: new Map([[source.uid, translation]]) }));
+    const hit = ui.getByTestId('pdf-page-hit-layer-0');
+    vi.spyOn(hit, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 1000, 1000));
+    const layer = document.createElement('div');
+    layer.className = 'pdf-text-layer';
+    ['Traffic flow changes rapidly.', 'The model predicts future traffic.'].forEach((text, index) => {
+      const span = document.createElement('span');
+      span.textContent = text;
+      vi.spyOn(span, 'getBoundingClientRect').mockReturnValue(new DOMRect(20, 30 + index * 30, 400, 20));
+      layer.append(span);
+    });
+    hit.append(layer);
+    Object.defineProperty(Range.prototype, 'getClientRects', { configurable: true, value(this: Range) {
+      return [this.startContainer.parentElement!.getBoundingClientRect()] as unknown as DOMRectList;
+    } });
+    try {
+      fireEvent.pointerEnter(hit, { buttons: 0, clientX: 100, clientY: 70 });
+      act(() => vi.advanceTimersByTime(20));
+      const preview = ui.getByRole('region', { name: 'PDF 整句悬停预览' });
+      expect(preview.textContent).toContain('模型预测未来交通流量。');
+      expect(preview.textContent).not.toContain('早期交通模式发生变化。');
+    } finally { delete (Range.prototype as { getClientRects?: () => DOMRectList }).getClientRects; }
+  });
+
   it.each([false, true])('offers item choice instead of selecting or dragging an ambiguous old list (Ctrl: %s)', ctrlKey => {
     vi.stubGlobal('PointerEvent', class extends MouseEvent { pointerId = 7; isPrimary = true; });
     const parent: SourceSegment = { uid: 'old-list', segment_type: 'list', page_idx: 0,
@@ -324,6 +443,70 @@ describe('PdfSourcePage performance boundaries', () => {
     expect(layer.dataset.activeHighlights).toBe('1');
   });
 
+  it('shows only the hit selection annotation, then restores the segment preview with source text', () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('PointerEvent', MouseEvent);
+    const annotation = {
+      annotation_id: 'annotation-1', segment_uid: 'segment-0', kind: 'translation',
+      content: 'B 的译文', importance: 'normal' as const,
+      text_selection: { color: 'yellow' as const, page_idx: 0,
+        rects: [[100, 100, 300, 140] as [number, number, number, number]], text: 'B' },
+      created_at: '2026-09-05T00:00:00Z', updated_at: '2026-09-05T00:00:00Z',
+    };
+    const otherAnnotation = {
+      ...annotation, annotation_id: 'annotation-2', content: 'C 的译文',
+      text_selection: { ...annotation.text_selection,
+        rects: [[310, 100, 350, 140] as [number, number, number, number]], text: 'C' },
+    };
+    const ui = render(cloneElement(pdfSourcePage(createPage(1), null,
+      new Map([['segment-0', [annotation, otherAnnotation]]])), {
+        hoverPreviewShowAnnotation: true, inlineAnnotationHoverEnabled: true,
+      }));
+    const hit = ui.getByTestId('pdf-page-hit-layer-0');
+    vi.spyOn(hit, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 1000, 1000));
+
+    fireEvent.pointerEnter(hit, { buttons: 0, clientX: 200, clientY: 120 });
+    const selectionPreview = ui.getByRole('region', { name: '选区批注悬停预览' });
+    expect(selectionPreview.textContent).toContain('B 的译文');
+    expect(selectionPreview.textContent).toContain('批注原文B');
+    expect(selectionPreview.textContent).not.toContain('C 的译文');
+    expect(ui.queryByRole('region', { name: '片段悬停预览' })).toBeNull();
+
+    fireEvent.pointerMove(hit, { buttons: 0, clientX: 400, clientY: 400 });
+    act(() => vi.advanceTimersByTime(20));
+    expect(ui.queryByRole('region', { name: '选区批注悬停预览' })).toBeNull();
+    const segmentPreview = ui.getByRole('region', { name: '片段悬停预览' });
+    expect(segmentPreview.textContent).toContain('批注原文B');
+    expect(segmentPreview.textContent).toContain('B 的译文');
+    expect(segmentPreview.textContent).toContain('C 的译文');
+  });
+
+  it.each([
+    { segment: false, inline: true, master: true, selected: true, whole: false },
+    { segment: true, inline: false, master: true, selected: false, whole: true },
+    { segment: false, inline: true, master: false, selected: true, whole: false },
+  ])('keeps inline and segment annotation hover independent: %j', ({ segment, inline, master, selected, whole }) => {
+    vi.stubGlobal('PointerEvent', MouseEvent);
+    const annotation = {
+      annotation_id: 'annotation-1', segment_uid: 'segment-0', kind: 'translation',
+      content: 'B 的译文', importance: 'normal' as const,
+      text_selection: { color: 'yellow' as const, page_idx: 0,
+        rects: [[100, 100, 300, 140] as [number, number, number, number]], text: 'B' },
+      created_at: '2026-09-05T00:00:00Z', updated_at: '2026-09-05T00:00:00Z',
+    };
+    const ui = render(cloneElement(pdfSourcePage(createPage(1), null,
+      new Map([['segment-0', [annotation]]])), {
+        hoverPreviewEnabled: master,
+        hoverPreviewShowAnnotation: segment,
+        inlineAnnotationHoverEnabled: inline,
+      }));
+    const hit = ui.getByTestId('pdf-page-hit-layer-0');
+    vi.spyOn(hit, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 1000, 1000));
+    fireEvent.pointerEnter(hit, { buttons: 0, clientX: 200, clientY: 120 });
+    expect(Boolean(ui.queryByRole('region', { name: '选区批注悬停预览' }))).toBe(selected);
+    expect(Boolean(ui.queryByRole('region', { name: '片段悬停预览' }))).toBe(whole);
+  });
+
 });
 
 function renderPdfSourcePage(page: PageSegments) {
@@ -346,6 +529,7 @@ function pdfSourcePage(
       hoverPreviewShowOriginal={false}
       hoverPreviewShowNote={false}
       hoverPreviewShowAnnotation={false}
+      inlineAnnotationHoverEnabled={false}
       hoverPreviewShowRegion={false}
       hoverPreviewShowTranslation={false}
       notesBySegmentUid={new Map()}

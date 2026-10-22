@@ -41,6 +41,125 @@ beforeEach(() => {
   vi.mocked(readNote).mockResolvedValue({note_id:'n1',title:'Note',markdown:'# Heading\n\nOld text\n',revision:'r1',links:[]});
 });
 describe('Claude integration with production NeuInk tools', () => {
+  it.each(['codex','claude'] as const)('%s does not accept a title-only answer after a NeuInk paper read is rejected', async provider => {
+    vi.mocked(runLocalAgent).mockImplementation(async (_request,_signal,event) => {
+      const id = crypto.randomUUID();
+      if (provider === 'codex') {
+        event({type:'message',value:{method:'item/completed',params:{item:{id,type:'mcpToolCall',
+          server:'neuink',tool:'read_entry_assistant_context',arguments:{entry_id:'entry1'},
+          status:'failed',error:'user rejected MCP tool call'}}}});
+      } else {
+        event({type:'message',value:{type:'assistant',uuid:id,message:{content:[{type:'tool_use',id,
+          name:'mcp__neuink__read_entry_assistant_context',input:{entry_id:'entry1'}}]}}});
+        event({type:'message',value:{type:'user',message:{content:[{type:'tool_result',tool_use_id:id,is_error:true,
+          content:'not approved'}]}}});
+      }
+      return {result:'这篇论文研究交通预测。'};
+    });
+    await expect(runLocalAgentHarness(options({question:'这篇论文讲了什么',currentNote:null}),
+      {...session,provider},vi.fn())).rejects.toThrow('NeuInk 正文或笔记读取未完成');
+    expect(runLocalAgent).toHaveBeenCalledTimes(3);
+    expect(invokeAssistantTool).not.toHaveBeenCalled();
+  });
+  it.each(['entry1','entry2'] as const)('a failed read of entry1 is recovered only by evidence from the same paper (%s)', async readEntry => {
+    vi.mocked(listTools).mockResolvedValue([{name:'read_entry_assistant_context',description:'Read paper',parameters_schema:{
+      type:'object',properties:{root:{type:'string'},entry_id:{type:'string'}},required:['root','entry_id'],additionalProperties:false
+    }}]);
+    vi.mocked(invokeAssistantTool).mockImplementation(async (_name,input) => ({entry_id:readEntry,
+      entry_title:'Paper',has_pdf:true,parsed_segment_count:1,markdown:'[S1] segment_uid: s1\nEvidence.',
+      sources:[{entry_id:readEntry,entry_title:'Paper',page_idx:0,segment_uid:'s1',quote:'Evidence.'}]
+    } as never));
+    vi.mocked(runLocalAgent).mockImplementation(async (_request,_signal,event,handle) => {
+      event({type:'message',value:{method:'item/completed',params:{item:{id:crypto.randomUUID(),type:'mcpToolCall',
+        server:'neuink',tool:'read_entry_assistant_context',arguments:{entry_id:'entry1'},status:'failed'}}}});
+      expect((await call(handle,'read_entry_assistant_context',{entry_id:readEntry},crypto.randomUUID())).isError).not.toBe(true);
+      return {result:'依据正文回答。[S1]'};
+    });
+    const request = options({question:'这篇论文讲了什么',currentNote:null,
+      scope:{entry_ids:['entry1','entry2'],entry_titles:['Entry','Other'],tag_ids:[],tag_names:[]}});
+    if (readEntry === 'entry1') {
+      const result = await runLocalAgentHarness(request,{...session,provider:'codex'},vi.fn());
+      expect(result.answer).toContain('依据正文回答');
+      expect(runLocalAgent).toHaveBeenCalledOnce();
+    } else {
+      await expect(runLocalAgentHarness(request,{...session,provider:'codex'},vi.fn()))
+        .rejects.toThrow('NeuInk 正文或笔记读取未完成');
+      expect(runLocalAgent).toHaveBeenCalledTimes(3);
+    }
+  });
+  it('does not mark a Claude Code note task complete when the target note read was rejected', async () => {
+    vi.mocked(runLocalAgent).mockImplementation(async (_request,_signal,event) => {
+      const id = crypto.randomUUID();
+      event({type:'message',value:{type:'assistant',uuid:id,message:{content:[{type:'tool_use',id,
+        name:'mcp__neuink__read_note',input:read}]}}});
+      event({type:'message',value:{type:'user',message:{content:[{type:'tool_result',tool_use_id:id,
+        is_error:true,content:'read denied'}]}}});
+      return {result:'已经整理好笔记。'};
+    });
+    await expect(runLocalAgentHarness(options({question:'阅读并整理这篇论文的笔记'}),session,vi.fn()))
+      .rejects.toThrow('NeuInk 正文或笔记读取未完成');
+    expect(readNote).not.toHaveBeenCalled();
+  });
+  it('does not claim a note was organized when the external proposal call was rejected', async () => {
+    vi.mocked(runLocalAgent).mockImplementation(async (_request,_signal,event) => {
+      const id = crypto.randomUUID();
+      event({type:'message',value:{type:'assistant',uuid:id,message:{content:[{type:'tool_use',id,
+        name:'mcp__neuink__note_propose_patch',input:patch}]}}});
+      event({type:'message',value:{type:'user',message:{content:[{type:'tool_result',tool_use_id:id,
+        is_error:true,content:'proposal denied'}]}}});
+      return {result:'已经整理好笔记。'};
+    });
+    await expect(runLocalAgentHarness(options({question:'整理笔记'}),session,vi.fn()))
+      .rejects.toThrow('笔记提案未创建成功');
+    expect(runLocalAgent).toHaveBeenCalledTimes(3);
+  });
+  it.each(['claude','codex'] as const)('%s follows a new note in the same native session and reads the new target freshly', async provider => {
+    vi.mocked(runLocalAgent).mockImplementation(async (_request,_signal,_event,handle) => {
+      expect((await call(handle,'read_current_note',{})).isError).not.toBe(true);
+      return {result:'已读取当前笔记。'};
+    });
+    const first = await runLocalAgentHarness(options({question:'读取当前笔记'}),{...session,provider},vi.fn());
+    const nextSurface = {kind:'note' as const,entryId:'entry2',noteId:'n2',pane:'right' as const,
+      surfaceKey:'note:entry2:n2',segmentUid:null,capturedAt:'2026-10-16T00:00:00Z'};
+    vi.mocked(readNote).mockResolvedValue({note_id:'n2',title:'Second note',markdown:'Second content',revision:'r2',links:[]});
+    await runLocalAgentHarness(options({question:'读取当前笔记',currentSurface:nextSurface,
+      currentEntry:{id:'entry2',title:'Second entry'},
+      currentNote:{entryId:'entry2',entryTitle:'Second entry',noteId:'n2',noteTitle:'Second note'},
+      scope:{entry_ids:['entry1','entry2'],entry_titles:['Entry','Second entry'],tag_ids:[],tag_names:[]}
+    }),first.localAgentSession!,vi.fn());
+    expect(readNote).toHaveBeenNthCalledWith(1,'C:/fixture','entry1','n1');
+    expect(readNote).toHaveBeenNthCalledWith(2,'C:/fixture','entry2','n2');
+    const request = vi.mocked(runLocalAgent).mock.calls[1][0];
+    expect(request).toMatchObject({resume:true,provider,conversationId:'c1',sessionId:session.sessionId});
+    const prompt = JSON.parse(request.prompt);
+    expect(prompt.context.currentSurface).toEqual({
+      kind:'note',pane:'right',entryId:'entry2',noteId:'n2',segmentUid:null
+    });
+    expect(prompt.targets.note.noteId).toBe('n2');
+    expect(prompt.instructions).toContain('Preserve prior discussion');
+  });
+  it('replaces a resumed paper target with a browser target, then clears it when no reading target is selected', async () => {
+    vi.mocked(runLocalAgent).mockResolvedValue({result:'请继续。'});
+    const browserSurface = {kind:'browser' as const,entryId:null,noteId:null,pane:'left' as const,
+      surfaceKey:'browser:tab2',segmentUid:null,capturedAt:'2026-10-16T00:00:00Z',
+      browserTab:{id:'tab2',url:'https://example.org/paper',title:'Second page',navigationId:'nav2'}};
+    const first = await runLocalAgentHarness(options({question:'你好'}),session,vi.fn());
+    const second = await runLocalAgentHarness(options({question:'你好',currentEntry:null,currentNote:null,
+      currentSurface:browserSurface}),first.localAgentSession!,vi.fn());
+    await runLocalAgentHarness(options({question:'你好',currentEntry:null,currentNote:null,
+      currentSurface:null}),second.localAgentSession!,vi.fn());
+    const requests = vi.mocked(runLocalAgent).mock.calls.map(([request]) => request);
+    expect(requests.slice(1).every(request => request.resume && request.sessionId === session.sessionId)).toBe(true);
+    const browserPrompt = JSON.parse(requests[1].prompt);
+    expect(browserPrompt.context.currentSurface).toEqual({
+      kind:'browser',pane:'left',entryId:null,noteId:null,segmentUid:null
+    });
+    expect(browserPrompt.targets).toMatchObject({entry:null,note:null});
+    const clearedPrompt = JSON.parse(requests[2].prompt);
+    expect(clearedPrompt.context.currentSurface).toBeNull();
+    expect(clearedPrompt.targets).toMatchObject({entry:null,note:null});
+    expect(clearedPrompt.instructions).toContain('never silently restore the previous one');
+  });
   it.each(['claude','codex','opencode','partial'] as const)('%s reads bounded parsed paper chunks through the production host', async mode => {
     const provider = mode === 'partial' ? 'claude' : mode;
     vi.mocked(listTools).mockResolvedValue([{name:'read_entry_assistant_context',description:'Read paper',parameters_schema:{
@@ -53,6 +172,15 @@ describe('Claude integration with production NeuInk tools', () => {
       expect(request.provider).toBe(provider);
       const descriptor = request.tools.find(tool => tool.name === 'read_entry_assistant_context');
       expect(descriptor?.description).toContain('next_read');
+      expect(descriptor?.description).toContain('12000');
+      const approval = await call(handle,'approve_tool',{
+        tool_name:'mcp__neuink__read_entry_assistant_context',input:{entry_id:'entry1'}
+      });
+      expect(approval.value.behavior).toBe('allow');
+      if (provider === 'codex') {
+        const unnamed = await call(handle,'approve_tool',{tool_name:'mcp__neuink__',input:{entry_id:'entry1'}});
+        expect(unnamed.value.behavior).toBe('allow');
+      }
       let input:unknown = {entry_id:'entry1'}, reads = 0;
       do {
         const page = await call(handle,'read_entry_assistant_context',input,`paper-${++reads}`);

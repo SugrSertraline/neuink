@@ -15,6 +15,51 @@ beforeEach(() => {
 });
 
 describe('selection translation task lifecycle', () => {
+  it('answers a known word locally without a service, model or background task', async () => {
+    const { translateTextSelection } = await import('./entryTranslation');
+    const registry = await import('@/shared/lib/localBackgroundJobs');
+    await expect(translateTextSelection({ ...request, text: '  Embedding  ' })).resolves.toBe('嵌入表示');
+    expect(mocks.service).not.toHaveBeenCalled();
+    expect(mocks.settings).not.toHaveBeenCalled();
+    expect(registry.getLocalBackgroundJobs()).toEqual([]);
+  });
+  it.each(['traﬃc', 'ﬂow', '  · “ﬂow,” ★  '])('translates PDF ligature word %s locally', async text => {
+    const { translateTextSelection } = await import('./entryTranslation');
+    const result = await translateTextSelection({ ...request, text });
+    expect(result).toBeTruthy();
+    expect(mocks.service).not.toHaveBeenCalled();
+    expect(mocks.settings).not.toHaveBeenCalled();
+    expect(mocks.generate).not.toHaveBeenCalled();
+  });
+  it('sends only an unknown single word to the selected service', async () => {
+    mocks.service.mockResolvedValue('新词');
+    const { translateTextSelection } = await import('./entryTranslation');
+    await expect(translateTextSelection({ ...request, text: ' inventedword ' })).resolves.toBe('新词');
+    expect(mocks.service).toHaveBeenCalledWith('inventedword');
+    expect(mocks.generate).not.toHaveBeenCalled();
+  });
+  it('expands ligatures before sending an unknown selection to the service', async () => {
+    mocks.service.mockResolvedValue('快速译文');
+    const { translateTextSelection } = await import('./entryTranslation');
+    await expect(translateTextSelection({ ...request, text: 'The ﬂow changes.' })).resolves.toBe('快速译文');
+    expect(mocks.service).toHaveBeenCalledWith('The flow changes.');
+    expect(mocks.generate).not.toHaveBeenCalled();
+  });
+  it('sends an unknown word without surrounding blanks or symbols', async () => {
+    mocks.service.mockResolvedValue('新词');
+    const { translateTextSelection } = await import('./entryTranslation');
+    await expect(translateTextSelection({ ...request, text: '  · “inventedword,” ★  ' })).resolves.toBe('新词');
+    expect(mocks.service).toHaveBeenCalledWith('inventedword');
+  });
+  it('omits paragraph context and paper title when an unknown word uses the model', async () => {
+    mocks.generate.mockResolvedValue({ text: '新词' });
+    const { translateTextSelection } = await import('./entryTranslation');
+    await expect(translateTextSelection({ ...request, text: 'inventedword' })).resolves.toBe('新词');
+    const input = mocks.generate.mock.calls[0][0];
+    expect(input.prompt).toBe('inventedword');
+    expect(input.prompt).not.toContain(request.context);
+    expect(input.prompt).not.toContain(request.entryTitle);
+  });
   it('uses the selected API without loading a model or sending paragraph context', async () => {
     mocks.service.mockResolvedValue('快速译文');
     const { translateTextSelection } = await import('./entryTranslation');
@@ -67,5 +112,11 @@ describe('selection translation task lifecycle', () => {
     expect(registry.getLocalBackgroundJobs()).toEqual([]);
     expect(mocks.settings).not.toHaveBeenCalled();
     expect(mocks.generate).not.toHaveBeenCalled();
+  });
+  it('ignores a selection containing only spaces and symbols', async () => {
+    const { translateTextSelection } = await import('./entryTranslation');
+    await expect(translateTextSelection({ ...request, text: '  · ★ ，  ' })).rejects.toThrow('没有可翻译的文字');
+    expect(mocks.service).not.toHaveBeenCalled();
+    expect(mocks.settings).not.toHaveBeenCalled();
   });
 });

@@ -23,7 +23,7 @@ export function InteractiveListContent({ entryId, hoverPreviewEnabled, onPreview
   entryId: string; hoverPreviewEnabled: boolean;
   onPreviewChange: (next: ReflowPreviewPointerState | null) => void;
   pdfDocument: PDFDocumentProxy | null;
-  reflowTranslationMode: 'source' | 'translation' | 'bilingual';
+  reflowTranslationMode: 'source' | 'translation' | 'bilingual' | 'sentences';
   relatedImagePath?: string | null; segment: SourceSegment;
   translatedText: string | null; workspaceRoot: string | null;
 }) {

@@ -13,8 +13,10 @@ export function DataSettingsSection({ props, navigationTarget }: {
 }) {
   return <>
     <ParserSettingsSection props={props} navigationTarget={navigationTarget} />
-    <SettingsPage tab="data" title="资料库与数据" description="数据随 Neuink 程序文件夹一起保存。">
+    <SettingsPage tab="getting-started" title="入门与教程" description="按真实任务练习阅读、翻译与整理；可以随时继续或回放。">
       <OnboardingSettings />
+    </SettingsPage>
+    <SettingsPage tab="data" title="资料与存储" description="查看本机资料的保存位置和迁移方式。">
       <SettingsGroup id="data-workspace" title="数据位置"
         description="便携版和 Windows 安装版均使用程序文件夹内的 data，无需选择或配置路径。">
         <p className="break-all text-xs leading-5 text-muted-foreground">

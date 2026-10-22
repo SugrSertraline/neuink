@@ -5,6 +5,15 @@ import { CLAUDE_CODE_DISPLAY_NAME } from '@/shared/lib/localAgentSettings';
 import { ReasoningBlocks } from './reasoningBlocks';
 
 const object = (value: unknown): Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+const NEUINK_READ = /^mcp__neuink__(?:read_entry_assistant_context|read_pdf_pages|search_pdf_text|read_segment_content|search_segments|read_note|read_current_note)$/;
+function readTarget(name: string, input: unknown) {
+  if (!NEUINK_READ.test(name)) return undefined;
+  const value = object(input);
+  return {
+    ...(typeof value.entry_id === 'string' ? {entry_id:value.entry_id} : {}),
+    ...(typeof value.note_id === 'string' ? {note_id:value.note_id} : {})
+  };
+}
 /** Partial messages and complete blocks overlap: consume each text block exactly once. */
 export class ClaudeStream {
   private current = '';
@@ -74,7 +83,9 @@ export class ClaudeStream {
         if (item.type === 'tool_use' && typeof item.id === 'string' && typeof item.name === 'string') {
           this.tools.set(item.id, item.name);
           this.inputs.set(item.id, item.input);
-          this.callbacks.tool({ id: item.id, toolName: `claude.${item.name}`, status: 'running', summary: `${CLAUDE_CODE_DISPLAY_NAME} 正在调用 ${item.name}` });
+          this.callbacks.tool({ id: item.id, toolName: `claude.${item.name}`,
+            ...(NEUINK_READ.test(item.name) ? {input:readTarget(item.name,item.input)} : {}),
+            status: 'running', summary: `${CLAUDE_CODE_DISPLAY_NAME} 正在调用 ${item.name}` });
         }
       }
       // CLI emits complete blocks as well as deltas. Streamed text is authoritative;
@@ -99,6 +110,7 @@ export class ClaudeStream {
           const readTooLarge = item.is_error && name === 'Read'
             && /File content \([\d,]+ tokens\) exceeds maximum allowed tokens \([\d,]+\)/.test(text);
           this.callbacks.tool({ id, toolName: `claude.${name}`,
+            ...(NEUINK_READ.test(name) ? {input:readTarget(name,this.inputs.get(id))} : {}),
             status: item.is_error ? 'error' : 'done', ...(rejectedBatch ? {error:ASSISTANT_READ_FAILURES.pageBatch} : {}),
             ...(readTooLarge ? {error:ASSISTANT_READ_FAILURES.localReadLimit} : {}),
             summary: item.is_error ? `${CLAUDE_CODE_DISPLAY_NAME} 工具调用失败。` : `${CLAUDE_CODE_DISPLAY_NAME} 工具调用完成。` });

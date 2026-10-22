@@ -65,7 +65,7 @@ export function formatReadEntryOutput(result: ReadEntryAssistantContextResponse,
       more, next_offset: more ? end : null,
       next_read: more ? { entry_id: result.entry_id, offset: end, limit, revision } : null,
       truncated_for_context: offset > 0 || more,
-      note: more ? '仅返回部分解析正文。继续调用 read_entry_assistant_context 并传入 next_read；不要使用原生 Read 或 shell 读取工具临时文件。'
+      note: more ? '仅返回部分解析正文。已有信息足以回答时请直接总结；仅在确需后续内容时传入 next_read 继续读取。不要使用原生 Read 或 shell 读取工具临时文件。'
         : offset > 0 ? '已到达解析正文末尾；只有之前各段均已读取时，才能称为全文读取。' : '已返回全部解析正文；图片与未解析内容不包含在内。',
     },
     sources,

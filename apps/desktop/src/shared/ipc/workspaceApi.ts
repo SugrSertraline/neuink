@@ -289,6 +289,16 @@ export async function updateEntryMeta(
   });
 }
 
+export async function applyEntryTagPaths(
+  root: string,
+  entryId: EntryId,
+  paths: string[]
+): Promise<{ entry: EntryMeta; tags: TagMeta[] }> {
+  return invoke('apply_entry_tag_paths', {
+    request: { root, entry_id: entryId, paths }
+  });
+}
+
 export async function createTag(root: string, name: string, parentId: TagId | null): Promise<TagMeta> {
   return invoke<TagMeta>('create_tag', {
     request: {

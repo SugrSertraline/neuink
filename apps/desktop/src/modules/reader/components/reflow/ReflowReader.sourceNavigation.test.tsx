@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { ComponentProps } from 'react';
-import { cleanup, render } from '@testing-library/react';
+import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { DEFAULT_REFLOW_COMPONENT_PREFERENCES } from '@/shared/lib/readerPreferences';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -9,14 +9,16 @@ import { ReflowReader } from './ReflowReader';
 const navigation = vi.hoisted(() => ({
   navigate: vi.fn(() => true), markJumpHandled: vi.fn(), isJumpHandled: vi.fn(() => false), notify: vi.fn()
 }));
+const virtualizerMeasure = vi.hoisted(() => vi.fn());
+const virtualizerMeasureElement = vi.hoisted(() => vi.fn());
 vi.mock('../navigation/useReflowReadingNavigation', () => ({ useReflowReadingNavigation: () => navigation }));
 vi.mock('../pdf-reader/useReadingActivityTracker', () => ({ useReadingActivityTracker: () => null }));
 vi.mock('../pdf-reader/SegmentRail', () => ({ SegmentRail: () => null }));
 vi.mock('@/shared/hooks/useToast', () => ({ useToast: () => ({ notify: navigation.notify, dismiss: vi.fn() }) }));
 vi.mock('@tanstack/react-virtual', () => ({ useVirtualizer: () => ({
-  measure: vi.fn(), getVirtualItems: () => [], getTotalSize: () => 0, scrollToIndex: vi.fn()
+  measure: virtualizerMeasure, measureElement: virtualizerMeasureElement, getVirtualItems: () => [], getTotalSize: () => 0, scrollToIndex: vi.fn()
 }) }));
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); vi.unstubAllGlobals(); });
 
 function props(): ComponentProps<typeof ReflowReader> {
   return {
@@ -41,6 +43,54 @@ it('marks source jumps local and keeps note focus while retaining ordinary linke
   navigation.navigate.mockClear();
   ui.rerender(<ReflowReader {...base} scrollToSegmentUid="s" scrollRequestKey={2} />);
   expect(navigation.navigate).toHaveBeenCalledWith({ pageIdx: 2, segmentUid: 's' }, { localOnly: false });
+});
+
+it('scrolls to the linked sentence after its paragraph is available', () => {
+  vi.useFakeTimers();
+  const base = props();
+  const ui = render(<ReflowReader {...base} />, { wrapper: TooltipProvider });
+  const scroll = ui.container.querySelector('.overflow-y-auto') as HTMLElement;
+  const target = document.createElement('div');
+  target.dataset.readingSegmentUid = 's';
+  target.dataset.readingSentenceIndex = '1';
+  scroll.append(target);
+  Object.defineProperty(scroll, 'clientHeight', { configurable: true, value: 600 });
+  scroll.getBoundingClientRect = () => new DOMRect(0, 100, 500, 600);
+  target.getBoundingClientRect = () => new DOMRect(0, 450, 500, 30);
+  scroll.scrollTo = vi.fn();
+  ui.rerender(<ReflowReader {...base} scrollToSegmentUid="s" scrollRequestKey={4} scrollSentenceIndex={1} localScrollRequest />);
+  act(() => vi.advanceTimersByTime(1));
+  expect(scroll.scrollTo).toHaveBeenCalledWith({ top: 150, behavior: 'smooth' });
+});
+
+it('remeasures bilingual rows when the split reading width changes', () => {
+  let notifyResize: ResizeObserverCallback | undefined;
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: ResizeObserverCallback) { notifyResize = callback; }
+    observe() {}
+    disconnect() {}
+  });
+  const base = props();
+  const ui = render(<ReflowReader {...base} reflowTranslationMode="bilingual" />, { wrapper: TooltipProvider });
+  const surface = ui.container.querySelector('.reflow-reading-surface') as HTMLElement;
+  expect(surface).toBeTruthy();
+  const visibleRow = document.createElement('div');
+  visibleRow.setAttribute('data-reflow-virtual-item', '');
+  surface.appendChild(visibleRow);
+  const notifyWidth = (width: number) => notifyResize?.([{
+    contentRect: { width } as DOMRectReadOnly,
+    target: surface,
+  } as unknown as ResizeObserverEntry], {} as ResizeObserver);
+  virtualizerMeasure.mockClear();
+  virtualizerMeasureElement.mockClear();
+  notifyWidth(700);
+  expect(virtualizerMeasure).not.toHaveBeenCalled();
+  notifyWidth(0);
+  notifyWidth(700);
+  expect(virtualizerMeasure).not.toHaveBeenCalled();
+  notifyWidth(420);
+  expect(virtualizerMeasure).toHaveBeenCalledOnce();
+  expect(virtualizerMeasureElement).toHaveBeenCalledExactlyOnceWith(visibleRow);
 });
 
 it('waits for loaded reflow content and ignores a previously handled request', () => {

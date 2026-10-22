@@ -41,6 +41,24 @@ export function TitleBar({ onOpenSearch }: { onOpenSearch: () => void }) {
     const appWindow = getCurrentWindow();
     try {
       if (action === 'minimize') {
+        // Capture the current frame before WebView2 loses its surface.
+        let unlisten: (() => void) | undefined;
+        let timeout: number | undefined;
+        try {
+          let markReady = () => {};
+          const ready = new Promise<void>((resolve) => { markReady = resolve; });
+          unlisten = await appWindow.once('neuink:preview-ready', markReady);
+          await appWindow.emit('neuink:prepare-minimize');
+          await Promise.race([
+            ready,
+            new Promise<void>((resolve) => { timeout = window.setTimeout(resolve, 500); })
+          ]);
+        } catch (error) {
+          console.error('Failed to preserve the window preview', error);
+        } finally {
+          unlisten?.();
+          if (timeout !== undefined) window.clearTimeout(timeout);
+        }
         await appWindow.minimize();
         return;
       }

@@ -1519,7 +1519,7 @@ export function toolDescription(descriptor: AssistantToolDescriptor) {
     return `${descriptor.description} Use this after search_segments when a snippet is not enough.`;
   }
   if (descriptor.name === 'read_entry_assistant_context') {
-    return `${descriptor.description} Use this only for an explicitly selected, named, or confirmed Entry. Parsed text is returned in bounded chunks: when more is true, call this tool again with the returned next_read arguments. Read all chunks when full reading is requested; otherwise state partial coverage. Never read CLI tool-result files with native Read/shell to obtain the rest. If no parsed segments exist, the host reads up to the first 3 PDF text-layer pages automatically. Continue with read_pdf_pages / search_pdf_text; respect next_page and incomplete/OCR warnings.`;
+    return `${descriptor.description} Use this only for an explicitly selected, named, or confirmed Entry. Omit limit for the default 8000 characters; if supplied, limit must be between 100 and ${ENTRY_CONTEXT_MAX_CHARS}. Parsed text is returned in bounded chunks: when more is true, call this tool again with the returned next_read arguments. Read all chunks when full reading is requested; otherwise state partial coverage. Never read CLI tool-result files with native Read/shell to obtain the rest. If no parsed segments exist, the host reads up to the first 3 PDF text-layer pages automatically. Continue with read_pdf_pages / search_pdf_text; respect next_page and incomplete/OCR warnings.`;
   }
   if (descriptor.name === 'search_sciverse_evidence') {
     return `${descriptor.description} Preserve every returned marker and source identifier in the answer.`;

@@ -39,11 +39,37 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   globalThis.IntersectionObserver = originalIntersectionObserver;
 });
 
 describe('useVisiblePdfPages', () => {
+  it('retains the rendered pages when the window becomes hidden', () => {
+    const root = document.createElement('div');
+    const pages = [0, 1, 2].map((index) => {
+      const page = document.createElement('section');
+      page.dataset.pdfPageIndex = String(index);
+      root.append(page);
+      return page;
+    });
+    const hook = renderHook(() => useVisiblePdfPages({ pageCount: pages.length, scrollRef: { current: root } }));
+    const visibleObserver = observers[0];
+    const nearbyObserver = observers[1];
+    act(() => {
+      visibleObserver.callback([intersectionEntry(pages[1], true)], {} as IntersectionObserver);
+      nearbyObserver.callback([intersectionEntry(pages[1], true)], {} as IntersectionObserver);
+    });
+    const before = [...hook.result.current.renderPageIndexes];
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    act(() => {
+      visibleObserver.callback([intersectionEntry(pages[1], false)], {} as IntersectionObserver);
+      nearbyObserver.callback([intersectionEntry(pages[1], false)], {} as IntersectionObserver);
+    });
+    expect([...hook.result.current.renderPageIndexes]).toEqual(before);
+    expect([...hook.result.current.visiblePageIndexes]).toEqual([1]);
+  });
+
   it.each([1, 1.25])('excludes the floating toolbar from page tracking at %sx UI scale', (scale) => {
     const root = document.createElement('div');
     root.style.scrollPaddingTop = '125px';

@@ -16,7 +16,7 @@ export function ExternalToolsSettingsSection({
   const active = props.activeSettingsTab === 'external-tools';
 
   return (
-    <SettingsPage tab="external-tools" title="工具与扩展" description="管理本地 Agent 与检索服务，开关更改后自动保存。">
+    <SettingsPage tab="external-tools" title="检索与工具" description="管理论文和网页检索、本地 Agent 及诊断选项。">
         <LocalAgentSettingsSection active={active} workspaceRoot={props.workspaceRoot} />
         <ResearchSettingsSection active={active}><SciverseSettingsSection active={active} /></ResearchSettingsSection>
         <AssistantDebugSetting />

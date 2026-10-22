@@ -77,6 +77,7 @@ function PdfCanvasPageImpl({
     hasRenderedPageRef.current = false;
     renderedPageWidthRef.current = null;
     pageAspectRatioRef.current = DEFAULT_PAGE_ASPECT_RATIO;
+    textLayerRef.current?.replaceChildren();
     setPageSize(null);
     setRenderError(null);
 
@@ -248,7 +249,6 @@ function PdfCanvasPageImpl({
   useEffect(() => {
     const textLayerElement = textLayerRef.current;
     if (!textLayerElement) return undefined;
-    textLayerElement.replaceChildren();
     if (
       !renderEnabled ||
       renderPriority !== 'visible' ||
@@ -315,7 +315,6 @@ function PdfCanvasPageImpl({
       cancelled = true;
       cancelSchedule();
       cancelTextLayerJob?.();
-      textLayerElement.replaceChildren();
     };
   }, [pageIdx, pageWidth, pdfDocument, renderEnabled, renderPriority, pageSize]);
 

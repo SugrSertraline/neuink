@@ -6,17 +6,11 @@ import {
   PDF_RAIL_WIDTH,
   PDF_SPREAD_GAP,
   PDF_VIEWPORT_PADDING,
-  PDF_ZOOM_STEP,
 } from "./readerConstants";
+import { pdfWheelZoomDelta, type PdfWheelZoomRequest, type PdfWheelSample } from './pdfWheelZoom';
 
 const PDF_ZOOM_STORAGE_KEY = "neuink.reader.pdfZoom";
 const ZOOM_REGION_SUPPRESS_MS = 260;
-
-type ZoomAnchor = {
-  clientX: number;
-  clientY: number;
-  container: HTMLDivElement;
-};
 
 type UsePdfReaderZoomOptions = {
   entryId: string;
@@ -35,19 +29,34 @@ export function usePdfReaderZoom({
   const [zoomSuppressRegions, setZoomSuppressRegions] = useState(false);
   const suppressTimerRef = useRef<number | null>(null);
   const entryIdRef = useRef(entryId);
+  const zoomRef = useRef(zoom);
+  const interactionRef = useRef(onInteractionStart);
+  interactionRef.current = onInteractionStart;
+  const wheelFrame = useRef<number | null>(null);
+  const wheelDelta = useRef(0);
+  const wheelSample = useRef<PdfWheelSample | null>(null);
+  const cancelWheel = useCallback(() => {
+    if (wheelFrame.current !== null) cancelAnimationFrame(wheelFrame.current);
+    wheelFrame.current = null;
+    wheelDelta.current = 0;
+    wheelSample.current = null;
+  }, []);
 
   useEffect(() => {
     entryIdRef.current = entryId;
-    setZoom(readStoredPdfZoom(entryId));
-  }, [entryId]);
+    cancelWheel();
+    zoomRef.current = readStoredPdfZoom(entryId);
+    setZoom(zoomRef.current);
+  }, [entryId, cancelWheel]);
 
   useEffect(
     () => () => {
+      cancelWheel();
       if (suppressTimerRef.current !== null) {
         window.clearTimeout(suppressTimerRef.current);
       }
     },
-    [],
+    [cancelWheel],
   );
 
   const pageWidth = useMemo(() => {
@@ -55,7 +64,7 @@ export function usePdfReaderZoom({
   }, [viewportWidth, zoom, pageDisplayMode]);
 
   const beginZoomInteraction = useCallback(() => {
-    onInteractionStart();
+    interactionRef.current();
     setZoomSuppressRegions(true);
     if (suppressTimerRef.current !== null) {
       window.clearTimeout(suppressTimerRef.current);
@@ -64,41 +73,43 @@ export function usePdfReaderZoom({
       suppressTimerRef.current = null;
       setZoomSuppressRegions(false);
     }, ZOOM_REGION_SUPPRESS_MS);
-  }, [onInteractionStart]);
+  }, []);
+
+  const commitZoom = useCallback((value: number) => {
+    const nextZoom = clampZoom(value);
+    if (nextZoom === zoomRef.current) return;
+    zoomRef.current = nextZoom;
+    beginZoomInteraction();
+    writeStoredPdfZoom(entryIdRef.current, nextZoom);
+    setZoom(nextZoom);
+  }, [beginZoomInteraction]);
 
   const updateZoom = useCallback(
-    (updater: (currentZoom: number) => number, anchor?: ZoomAnchor) => {
-      setZoom((currentZoom) => {
-        const nextZoom = clampZoom(updater(currentZoom));
-        if (nextZoom === currentZoom) {
-          return currentZoom;
-        }
-
-        beginZoomInteraction();
-        writeStoredPdfZoom(entryIdRef.current, nextZoom);
-        if (anchor) {
-          keepZoomAnchor(anchor, nextZoom / currentZoom);
-        }
-        return nextZoom;
-      });
+    (updater: (currentZoom: number) => number) => {
+      cancelWheel();
+      commitZoom(updater(zoomRef.current));
     },
-    [beginZoomInteraction],
+    [cancelWheel, commitZoom],
   );
 
   const handleCtrlWheelZoom = useCallback(
-    ({
-      clientX,
-      clientY,
-      container,
-      direction,
-    }: ZoomAnchor & { direction: 1 | -1 }) => {
-      updateZoom((currentZoom) => currentZoom + direction * PDF_ZOOM_STEP, {
-        clientX,
-        clientY,
-        container,
+    (request: PdfWheelZoomRequest) => {
+      const delta = pdfWheelZoomDelta(request, wheelSample.current);
+      if (!delta) return;
+      if (wheelSample.current && request.timeStamp - wheelSample.current.timeStamp > 200) cancelWheel();
+      wheelSample.current = { direction: Math.sign(request.deltaY), timeStamp: request.timeStamp };
+      wheelDelta.current += delta;
+      if (wheelFrame.current !== null) return;
+      // Several wheel messages in one display frame produce one geometry update.
+      wheelFrame.current = requestAnimationFrame(() => {
+        wheelFrame.current = null;
+        const requested = zoomRef.current + wheelDelta.current;
+        const next = clampZoom(requested);
+        wheelDelta.current = requested < PDF_MIN_ZOOM || requested > PDF_MAX_ZOOM ? 0 : requested - next;
+        commitZoom(next);
       });
     },
-    [updateZoom],
+    [cancelWheel, commitZoom],
   );
 
   return {
@@ -131,26 +142,6 @@ function clampZoom(value: number) {
     Math.round(Math.min(PDF_MAX_ZOOM, Math.max(PDF_MIN_ZOOM, value)) * 100) /
     100
   );
-}
-
-function keepZoomAnchor(anchor: ZoomAnchor, zoomRatio: number) {
-  const { clientX, clientY, container } = anchor;
-  const rect = container.getBoundingClientRect();
-  const viewportX = clientX - rect.left;
-  const viewportY = clientY - rect.top;
-  const contentX = container.scrollLeft + viewportX;
-  const contentY = container.scrollTop + viewportY;
-
-  const applyAnchoredScroll = () => {
-    container.scrollLeft = contentX * zoomRatio - viewportX;
-    container.scrollTop = contentY * zoomRatio - viewportY;
-  };
-
-  window.requestAnimationFrame(() => {
-    applyAnchoredScroll();
-    window.requestAnimationFrame(applyAnchoredScroll);
-  });
-  window.setTimeout(applyAnchoredScroll, 180);
 }
 
 function pdfZoomStorageKey(entryId: string) {

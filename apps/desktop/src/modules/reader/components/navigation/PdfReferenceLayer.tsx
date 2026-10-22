@@ -68,6 +68,7 @@ function NativeReference({ link, document, fallback }: {
   const navigation = useReadingNavigation();
   const context = usePaperReferences()!;
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useEffect(() => { if (context.hoverEnabled === false) setOpen(false); }, [context.hoverEnabled]);
   useEffect(() => {
     if ((!open && !chooserOpen) || resolved) return;
     let current = true; setError('');
@@ -110,11 +111,11 @@ function NativeReference({ link, document, fallback }: {
         : <DestinationImage document={document} target={target} />}
     </> : !error ? <p role="status" className="flex items-center gap-2 text-xs"><Loader2 size={13} className="animate-spin" />正在读取目标…</p> : null}
   </>;
-  return <Popover open={chooserOpen} onOpenChange={setChooserOpen}><HoverCard open={open && !chooserOpen} onOpenChange={setOpen}>
+  return <Popover open={chooserOpen} onOpenChange={setChooserOpen}><HoverCard open={context.hoverEnabled !== false && open && !chooserOpen} onOpenChange={next => setOpen(context.hoverEnabled !== false && next)}>
     <HoverCardTrigger asChild><PopoverTrigger asChild><button ref={trigger} type="button" data-paper-reference aria-label={`${link.label}，预览或定位原文`}
       className="pointer-events-auto absolute cursor-pointer rounded-sm hover:bg-primary/15 focus-visible:bg-primary/15 focus-visible:outline focus-visible:outline-ring"
       style={{ left: `${link.rect[0]*100}%`, top: `${link.rect[1]*100}%`, width: `${(link.rect[2]-link.rect[0])*100}%`, height: `${(link.rect[3]-link.rect[1])*100}%` }}
-      onFocus={() => setOpen(true)} onPointerDown={e => e.stopPropagation()} onPointerUp={e => e.stopPropagation()}
+      onFocus={() => { if (context.hoverEnabled !== false) setOpen(true); }} onPointerDown={e => e.stopPropagation()} onPointerUp={e => e.stopPropagation()}
       onPointerMove={e => e.stopPropagation()} onMouseMove={e => e.stopPropagation()} onContextMenu={e => e.stopPropagation()}
       onClick={e => { e.preventDefault(); e.stopPropagation(); void activate(); }}
       onKeyDown={e => { if (e.key === 'ArrowDown') { e.preventDefault(); e.stopPropagation(); void activate(true); } }} />

@@ -447,7 +447,7 @@ describe('onboarding interaction', () => {
     const props = defaults(); render(<OnboardingGuide {...props} />);
     fireEvent.click(screen.getByText('暂停引导'));
     const message = notify.mock.calls[0][0] as unknown as { title:string; description:string; action:React.ReactElement };
-    expect(message.description).toContain('设置 → 资料库与数据 → 新手引导 → 继续新手引导');
+    expect(message.description).toContain('设置 → 入门与教程 → 新手引导 → 继续新手引导');
     render(message.action);
     fireEvent.click(screen.getByText('前往设置'));
     expect(props.onRoute).toHaveBeenCalledWith('onboarding-settings', null);

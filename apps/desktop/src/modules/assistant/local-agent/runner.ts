@@ -42,7 +42,7 @@ import { parsedEntryReadingNotice } from '../sdk/entryContext';
 
 export async function runLocalAgentHarness(inputOptions: RunAssistantHarnessOptions, session: LocalAgentSession,
   onSession: (session: LocalAgentSession) => void): Promise<GroundedAnswer> {
-  if (!readLocalAgentEnabled()) throw new Error('本地 Agent 已关闭，请在设置 → 工具与扩展中启用。');
+  if (!readLocalAgentEnabled()) throw new Error('本地 Agent 已关闭，请在设置 → 检索与工具中启用。');
   inputOptions.abortSignal?.throwIfAborted();
   const result = await runDurableHarness(inputOptions, options => executeLocalAgent(options, session, onSession));
   if (result.localAgentSession) onSession(result.localAgentSession);
@@ -54,7 +54,7 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
   const lifetime = new AbortController();
   const options = {...inputOptions,abortSignal:AbortSignal.any([lifetime.signal,...(inputOptions.abortSignal ? [inputOptions.abortSignal] : [])])};
   try {
-    if (!readLocalAgentEnabled()) throw new Error('本地 Agent 已关闭，请在设置 → 工具与扩展中启用。');
+    if (!readLocalAgentEnabled()) throw new Error('本地 Agent 已关闭，请在设置 → 检索与工具中启用。');
     options.abortSignal?.throwIfAborted();
     if (!options.conversationId) throw new Error('请先创建对话。');
     const runId = crypto.randomUUID();
@@ -157,7 +157,11 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
             writesBlocked:budget.writesBlocked,
             instruction:'Continue the frozen request using the saved observations. Completed operations and proposals already exist; do not repeat them. Freshly read a note before any new edit. If writesBlocked, only inspect and explain the uncertain outcome.' } : undefined,
           capabilities:web.capabilities,
-          context:{browser:web.browser, active_entry:snapshot.active_entry, active_note:snapshot.active_note && {
+          context:{currentSurface:options.currentSurface ? {
+            kind:options.currentSurface.kind, pane:options.currentSurface.pane,
+            entryId:options.currentSurface.entryId, noteId:options.currentSurface.noteId,
+            segmentUid:options.currentSurface.segmentUid
+          } : null, browser:web.browser, active_entry:snapshot.active_entry, active_note:snapshot.active_note && {
             entry_id:snapshot.active_note.entry_id, note_id:snapshot.active_note.note_id, note_title:snapshot.active_note.note_title},
             document:snapshot.document && {entry_id:snapshot.document.entry_id, entry_title:snapshot.document.entry_title}, warnings:snapshot.warnings},
           selectedNotes:selected.text.slice(0,36_000), selectedNotesTruncated:selected.text.length > 36_000,
@@ -166,7 +170,9 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
           catalog:{entries:options.availableEntries,notes:options.availableNotes,tags:options.availableTags},
           priorProposalDecisions:(options.conversationHistory ?? []).flatMap(message => (message.note_proposals ?? []).map(p => ({id:p.id,status:p.status}))),
           agentInstructions:main.systemPrompt,
-          instructions:[buildToolNotes(runtime.toolNames,plan,{agent:main},invocationPlan),web.instructions,USER_INPUT_INSTRUCTIONS,
+          instructions:[
+            'The user can switch reading tabs without starting a new conversation. Preserve prior discussion, but resolve "this paper", "this note" and "the current page" using this request\'s frozen context and targets, not a previous turn or native session memory. The host has already resolved any explicitly pinned reading target. Explicit references to earlier documents and requests to compare them still apply; read their evidence again when needed. Null current targets mean no target is selected: never silently restore the previous one. If the intended target remains ambiguous, ask. A tab change during execution does not retarget this frozen request. Treat historical source markers as historical; only this task\'s retrieved or explicitly recovered markers are valid for new citations.',
+            buildToolNotes(runtime.toolNames,plan,{agent:main},invocationPlan),web.instructions,USER_INPUT_INSTRUCTIONS,
             executionModeInstructions(plan.executionMode!),PAPER_PRESENTATION_INSTRUCTIONS,
             TOOL_FAILURE_INSTRUCTIONS,...runtime.availabilityNotes].join('\n\n') }) }, options.abortSignal,
         event => { if (event.type === 'message') stream.consume(event.value); },
@@ -177,12 +183,15 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
             const name = typeof input?.tool_name === 'string' ? input.tool_name.replace(/^(mcp__neuink__|neuink_)/, '') : '';
             // NeuInk's declared tools already validate arguments and request their own
             // approvals. Reads and proposal drafts must not cause a second native prompt.
-            const decision = typeof input?.tool_name === 'string' && /^(mcp__neuink__|neuink_)/.test(input.tool_name) && Object.prototype.hasOwnProperty.call(executors,name)
+            // Codex may omit the tool name from an approval elicitation. Rust
+            // emits this marker only for this task's NeuInk MCP server.
+            const ownMcpApproval = input?.tool_name === 'mcp__neuink__' && session.provider === 'codex';
+            const decision = ownMcpApproval || typeof input?.tool_name === 'string' && /^(mcp__neuink__|neuink_)/.test(input.tool_name) && Object.prototype.hasOwnProperty.call(executors,name)
               ? {behavior:'allow',updatedInput:input.input}
               : (plan.executionMode === 'plan' || main.sandbox === 'read-only' || budget.writesBlocked) && name !== 'AskUserQuestion'
                 ? {behavior:'deny',message:'当前任务仅允许通过 NeuInk 只读工具核对，不允许原生操作。'}
                 : await approveClaudeTool(event.input,event.id,options,session.provider);
-            if (decision.behavior === 'allow' && !Object.prototype.hasOwnProperty.call(executors,name) && name !== 'AskUserQuestion') await checkpoint.approveNative();
+            if (decision.behavior === 'allow' && !ownMcpApproval && !Object.prototype.hasOwnProperty.call(executors,name) && name !== 'AskUserQuestion') await checkpoint.approveNative();
             return {content:[{type:'text',text:JSON.stringify(decision)}]};
           }
           const execute = executors[event.name];
@@ -219,7 +228,17 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
       await checkpoint.finishNativeTurn();
       answer = normalizeReturnedExternalCitationLinks(
         typeof result.result === 'string' ? result.result : '', returnedExternalCitationUrls(runtime.observations));
-      const issue = answerVerification({ answer, question:options.question, plan, sources:ledger.sources,
+      const rejectedNeuInkRead = hasUnrecoveredExternalRead(events, runtime.events,
+        observed.activeEntryId, observed.activeNote);
+      const rejectedNoteProposal = proposals.length === 0 && events.some(event => event.status === 'error' &&
+        /^(?:codex|claude|opencode)\.mcp__neuink__(?:note_propose_create|note_propose_patch|segment_note_propose_patch)$/.test(event.toolName));
+      const issue = rejectedNeuInkRead ? {
+        message:'NeuInk 正文或笔记读取未完成，请检查工具调用与权限后重试。',
+        correction:'The NeuInk read did not yield host-verified evidence for the requested document. Retry the declared NeuInk read tool. If it still fails, do not answer from the title or prior memory; report that the document could not be read.'
+      } : rejectedNoteProposal ? {
+        message:'笔记提案未创建成功，请检查工具调用与权限后重试。',
+        correction:'The attempted NeuInk note proposal was rejected before a reviewable proposal was created. Retry the declared proposal tool only after the required fresh note read. Never say the note was organized or saved without a host-confirmed proposal.'
+      } : answerVerification({ answer, question:options.question, plan, sources:ledger.sources,
         events:runtime.events, observations:runtime.observations,
         hasProposals:Boolean(proposals.length || entryMetaProposals.length || tagProposals.length || runtime.snapshot().createdEntries.length),
         availabilityNotes:runtime.availabilityNotes });
@@ -257,4 +276,31 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
     // waiters too, without marking an ordinary completion as a user stop.
     lifetime.abort(new DOMException('本地 Agent 已结束。','AbortError'));
   }
+}
+
+const PAPER_READ_NAMES = new Set(['read_entry_assistant_context', 'read_pdf_pages', 'search_pdf_text',
+  'read_segment_content', 'search_segments']);
+const NOTE_READ_NAMES = new Set(['read_note', 'read_current_note']);
+const EXTERNAL_NEUINK_READ = /^(?:codex|claude|opencode)\.mcp__neuink__(.+)$/;
+
+function hasUnrecoveredExternalRead(events: AssistantToolTraceEvent[], hostEvents: AssistantToolTraceEvent[],
+  activeEntryId: string | null, activeNote: {entryId:string;noteId:string} | null) {
+  return events.some(failed => {
+    if (failed.status !== 'error' || failed.recovered) return false;
+    const name = EXTERNAL_NEUINK_READ.exec(failed.toolName)?.[1] ?? '';
+    const paper = PAPER_READ_NAMES.has(name);
+    if (!paper && !NOTE_READ_NAMES.has(name)) return false;
+    const failedInput = protocolObject(failed.input);
+    const entryId = typeof failedInput.entry_id === 'string' ? failedInput.entry_id : activeEntryId;
+    const noteId = typeof failedInput.note_id === 'string' ? failedInput.note_id : activeNote?.noteId;
+    return !hostEvents.some(done => {
+      if (done.status !== 'done' || !(paper ? PAPER_READ_NAMES : NOTE_READ_NAMES).has(done.toolName)) return false;
+      if (paper) return (done.sources ?? []).some(source =>
+        'entry_id' in source && (!entryId || source.entry_id === entryId));
+      const readInput = protocolObject(done.input);
+      const readEntryId = typeof readInput.entry_id === 'string' ? readInput.entry_id : activeNote?.entryId;
+      const readNoteId = typeof readInput.note_id === 'string' ? readInput.note_id : activeNote?.noteId;
+      return (!entryId || readEntryId === entryId) && (!noteId || readNoteId === noteId);
+    });
+  });
 }

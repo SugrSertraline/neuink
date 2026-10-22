@@ -1,3 +1,4 @@
+use super::installation::AgentExecutable;
 use super::{
     mcp::{self, Bridge, Event, Replies, Tool},
     process,
@@ -15,7 +16,6 @@ use tauri::{ipc::Channel, Manager, WebviewWindow};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
     net::TcpListener,
-    process::Command,
     sync::{mpsc, watch},
 };
 
@@ -220,7 +220,7 @@ pub async fn run_local_agent<R: tauri::Runtime>(
 async fn execute(
     request: &Request,
     cwd: &std::path::Path,
-    path: PathBuf,
+    path: AgentExecutable,
     cancel_rx: watch::Receiver<bool>,
     replies: Replies,
     send: Arc<dyn Fn(Event) -> Result<(), String> + Send + Sync>,
@@ -277,7 +277,7 @@ async fn execute(
         )
         .await;
     }
-    let mut command = Command::new(path);
+    let mut command = path.command();
     command
         .current_dir(&cwd)
         .args([

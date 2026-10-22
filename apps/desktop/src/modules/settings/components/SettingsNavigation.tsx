@@ -5,8 +5,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { SETTINGS_CATALOG, SETTINGS_CATEGORIES, searchSettings, settingsCategory, type SettingDefinition, type SettingsNavigationTarget, type SettingsTab } from '../settingsCatalog';
 
 export const SETTINGS_TAB_LABELS: Record<SettingsTab, string> = {
-  appearance: '外观与界面', reader: '阅读与批注', translation: '翻译', parser: '导入与解析', data: '资料库与数据',
-  models: '模型连接与对话', 'main-agent': '主助手', subagents: '子助手', 'external-tools': '外部检索'
+  'getting-started': '入门与教程', appearance: '外观与界面', reader: '阅读与批注', translation: '翻译', parser: '导入与解析', data: '资料与存储',
+  models: '模型与助手', 'main-agent': '主助手', subagents: '子助手', 'external-tools': '检索与工具'
 };
 
 export function useSettingsNavigation(activeTab: SettingsTab, onChange: (tab: SettingsTab) => void, target?: SettingsNavigationTarget) {
@@ -61,7 +61,10 @@ export function SettingsCategoryNavigation({ activeTab, onChange }: { activeTab:
     <nav className="settings-category-nav" data-material="sidebar-canvas" aria-label="设置分类">{SETTINGS_CATEGORIES.map(item =>
       <Button key={item.id} size="sm" variant="ghost" aria-current={category.id === item.id ? 'page' : undefined}
         className="w-full justify-start text-xs" onClick={() => onChange(item.tabs[0])}>{item.title}</Button>)}</nav>
-    <div className="settings-category-select"><Select value={category.id} onValueChange={value => onChange(value as SettingsTab)}>
+    <div className="settings-category-select"><Select value={category.id} onValueChange={value => {
+      const selected = SETTINGS_CATEGORIES.find(item => item.id === value);
+      if (selected) onChange(selected.tabs[0]);
+    }}>
       <SelectTrigger aria-label="设置分类" size="sm" className="w-full"><SelectValue /></SelectTrigger>
       <SelectContent>{SETTINGS_CATEGORIES.map(item => <SelectItem value={item.id} key={item.id}>{item.title}</SelectItem>)}</SelectContent>
     </Select></div>

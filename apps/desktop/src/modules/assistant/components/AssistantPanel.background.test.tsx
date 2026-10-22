@@ -202,7 +202,7 @@ it('enables Claude from settings, uses the existing composer and resumes its sav
   expect(vi.mocked(runLocalAgentHarness).mock.calls[1][1]).toEqual(identity);
   await waitFor(() => expect(ui.getByRole('button',{name:'发送'}).hasAttribute('disabled')).toBe(false));
   act(() => setLocalAgentEnabled(false));
-  expect(ui.getByText('本地 Agent 已关闭，请在设置 → 工具与扩展中启用。')).toBeTruthy();
+  expect(ui.getByText('本地 Agent 已关闭，请在设置 → 检索与工具中启用。')).toBeTruthy();
   fireEvent.change(ui.getByLabelText('输入问题'),{target:{value:'disabled'}});
   expect(ui.getByRole('button',{name:'发送'}).hasAttribute('disabled')).toBe(true);
   expect(mocks.disks.get('conversation-1')!.messages.length).toBe(4);

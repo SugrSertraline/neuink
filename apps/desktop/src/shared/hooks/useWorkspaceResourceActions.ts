@@ -3,6 +3,7 @@ import { listTagArchives, restoreTagArchive } from '@/shared/ipc/tagReadingApi';
 import { updateTagDescription } from '@/shared/ipc/noteCatalogApi';
 
 import {
+  applyEntryTagPaths as mergeEntryTagPaths,
   applyTagProposal,
   applyEntryMetaProposal,
   createAnnotation,
@@ -490,30 +491,12 @@ export function useWorkspaceResourceActions({
 
   const applyEntryTagPaths = useCallback(
     async (entryId: string, tagPaths: string[]) => {
-      if (!root) {
-        return;
-      }
-
-      const entry = entries.find((item) => item.id === entryId);
-      if (!entry) {
-        return;
-      }
+      if (!root) throw new Error('请先打开资料库');
 
       try {
-        let nextTags = tags;
-        const tagIds = new Set<TagId>(entry.tags);
-        for (const tagPath of cleanTagPaths(tagPaths)) {
-          const result = await ensureTagPath(tagPath, nextTags);
-          nextTags = result.tags;
-          if (result.tagId) {
-            tagIds.add(result.tagId);
-          }
-        }
+        const { entry: updated, tags: nextTags } = await mergeEntryTagPaths(root, entryId, cleanTagPaths(tagPaths));
+        if (currentRoot.current !== root) return updated;
         setTags(nextTags);
-
-        const updated = await updateEntryMeta(root, entryId, entry.title, entry.fields, [
-          ...tagIds
-        ]);
         setEntries((current) =>
           current.map((item) => (item.id === updated.id ? updated : item))
         );
@@ -522,11 +505,10 @@ export function useWorkspaceResourceActions({
         return updated;
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : String(caught));
-        await refreshEntries(root);
         throw caught;
       }
     },
-    [ensureTagPath, entries, refreshEntries, root, tags]
+    [root, setEntries, setError, setSelectedEntryId, setTags]
   );
 
   const applyWorkspaceTagProposal = useCallback(

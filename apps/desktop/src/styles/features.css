@@ -38,6 +38,17 @@
   scrollbar-width: auto;
 }
 
+.pdf-document-scroll[data-pdf-pan],
+.pdf-document-scroll[data-pdf-pan] * {
+  cursor: grab !important;
+  user-select: none !important;
+}
+
+.pdf-document-scroll[data-pdf-pan="dragging"],
+.pdf-document-scroll[data-pdf-pan="dragging"] * {
+  cursor: grabbing !important;
+}
+
 .pdf-document-scroll::-webkit-scrollbar {
   display: block;
   width: 10px;
@@ -893,6 +904,19 @@
   container: reflow-toolbar / inline-size;
 }
 
+.reflow-reader-pane { container: reflow-reader / inline-size; }
+.reflow-document-scroll { padding: 24px 24px 24px calc(var(--reflow-rail-width, 48px) + 24px); }
+.reflow-reading-surface { font-size: var(--reflow-preferred-font-size, 16px); }
+
+@container reflow-reader (max-width: 600px) {
+  .reflow-document-scroll { padding: 16px 16px 16px calc(var(--reflow-rail-width, 48px) + 12px); }
+  .reflow-reading-surface { font-size: min(var(--reflow-preferred-font-size, 16px), max(14px, 4cqi)); }
+}
+
+@container reflow-reader (max-width: 420px) {
+  .reflow-document-scroll { padding-right: 10px; padding-left: calc(var(--reflow-rail-width, 48px) + 8px); }
+}
+
 /* Size to the pane, not the application viewport. At 220px an avatar column
    consumes the space needed by proposal controls; role labels stay visible. */
 .assistant-message-layout {
@@ -947,6 +971,11 @@
 @container reflow-toolbar (max-width: 380px) {
   .reflow-toolbar-menu-label { display: none; }
   .reflow-toolbar-menu { width: 28px; padding-inline: 0; }
+}
+
+@container reflow-toolbar (max-width: 420px) {
+  .reflow-toolbar [data-reader-compact-toolbar] { flex-wrap: wrap; }
+  .reflow-toolbar [data-reader-compact-toolbar] .reflow-toolbar-translation { order: 1; flex: 0 0 100%; padding-bottom: 4px; }
 }
 
 .pdf-reader-toolbar {

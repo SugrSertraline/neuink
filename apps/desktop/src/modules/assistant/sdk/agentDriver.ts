@@ -13,6 +13,7 @@ import { availableTurnTools, toolCallError } from './toolAvailability';
 import { researchFailureMessage } from './researchRecovery';
 import { TOOL_FAILURE_INSTRUCTIONS } from './toolFailurePolicy';
 import { canReplayAssistantTool } from '../runtime/durableExecution';
+import { isPotentialRawModelToolCall, isRawModelToolCall } from './modelToolCallMarkup';
 
 /** AI SDK is a single-turn provider adapter, never the owner of our agent loop. */
 export function createAgentDriver(options: {
@@ -23,6 +24,7 @@ export function createAgentDriver(options: {
   onTurn?: () => void;
   onDelta?: (text: string) => void;
   onReasoningDelta?: (text: string) => void;
+  entryContextReadLimit?: number;
 }): AgentDriver<ModelMessage> {
   const declarations: ToolSet = Object.fromEntries(Object.entries(options.tools).map(([name, definition]) => {
     const { execute: _execute, needsApproval: _approval, ...declaration } = definition;
@@ -34,7 +36,8 @@ export function createAgentDriver(options: {
       const permitted = options.budget?.writesBlocked
         ? Object.fromEntries(Object.entries(declarations).filter(([name]) => canReplayAssistantTool(name)))
         : declarations;
-      const availability = availableTurnTools(permitted, messages, turnOptions?.finalTurn);
+      const availability = availableTurnTools(permitted, messages, turnOptions?.finalTurn,
+        options.entryContextReadLimit);
       const system = [options.system, TOOL_FAILURE_INSTRUCTIONS, availability.instructions].filter(Boolean).join('\n\n');
       const maxChars = Math.max(4_000, (options.settings.max_context_length ?? 64_000) - (options.settings.max_output_tokens ?? 4_096)) * 2;
       const available = maxChars - system.length - JSON.stringify(availability.tools).length;
@@ -56,10 +59,17 @@ export function createAgentDriver(options: {
         maxRetries: 0
       });
       let text = '';
+      let streamedChars = 0;
       const calls: AgentToolCall[] = [];
       for await (const part of response.fullStream) {
         requestSignal.throwIfAborted();
-        if (part.type === 'text-delta') { text += part.text; options.onDelta?.(part.text); }
+        if (part.type === 'text-delta') {
+          text += part.text;
+          if (!isPotentialRawModelToolCall(text)) {
+            options.onDelta?.(text.slice(streamedChars));
+            streamedChars = text.length;
+          }
+        }
         if (part.type === 'reasoning-delta') options.onReasoningDelta?.(part.text);
         if (part.type === 'error') throw part.error;
         if (part.type === 'tool-call') calls.push({
@@ -84,6 +94,12 @@ export function createAgentDriver(options: {
         }
         if (!calls.length) throw new AgentLocalLimitError('output_length', '模型输出达到长度上限，未把不完整回答标记为完成。');
       }
+      if (isRawModelToolCall(text)) {
+        // A textual tool envelope is neither a tool call nor a user-facing answer.
+        return { text: '', calls, messages: calls.length
+          ? result.messages.filter(message => message.role === 'assistant') : [] };
+      }
+      if (streamedChars < text.length) options.onDelta?.(text.slice(streamedChars));
       return { text, calls, messages: result.messages.filter((message) => message.role === 'assistant') };
     },
     instruction: (text) => ({ role: 'user', content: text }),

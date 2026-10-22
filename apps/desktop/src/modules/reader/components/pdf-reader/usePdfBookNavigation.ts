@@ -96,6 +96,8 @@ export function usePdfBookNavigation({ enabled, entryId, rows, scrollRef, docume
     const container = scrollRef.current;
     if (!container || !enabled) return;
     const measure = () => {
+      // Preserve the fitted paper size while the native window is minimized.
+      if (container.clientWidth <= 0 || container.clientHeight <= 0) return;
       const inset = parseFloat(getComputedStyle(container).scrollPaddingTop) || 0;
       setHeight(Math.max(0, container.clientHeight - inset));
       setViewportWidth(container.clientWidth);

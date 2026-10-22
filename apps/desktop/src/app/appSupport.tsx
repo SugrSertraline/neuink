@@ -107,6 +107,7 @@ export const SIDEBAR_MIN_WIDTH = 220;
 export const SIDEBAR_MAX_WIDTH = 820;
 export const DEFAULT_SIDEBAR_WIDTH = 280;
 export const WORKSPACE_SPLIT_WIDTH_STORAGE_KEY = 'neuink.workspaceSplitLeftWidth';
+export const WORKSPACE_SPLIT_RATIO_STORAGE_KEY = 'neuink.workspaceSplitRatio';
 export const ENTRY_CONTENT_TAB_PREFIX = 'entry-content:';
 
 export const EMPTY_SIDE_PANE: SidePaneState = {
@@ -185,6 +186,13 @@ export function readStoredWorkspaceSplitLeftWidth() {
   return Number.isFinite(saved) && saved >= WORKSPACE_SPLIT_NOTE_MIN_WIDTH
     ? Math.round(saved)
     : null;
+}
+
+export function readStoredWorkspaceSplitRatio() {
+  if (typeof window === 'undefined') return null;
+  const raw = window.localStorage.getItem(WORKSPACE_SPLIT_RATIO_STORAGE_KEY);
+  const ratio = raw === null ? NaN : Number(raw);
+  return Number.isFinite(ratio) && ratio > 0 && ratio < 1 ? ratio : null;
 }
 
 export function getWorkspaceSplitContainerWidth() {

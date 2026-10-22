@@ -106,6 +106,34 @@ fn unknown_requests_are_never_treated_as_native_approvals() {
     );
 }
 #[test]
+fn codex_mcp_tool_approval_routes_only_declared_neuink_tools() {
+    let request = json!({"method":"mcpServer/elicitation/request","params":{
+        "serverName":"neuink","mode":"form","_meta":{
+            "codex_approval_kind":"mcp_tool_call","tool_name":"read_entry_assistant_context",
+            "tool_params":{"entry_id":"paper-1","limit":8000}
+        },"message":"Allow tool?","requestedSchema":{"type":"object","properties":{}}
+    }});
+    assert_eq!(approval_input(Provider::Codex, &request).unwrap(),
+        json!({"tool_name":"mcp__neuink__read_entry_assistant_context",
+            "input":{"entry_id":"paper-1","limit":8000}}));
+    let allow = json!({"content":[{"text":"{\"behavior\":\"allow\"}"}]});
+    assert_eq!(approval_result(Provider::Codex, &request, &allow),
+        json!({"action":"accept","content":{}}));
+    assert_eq!(approval_result(Provider::Codex, &request, &Value::Null),
+        json!({"action":"decline","content":null}));
+
+    let mut without_name = request.clone();
+    without_name["params"]["_meta"].as_object_mut().unwrap().remove("tool_name");
+    assert_eq!(approval_input(Provider::Codex, &without_name).unwrap()["tool_name"], "mcp__neuink__");
+
+    let mut foreign = request.clone();
+    foreign["params"]["serverName"] = json!("other");
+    assert_eq!(approval_input(Provider::Codex, &foreign).unwrap()["tool_name"], "McpElicitation");
+    let mut form = request.clone();
+    form["params"]["_meta"]["codex_approval_kind"] = json!("user_input");
+    assert_eq!(approval_input(Provider::Codex, &form).unwrap()["tool_name"], "McpElicitation");
+}
+#[test]
 fn acp_non_success_stop_reasons_fail() {
     let mut state = protocol(Provider::Opencode);
     state.active = true;

@@ -53,6 +53,9 @@ export function useVisiblePdfPages({
       });
     };
     const updateEntries = (target: Set<number>, entries: IntersectionObserverEntry[], meaningful = false) => {
+      // A minimized WebView can report every observed page as non-intersecting.
+      // Retain the last reading window until the page becomes visible again.
+      if (document.hidden || window.innerWidth <= 0 || window.innerHeight <= 0) return;
       for (const entry of entries) {
         const pageIdx = Number((entry.target as HTMLElement).dataset.pdfPageIndex);
         if (!Number.isInteger(pageIdx)) continue;

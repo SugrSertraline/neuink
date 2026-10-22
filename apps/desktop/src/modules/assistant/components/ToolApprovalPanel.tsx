@@ -41,7 +41,7 @@ function Approval({ item }: { item: PendingToolApproval }) {
       </details>}
     </> : <p className="text-muted-foreground">尚未执行。确认后继续；拒绝会停止本次任务。</p>}
     {permission && <p className="text-muted-foreground">
-      选择“以后都允许”将记住当前资料库中 {agent?.name} 的“{localAgentPermissionLabel(permission.toolName)}”授权，包含此类操作的不同命令或文件。可在设置 → 工具与扩展 → 本地 Agent 中撤销。
+      选择“以后都允许”将记住当前资料库中 {agent?.name} 的“{localAgentPermissionLabel(permission.toolName)}”授权，包含此类操作的不同命令或文件。可在设置 → 检索与工具 → 本地 Agent 中撤销。
     </p>}
     {saveError && <p role="alert" className="text-destructive">{saveError}</p>}
     <div className="flex flex-wrap justify-end gap-1">

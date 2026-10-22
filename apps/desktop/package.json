@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/tauri.cjs dev",
+    "dev:d-data": "node scripts/dev-d-data.cjs",
+    "audit:sentences": "node scripts/audit-sentence-alignment.mjs",
     "tauri": "node scripts/tauri.cjs",
     "dev:frontend": "vite --host 127.0.0.1 --port 1420",
     "build": "npm run build:frontend",

@@ -68,6 +68,14 @@ export function clampWorkspaceSplitLeftWidth(
   return Math.min(maxLeftWidth, Math.max(minLeftWidth, Math.round(value)));
 }
 
+export function workspaceSplitLeftWidthFromRatio(
+  ratio: number,
+  containerWidth: number,
+  minimums?: WorkspaceSplitMinimums
+) {
+  return clampWorkspaceSplitLeftWidth(ratio * containerWidth, containerWidth, minimums);
+}
+
 function getWorkspaceSurfaceMinimumWidth(surface: WorkspaceSurface) {
   return surface.kind === 'note'
     ? WORKSPACE_SPLIT_NOTE_MIN_WIDTH

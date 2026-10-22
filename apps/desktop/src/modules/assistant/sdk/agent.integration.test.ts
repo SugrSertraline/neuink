@@ -159,6 +159,27 @@ describe('production agent wiring', () => {
     expect(model.doStreamCalls[1].tools).toBeUndefined();
     expect(JSON.stringify(model.doStreamCalls[1].prompt)).toContain('Give the final answer now');
   });
+  it('reserves a correction turn and never streams a textual tool envelope as the answer', async () => {
+    const raw = '<tool_call><function=search_papers><parameter=query>traffic graph</parameter></function></tool_call>';
+    const model = fakeModel([
+      ...Array.from({ length: 9 }, () => ({ call: { name: 'read_note', args: {} } })),
+      { text: raw }, { text: '已根据读到的资料给出结论。' }
+    ]);
+    vi.mocked(createNeuinkModel).mockReturnValue(model);
+    const onDelta = vi.fn();
+    const execute = vi.fn(async () => ({ text: 'evidence' }));
+    const tools: ToolSet = { read_note: tool({ inputSchema: jsonSchema({ type: 'object', properties: {} }), execute }) };
+    const agent = new Agent({ driver: createAgentDriver({ settings: profile, system: '', tools, onDelta }),
+      tools: agentExecutors(tools), messages: [{ role: 'user' as const, content: 'Summarize' }],
+      budget: new RunBudget(), maxTurns: 12, synthesisReserveTurns: 2,
+      verify: text => text ? undefined : '请根据已经取得的资料回答。' });
+    expect(await agent.run()).toBe('已根据读到的资料给出结论。');
+    expect(execute).toHaveBeenCalledTimes(9);
+    expect(model.doStreamCalls[9].tools).toBeUndefined();
+    expect(JSON.stringify(model.doStreamCalls[10].prompt)).toContain('请根据已经取得的资料回答');
+    expect(onDelta.mock.calls.flat().join('')).not.toContain('<tool_call>');
+    expect(JSON.stringify(agent.messages)).not.toContain('<tool_call>');
+  });
   it('removes search tools after six searches and rejects a provider that still calls them', async () => {
     const model = fakeModel([
       ...Array.from({ length: 7 }, (_, i) => ({ call: { name: 'search_web', args: { query: `ACL variant ${i}` } } })),

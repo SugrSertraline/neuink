@@ -17,7 +17,7 @@ export function buildReflowGroupIndex(groups: ReflowSegmentGroup[]) {
 
 export function estimateReflowGroupSize(
   group: ReflowSegmentGroup,
-  translationMode: 'bilingual' | 'source' | 'translation'
+  translationMode: 'bilingual' | 'source' | 'translation' | 'sentences'
 ) {
   if (group.kind === 'visual') {
     return 520;
@@ -31,7 +31,7 @@ export function estimateReflowGroupSize(
   );
   const contentHeight = Math.min(560, Math.max(36, wrappedLines * 27));
   const chromeHeight = segment.segment_type === 'heading' ? 116 : 82;
-  const translationMultiplier = translationMode === 'bilingual' ? 1.75 : 1;
+  const translationMultiplier = translationMode === 'bilingual' || translationMode === 'sentences' ? 1.75 : 1;
 
   return Math.ceil((contentHeight + chromeHeight) * translationMultiplier);
 }

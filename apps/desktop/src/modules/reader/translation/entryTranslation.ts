@@ -16,6 +16,7 @@ import type { SourceSegment } from '@/shared/types/domain';
 import { runLocalBackgroundJob } from '@/shared/lib/localBackgroundJobs';
 
 import { createNeuinkModel, generationSettings } from '../../assistant/sdk/provider';
+import { expandEnglishLigatures, singleEnglishWord, translateLocalEnglishWord } from './localEnglishLexicon';
 
 const MAX_PAPER_CONTEXT_BUDGET = 28_000;
 const MAX_BATCH_CHAR_BUDGET = 7_500;
@@ -43,10 +44,14 @@ export async function translateTextSelection({
   root: string | null;
   text: string;
 }) {
-  const sourceText = text.trim();
-  if (!sourceText) {
+  const expandedText = expandEnglishLigatures(text.trim());
+  const word = singleEnglishWord(expandedText);
+  const sourceText = word ?? expandedText;
+  if (!/[\p{L}\p{N}]/u.test(sourceText)) {
     throw new Error('没有可翻译的文字。');
   }
+  const localTranslation = word ? await translateLocalEnglishWord(word) : null;
+  if (localTranslation) return localTranslation;
   return runLocalBackgroundJob({
     idPrefix: 'selection-translation',
     kind: 'paragraph_translation',
@@ -66,13 +71,15 @@ export async function translateTextSelection({
     const result = await generateText({
       ...generationSettings(profile),
       model: createNeuinkModel(profile),
-      system: [
-        'You are an academic paper translator.',
-        'Translate the selected text into Simplified Chinese.',
-        'Preserve formulas, citations, numbers, abbreviations, code, and technical symbols.',
-        'Return the translation only. Do not return JSON, explanations, labels, or markdown fences.'
-      ].join('\n'),
-      prompt: [
+      system: word
+        ? 'Translate the single English word into concise Simplified Chinese dictionary meanings. Return the meanings only.'
+        : [
+          'You are an academic paper translator.',
+          'Translate the selected text into Simplified Chinese.',
+          'Preserve formulas, citations, numbers, abbreviations, code, and technical symbols.',
+          'Return the translation only. Do not return JSON, explanations, labels, or markdown fences.'
+        ].join('\n'),
+      prompt: word ? word : [
         `Paper title: ${entryTitle}`,
         context?.trim()
           ? `Paragraph context:\n${trimToBudget(context.trim(), translationBudgets(profile.max_context_length).context)}`
