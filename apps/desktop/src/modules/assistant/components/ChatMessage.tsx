@@ -1276,6 +1276,7 @@ function citationFromHref(href?: string) {
 
 function normalizeMathDelimiters(markdown: string) {
   return markdown
-    .replace(/\\\[([\s\S]+?)\\\]/g, (_match, latex: string) => `\n$$${latex.trim()}$$\n`)
+    // Multiline math needs standalone fences so prose after it stays Markdown.
+    .replace(/\\\[([\s\S]+?)\\\]/g, (_match, latex: string) => `\n$$\n${latex.trim()}\n$$\n`)
     .replace(/\\\(([\s\S]+?)\\\)/g, (_match, latex: string) => `$${latex.trim()}$`);
 }
