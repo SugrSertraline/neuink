@@ -2,6 +2,8 @@ use super::{error, request, Provider};
 use serde_json::{json, Value};
 use std::{collections::HashMap, path::Path};
 
+const MAX_CONSECUTIVE_CODEX_RETRIES: u8 = 6;
+
 pub(super) struct Protocol<'a> {
     pub(super) provider: Provider,
     pub(super) cwd: &'a Path,
@@ -106,7 +108,9 @@ impl Protocol<'_> {
             match value["method"].as_str().unwrap_or("") {
                 "error" => {
                     self.upstream_failures = self.upstream_failures.saturating_add(1);
-                    if params["willRetry"] != true || self.upstream_failures >= 3 {
+                    if params["willRetry"] != true
+                        || self.upstream_failures > MAX_CONSECUTIVE_CODEX_RETRIES
+                    {
                         return Err(error(self.provider, params));
                     }
                 }

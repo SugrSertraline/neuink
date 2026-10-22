@@ -2,6 +2,24 @@ import { describe,expect,it,vi } from 'vitest';
 import { RpcAgentStream } from './rpcProtocol';
 const callbacks=()=>({text:vi.fn(),reset:vi.fn(),reasoning:vi.fn(),tool:vi.fn(),initialized:vi.fn()});
 describe('official local agent protocols',()=>{
+  it('reconciles Codex summary sections with completion and does not mix raw and summary copies',()=>{
+    const output=callbacks(),stream=new RpcAgentStream('codex',output);
+    stream.consume({method:'item/reasoning/summaryTextDelta',params:{itemId:'r1',summaryIndex:0,delta:'检查'}});
+    stream.consume({method:'item/reasoning/textDelta',params:{itemId:'r1',contentIndex:0,delta:'另一种表示'}});
+    stream.consume({method:'item/reasoning/summaryTextDelta',params:{itemId:'r1',summaryIndex:1,delta:'准备结论'}});
+    const complete={method:'item/completed',params:{item:{id:'r1',type:'reasoning',summary:['检查','准备结论。'],content:['另一种表示']}}};
+    stream.consume(complete);stream.consume(complete);
+    stream.consume({method:'item/completed',params:{item:{id:'r2',type:'reasoning',summary:['第二轮摘要'],content:[]}}});
+    expect(output.reasoning.mock.calls.flat().join('')).toBe('检查\n\n准备结论。\n\n第二轮摘要');
+    expect(output.text).not.toHaveBeenCalled();
+  });
+  it('uses returned raw text when no summary is supplied and handles completion-only blocks',()=>{
+    const output=callbacks(),stream=new RpcAgentStream('codex',output);
+    stream.consume({method:'item/reasoning/textDelta',params:{itemId:'r1',contentIndex:0,delta:'开始'}});
+    stream.consume({method:'item/completed',params:{item:{id:'r1',type:'reasoning',summary:[],content:['开始检查。']}}});
+    stream.consume({method:'item/completed',params:{item:{id:'r2',type:'reasoning',summary:[],content:['已返回的内容']}}});
+    expect(output.reasoning.mock.calls.flat().join('')).toBe('开始检查。\n\n已返回的内容');
+  });
   it('corrects known rejected PDF batches only after actual host coverage',()=>{
     const output=callbacks(),stream=new RpcAgentStream('codex',output);
     stream.consume({method:'item/started',params:{item:{id:'bad',type:'mcpToolCall',server:'neuink',tool:'read_pdf_pages',arguments:{entry_id:'e1',start_page:16,page_count:6}}}});

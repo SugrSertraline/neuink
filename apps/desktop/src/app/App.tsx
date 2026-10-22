@@ -500,9 +500,24 @@ export function App() {
     };
 
     restorePreferredSplitWidth();
-    const observer = new ResizeObserver(restorePreferredSplitWidth);
+    let resizeTimer: number | null = null;
+    const schedulePreferredSplitWidth = () => {
+      if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+      // Native window restoration reports intermediate WebView widths. Keep
+      // the last paper/chat ratio until the new window geometry settles.
+      resizeTimer = window.setTimeout(() => {
+        resizeTimer = null;
+        restorePreferredSplitWidth();
+      }, 180);
+    };
+    const observer = new ResizeObserver(schedulePreferredSplitWidth);
     observer.observe(split);
-    return () => observer.disconnect();
+    window.addEventListener('focus', schedulePreferredSplitWidth);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('focus', schedulePreferredSplitWidth);
+      if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+    };
   }, [surfaceLayout.left, surfaceLayout.right]);
 
   const trashedEntries = useMemo(

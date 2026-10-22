@@ -1,13 +1,14 @@
 // Temporary tester-facing surface. Existing runtime configuration stays intact.
 export const ADVANCED_ASSISTANT_SETTINGS_VISIBLE = false;
 const ALL_SETTINGS_CATEGORIES = [
+  { id: 'getting-started', title: '入门与教程', tabs: ['getting-started'] },
   { id: 'appearance', title: '外观与界面', tabs: ['appearance'] },
   { id: 'reader', title: '阅读与批注', tabs: ['reader'] },
   { id: 'translation', title: '翻译', tabs: ['translation'] },
   { id: 'parser', title: '导入与解析', tabs: ['parser'] },
-  { id: 'data', title: '资料库与数据', tabs: ['data'] },
   { id: 'models', title: '模型与助手', tabs: ['models', 'main-agent', 'subagents'] },
-  { id: 'external-tools', title: '工具与扩展', tabs: ['external-tools'] }
+  { id: 'external-tools', title: '检索与工具', tabs: ['external-tools'] },
+  { id: 'data', title: '资料与存储', tabs: ['data'] }
 ] as const;
 
 export type SettingsTab = typeof ALL_SETTINGS_CATEGORIES[number]['tabs'][number];
@@ -31,13 +32,14 @@ export type SettingDefinition = {
 // Metadata only: never index user values, credentials, paths or document content.
 const ALL_SETTINGS_CATALOG: SettingDefinition[] = [
   { id: 'tools-local-agent', tab: 'external-tools', title: '本地 Agent', description: '检测本地 Agent，管理已记住的操作授权。', keywords: 'claudecode Claude Code Codex OpenCode 本地 agent 智能体 工具 检测 权限 授权 以后都允许 撤销 恢复询问' },
-  { id:'data-onboarding', tab:'data', title:'新手引导', description:'继续或回放聚焦式任务教程。', keywords:'教程 onboarding 入门 引导 回放 Attention 论文 示例' },
+  { id:'data-onboarding', tab:'getting-started', title:'新手引导', description:'继续或回放聚焦式任务教程。', keywords:'教程 onboarding 入门 引导 回放 Attention 论文 示例' },
   { id: 'appearance-style', tab: 'appearance', title: '界面风格', description: '标准、拟物和玻璃。', keywords: '主题 theme 外观 皮肤 材质' },
   { id: 'appearance-color', tab: 'appearance', title: '强调色', description: '选中、焦点与主要操作使用的颜色预设。', keywords: '主题 颜色 配色 蓝色 绿色 紫色' },
   { id: 'appearance-scale', tab: 'appearance', title: '界面缩放', description: '调整标题栏、侧栏、阅读区和弹窗的大小。', keywords: '字体太小 字体大小 放大 缩小 DPI 比例' },
   { id: 'appearance-transparency', tab: 'appearance', title: '降低透明度', description: '切换玻璃通透效果与实色显示。', keywords: '主题 玻璃 模糊 透明 辅助 实色 折射 通透' },
   { id: 'reader-open-pdf', tab: 'reader', title: '有 PDF 时直接打开 PDF', description: '打开条目时优先阅读 PDF；关闭后或没有 PDF 时显示条目概览。', keywords: '默认打开PDF 默认打开 PDF 打开条目 直接阅读 阅读方式 概览 详情' },
   { id: 'reader-preview', tab: 'reader', title: 'PDF 悬停预览', description: '悬停时查看对应片段。', keywords: '阅读 鼠标 预览 浮层 卡片' },
+  { id: 'reader-sentence-hover', tab: 'reader', title: 'PDF 逐句悬停', description: '悬停查看当前句，点击联动重排译文。', keywords: '阅读 句子 逐句 hover 翻译 联动' },
   { id: 'reader-reflow-preview', tab: 'reader', title: '重排悬停预览', description: '重排视图悬停时查看对应片段。', keywords: '阅读 reflow 鼠标 预览' },
   { id: 'reader-inline-annotation-hover', tab: 'reader', title: '行内批注', description: '悬停 PDF 选区批注时查看该处原文和批注。', keywords: '划词 高亮 选中文字 悬停 批注' },
   { id: 'reader-paper-reference-hover', tab: 'reader', title: '文内引用悬停', description: '悬停参考文献、图表引用时预览目标；点击定位仍可使用。', keywords: '参考文献 图表 引用 图片 表格 hover 预览' },
@@ -52,10 +54,11 @@ const ALL_SETTINGS_CATALOG: SettingDefinition[] = [
   { id: 'translation-auto', tab: 'translation', title: '解析后自动翻译 PDF', description: '解析成功后自动启动英译中。', keywords: 'PDF自动翻译 自动翻译 数据与解析' },
   { id: 'translation-content', tab: 'translation', title: '自动翻译内容范围', description: '选择段落、标题、表格等参与翻译的内容类型。', keywords: '翻译 图片 公式 页眉 页脚 列表' },
   { id: 'translation-display', tab: 'translation', title: '重排翻译显示', description: '默认显示原文、译文或双语对照。', keywords: '翻译 reflow 双语 原文 译文' },
+  { id: 'translation-visible', tab: 'translation', title: '重排显示翻译', description: '独立控制重排视图的译文显示。', keywords: '翻译 reflow 双语 开关 译文' },
   { id: 'parser-auto', tab: 'parser', title: '导入 PDF 后自动解析', description: '默认关闭；开启后使用已配置的解析服务，客户端 ZIP 导入不受影响。', keywords: '上传PDF后自动开始解析 导入 解析' },
   { id: 'parser-service', tab: 'parser', title: 'MinerU 服务连接', description: '配置解析服务地址和可选 API Key。', keywords: 'MinerU URL 密钥 API Key token 凭据 解析 Base URL' },
   { id: 'parser-zip', tab: 'parser', title: '导入 MinerU 客户端 ZIP', description: '使用客户端生成的解析结果。', keywords: '离线 解析 导入 ZIP content_list' },
-  { id: 'data-workspace', tab: 'data', title: '资料库位置与切换', description: '打开、新建、迁移资料库，以及最近使用记录。', keywords: '工作区 workspace 位置 路径 目录 迁移 最近使用 默认文库' },
+  { id: 'data-workspace', tab: 'data', title: '数据位置', description: '数据固定保存在程序文件夹内，随程序一起移动。', keywords: '工作区 workspace 位置 路径 目录 data 便携 U盘 USB' },
   { id: 'models-connections', tab: 'models', title: '模型连接配置', description: '选择公开模型预设，自动填入参数；配置 API Key、接口地址和模型 ID。', keywords: '大模型 大语言模型 密钥 API Key token 凭据 Base URL Provider Ollama OpenAI 模型预设 models.dev OpenRouter 公开目录 自动填充' },
   { id: 'models-advanced', tab: 'models', title: '模型高级参数', description: '在模型编辑中设置上下文、最大输出、Temperature 和 Top P。', keywords: '采样 温度 token 上下文窗口 参数' },
   { id: 'models-assistant', tab: 'models', title: '助手对话模型', description: '指定对话与资料问答使用的模型。', keywords: '任务模型 助手 对话 AI' },

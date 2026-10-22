@@ -17,17 +17,20 @@ export function EntryTagRecommendations({ entry, workspaceRoot, onApplyEntryTagP
     </Button>}>
     {suggestions.recommendations.length ? <div className="flex flex-wrap gap-2">{suggestions.recommendations.map(tag => {
       const applied = entry.tags.includes(tag.path), selected = suggestions.selectedPaths.has(tag.path);
-      return <Button key={tag.path} size="sm" variant={selected || applied ? 'secondary' : 'outline'} className="h-auto min-w-0 max-w-full whitespace-normal py-1.5 text-left"
-        aria-pressed={selected || applied} disabled={suggestions.busy || applied} title={tag.reason || tag.path} aria-label={`${tag.path}${applied ? '，已添加' : ''}`}
+      return <Button key={tag.path} size="sm" variant={selected ? 'secondary' : 'outline'} className="h-auto min-w-0 max-w-full whitespace-normal py-1.5 text-left"
+        aria-pressed={selected} disabled={suggestions.busy} title={tag.reason || tag.path} aria-label={`${tag.path}${applied ? '，已添加' : ''}`}
         onClick={() => suggestions.toggleRecommendation(tag)}>
-        {selected || applied ? <Check size={12} className="shrink-0" /> : null}<span className="min-w-0 break-words">{tag.path}</span>{applied ? <span className="shrink-0 text-xs text-muted-foreground">已添加</span> : null}
+        {selected ? <Check size={12} className="shrink-0" /> : null}<span className="min-w-0 break-words">{tag.path}</span>{applied ? <span className="shrink-0 text-xs text-muted-foreground">已添加</span> : null}
       </Button>;
     })}</div> : <p className="text-sm text-muted-foreground">{suggestions.generatedAt ? '本次分析没有生成推荐标签，可以重新生成。' : '尚未生成推荐标签。'}</p>}
     {suggestions.disabledReason ? <p className="mt-2 text-xs text-muted-foreground">{suggestions.disabledReason}</p> : null}
     {suggestions.error ? <p role="alert" className="mt-2 text-sm text-destructive">{suggestions.error}</p> : null}
     {suggestions.recommendations.length ? <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
       <span className="text-xs text-muted-foreground">选择要添加的标签，已有关联保持不变。</span>
-      <Button size="sm" disabled={suggestions.busy || !suggestions.canApply || !onApplyEntryTagPaths} onClick={() => void suggestions.apply()}>{suggestions.phase === 'applying' ? '添加中…' : '添加所选标签'}</Button>
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant="ghost" disabled={suggestions.busy} onClick={suggestions.discard}>丢弃推荐</Button>
+        <Button size="sm" disabled={suggestions.busy || !suggestions.canApply || !onApplyEntryTagPaths} onClick={() => void suggestions.apply()}>{suggestions.phase === 'applying' ? '添加中…' : '添加所选标签'}</Button>
+      </div>
     </div> : null}
   </ReaderSection>;
 }

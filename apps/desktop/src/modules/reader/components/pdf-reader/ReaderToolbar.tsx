@@ -16,9 +16,7 @@ import {
   Search,
   Sparkles,
   RotateCcw,
-  X,
-  ZoomIn,
-  ZoomOut
+  X
 } from 'lucide-react';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 
@@ -45,6 +43,7 @@ import { EntryContentHeader } from '../EntryContentHeader';
 import { useReadingSession } from '../../parallel-reading/ReadingSessionContext';
 import { PdfReadingModeControl } from './PdfReadingModeControl';
 import { PdfViewControls } from '../navigation/ReadingViewSession';
+import { PdfZoomControls } from './PdfZoomControls';
 
 export function ReaderToolbar({
   navigation,
@@ -89,7 +88,8 @@ export function ReaderToolbar({
   onStartPdfParse,
   reparseBusy = false,
   onZoomIn,
-  onZoomOut
+  onZoomOut,
+  onZoomReset
 }: {
   navigation?: import('react').ReactNode;
   entry: LibraryEntry;
@@ -134,6 +134,7 @@ export function ReaderToolbar({
   reparseBusy?: boolean;
   onZoomIn: () => void;
   onZoomOut: () => void;
+  onZoomReset: () => void;
 }) {
   const readingSession = useReadingSession();
   const translationPaused = !translationBusy && translation?.status === 'paused' && Boolean(translation.task);
@@ -158,14 +159,11 @@ export function ReaderToolbar({
     <div className="min-w-0 flex-1" />
     <PdfViewControls />
     <PdfReadingModeControl preferences={readerPreferences} onChange={onReaderPreferencesChange} />
+    <PdfZoomControls zoom={zoom} onZoomIn={onZoomIn} onZoomOut={onZoomOut} onZoomReset={onZoomReset} />
     <Popover>
-      <PopoverTrigger asChild><Button size="sm" variant="outline" className="px-2 text-xs" aria-label="缩放与阅读显示" title="调整缩放、单页/双页与悬停预览">{Math.round(zoom * 100)}%</Button></PopoverTrigger>
+      <PopoverTrigger asChild><Button size="sm" variant="outline" className="px-2 text-xs" aria-label="阅读显示" title="调整单页/双页与悬停预览">显示</Button></PopoverTrigger>
       <PopoverContent viewportAligned align="end" className="w-72 max-w-[calc(100vw-2rem)] space-y-3 text-xs">
-        <div className="flex items-center justify-between gap-2"><span>PDF 缩放</span><div className="flex items-center gap-2">
-          <Button size="icon-sm" variant="outline" aria-label="缩小" title="缩小" onClick={onZoomOut}><ZoomOut size={14} aria-hidden="true" /></Button>
-          <span>{Math.round(zoom * 100)}%</span>
-          <Button size="icon-sm" variant="outline" aria-label="放大" title="放大" onClick={onZoomIn}><ZoomIn size={14} aria-hidden="true" /></Button>
-        </div></div>
+        <p className="text-muted-foreground">按住空格并用鼠标左键拖动 PDF；Ctrl＋滚轮可按 1% 缩放。</p>
         <Button size="sm" variant="outline" onClick={() => onReaderPreferencesChange({ ...readerPreferences, pageDisplayMode: readerPreferences.pageDisplayMode === 'dual' ? 'single' : 'dual' })}>
           {readerPreferences.pageDisplayMode === 'dual' ? '切换为单页' : '切换为双页'}
         </Button>
@@ -326,17 +324,7 @@ export function ReaderToolbar({
           <Columns2 size={14} aria-hidden="true" />
         </Button>
 
-        <div className="flex shrink-0 items-center gap-1">
-          <Button aria-label="缩小" size="icon-sm" title="缩小" type="button" variant="outline" onClick={onZoomOut}>
-            <ZoomOut size={14} aria-hidden="true" />
-          </Button>
-          <span className="pdf-reader-zoom-value w-12 text-center text-xs font-semibold text-muted-foreground">
-            {Math.round(zoom * 100)}%
-          </span>
-          <Button aria-label="放大" size="icon-sm" title="放大" type="button" variant="outline" onClick={onZoomIn}>
-            <ZoomIn size={14} aria-hidden="true" />
-          </Button>
-        </div>
+        <PdfZoomControls zoom={zoom} onZoomIn={onZoomIn} onZoomOut={onZoomOut} onZoomReset={onZoomReset} />
       </EntryContentHeader>
 
       <div data-material="reader-toolbar-row" className="flex min-w-0 flex-wrap items-center gap-2 border-t bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground">
@@ -665,7 +653,7 @@ function RecommendedTagControls({
   onOpenChange: (open: boolean) => void;
   onToggleTag: (tag: TagRecommendation) => void;
 }) {
-  const selected = new Set(selectedRecommendedTagPaths.filter(path => !appliedPaths.includes(path)));
+  const selected = new Set(selectedRecommendedTagPaths);
   const selectedCount = selected.size;
 
   return (
@@ -701,9 +689,9 @@ function RecommendedTagControls({
                   className="h-auto justify-between px-3 py-2 text-left"
                   size="sm"
                   type="button"
-                  variant={active || applied ? 'secondary' : 'outline'}
-                  disabled={busy || applied}
-                  aria-pressed={active || applied}
+                  variant={active ? 'secondary' : 'outline'}
+                  disabled={busy}
+                  aria-pressed={active}
                   onClick={() => onToggleTag(tag)}
                 >
                   <span className="grid min-w-0 gap-0.5">
@@ -727,7 +715,7 @@ function RecommendedTagControls({
               variant="ghost"
               onClick={onDismiss}
             >
-              关闭
+              丢弃推荐
             </Button>
             <div className="flex items-center gap-2">
               <span className="text-xs text-muted-foreground">
@@ -765,7 +753,8 @@ export function HoverPreviewControls({
     mode === 'pdf'
       ? preferences.hoverPreviewEnabled
       : preferences.reflowHoverSourceEnabled;
-  const active = enabled || preferences.paperReferenceHoverEnabled || (mode === 'pdf' && preferences.inlineAnnotationHoverEnabled);
+  const active = enabled || preferences.paperReferenceHoverEnabled ||
+    (mode === 'pdf' && (preferences.inlineAnnotationHoverEnabled || preferences.pdfSentenceHoverEnabled));
   const update = (changes: Partial<ReaderPreferences>) => {
     onChange({ ...preferences, ...changes });
   };
@@ -778,7 +767,7 @@ export function HoverPreviewControls({
           className="shrink-0"
           aria-pressed={active}
           size="sm"
-          title="配置片段悬停预览与行内批注"
+          title="配置片段、逐句译文与批注悬停"
           type="button"
           variant={active ? 'secondary' : 'outline'}
         >
@@ -788,7 +777,7 @@ export function HoverPreviewControls({
       </PopoverTrigger>
       <PopoverContent
         align="end"
-        className="w-72 gap-0 p-2.5 duration-0"
+        className="w-80 gap-0 p-2.5 duration-0"
         side="bottom"
         sideOffset={8}
       >
@@ -800,64 +789,44 @@ export function HoverPreviewControls({
             <p className="font-medium">悬停配置</p>
             <p className="mt-0.5 text-xs text-muted-foreground">设置会同步保存到阅读偏好。</p>
           </div>
-          <div className="grid gap-2">
-        <HoverPreviewToggle
-          checked={enabled}
-          label="启用悬停预览"
-          onClick={() =>
-            update(
-              mode === 'pdf'
-                ? { hoverPreviewEnabled: !enabled }
-                : { reflowHoverSourceEnabled: !enabled }
-            )
-          }
-        />
-        {mode === 'pdf' ? (
-          <HoverPreviewToggle
-            checked={preferences.inlineAnnotationHoverEnabled}
-            label="行内批注"
-            onClick={() => update({ inlineAnnotationHoverEnabled: !preferences.inlineAnnotationHoverEnabled })}
-          />
-        ) : null}
-        <HoverPreviewToggle
-          checked={preferences.paperReferenceHoverEnabled}
-          label="文内引用悬停"
-          onClick={() => update({ paperReferenceHoverEnabled: !preferences.paperReferenceHoverEnabled })}
-        />
-        <div className="mt-2 grid gap-1 border-t pt-2">
-          {mode === 'pdf' ? (
-            <HoverPreviewToggle
-              checked={preferences.hoverPreviewShowRegion}
-              disabled={!enabled}
-              label="区域"
-              onClick={() => update({ hoverPreviewShowRegion: !preferences.hoverPreviewShowRegion })}
-            />
-          ) : null}
-          <HoverPreviewToggle
-            checked={preferences.hoverPreviewShowOriginal}
-            disabled={!enabled}
-            label="解析后"
-            onClick={() => update({ hoverPreviewShowOriginal: !preferences.hoverPreviewShowOriginal })}
-          />
-          <HoverPreviewToggle
-            checked={preferences.hoverPreviewShowTranslation}
-            disabled={!enabled}
-            label="翻译"
-            onClick={() => update({ hoverPreviewShowTranslation: !preferences.hoverPreviewShowTranslation })}
-          />
-          <HoverPreviewToggle
-            checked={preferences.hoverPreviewShowNote}
-            disabled={!enabled}
-            label="片段笔记"
-            onClick={() => update({ hoverPreviewShowNote: !preferences.hoverPreviewShowNote })}
-          />
-          <HoverPreviewToggle
-            checked={preferences.hoverPreviewShowAnnotation}
-            disabled={!enabled}
-            label="悬停批注"
-            onClick={() => update({ hoverPreviewShowAnnotation: !preferences.hoverPreviewShowAnnotation })}
-          />
-        </div>
+          <div className="grid gap-3">
+            <section aria-label={mode === 'pdf' ? 'PDF 片段悬停' : '重排悬停'}>
+              <p className="px-2 text-xs font-medium text-muted-foreground">{mode === 'pdf' ? 'PDF 片段' : '重排内容'}</p>
+              <HoverPreviewToggle checked={enabled} label="启用悬停预览" onClick={() => update(
+                mode === 'pdf' ? { hoverPreviewEnabled: !enabled } : { reflowHoverSourceEnabled: !enabled })} />
+              <div className="ml-2 grid gap-0.5 border-l pl-2">
+                {mode === 'pdf' ? <HoverPreviewToggle checked={preferences.hoverPreviewShowRegion} disabled={!enabled}
+                  label="区域高亮" onClick={() => update({ hoverPreviewShowRegion: !preferences.hoverPreviewShowRegion })} /> : null}
+                <HoverPreviewToggle checked={preferences.hoverPreviewShowOriginal} disabled={!enabled}
+                  label="解析后原文" onClick={() => update({ hoverPreviewShowOriginal: !preferences.hoverPreviewShowOriginal })} />
+                <HoverPreviewToggle checked={preferences.hoverPreviewShowTranslation} disabled={!enabled}
+                  label={mode === 'pdf' ? '整段译文' : '译文'}
+                  onClick={() => update({ hoverPreviewShowTranslation: !preferences.hoverPreviewShowTranslation })} />
+                <HoverPreviewToggle checked={preferences.hoverPreviewShowNote} disabled={!enabled}
+                  label="片段笔记" onClick={() => update({ hoverPreviewShowNote: !preferences.hoverPreviewShowNote })} />
+                <HoverPreviewToggle checked={preferences.hoverPreviewShowAnnotation} disabled={!enabled}
+                  label="悬停批注" onClick={() => update({ hoverPreviewShowAnnotation: !preferences.hoverPreviewShowAnnotation })} />
+              </div>
+            </section>
+            {mode === 'pdf' ? <section aria-label="PDF 逐句悬停" className="border-t pt-2">
+              <p className="px-2 text-xs font-medium text-muted-foreground">PDF 逐句</p>
+              <HoverPreviewToggle checked={preferences.pdfSentenceHoverEnabled} label="整句悬停"
+                onClick={() => update({ pdfSentenceHoverEnabled: !preferences.pdfSentenceHoverEnabled })} />
+              <div className="ml-2 grid gap-0.5 border-l pl-2">
+                <HoverPreviewToggle checked={preferences.pdfSentenceHoverShowOriginal}
+                  disabled={!preferences.pdfSentenceHoverEnabled} label="句子原文"
+                  onClick={() => update({ pdfSentenceHoverShowOriginal: !preferences.pdfSentenceHoverShowOriginal })} />
+                <HoverPreviewToggle checked={preferences.pdfSentenceHoverShowTranslation}
+                  disabled={!preferences.pdfSentenceHoverEnabled} label="逐句译文"
+                  onClick={() => update({ pdfSentenceHoverShowTranslation: !preferences.pdfSentenceHoverShowTranslation })} />
+              </div>
+            </section> : null}
+            <section aria-label="其他悬停" className="border-t pt-2">
+              {mode === 'pdf' ? <HoverPreviewToggle checked={preferences.inlineAnnotationHoverEnabled}
+                label="行内批注" onClick={() => update({ inlineAnnotationHoverEnabled: !preferences.inlineAnnotationHoverEnabled })} /> : null}
+              <HoverPreviewToggle checked={preferences.paperReferenceHoverEnabled} label="文内引用悬停"
+                onClick={() => update({ paperReferenceHoverEnabled: !preferences.paperReferenceHoverEnabled })} />
+            </section>
           </div>
         </div>
       </PopoverContent>

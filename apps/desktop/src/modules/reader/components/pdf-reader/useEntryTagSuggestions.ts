@@ -17,7 +17,7 @@ export function useEntryTagSuggestions({ entry, onApplyEntryTagPaths, workspaceR
   const snapshot = useSyncExternalStore(subscribeTagSuggestions, () => readTagSuggestions(key));
   const selectedPaths = useMemo(() => new Set(snapshot.selectedPaths), [snapshot.selectedPaths]);
   const appliedPaths = new Set(entry.tags);
-  const selectedRecommendations = snapshot.recommendations.filter(tag => selectedPaths.has(tag.path) && !appliedPaths.has(tag.path));
+  const selectedRecommendations = snapshot.recommendations.filter(tag => selectedPaths.has(tag.path));
   const disabledReason = !workspaceRoot ? '请先打开资料库。' : entry.status !== 'Parsed' ? 'PDF 解析完成后可以生成推荐标签。'
     : profile === undefined ? '正在读取模型设置…' : !profile ? '请先在设置中配置助手模型。' : null;
   useEffect(() => {
@@ -42,7 +42,7 @@ export function useEntryTagSuggestions({ entry, onApplyEntryTagPaths, workspaceR
     finally { updateTagSuggestions(key, { phase: 'idle' }); }
   };
   const toggleRecommendation = (tag: TagRecommendation) => {
-    if (snapshot.phase !== 'idle' || appliedPaths.has(tag.path)) return;
+    if (snapshot.phase !== 'idle') return;
     const paths = new Set(readTagSuggestions(key).selectedPaths);
     if (paths.has(tag.path)) paths.delete(tag.path); else paths.add(tag.path);
     updateTagSuggestions(key, { selectedPaths: [...paths] }, true);
@@ -54,12 +54,18 @@ export function useEntryTagSuggestions({ entry, onApplyEntryTagPaths, workspaceR
       await onApplyEntryTagPaths(entry.id, paths);
       updateTagSuggestions(key, { selectedPaths: readTagSuggestions(key).selectedPaths.filter(path => !paths.includes(path)) }, true);
       if (live.current && currentKey.current === key) {
-        setOpen(false); notify({ tone: 'success', title: '推荐标签已添加', description: `已添加 ${paths.length} 个标签。` });
+        const addedCount = paths.filter(path => !appliedPaths.has(path)).length;
+        setOpen(false); notify({ tone: 'success', title: '推荐标签已保存', description: addedCount ? `新增 ${addedCount} 个标签，已有标签保持不变。` : '所选标签均已存在，已有标签保持不变。' });
       }
     } catch (caught) { updateTagSuggestions(key, { error: `保存推荐标签失败：${caught instanceof Error ? caught.message : String(caught)}` }); }
     finally { updateTagSuggestions(key, { phase: 'idle' }); }
   };
-  return { apply, generate, busy: snapshot.phase !== 'idle', phase: snapshot.phase, error: snapshot.error,
+  const discard = () => {
+    if (readTagSuggestions(key).phase !== 'idle') return;
+    updateTagSuggestions(key, { recommendations: [], selectedPaths: [], generatedAt: null, error: null }, true);
+    setOpen(false);
+  };
+  return { apply, discard, generate, busy: snapshot.phase !== 'idle', phase: snapshot.phase, error: snapshot.error,
     generatedAt: snapshot.generatedAt, disabledReason, canApply: selectedRecommendations.length > 0 && Boolean(workspaceRoot),
-    dismiss: () => setOpen(false), open, setOpen, recommendations: snapshot.recommendations, selectedPaths, toggleRecommendation };
+    open, setOpen, recommendations: snapshot.recommendations, selectedPaths, toggleRecommendation };
 }

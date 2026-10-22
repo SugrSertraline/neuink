@@ -4,6 +4,26 @@ use serde_json::{json, Value};
 pub(super) fn approval_input(provider: Provider, message: &Value) -> Option<Value> {
     let params = &message["params"];
     match message["method"].as_str()? {
+        "mcpServer/elicitation/request" if provider == Provider::Codex => {
+            let meta = &params["_meta"];
+            // Codex sends MCP tool approvals as elicitations, separately from
+            // command/file approvals. Tool names are optional in the metadata;
+            // the NeuInk MCP server still validates every actual tool call.
+            let own_tool_approval = params["serverName"] == "neuink"
+                && params["mode"] == "form"
+                && meta["codex_approval_kind"] == "mcp_tool_call";
+            let name = if own_tool_approval {
+                meta["tool_name"].as_str().and_then(|name| {
+                    let name = name.strip_prefix("mcp__neuink__").unwrap_or(name);
+                    (!name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))
+                        .then(|| format!("mcp__neuink__{name}"))
+                }).or_else(|| meta["tool_name"].is_null().then(|| "mcp__neuink__".into()))
+            } else {
+                None
+            };
+            Some(json!({"tool_name":name.unwrap_or_else(|| "McpElicitation".into()),
+                "input":meta["tool_params"].as_object().map(|_|meta["tool_params"].clone()).unwrap_or_else(||json!({}))}))
+        }
         "item/commandExecution/requestApproval" => Some(json!({"tool_name":"Bash","input":params})),
         "item/fileChange/requestApproval" => Some(json!({"tool_name":"Edit","input":params})),
         "item/permissions/requestApproval" => {
@@ -39,6 +59,9 @@ pub(super) fn approval_result(provider: Provider, request: &Value, output: &Valu
         .unwrap_or(Value::Null);
     let allow = decision["behavior"] == "allow" && output["isError"] != true;
     match request["method"].as_str().unwrap_or("") {
+        "mcpServer/elicitation/request" if provider == Provider::Codex => {
+            json!({"action":if allow {"accept"} else {"decline"},"content":if allow {json!({})} else {Value::Null}})
+        }
         "session/request_permission" if provider == Provider::Opencode => {
             let option = request["params"]["options"].as_array().and_then(|options| {
                 options.iter().find(|option| {

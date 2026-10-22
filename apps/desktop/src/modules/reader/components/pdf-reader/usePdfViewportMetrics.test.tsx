@@ -121,6 +121,50 @@ describe('usePdfViewportMetrics', () => {
     });
     expect(screen.getByTestId('viewport-width').textContent).toBe('800');
   });
+
+  it('ignores a transient 1px native viewport and restores the actual width without a ResizeObserver callback', () => {
+    render(<ViewportHarness segments={[]} />);
+    const output = screen.getByTestId('viewport-width');
+    expect(output.textContent).toBe('800');
+
+    viewportWidth = 1;
+    act(() => {
+      resizeObserver?.notify();
+      vi.advanceTimersByTime(300);
+    });
+    expect(output.textContent).toBe('800');
+
+    viewportWidth = 1;
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+      flushAnimationFrames();
+    });
+    expect(output.textContent).toBe('800');
+
+    viewportWidth = 620;
+    act(() => {
+      vi.advanceTimersByTime(160);
+      flushAnimationFrames();
+    });
+    expect(output.textContent).toBe('620');
+
+    viewportWidth = 540;
+    act(() => {
+      window.dispatchEvent(new Event('resize'));
+      flushAnimationFrames();
+    });
+    expect(output.textContent).toBe('540');
+  });
+
+  it('cancels a pending width change if the window collapses during minimization', () => {
+    render(<ViewportHarness segments={[]} />);
+    viewportWidth = 760;
+    act(() => resizeObserver?.notify());
+    viewportWidth = 1;
+    act(() => resizeObserver?.notify());
+    act(() => vi.advanceTimersByTime(300));
+    expect(screen.getByTestId('viewport-width').textContent).toBe('800');
+  });
 });
 
 function ViewportHarness({ segments }: { segments: SourceSegment[] }) {

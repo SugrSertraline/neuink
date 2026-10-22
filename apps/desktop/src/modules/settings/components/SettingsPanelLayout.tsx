@@ -35,6 +35,8 @@ type SettingsStateLike = {
 };
 
 type WorkspaceSettingsLike = {
+  data_root?: string | null;
+  legacy_import_notice?: string | null;
   root: string;
   default_root: string;
   custom_root?: string | null;
@@ -78,7 +80,6 @@ export type SettingsPanelLayoutProps = {
   onOpenWorkspace: () => void;
   onOpenMineruClientGuide: () => void;
   onCreateWorkspace: () => void;
-  onMigrateWorkspace: () => void;
   onOpenCurrentWorkspace: () => void;
   onOpenRecentWorkspace: (root: string) => void;
   onForgetRecentWorkspace: (root: string) => void;

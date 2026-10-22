@@ -9,6 +9,14 @@
 - Desktop release artifacts and website deployments must come from `main`; release tags must point to commits already included in `main`. Pull requests targeting `main` may run validation without publishing artifacts.
 - Keep unrelated uncommitted work out of maintenance commits and preserve it when switching branches.
 
+## Local testing preference
+
+- The user wants everyday testing to launch the native development app with `npm --workspace apps/desktop run dev:d-data`, using the existing `D:\NeuInk\data` directory. Do not rebuild or replace `D:\NeuInk\Neuink.exe` after each feature unless explicitly requested.
+- On this Windows workstation, the desktop shortcut `Neuink 开发测试.lnk` runs `apps/desktop/scripts/start-dev-windows.ps1`. It starts the same development workflow in the background and records startup output in `target/desktop-dev/launcher.log`.
+- Close the portable app before starting development against the same data; do not run both simultaneously. Preserve the user's real papers, notes and settings. This is a local development preference, not authorization to merge into `main` or publish a release.
+
+- The Windows development shortcut must show startup progress, restore an existing development window on repeated launch, and report failures with the log path. Keep background consoles hidden and write launcher logs as UTF-8.
+
 ## Code navigation
 
 When a `.codegraph/` directory exists, use CodeGraph before grep/find or broad file reads to locate symbols, callers and current implementation paths. Indexing remains an explicit repository decision.

@@ -265,6 +265,7 @@ export async function answerWithGroundedAgent({
         'Tool and child failures are observations, not completed actions. If a required tool fails or is unavailable, use permitted alternatives or explain the incomplete part; never fabricate evidence, citations or successful writes. An honest limitation answer without citations is permitted when no evidence could be acquired.'
       ].filter(Boolean).join('\n\n'),
       tools: runtime.tools,
+      entryContextReadLimit: plan?.intent === 'paper_search' ? 2 : plan?.intent === 'paper_summary' ? 5 : 6,
       onTurn: onAnswerReset,
       onDelta,
       onReasoningDelta
@@ -285,6 +286,7 @@ export async function answerWithGroundedAgent({
     budget,
     signal: abortSignal,
     maxTurns: agentLoopState.maxTurns,
+    synthesisReserveTurns: ['paper_qa', 'paper_search', 'paper_summary'].includes(plan?.intent ?? '') ? 2 : 0,
     beforeTurn: () => loopGuard.startTurn(),
     isFatal: (error) => error instanceof AgentLoopGuardError,
     toolErrorDiagnostic: assistantErrorDiagnostic,

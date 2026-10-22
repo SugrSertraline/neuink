@@ -16,6 +16,11 @@ afterEach(() => {
 });
 
 describe('ChatMessage performance boundaries', () => {
+  it('hides old assistant replies that contain only a serialized tool call', () => {
+    const raw = '<tool_call><function=search_papers></function></tool_call>';
+    const ui = render(<ChatMessage message={{ ...createMessage(), content: raw }} streaming={false} onOpenSource={() => undefined} />);
+    expect(ui.container.textContent).not.toContain('<tool_call>');
+  });
   it('offers reading consistently for completed replies and not for user, empty or streaming messages', () => {
     const actions = { root: 'root', openReply: vi.fn(), openSource: vi.fn(), addSciverseSource: vi.fn() };
     const show = (message: ConversationMessage, streaming: boolean) => <AssistantReplyActionsContext.Provider value={actions}>
@@ -99,11 +104,11 @@ describe('ChatMessage performance boundaries', () => {
     expect(container.textContent).not.toContain('**Markdown**');
   });
 
-  it('keeps reasoning hidden while streaming and only mounts details on request', () => {
+  it('previews streaming reasoning and keeps full details under the user disclosure control', () => {
     const message = createMessage();
     message.parts = [{ type: 'reasoning', text: '先确认当前上下文，再选择需要调用的工具。' }];
 
-    const { getByRole, getByText, queryByText, rerender } = render(
+    const { getByRole, getByText, getByLabelText, queryByLabelText, rerender } = render(
       <ChatMessage
         message={message}
         streaming
@@ -112,13 +117,27 @@ describe('ChatMessage performance boundaries', () => {
     );
 
     expect(getByRole('button', { name: '展开执行详情' }).getAttribute('aria-expanded')).toBe('false');
-    expect(queryByText('先确认当前上下文，再选择需要调用的工具。')).toBeNull();
+    expect(getByLabelText('思考预览').textContent).toBe('先确认当前上下文，再选择需要调用的工具。');
     fireEvent.click(getByRole('button', { name: '展开执行详情' }));
     expect(getByText('先确认当前上下文，再选择需要调用的工具。')).toBeTruthy();
+    expect(queryByLabelText('思考预览')).toBeNull();
     fireEvent.click(getByRole('button', { name: '收起执行详情' }));
     rerender(<ChatMessage message={{ ...message, content: '更多回答' }} streaming onOpenSource={() => undefined} />);
     expect(getByRole('button', { name: '展开执行详情' }).getAttribute('aria-expanded')).toBe('false');
-    expect(queryByText('先确认当前上下文，再选择需要调用的工具。')).toBeNull();
+    expect(getByLabelText('思考预览')).toBeTruthy();
+    rerender(<ChatMessage message={message} streaming={false} onOpenSource={() => undefined} />);
+    expect(queryByLabelText('思考预览')).toBeNull();
+    fireEvent.click(getByRole('button', { name: '展开执行详情' }));
+    expect(getByText('先确认当前上下文，再选择需要调用的工具。')).toBeTruthy();
+  });
+
+  it('limits the collapsed preview to recent thinking and leaves absent thinking empty', () => {
+    const message = { ...createMessage(), parts: [{ type: 'reasoning' as const, text: '旧内容'.repeat(200) + '\n最新进展' }] };
+    const { getByLabelText, queryByLabelText, rerender } = render(<ChatMessage message={message} streaming onOpenSource={() => undefined} />);
+    expect(getByLabelText('思考预览').textContent?.length).toBeLessThanOrEqual(220);
+    expect(getByLabelText('思考预览').textContent).toContain('最新进展');
+    rerender(<ChatMessage message={createMessage()} streaming onOpenSource={() => undefined} />);
+    expect(queryByLabelText('思考预览')).toBeNull();
   });
 
   it('collapses tool traces and memory together without hiding answers or errors', () => {

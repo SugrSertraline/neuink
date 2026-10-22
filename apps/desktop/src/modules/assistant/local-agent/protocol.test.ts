@@ -10,6 +10,33 @@ function setup() {
   return {stream,event,callbacks,answer:() => answer};
 }
 describe('Claude stream protocol', () => {
+  it('combines thinking block starts, deltas and final suffixes without repeating snapshots', () => {
+    const s = setup();
+    s.event({type:'message_start',message:{id:'m1'}});
+    s.event({type:'content_block_start',index:0,content_block:{type:'thinking',thinking:'先'}});
+    s.event({type:'content_block_delta',index:0,delta:{type:'thinking_delta',thinking:'查原文'}});
+    const complete = {type:'assistant',uuid:'thought1',message:{id:'m1',content:[{type:'thinking',thinking:'先查原文，再核对引用。'}]}};
+    s.stream.consume(complete); s.stream.consume(complete);
+    s.event({type:'content_block_stop',index:0});
+    s.event({type:'content_block_start',index:2,content_block:{type:'thinking',thinking:''}});
+    s.event({type:'content_block_delta',index:2,delta:{type:'thinking_delta',thinking:'整理结论。'}});
+    s.stream.consume({type:'assistant',uuid:'thought2',message:{id:'m1',content:[{type:'thinking',thinking:'整理结论。'}]}});
+    s.event({type:'message_start',message:{id:'m2'}});
+    s.event({type:'content_block_delta',index:0,delta:{type:'thinking_delta',thinking:'检查最终回答。'}});
+    expect(s.callbacks.reasoning.mock.calls.flat().join('')).toBe('先查原文，再核对引用。\n\n整理结论。\n\n检查最终回答。');
+    expect(s.answer()).toBe('');
+  });
+  it('supports completed thinking without partial events and ignores signatures, redacted and child content', () => {
+    const s = setup();
+    const complete = {type:'assistant',uuid:'thought1',message:{id:'m1',content:[{type:'thinking',thinking:'已返回的思考',signature:'private-signature'}]}};
+    s.stream.consume(complete); s.stream.consume(complete);
+    s.stream.consume({type:'assistant',uuid:'thought2',message:{id:'m1',content:[{type:'thinking',thinking:'下一段'}]}});
+    s.stream.consume({...complete,uuid:'child',parent_tool_use_id:'tool-child'});
+    s.stream.consume({type:'assistant',uuid:'redacted',message:{content:[{type:'redacted_thinking',data:'encrypted-text'}]}});
+    s.event({type:'content_block_delta',delta:{type:'signature_delta',signature:'private-signature'}});
+    expect(s.callbacks.reasoning.mock.calls.flat().join('')).toBe('已返回的思考\n\n下一段');
+    expect(s.answer()).toBe('');
+  });
   it('does not duplicate completed blocks and resets at the next model step', () => {
     const s = setup();
     s.event({type:'message_start',message:{id:'m1'}});

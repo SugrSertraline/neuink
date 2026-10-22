@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/tauri.cjs dev",
+    "dev:d-data": "node scripts/dev-d-data.cjs",
+    "audit:sentences": "node scripts/audit-sentence-alignment.mjs",
     "tauri": "node scripts/tauri.cjs",
     "dev:frontend": "vite --host 127.0.0.1 --port 1420",
     "build": "npm run build:frontend",
@@ -16,7 +18,7 @@
     "verify:browser-reader": "node scripts/browser-reader-resources.cjs --smoke-test",
     "prepare:reader-licenses": "node scripts/reader-licenses.cjs --prepare",
     "verify:reader-licenses": "node scripts/reader-licenses.cjs",
-    "test:packaging": "node --test scripts/onboarding-resources.test.cjs scripts/browser-reader-resources.test.cjs scripts/reader-licenses.test.cjs scripts/embedding-resources.test.cjs scripts/release-artifacts.test.cjs scripts/macos-artifacts.test.cjs scripts/release-version.test.cjs",
+    "test:packaging": "node --test scripts/onboarding-resources.test.cjs scripts/browser-reader-resources.test.cjs scripts/reader-licenses.test.cjs scripts/embedding-resources.test.cjs scripts/release-artifacts.test.cjs scripts/macos-artifacts.test.cjs scripts/release-version.test.cjs scripts/portable-layout.test.cjs",
     "test:frontend": "vitest run",
     "preview": "vite preview"
   },

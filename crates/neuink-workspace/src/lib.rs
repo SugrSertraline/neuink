@@ -6,6 +6,7 @@ mod downloaded_pdf;
 pub mod error;
 pub mod export;
 pub mod layout;
+pub mod legacy_import;
 pub mod note;
 pub mod note_image;
 pub mod note_catalog;

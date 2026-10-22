@@ -63,6 +63,7 @@ import { NoteDiffLines, NoteRenderedContent } from '../review/NoteDiffLines';
 import { buildRenderedNoteDiff } from '../review/renderedNoteDiff';
 import { canReviewNoteProposal } from '../review/noteReviewDiff';
 import { ASSISTANT_ACTION_INCOMPLETE, assistantToolErrorNotice, formatAssistantError, formatAssistantToolSummary, useAssistantDebug } from '@/shared/lib/assistantDebug';
+import { hideRawModelToolCall } from '../sdk/modelToolCallMarkup';
 
 type ChatMessageProps = {
   reading?: boolean;
@@ -109,7 +110,9 @@ function ChatMessageComponent({
 }: ChatMessageProps) {
   const readingActions = useAssistantReading();
   const messageParts = message.parts ?? [];
-  const content = message.content || textFromParts(messageParts);
+  const content = message.role === 'assistant'
+    ? hideRawModelToolCall(message.content || textFromParts(messageParts))
+    : message.content || textFromParts(messageParts);
   const resolvedToolEvents =
     toolEvents.length > 0 ? toolEvents : toolEventsFromParts(messageParts);
   const diagrams = resolvedToolEvents.filter(event => event.status === 'done' && event.diagram);
@@ -166,7 +169,13 @@ function ChatMessageComponent({
       </div>
       {isPlanningRequest ? <div className="mb-1 text-[11px] text-muted-foreground">仅规划 · 只读</div> : null}
       {message.role === 'assistant' && (streaming || resolvedAgentRun || resolvedPlan || resolvedMemory || resolvedToolEvents.length > 0 || reasoning) ? (
-        <ExecutionDetails key={message.message_id} awaitingApproval={awaitingApproval} streaming={streaming} hasAnswer={Boolean(content.trim())} run={resolvedAgentRun} events={resolvedToolEvents}>
+        <ExecutionDetails key={message.message_id} awaitingApproval={awaitingApproval} streaming={streaming} hasAnswer={Boolean(content.trim())} run={resolvedAgentRun} events={resolvedToolEvents} reasoning={reasoning}>
+      {reasoning ? (
+        <section className="text-[11px] leading-4 text-muted-foreground" aria-label="思考过程">
+          <div className="mb-1 font-medium">思考过程</div>
+          <div className="whitespace-pre-wrap break-words">{reasoning}</div>
+        </section>
+      ) : null}
       {resolvedAgentRun ? (
         <AgentRunSummary run={resolvedAgentRun} errorNotice={toolErrorNotice} onRetry={onRetryAgentRun} />
       ) : null}
@@ -176,12 +185,6 @@ function ChatMessageComponent({
       ) : null}
       {resolvedToolEvents.length > 0 ? (
         <ToolTrace events={resolvedToolEvents} errorNotice={toolErrorNotice} />
-      ) : null}
-      {reasoning ? (
-        <section className="text-[11px] leading-4 text-muted-foreground" aria-label="思考过程">
-          <div className="mb-1 font-medium">思考过程</div>
-          <div className="whitespace-pre-wrap break-words">{reasoning}</div>
-        </section>
       ) : null}
         </ExecutionDetails>
       ) : null}

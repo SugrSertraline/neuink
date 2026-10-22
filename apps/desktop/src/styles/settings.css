@@ -16,7 +16,7 @@
 .settings-search-results { width: 100%; max-width: 752px; margin-inline: auto; }
 .settings-page-head > :first-child { flex-shrink: 0; }
 .settings-page-head > :last-child { min-width: 0; flex: 1; max-width: 480px; margin-left: auto; }
-.settings-model-list { container: model-list / inline-size; border-block: 1px solid var(--border); }
+.settings-model-list { container: model-list / inline-size; }
 .settings-model-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px 16px; padding-block: 12px; }
 .settings-model-row + .settings-model-row { border-top: 1px solid var(--border); }
 .settings-model-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; }
@@ -42,16 +42,18 @@
   .settings-agent-master-detail { grid-template-columns: 280px minmax(0, 1fr); }
   .settings-mcp-fields { grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) auto; }
 }
-.settings-group { width: 100%; max-width: 720px; padding-block: 12px; }
-.settings-group + .settings-group { border-top: 1px solid var(--border); }
+.settings-group { width: 100%; max-width: 720px; padding-block: 16px; }
+.settings-form > .settings-group + .settings-group { border-top: 1px solid var(--border); }
 .settings-service + .settings-service { border-top: 1px solid var(--border); }
 .settings-service .settings-row { grid-template-columns: minmax(0,1fr) auto; }
-.settings-row { display: grid; width: 100%; max-width: 720px; grid-template-columns: minmax(0, 420px) auto; align-items: center; justify-content: start; gap: 16px; padding-block: 10px; border-bottom: 1px solid var(--border); }
-.settings-row:last-child { border-bottom: 0; }
+.settings-row { display: grid; width: 100%; max-width: 720px; grid-template-columns: minmax(0, 420px) auto; align-items: center; justify-content: start; gap: 16px; padding-block: 10px; }
 .settings-row-control { flex-shrink: 0; max-width: 100%; }
 .settings-row-select > .settings-row-control { width: 280px; min-width: 0; }
 .settings-checkbox-grid { display: grid; width: 100%; max-width: 480px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 120px), 1fr)); column-gap: 16px; }
-.settings-advanced { width: 100%; max-width: 720px; min-width: 0; margin: 12px auto; padding-block: 8px; border-block: 1px solid var(--border); }
+.settings-advanced { width: 100%; max-width: 720px; min-width: 0; margin: 12px auto; padding-block: 8px; }
+.settings-subsection { min-width: 0; margin-top: 12px; padding-block: 8px; }
+.settings-subheading { font-size: 13px; font-weight: 600; line-height: 20px; }
+.settings-dependent { margin-left: 12px; padding-block: 4px; }
 .sciverse-settings { container: sciverse-settings / inline-size; }
 .sciverse-token-controls { display: flex; min-width: 0; flex-direction: column; gap: 8px; }
 @container sciverse-settings (min-width: 640px) {

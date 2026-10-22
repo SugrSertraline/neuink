@@ -20,6 +20,9 @@ describe('ReaderToolbar', () => {
       closeSegmentOverlayOnBlankClick: true,
       closeSegmentOverlayOnSameSegmentClick: true,
       hoverPreviewEnabled: true,
+      pdfSentenceHoverEnabled: true,
+      pdfSentenceHoverShowOriginal: true,
+      pdfSentenceHoverShowTranslation: true,
       pdfHoverPreviewFontSize: 'standard' as const,
       pdfHoverPreviewSize: 'standard' as const,
       hoverPreviewShowAnnotation: true,
@@ -86,6 +89,30 @@ describe('ReaderToolbar', () => {
       inlineAnnotationHoverEnabled: true, hoverPreviewShowAnnotation: false,
     }));
   });
+  it('keeps whole-sentence hover independent of the PDF preview switch', () => {
+    const onChange = vi.fn();
+    const ui = renderWithTooltipProvider(<HoverPreviewControls preferences={buildPreferences()} onChange={onChange} />);
+    fireEvent.click(screen.getByRole('button', { name: '悬停配置' }));
+    fireEvent.click(screen.getByRole('switch', { name: '整句悬停' }));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ pdfSentenceHoverEnabled: false, hoverPreviewEnabled: true }));
+    ui.rerender(<TooltipProvider><HoverPreviewControls preferences={buildPreferences({ hoverPreviewEnabled: false })} onChange={onChange} /></TooltipProvider>);
+    const sentenceSwitch = screen.getByRole('switch', { name: '整句悬停' }) as HTMLButtonElement;
+    expect(sentenceSwitch.disabled).toBe(false);
+    fireEvent.click(sentenceSwitch);
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ pdfSentenceHoverEnabled: false, hoverPreviewEnabled: false }));
+  });
+  it('configures sentence original and translation independently from block preview', () => {
+    const onChange = vi.fn();
+    renderWithTooltipProvider(<HoverPreviewControls preferences={buildPreferences({ hoverPreviewEnabled: false })} onChange={onChange} />);
+    fireEvent.click(screen.getByRole('button', { name: '悬停配置' }));
+    const sentenceTranslation = screen.getByRole('switch', { name: '逐句译文' }) as HTMLButtonElement;
+    expect(sentenceTranslation.disabled).toBe(false);
+    fireEvent.click(sentenceTranslation);
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      hoverPreviewEnabled: false, pdfSentenceHoverShowOriginal: true, pdfSentenceHoverShowTranslation: false,
+    }));
+    expect((screen.getByRole('switch', { name: '整段译文' }) as HTMLButtonElement).disabled).toBe(true);
+  });
   it('changes reference hover without changing segment or annotation preview', () => {
     const onChange = vi.fn();
     renderWithTooltipProvider(<HoverPreviewControls preferences={buildPreferences()} onChange={onChange} />);
@@ -94,6 +121,28 @@ describe('ReaderToolbar', () => {
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({
       paperReferenceHoverEnabled: false, hoverPreviewEnabled: true, inlineAnnotationHoverEnabled: true,
     }));
+  });
+
+  it('lets the PDF reader save or discard recommendations that are already on the entry', () => {
+    const onApply = vi.fn();
+    const onDiscard = vi.fn();
+    const onToggle = vi.fn();
+    const existing = { path: '已有标签', confidence: 0.9, reason: '相关', dimension: '主题', source: 'existing' as const };
+    renderWithTooltipProvider(<ReaderToolbar entry={{ ...buildEntry(), tags: ['已有标签'] }} pageCount={1} segmentCount={1}
+      readerPreferences={buildPreferences()} zoom={1} recommendedTags={[existing]} selectedRecommendedTagPaths={['已有标签']}
+      tagSuggestionBusy={false} tagSuggestionsOpen translation={null} translationBusy={false}
+      onApplyRecommendedTags={onApply} onDismissRecommendedTags={onDiscard} onRecommendedTagToggle={onToggle}
+      onTagSuggestionsOpenChange={vi.fn()} onExportTranslation={vi.fn()} onPauseTranslation={vi.fn()}
+      onOpenTranslationTask={vi.fn()} onReaderPreferencesChange={vi.fn()} onZoomIn={vi.fn()} onZoomReset={vi.fn()} onZoomOut={vi.fn()} />);
+    const option = screen.getByRole('button', { name: /已有标签/ });
+    expect((option as HTMLButtonElement).disabled).toBe(false);
+    expect(option.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(option);
+    expect(onToggle).toHaveBeenCalledWith(existing);
+    fireEvent.click(screen.getByRole('button', { name: '保存推荐' }));
+    expect(onApply).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: '丢弃推荐' }));
+    expect(onDiscard).toHaveBeenCalledOnce();
   });
 
   it('uses a single compact row in parallel reading and keeps navigation, search, zoom and export operable', () => {
@@ -115,7 +164,7 @@ describe('ReaderToolbar', () => {
           onApplyRecommendedTags={vi.fn()} onDismissRecommendedTags={vi.fn()} onRecommendedTagToggle={vi.fn()}
           onTagSuggestionsOpenChange={vi.fn()} onExportTranslation={vi.fn()} onExportPaper={onExportPaper}
           onPauseTranslation={onPauseTranslation} onCancelTranslation={onCancelTranslation} onOpenTranslationTask={onOpenTranslationTask}
-          onZoomIn={onZoomIn} onZoomOut={vi.fn()} onCurrentPageChange={onCurrentPageChange}
+          onZoomIn={onZoomIn} onZoomReset={vi.fn()} onZoomOut={vi.fn()} onCurrentPageChange={onCurrentPageChange}
           onReaderPreferencesChange={onReaderPreferencesChange} onSearchQueryChange={onSearchQueryChange} onSearchNext={onSearchNext} />
       </ReadingSessionContext.Provider>
     );
@@ -136,12 +185,12 @@ describe('ReaderToolbar', () => {
     fireEvent.click(screen.getByRole('button', { name: '下一个匹配' }));
     expect(onSearchNext).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole('button', { name: '查找 PDF 文字' }));
-    fireEvent.click(screen.getByRole('button', { name: '缩放与阅读显示' }));
     fireEvent.click(screen.getByRole('button', { name: '放大' }));
     expect(onZoomIn).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: '阅读显示' }));
     fireEvent.click(screen.getByRole('button', { name: '切换为双页' }));
     expect(onReaderPreferencesChange).toHaveBeenCalledWith(expect.objectContaining({ pageDisplayMode: 'dual' }));
-    fireEvent.click(screen.getByRole('button', { name: '缩放与阅读显示' }));
+    fireEvent.click(screen.getByRole('button', { name: '阅读显示' }));
     const openTools = () => fireEvent.keyDown(screen.getByRole('button', { name: '更多 PDF 操作' }), { key: 'Enter' });
     openTools();
     fireEvent.click(screen.getByRole('menuitem', { name: '导出论文内容' }));
@@ -167,7 +216,7 @@ describe('ReaderToolbar', () => {
       recommendedTags={[]} selectedRecommendedTagPaths={[]} tagSuggestionBusy={false} tagSuggestionsOpen={false}
       translation={paused} translationBusy={false} onResumeTranslation={onResume} onCancelTranslation={onCancel}
       onApplyRecommendedTags={vi.fn()} onDismissRecommendedTags={vi.fn()} onRecommendedTagToggle={vi.fn()} onTagSuggestionsOpenChange={vi.fn()}
-      onExportTranslation={vi.fn()} onPauseTranslation={vi.fn()} onOpenTranslationTask={vi.fn()} onReaderPreferencesChange={vi.fn()} onZoomIn={vi.fn()} onZoomOut={vi.fn()} />;
+      onExportTranslation={vi.fn()} onPauseTranslation={vi.fn()} onOpenTranslationTask={vi.fn()} onReaderPreferencesChange={vi.fn()} onZoomIn={vi.fn()} onZoomReset={vi.fn()} onZoomOut={vi.fn()} />;
     renderWithTooltipProvider(compact ? <ReadingSessionContext.Provider value={{ active: true, onReady: vi.fn() }}>{content}</ReadingSessionContext.Provider> : content);
     if (compact) fireEvent.keyDown(screen.getByRole('button', { name: '更多 PDF 操作' }), { key: 'Enter' });
     fireEvent.click(screen.getByRole(compact ? 'menuitem' : 'button', { name: '继续翻译' }));
@@ -206,7 +255,7 @@ describe('ReaderToolbar', () => {
         onRecommendedTagToggle={() => {}}
         onTagSuggestionsOpenChange={() => {}}
         onZoomIn={onZoomIn}
-        onZoomOut={onZoomOut}
+        onZoomReset={vi.fn()} onZoomOut={onZoomOut}
       />
     );
 
@@ -218,8 +267,8 @@ describe('ReaderToolbar', () => {
     expect(screen.getByText('已解析')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: '翻译任务' }));
-    fireEvent.click(screen.getByTitle('缩小'));
-    fireEvent.click(screen.getByTitle('放大'));
+    fireEvent.click(screen.getByTitle('缩小 1%'));
+    fireEvent.click(screen.getByTitle('放大 1%'));
     expect(onOpenTranslationTask).toHaveBeenCalledOnce();
     expect(onZoomOut).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole('button', { name: '导出论文内容' }));
@@ -251,7 +300,7 @@ describe('ReaderToolbar', () => {
         onRecommendedTagToggle={() => {}}
         onTagSuggestionsOpenChange={() => {}}
         onZoomIn={() => {}}
-        onZoomOut={() => {}}
+        onZoomReset={vi.fn()} onZoomOut={() => {}}
       />
     );
 
@@ -286,7 +335,7 @@ describe('ReaderToolbar', () => {
         onRecommendedTagToggle={() => {}}
         onTagSuggestionsOpenChange={() => {}}
         onZoomIn={() => {}}
-        onZoomOut={() => {}}
+        onZoomReset={vi.fn()} onZoomOut={() => {}}
       />
     );
 
@@ -317,7 +366,7 @@ describe('ReaderToolbar', () => {
         onRecommendedTagToggle={() => {}}
         onTagSuggestionsOpenChange={() => {}}
         onZoomIn={() => {}}
-        onZoomOut={() => {}}
+        onZoomReset={vi.fn()} onZoomOut={() => {}}
       /></ReadingViewSession>
     );
 
@@ -377,7 +426,7 @@ describe('ReaderToolbar', () => {
         onStartPdfParse={onStartPdfParse}
         onTagSuggestionsOpenChange={() => {}}
         onZoomIn={() => {}}
-        onZoomOut={() => {}}
+        onZoomReset={vi.fn()} onZoomOut={() => {}}
       />
     );
 
@@ -431,7 +480,7 @@ describe('ReaderToolbar', () => {
         onRecommendedTagToggle={() => {}}
         onTagSuggestionsOpenChange={() => {}}
         onZoomIn={() => {}}
-        onZoomOut={() => {}}
+        onZoomReset={vi.fn()} onZoomOut={() => {}}
       />
     );
 
@@ -473,7 +522,7 @@ describe('ReaderToolbar', () => {
         onRecommendedTagToggle={() => {}}
         onTagSuggestionsOpenChange={() => {}}
         onZoomIn={() => {}}
-        onZoomOut={() => {}}
+        onZoomReset={vi.fn()} onZoomOut={() => {}}
       />
     );
 
@@ -512,7 +561,7 @@ describe('ReaderToolbar', () => {
         onRetryPdfParse={onRetryPdfParse}
         onTagSuggestionsOpenChange={() => {}}
         onZoomIn={() => {}}
-        onZoomOut={() => {}}
+        onZoomReset={vi.fn()} onZoomOut={() => {}}
       />
     );
 

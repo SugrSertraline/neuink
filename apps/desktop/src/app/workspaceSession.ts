@@ -1,9 +1,10 @@
 import type { EntryMeta, TagMeta } from '@/shared/types/domain';
+import { readWorkspaceStorage, workspaceStorageIdentity } from '@/shared/lib/workspaceStorageIdentity';
 import { initialWorkspaceSurfaceLayout, surfaceKey, type WorkspaceSurface, type WorkspaceSurfaceLayout } from './workspaceSurface';
 
 const VERSION = 1;
 const MAX_TABS = 80;
-const storageKey = (root: string) => `neuink.workspace.session:${root}`;
+const storageKey = (root: string) => `neuink.workspace.session:${workspaceStorageIdentity(root)}`;
 type Catalog = { entries: Pick<EntryMeta, 'id' | 'pdf' | 'contents'>[]; tags: Pick<TagMeta, 'id'>[] };
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 const id = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 512;
@@ -81,7 +82,7 @@ function normalizeLayout(value: Record<string, unknown>, catalog?: Catalog): Wor
 
 export function readWorkspaceSession(root: string, catalog: Catalog): WorkspaceSurfaceLayout {
   try {
-    const raw = window.localStorage.getItem(storageKey(root));
+    const raw = readWorkspaceStorage(storageKey(root));
     if (!raw || raw.length > 256_000) return initialWorkspaceSurfaceLayout;
     const value: unknown = JSON.parse(raw);
     return record(value) && value.version === VERSION ? normalizeLayout(value, catalog) : initialWorkspaceSurfaceLayout;

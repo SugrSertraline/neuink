@@ -1100,7 +1100,7 @@ export function AssistantPanel({
 
           {!selectedProfile ? (
             <div className="mt-2 rounded-md border bg-muted/30 p-2 text-xs leading-5 text-muted-foreground">
-              {usingLocalAgent ? !localAgentEnabled ? '本地 Agent 已关闭，请在设置 → 工具与扩展中启用。'
+              {usingLocalAgent ? !localAgentEnabled ? '本地 Agent 已关闭，请在设置 → 检索与工具中启用。'
                 : localDetection?.message ?? `正在检测 ${localProvider ? localAgentName(localProvider) : '本地 Agent'}…` : '请先在设置中配置模型或启用本地 Agent。'}
             </div>
           ) : null}
@@ -1120,27 +1120,29 @@ export function AssistantPanel({
             </div>
           ) : null}
 
-          <AssistantConversationHistory
-            busy={busy}
-            runningConversationIds={[...backgroundRuns.flatMap(run => run.conversationId ? [run.conversationId] : []),
-              ...messageQueues.flatMap(queue => queue.conversationId ? [queue.conversationId] : [])]}
-            conversationId={conversation?.id ?? null}
-            error={historyError}
-            items={visibleConversations}
-            loading={historyLoading}
-            open={historyOpen}
-            onClose={() => setHistoryOpen(false)}
-            onDelete={setConversationPendingDelete}
-            onExport={(item) => void exportConversationHistory(item)}
-            onOpen={(conversationId) => void openConversation(conversationId)}
-            onRename={(item) => {
-              setConversationRenameValue(item.title);
-              setConversationPendingRename(item);
-            }}
-          />
           <AssistantBackgroundTasks runs={backgroundRuns} currentConversationId={conversation?.id ?? null}
             onOpen={id => void openConversation(id)} onStop={stopAssistantBackgroundRun} />
         </div>
+
+        {/* Keep the overlay anchored to the full panel: glass hover makes the toolbar positioned. */}
+        <AssistantConversationHistory
+          busy={busy}
+          runningConversationIds={[...backgroundRuns.flatMap(run => run.conversationId ? [run.conversationId] : []),
+            ...messageQueues.flatMap(queue => queue.conversationId ? [queue.conversationId] : [])]}
+          conversationId={conversation?.id ?? null}
+          error={historyError}
+          items={visibleConversations}
+          loading={historyLoading}
+          open={historyOpen}
+          onClose={() => setHistoryOpen(false)}
+          onDelete={setConversationPendingDelete}
+          onExport={(item) => void exportConversationHistory(item)}
+          onOpen={(conversationId) => void openConversation(conversationId)}
+          onRename={(item) => {
+            setConversationRenameValue(item.title);
+            setConversationPendingRename(item);
+          }}
+        />
 
         <div className="assistant-message-layout relative min-h-0 min-w-0 overflow-hidden">
           <AssistantMessageList

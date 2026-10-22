@@ -1,6 +1,5 @@
 import {
   Check,
-  ClipboardCopy,
   Loader2,
   Send,
   Star
@@ -22,6 +21,8 @@ import { describeTranslationFailure } from '../../translation/translationErrorMe
 import { ReadingSelectionToolbarControls } from './ReadingSelectionToolbarControls';
 import { ReadingSelectionToolbarContext } from './readingSelectionToolbarContext';
 import { useSelectionToolbarPosition } from './useSelectionToolbarPosition';
+import { SelectionTranslationPanel } from './SelectionTranslationPanel';
+import type { ApplyTextSelectionAnnotation } from './textSelectionAnnotation';
 export { calculateFloatingToolbarLayout } from './selectionToolbarLayout';
 
 const HIGHLIGHT_COLORS: Array<{
@@ -48,7 +49,7 @@ export type PdfTextSelectionToolbarProps = {
   autoTranslate?: boolean;
   visible?: boolean;
   pending: PendingPdfTextSelection | null;
-  onApply?: (input: { content: string; importance: AnnotationImportance; segment: SourceSegment; selection: AnnotationTextSelection }) => Promise<void> | void;
+  onApply?: ApplyTextSelectionAnnotation;
   onClose: () => void;
   onTranslate?: (input: { segment: SourceSegment; text: string }) => Promise<string>;
   onAsk?: (input: { segment: SourceSegment; text: string }, intent: 'ask' | 'explain') => void;
@@ -75,6 +76,8 @@ export function PdfTextSelectionToolbarContent({
   const [panel, setPanel] = useState<ExpandedPanel>(null);
   const [comment, setComment] = useState('');
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const saveRequestRef = useRef<symbol | null>(null);
   const [translating, setTranslating] = useState(false);
   const [translation, setTranslation] = useState<string | null>(null);
   const [translationError, setTranslationError] = useState<string | null>(null);
@@ -93,6 +96,8 @@ export function PdfTextSelectionToolbarContent({
     position.reset();
     retained.current = null;
     translationRequestRef.current += 1;
+    saveRequestRef.current = null;
+    setSaving(false);
     onClose();
   };
   const closeRef = useRef(close);
@@ -115,11 +120,12 @@ export function PdfTextSelectionToolbarContent({
     window.addEventListener('neuink:reader-surface-change', dismiss);
     return () => {
       translationRequestRef.current += 1;
+      saveRequestRef.current = null;
       window.removeEventListener('neuink:reader-surface-change', dismiss);
     };
   }, []);
   const selectionKey = pending
-    ? `${pending.segment.uid}:${pending.selection.page_idx}:${pending.selection.text}`
+    ? JSON.stringify([pending.segment.uid, pending.selection.page_idx, pending.selection.text, pending.selection.rects])
     : '';
   const selectionKeyRef = useRef(selectionKey);
   selectionKeyRef.current = selectionKey;
@@ -132,6 +138,8 @@ export function PdfTextSelectionToolbarContent({
     setTranslationError(null);
     setTranslating(false);
     setSaving(false);
+    setSaveError(null);
+    saveRequestRef.current = null;
     setColor('yellow');
     setImportance('normal');
     if (!selectionKey) {
@@ -181,25 +189,39 @@ export function PdfTextSelectionToolbarContent({
   // Translation is intentionally non-blocking: highlighting, annotation and copy
   // remain available while the selected text is being translated.
   const busy = saving || !incomingPending;
-  const apply = async (content: string) => {
-    if (!onApply || !incomingPending) return;
+  const apply = async (content: string, contentMode?: 'append') => {
+    if (!onApply || !incomingPending || saveRequestRef.current) return;
     const applyingSelection = selectionKey;
+    const request = Symbol();
+    saveRequestRef.current = request;
+    const isCurrent = () => saveRequestRef.current === request && selectionKeyRef.current === applyingSelection;
     setSaving(true);
+    setSaveError(null);
     try {
-      await onApply({
+      const saved = await onApply({
         content: content.trim(),
+        ...(contentMode ? { contentMode } : {}),
         importance,
         segment: pending.segment,
         selection: { ...pending.selection, color }
       });
-      if (selectionKeyRef.current !== applyingSelection) return;
+      if (!isCurrent()) return;
+      if (saved === false) {
+        setSaveError('批注保存失败，请重试。');
+        return;
+      }
       if (position.pinned) {
         setPanel(null);
         setComment('');
         onClose();
       } else close();
+    } catch {
+      if (isCurrent()) setSaveError('批注保存失败，请重试。');
     } finally {
-      if (selectionKeyRef.current === applyingSelection) setSaving(false);
+      if (isCurrent()) {
+        saveRequestRef.current = null;
+        setSaving(false);
+      }
     }
   };
   const translate = async () => {
@@ -304,29 +326,12 @@ export function PdfTextSelectionToolbarContent({
       </div> : null}
 
       {panel === 'translation' ? (
-        <div className="mt-2 grid gap-2 border-t pt-2">
-          <div className="text-[11px] font-semibold text-muted-foreground">选中文字翻译</div>
-          {translationError ? <p role="alert" className="text-xs text-destructive">{translationError}，可点击“重试翻译”。</p> : null}
-          <div className="max-h-36 overflow-auto whitespace-pre-wrap rounded-md bg-muted/50 p-2 text-sm leading-6">
-            {translating ? (
-              <span className="inline-flex items-center gap-2 text-muted-foreground">
-                <Loader2 className="animate-spin" size={14} />正在翻译选中文字…
-              </span>
-            ) : translation || '暂无译文'}
-          </div>
-          {translation ? (
-            <div className="flex justify-end">
-              <button
-                className="inline-flex h-7 items-center gap-1 rounded border px-2 text-xs hover:bg-muted"
-                type="button"
-                onClick={() => void copy(translation, '译文已复制')}
-              >
-                <ClipboardCopy size={13} />复制译文
-              </button>
-            </div>
-          ) : null}
-        </div>
+        <SelectionTranslationPanel translation={translation} error={translationError} translating={translating}
+          saving={saving} disabled={busy} onCopy={text => void copy(text, '译文已复制')}
+          onAnnotate={onApply ? text => void apply(text, 'append') : undefined} />
       ) : null}
+
+      {saveError ? <p role="alert" className="mt-2 text-xs text-destructive">{saveError}</p> : null}
 
       {onApply && panel === 'annotation' ? (
         <div data-material="annotation-paper" data-paper-color={color} className="mt-2 grid gap-2 border-t pt-2">

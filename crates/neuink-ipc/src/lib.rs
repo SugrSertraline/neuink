@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod storage;
 
 pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     let handler: Box<dyn Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync> =
@@ -39,7 +40,6 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
             commands::workspace::forget_recent_workspace,
             commands::workspace::get_workspace_settings,
             commands::workspace::inspect_workspace_path,
-            commands::workspace::migrate_workspace_root,
             commands::workspace::open_dev_workspace,
             commands::workspace::reset_workspace_root,
             commands::workspace::set_workspace_root,
@@ -80,6 +80,7 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
             commands::entry::submit_queued_pdf_parse,
             commands::entry::update_note,
             commands::entry::update_entry_meta,
+            commands::entry::apply_entry_tag_paths,
             commands::annotation::list_annotations,
             commands::annotation::create_annotation,
             commands::annotation::update_annotation,

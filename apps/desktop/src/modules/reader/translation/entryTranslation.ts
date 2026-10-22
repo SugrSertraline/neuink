@@ -16,7 +16,7 @@ import type { SourceSegment } from '@/shared/types/domain';
 import { runLocalBackgroundJob } from '@/shared/lib/localBackgroundJobs';
 
 import { createNeuinkModel, generationSettings } from '../../assistant/sdk/provider';
-import { singleEnglishWord, translateLocalEnglishWord } from './localEnglishLexicon';
+import { expandEnglishLigatures, singleEnglishWord, translateLocalEnglishWord } from './localEnglishLexicon';
 
 const MAX_PAPER_CONTEXT_BUDGET = 28_000;
 const MAX_BATCH_CHAR_BUDGET = 7_500;
@@ -44,11 +44,12 @@ export async function translateTextSelection({
   root: string | null;
   text: string;
 }) {
-  const sourceText = text.trim();
-  if (!sourceText) {
+  const expandedText = expandEnglishLigatures(text.trim());
+  const word = singleEnglishWord(expandedText);
+  const sourceText = word ?? expandedText;
+  if (!/[\p{L}\p{N}]/u.test(sourceText)) {
     throw new Error('没有可翻译的文字。');
   }
-  const word = singleEnglishWord(sourceText);
   const localTranslation = word ? await translateLocalEnglishWord(word) : null;
   if (localTranslation) return localTranslation;
   return runLocalBackgroundJob({

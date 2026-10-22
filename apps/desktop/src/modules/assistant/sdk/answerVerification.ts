@@ -4,6 +4,7 @@ import { ASSISTANT_READ_FAILURES } from '@/shared/lib/assistantReadFailure';
 import { paperPresentationError, paperRecords, presentedPaperRecords } from '../research/paperPresentation';
 import { citationCorrection, matchedExternalCitationUrls, returnedExternalCitationUrls, taskVerificationCorrection } from './citationContract';
 import { hasConfirmedPaperImportOnly } from './researchCompletion';
+import { isRawModelToolCall } from './modelToolCallMarkup';
 
 /** The same evidence/completion contract applies to SDK and native Agent answers. */
 export function answerVerification({ answer, question, plan, sources, events, observations,
@@ -13,6 +14,10 @@ export function answerVerification({ answer, question, plan, sources, events, ob
   observations: Array<{ toolName: string; output: unknown }>;
   hasProposals: boolean; availabilityNotes: string[]; missing?: string[];
 }): { message: string; correction: string } | undefined {
+  if (isRawModelToolCall(answer)) return {
+    message: ASSISTANT_READ_FAILURES.contract,
+    correction: '上一次输出的是原始工具调用标记，不是回答。请根据已有工具结果直接回答用户，并按实际来源添加引用；不要输出 <tool_call> 标记。'
+  };
   const records = paperRecords(events.flatMap(event => event.status === 'done' ? event.researchPapers ?? [] : []), [...sources.values()]);
   const presentationError = paperPresentationError(answer, records);
   const invalidCitation = [...answer.matchAll(/\[S(\d+)]/g)].some(match => !sources.has(Number(match[1])));

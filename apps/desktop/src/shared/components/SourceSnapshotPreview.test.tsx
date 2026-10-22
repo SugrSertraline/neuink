@@ -38,6 +38,15 @@ describe('SourceSnapshotPreview', () => {
     expect(within(tables[0]).queryByText('73')).toBeNull();
   });
 
+  it('keeps wide reflow tables horizontally scrollable with a keyboard focus target', () => {
+    render(<SourceSnapshotPreview allowScroll={false} markdown={'| A | B | C | D | E | F | G | H | I | J |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |'} />);
+    const tableRegion = screen.getByRole('region', { name: '表格内容' });
+    expect(tableRegion.className).toContain('overflow-x-auto');
+    expect(tableRegion.className).not.toContain('overflow-visible');
+    expect(tableRegion.getAttribute('tabindex')).toBe('0');
+    expect(screen.getByRole('table').getAttribute('style')).toContain('min-width: 880px');
+  });
+
   it('renders math in HTML table cells without losing cell semantics', () => {
     const { container } = render(<SourceSnapshotPreview markdown={'<table><tr><th>表达式</th></tr><tr><td>$x^2 + y^2$</td></tr></table>'} />);
     expect(container.querySelector('td .katex'), container.innerHTML).not.toBeNull();

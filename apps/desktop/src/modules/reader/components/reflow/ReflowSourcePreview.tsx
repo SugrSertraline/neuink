@@ -18,7 +18,7 @@ import {
   warmCachedPdfSegmentSnapshot,
 } from "./pdfSourceSnapshot";
 
-export type ReflowTranslationMode = "source" | "translation" | "bilingual";
+export type ReflowTranslationMode = "source" | "translation" | "bilingual" | "sentences";
 
 
 export function ReflowSourcePreview({

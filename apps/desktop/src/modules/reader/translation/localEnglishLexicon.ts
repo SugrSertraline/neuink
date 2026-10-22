@@ -177,9 +177,14 @@ async function loadDictionaryShard(word: string): Promise<DictionaryShard | null
   return load ? (await load()).default : null;
 }
 
+// PDF text layers often encode letter combinations as a single typographic glyph.
+export function expandEnglishLigatures(text: string): string {
+  return text.replace(/[\uFB00-\uFB06]/g, ligature => ligature.normalize('NFKC'));
+}
+
 export function singleEnglishWord(text: string): string | null {
-  const word = text.trim()
-    .replace(/^[“”‘’"'([{\s]+|[“”‘’"')\]},.;:!?，。；：！？\s]+$/g, '')
+  const word = expandEnglishLigatures(text.trim())
+    .replace(/^[\p{P}\p{S}\s]+|[\p{P}\p{S}\s]+$/gu, '')
     .replace(/[‐‑–]/g, '-');
   return /^[A-Za-z]{2,40}(?:-[A-Za-z]{2,40}){0,3}$/.test(word)
     ? word.toLowerCase()

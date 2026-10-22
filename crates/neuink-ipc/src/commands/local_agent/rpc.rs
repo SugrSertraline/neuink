@@ -1,4 +1,5 @@
 //! Official Codex App Server and OpenCode ACP transports. No shell wrappers or global config writes.
+use super::installation::AgentExecutable;
 mod permissions;
 mod protocol;
 use permissions::{approval_input, approval_result};
@@ -9,16 +10,9 @@ use super::{
     process, Provider,
 };
 use serde_json::{json, Value};
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-    process::Stdio,
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashMap, path::Path, process::Stdio, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
-    process::Command,
     sync::{mpsc, oneshot, watch},
     task::JoinSet,
 };
@@ -103,7 +97,7 @@ async fn write(stdin: &mut tokio::process::ChildStdin, value: &Value) -> Result<
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn execute(
     provider: Provider,
-    path: PathBuf,
+    path: AgentExecutable,
     cwd: &Path,
     session: &str,
     resume: bool,
@@ -119,7 +113,7 @@ pub(super) async fn execute(
     if *cancel.borrow() {
         return Err("任务已停止。".into());
     }
-    let mut command = Command::new(path);
+    let mut command = path.command();
     command
         .arg(if provider == Provider::Codex {
             "app-server"

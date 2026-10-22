@@ -2,8 +2,18 @@ import type { AssistantToolTraceEvent } from '@/shared/ipc/assistantApi';
 import { PdfReadingAudit } from './pdfReading';
 import { ASSISTANT_READ_FAILURES } from '@/shared/lib/assistantReadFailure';
 import { CLAUDE_CODE_DISPLAY_NAME } from '@/shared/lib/localAgentSettings';
+import { ReasoningBlocks } from './reasoningBlocks';
 
 const object = (value: unknown): Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+const NEUINK_READ = /^mcp__neuink__(?:read_entry_assistant_context|read_pdf_pages|search_pdf_text|read_segment_content|search_segments|read_note|read_current_note)$/;
+function readTarget(name: string, input: unknown) {
+  if (!NEUINK_READ.test(name)) return undefined;
+  const value = object(input);
+  return {
+    ...(typeof value.entry_id === 'string' ? {entry_id:value.entry_id} : {}),
+    ...(typeof value.note_id === 'string' ? {note_id:value.note_id} : {})
+  };
+}
 /** Partial messages and complete blocks overlap: consume each text block exactly once. */
 export class ClaudeStream {
   private current = '';
@@ -13,6 +23,9 @@ export class ClaudeStream {
   private streamed = false;
   private messageId = '';
   private inputs = new Map<string, unknown>();
+  private thinkingIndex: number | null = null;
+  private thinkingStep = 0;
+  private reasoning = new ReasoningBlocks(text => this.callbacks.reasoning(text));
   readonly pdfReading = new PdfReadingAudit(id => this.callbacks.tool({id, toolName:'claude.mcp__neuink__read_pdf_pages',
     status:'error', recovered:true, summary:'读取请求已调整，后续调用已覆盖原请求页码。'}));
   constructor(private callbacks: { text: (delta: string) => void; reset: () => void;
@@ -30,6 +43,7 @@ export class ClaudeStream {
       const index = typeof event.index === 'number' ? event.index : 0;
       if (event.type === 'message_start') {
         this.blocks.clear(); this.current = ''; this.streamed = true;
+        this.thinkingIndex = null; this.thinkingStep += 1;
         this.messageId = String(object(event.message).id ?? ''); this.callbacks.reset();
       }
       const block = object(event.content_block);
@@ -40,7 +54,14 @@ export class ClaudeStream {
         this.blocks.set(index, (this.blocks.get(index) ?? '') + delta.text);
         this.current += delta.text; this.callbacks.text(delta.text);
       }
-      if (event.type === 'content_block_delta' && delta.type === 'thinking_delta' && typeof delta.thinking === 'string') this.callbacks.reasoning(delta.thinking);
+      if (event.type === 'content_block_start' && block.type === 'thinking') {
+        this.thinkingIndex = index;
+        if (typeof block.thinking === 'string') this.reasoning.append(this.thinkingKey(index), block.thinking);
+      }
+      if (event.type === 'content_block_delta' && delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+        this.thinkingIndex = index;
+        this.reasoning.append(this.thinkingKey(index), delta.thinking);
+      }
       return;
     }
     if (value.type === 'assistant') {
@@ -50,12 +71,21 @@ export class ClaudeStream {
       const message = object(value.message), content = message.content;
       if (!Array.isArray(content)) return;
       let text = '';
-      for (const item of content.map(object)) {
+      for (const [index, item] of content.map(object).entries()) {
         if (item.type === 'text' && typeof item.text === 'string') text += item.text;
+        if (item.type === 'thinking' && typeof item.thinking === 'string') {
+          const streamedMessage = this.streamed && String(message.id ?? '') === this.messageId;
+          // Claude Code completes one block per assistant event, before block_stop.
+          const blockIndex = content.length === 1 ? this.thinkingIndex ?? index : index;
+          const key = streamedMessage ? this.thinkingKey(blockIndex) : `complete:${uuid || String(message.id ?? '')}:${index}`;
+          this.reasoning.complete(key, item.thinking);
+        }
         if (item.type === 'tool_use' && typeof item.id === 'string' && typeof item.name === 'string') {
           this.tools.set(item.id, item.name);
           this.inputs.set(item.id, item.input);
-          this.callbacks.tool({ id: item.id, toolName: `claude.${item.name}`, status: 'running', summary: `${CLAUDE_CODE_DISPLAY_NAME} 正在调用 ${item.name}` });
+          this.callbacks.tool({ id: item.id, toolName: `claude.${item.name}`,
+            ...(NEUINK_READ.test(item.name) ? {input:readTarget(item.name,item.input)} : {}),
+            status: 'running', summary: `${CLAUDE_CODE_DISPLAY_NAME} 正在调用 ${item.name}` });
         }
       }
       // CLI emits complete blocks as well as deltas. Streamed text is authoritative;
@@ -80,6 +110,7 @@ export class ClaudeStream {
           const readTooLarge = item.is_error && name === 'Read'
             && /File content \([\d,]+ tokens\) exceeds maximum allowed tokens \([\d,]+\)/.test(text);
           this.callbacks.tool({ id, toolName: `claude.${name}`,
+            ...(NEUINK_READ.test(name) ? {input:readTarget(name,this.inputs.get(id))} : {}),
             status: item.is_error ? 'error' : 'done', ...(rejectedBatch ? {error:ASSISTANT_READ_FAILURES.pageBatch} : {}),
             ...(readTooLarge ? {error:ASSISTANT_READ_FAILURES.localReadLimit} : {}),
             summary: item.is_error ? `${CLAUDE_CODE_DISPLAY_NAME} 工具调用失败。` : `${CLAUDE_CODE_DISPLAY_NAME} 工具调用完成。` });
@@ -88,6 +119,7 @@ export class ClaudeStream {
       }
     }
   }
+  private thinkingKey(index: number) { return `stream:${this.thinkingStep}:${index}`; }
 }
 
 export { object as protocolObject };

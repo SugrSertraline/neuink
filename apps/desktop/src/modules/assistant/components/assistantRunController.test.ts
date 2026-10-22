@@ -58,6 +58,28 @@ beforeEach(() => {
 afterEach(() => { setAssistantBackgroundRun(null); vi.useRealTimers(); });
 
 describe('assistant production controller persistence boundaries', () => {
+  it.each(['completed', 'canceled'] as const)('saves local thinking separately from the answer when %s', async status => {
+    const input = options(); input.selectedProfile = CLAUDE_PROFILE;
+    vi.mocked(runLocalAgentHarness).mockImplementation(async callbacks => {
+      callbacks.onReasoningDelta?.('先检查来源。');
+      callbacks.onDelta?.('临时答复');
+      callbacks.onAnswerReset?.();
+      callbacks.onReasoningDelta?.('\n\n再比较结果。');
+      callbacks.onDelta?.('保留的答复');
+      if (status === 'canceled') {
+        input.runAbortControllerRef.current!.abort();
+        callbacks.onReasoningDelta?.('停止后到达，不应保存');
+        throw new Error('用户已停止任务');
+      }
+      return { answer: '最终答复', sources: [] };
+    });
+    await runAssistantPanelTask(input);
+    expect(lastMessage().parts).toContainEqual({ type: 'reasoning', text: '先检查来源。\n\n再比较结果。' });
+    expect(lastMessage().content).toContain(status === 'completed' ? '最终答复' : '保留的答复');
+    expect(lastMessage().content).not.toContain('临时答复');
+    expect(lastMessage().content).not.toContain('先检查来源');
+    expect(JSON.stringify(lastMessage())).not.toContain('停止后到达');
+  });
   it('discards a rejected answer while preserving completed tool receipts and the verification error', async () => {
     vi.mocked(runAssistantHarness).mockImplementation(async callbacks => {
       callbacks.onToolEvent?.({ id: 'imported', toolName: 'import_papers', status: 'done', summary: 'PDF 已下载入库 1 篇，尚未解析。' });

@@ -48,6 +48,27 @@ describe('reader preferences', () => {
     expect(readStoredReaderPreferences().autoTranslateTextSelection).toBe(true);
   });
 
+  it('enables sentence hover for existing readers and saves its separate choice', () => {
+    window.localStorage.setItem('neuink.reader.preferences', JSON.stringify({ hoverPreviewEnabled: true }));
+    const original = readStoredReaderPreferences();
+    expect(original.pdfSentenceHoverEnabled).toBe(true);
+    const disabled = { ...original, pdfSentenceHoverEnabled: false };
+    expect(equalReaderPreferences(original, disabled)).toBe(false);
+    persistReaderPreferences(disabled);
+    expect(readStoredReaderPreferences().pdfSentenceHoverEnabled).toBe(false);
+  });
+
+  it('keeps sentence preview content independent of block preview', () => {
+    window.localStorage.setItem('neuink.reader.preferences', JSON.stringify({ hoverPreviewEnabled: false }));
+    const original = readStoredReaderPreferences();
+    expect(original.pdfSentenceHoverShowOriginal).toBe(true);
+    expect(original.pdfSentenceHoverShowTranslation).toBe(true);
+    const translationOnly = { ...original, pdfSentenceHoverShowOriginal: false };
+    expect(equalReaderPreferences(original, translationOnly)).toBe(false);
+    persistReaderPreferences(translationOnly);
+    expect(readStoredReaderPreferences()).toEqual(translationOnly);
+  });
+
   it('migrates the old shared annotation hover choice, then persists independent choices', () => {
     window.localStorage.setItem('neuink.reader.preferences', JSON.stringify({
       hoverPreviewEnabled: true, hoverPreviewShowAnnotation: false,

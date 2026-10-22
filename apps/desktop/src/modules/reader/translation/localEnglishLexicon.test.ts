@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { singleEnglishWord, translateLocalEnglishWord } from './localEnglishLexicon';
+import { expandEnglishLigatures, singleEnglishWord, translateLocalEnglishWord } from './localEnglishLexicon';
 
 describe('local English lexicon', () => {
   it('ships the expected common-word and inflection coverage', async () => {
@@ -26,6 +26,17 @@ describe('local English lexicon', () => {
     expect(await translateLocalEnglishWord('convolution')).toBe('卷积');
     expect(await translateLocalEnglishWord('convolutions')).toBe('卷积');
     expect(await translateLocalEnglishWord('“fine‑tuning,”')).toBe('微调');
+    expect(singleEnglishWord('traﬃc')).toBe('traffic');
+    expect(await translateLocalEnglishWord('traﬃc')).toBe(await translateLocalEnglishWord('traffic'));
+    expect(singleEnglishWord('ﬂow')).toBe('flow');
+    expect(await translateLocalEnglishWord('ﬂow')).toBe(await translateLocalEnglishWord('flow'));
+    expect(singleEnglishWord('  · “ﬂow,” ★  ')).toBe('flow');
+    expect(await translateLocalEnglishWord('  · “ﬂow,” ★  ')).toBe(await translateLocalEnglishWord('flow'));
+  });
+
+  it('expands typographic ligatures without changing other symbols', () => {
+    expect(expandEnglishLigatures('oﬀice ﬁle ﬂow traﬃc aﬄict ﬅ ﬆ x²'))
+      .toBe('office file flow traffic afflict st st x²');
   });
 
   it('covers general and scientific words from local dictionary shards', async () => {

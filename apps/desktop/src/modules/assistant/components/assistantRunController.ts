@@ -1,5 +1,6 @@
 import type { ApplicationActions } from '../runtime/applicationActions';
 import { rejectedAnswerContent } from './rejectedAnswerContent';
+import { hideRawModelToolCall } from '../sdk/modelToolCallMarkup';
 import { requestToolApproval } from '../runtime/toolApproval';
 import { AgentStoppedError } from '../agent-core/agent';
 import { requestUserInput } from '../runtime/userInput';
@@ -650,8 +651,9 @@ export async function runAssistantPanelTask({
       const conversationId = persistedConversationId;
       const assistantMessageId = persistedAssistantMessageId;
       const errorMessage = caught instanceof Error ? caught.message : String(caught);
-      const fallbackContent = stopped ? [streamedAnswer, stopMessage].filter(Boolean).join('\n\n')
-        : rejectedAnswerContent(errorMessage, assistantToolEvents) ?? streamedAnswer;
+      const visibleAnswer = hideRawModelToolCall(streamedAnswer);
+      const fallbackContent = stopped ? [visibleAnswer, stopMessage].filter(Boolean).join('\n\n')
+        : rejectedAnswerContent(errorMessage, assistantToolEvents) ?? visibleAnswer;
       const fallbackParts = buildAssistantMessageParts({
         agentRun: failedAgentRun,
         content: fallbackContent,

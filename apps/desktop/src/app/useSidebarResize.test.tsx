@@ -32,7 +32,7 @@ beforeEach(() => {
   HTMLElement.prototype.hasPointerCapture = vi.fn(() => true);
   commit.mockReset(); rendered.mockReset(); document.body.style.cursor = 'crosshair'; document.body.style.userSelect = 'text';
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.style.cssText = ''; });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.style.cssText = ''; });
 const begin = () => fireEvent.pointerDown(screen.getByRole('separator'), { clientX: 350, pointerId: 1, button: 0 });
 const move = (x = 450, pointerId = 1) => fireEvent.pointerMove(window, { clientX: x, pointerId });
 const flushFrame = () => act(() => {
@@ -247,6 +247,35 @@ describe('sidebar resize interaction', () => {
       return <div ref={resize.observeContainer} style={{ '--app-activity-width': '48px' } as React.CSSProperties}><output>{resize.effectiveWidth}</output></div>;
     }
     render(<NarrowFixture />);
+    expect(screen.getByRole('status').textContent).toBe('432');
+    expect(commit).not.toHaveBeenCalled();
+  });
+  it('keeps the preferred sidebar width through minimize and provisional restore sizes', () => {
+    vi.useFakeTimers();
+    let shellWidth = 1600;
+    let resized = () => {};
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) { resized = callback; }
+      observe() {}
+      disconnect() {}
+    });
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => shellWidth);
+    function RestoreFixture() {
+      const ref = useRef<HTMLDivElement>(null);
+      const resize = useSidebarResize({ width: 700, min: 220, max: 820, enabled: true, onCommit: commit, containerRef: ref });
+      return <div ref={resize.observeContainer} style={{ '--app-activity-width': '48px' } as React.CSSProperties}>
+        <output>{resize.effectiveWidth}</output>
+      </div>;
+    }
+    render(<RestoreFixture />);
+    expect(screen.getByRole('status').textContent).toBe('700');
+    act(() => { fireEvent.blur(window); shellWidth = 0; resized(); });
+    expect(screen.getByRole('status').textContent).toBe('700');
+    act(() => { fireEvent.focus(window); shellWidth = 800; resized(); });
+    expect(screen.getByRole('status').textContent).toBe('700');
+    act(() => { shellWidth = 1600; resized(); vi.advanceTimersByTime(400); });
+    expect(screen.getByRole('status').textContent).toBe('700');
+    act(() => { shellWidth = 800; resized(); });
     expect(screen.getByRole('status').textContent).toBe('432');
     expect(commit).not.toHaveBeenCalled();
   });

@@ -6,9 +6,10 @@ use std::{
 
 use neuink_config::{AppSettings, RecentWorkspace, TranslationAutomationSettings};
 use neuink_domain::{EntryMeta, TagMeta};
-use neuink_workspace::atomic_write_json;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, Runtime};
+pub(crate) use crate::storage::read_settings;
+use crate::storage::{default_workspace_root, write_settings};
 
 #[derive(Debug, Deserialize)]
 pub struct CreateWorkspaceRequest {
@@ -53,17 +54,14 @@ pub struct WorkspacePathInspection {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct MigrateWorkspaceRootRequest {
-    pub root: PathBuf,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct ForgetRecentWorkspaceRequest {
     pub root: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct WorkspaceSettingsResponse {
+    pub data_root: Option<PathBuf>,
+    pub legacy_import_notice: Option<String>,
     pub default_root: PathBuf,
     pub root: PathBuf,
     pub custom_root: Option<PathBuf>,
@@ -76,13 +74,6 @@ pub struct UpdateTranslationAutomationSettingsRequest {
     pub auto_translate_pdf: bool,
     #[serde(default)]
     pub segment_types: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct MigrateWorkspaceRootResponse {
-    pub from_root: PathBuf,
-    pub root: PathBuf,
-    pub restart_requested: bool,
 }
 
 #[tauri::command]
@@ -144,6 +135,8 @@ pub fn get_workspace_settings<R: Runtime>(
         .filter(|value| !value.trim().is_empty())
         .map(PathBuf::from);
     Ok(WorkspaceSettingsResponse {
+        data_root: crate::storage::portable(&app).map(|paths| paths.data().to_path_buf()),
+        legacy_import_notice: app.try_state::<crate::storage::legacy_scan::ScanReport>().and_then(|report| report.description()),
         root: custom_root.clone().unwrap_or_else(|| default_root.clone()),
         default_root,
         custom_root,
@@ -205,6 +198,7 @@ pub fn create_and_set_workspace_root<R: Runtime>(
     app: AppHandle<R>,
     request: SetWorkspaceRootRequest,
 ) -> Result<OpenDevWorkspaceResponse, String> {
+    reject_fixed_data_location(&app)?;
     let root = normalize_target_path(&request.root)?;
     ensure_empty_target_dir(&root)?;
     let workspace =
@@ -232,51 +226,11 @@ pub fn reset_workspace_root<R: Runtime>(
     open_workspace_response(&app, workspace)
 }
 
-#[tauri::command]
-pub fn migrate_workspace_root<R: Runtime>(
-    app: AppHandle<R>,
-    request: MigrateWorkspaceRootRequest,
-) -> Result<MigrateWorkspaceRootResponse, String> {
-    let from_root = current_workspace_root(&app)?;
-    let to_root = request.root;
-    if to_root.as_os_str().is_empty() {
-        return Err("workspace path is required".to_string());
-    }
-
-    let from_root = canonicalize_existing(&from_root)?;
-    let to_root = normalize_target_path(&to_root)?;
-    if from_root == to_root {
-        return Err("目标路径已经是当前工作区。".to_string());
-    }
-    if to_root.starts_with(&from_root) {
-        return Err("不能把工作区迁移到当前工作区的子目录。".to_string());
-    }
-    ensure_empty_target_dir(&to_root)?;
-    copy_dir_recursive(&from_root, &to_root).map_err(|error| {
-        format!(
-            "迁移复制失败；原工作区未改动，目标目录 {} 可能保留部分文件：{error}",
-            to_root.to_string_lossy()
-        )
-    })?;
-
-    let workspace = neuink_workspace::Workspace::open_existing(&to_root)
-        .map_err(|error| format!("工作区复制完成，但验证失败：{error}"))?;
-    let mut settings = read_settings(&app)?;
-    set_active_workspace(&mut settings, workspace.layout().root());
-    write_settings(&app, &settings)?;
-    app.request_restart();
-
-    Ok(MigrateWorkspaceRootResponse {
-        from_root,
-        root: workspace.layout().root().to_path_buf(),
-        restart_requested: true,
-    })
-}
-
 fn switch_workspace_root_impl<R: Runtime>(
     app: &AppHandle<R>,
     root: PathBuf,
 ) -> Result<OpenDevWorkspaceResponse, String> {
+    reject_fixed_data_location(app)?;
     let inspection = inspect_workspace_path_value(&root, Some(&current_workspace_root(app)?))?;
     if !matches!(inspection.kind, WorkspacePathKind::ValidWorkspace) {
         return Err(inspection.message);
@@ -431,14 +385,6 @@ fn open_workspace_response<R: Runtime>(
     })
 }
 
-fn default_workspace_root<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
-    Ok(app
-        .path()
-        .app_data_dir()
-        .map_err(|error| error.to_string())?
-        .join("dev-library"))
-}
-
 pub(crate) fn current_workspace_root<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let settings = read_settings(app)?;
     Ok(settings
@@ -447,29 +393,6 @@ pub(crate) fn current_workspace_root<R: Runtime>(app: &AppHandle<R>) -> Result<P
         .filter(|value| !value.trim().is_empty())
         .map(PathBuf::from)
         .unwrap_or(default_workspace_root(app)?))
-}
-
-pub(crate) fn read_settings<R: Runtime>(app: &AppHandle<R>) -> Result<AppSettings, String> {
-    let path = settings_path(app)?;
-    if !path.exists() {
-        return Ok(AppSettings::default());
-    }
-    let bytes = fs::read(path).map_err(|error| error.to_string())?;
-    serde_json::from_slice(&bytes).map_err(|error| error.to_string())
-}
-
-fn write_settings<R: Runtime>(app: &AppHandle<R>, settings: &AppSettings) -> Result<(), String> {
-    let path = settings_path(app)?;
-    atomic_write_json(path, settings).map_err(|error| error.to_string())
-}
-
-fn settings_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
-    let config_dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|error| error.to_string())?;
-    fs::create_dir_all(&config_dir).map_err(|error| error.to_string())?;
-    Ok(config_dir.join("settings.json"))
 }
 
 fn canonicalize_existing(path: &Path) -> Result<PathBuf, String> {
@@ -505,28 +428,6 @@ fn ensure_empty_target_dir(path: &Path) -> Result<(), String> {
         }
     } else {
         fs::create_dir_all(path).map_err(|error| error.to_string())?;
-    }
-    Ok(())
-}
-
-fn copy_dir_recursive(from: &Path, to: &Path) -> Result<(), String> {
-    fs::create_dir_all(to).map_err(|error| error.to_string())?;
-    for entry in fs::read_dir(from).map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let source = entry.path();
-        let target = to.join(entry.file_name());
-        let file_type = entry.file_type().map_err(|error| error.to_string())?;
-        if file_type.is_dir() {
-            copy_dir_recursive(&source, &target)?;
-        } else if file_type.is_file() {
-            fs::copy(&source, &target).map_err(|error| {
-                format!(
-                    "复制文件失败 {} -> {}: {error}",
-                    source.to_string_lossy(),
-                    target.to_string_lossy()
-                )
-            })?;
-        }
     }
     Ok(())
 }
@@ -675,4 +576,11 @@ mod tests {
         fs::remove_dir_all(current).expect("cleanup current");
         fs::remove_dir_all(corrupt).expect("cleanup corrupt");
     }
+}
+
+fn reject_fixed_data_location<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    if crate::storage::portable(app).is_some() {
+        return Err("数据固定保存在程序文件夹内，不能切换到外部资料库。".into());
+    }
+    Ok(())
 }

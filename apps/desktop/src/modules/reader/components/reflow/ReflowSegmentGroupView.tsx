@@ -31,6 +31,7 @@ import { SegmentActionMenu } from "../pdf-reader/SegmentActionMenu";
 import { useParagraphTranslation } from './ParagraphTranslationContext';
 import { hasMatchingDocumentTranslation, hasSentenceTranslation, paragraphTranslationRunning } from './paragraphTranslationState';
 import { ParagraphTranslationActions, ParagraphTranslationContent } from './ParagraphTranslationControls';
+import { SentenceAlignedTranslationContent } from './SentenceAlignedTranslationContent';
 import { isVisualReflowComponent, resolveReflowContent, type ReflowContentPreference } from '@/shared/lib/reflowContentPreferences';
 import { useReflowSegmentPreferences } from './ReflowSegmentPreferences';
 import { ReflowSegmentContentActions } from './ReflowContentControls';
@@ -54,7 +55,7 @@ import {
   estimateReflowGroupSize,
 } from "./reflowVirtualization";
 
-export type ReflowTranslationMode = "source" | "translation" | "bilingual";
+export type ReflowTranslationMode = "source" | "translation" | "bilingual" | "sentences";
 
 import {
   warmReflowPreviewAssets,
@@ -71,6 +72,8 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
   active,
   activeSegmentUid,
   flashSegmentUid,
+  focusedSentenceIndex,
+  sentenceLinked = false,
   annotationsBySegmentUid,
   entryId,
   flashed,
@@ -102,6 +105,8 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
   active: boolean;
   activeSegmentUid?: string | null;
   flashSegmentUid?: string | null;
+  focusedSentenceIndex?: number;
+  sentenceLinked?: boolean;
   annotationsBySegmentUid: Map<string, Annotation[]>;
   entryId: string;
   flashed: boolean;
@@ -139,7 +144,6 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
   const componentKey = reflowComponentKeyForGroup(segmentGroup);
   const componentContent = componentPreferences.content?.[componentKey];
   const content = resolveReflowContent(componentKey, reflowTranslationMode, {
-    ...(paragraphTranslation.record ? { translation: true, translationView: paragraphTranslation.record.view } : {}),
     ...componentContent,
   }, segmentPreferences.override);
   const componentTextScale = reflowGroupTextScale(segmentGroup, componentPreferences);
@@ -222,8 +226,8 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
       className={cn(
         "group relative min-w-0 scroll-mt-3 border-b border-border/65 px-2 py-4 outline-none transition-[background-color,opacity,transform] duration-200",
         isHeading && "border-t pt-9 pb-3",
-        active && "bg-primary/5",
-        flashed && "segment-navigation-highlight",
+        active && !sentenceLinked && focusedSentenceIndex === undefined && "bg-primary/5",
+        flashed && !sentenceLinked && focusedSentenceIndex === undefined && "segment-navigation-highlight",
         isHiding && "-translate-x-2 scale-[0.99] opacity-0",
       )}
       id={`reflow-segment-${segmentGroup.body.uid}`}
@@ -348,6 +352,13 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
           <ReflowGroupContent
             content={content}
             paragraphRecord={paragraphTranslation.record}
+            focusedSentenceIndex={focusedSentenceIndex}
+            onEnhance={paragraphTranslation.context?.ready ? () => {
+              if (paragraphTranslation.context?.pending.has(segmentGroup.body.uid) || paragraphTranslationRunning(paragraphTranslation.record)) return;
+              segmentPreferences.update({ translation: true, translationView: 'sentences' });
+              paragraphTranslation.context?.translate(segmentGroup.body.uid, true);
+            } : undefined}
+            enhancing={Boolean(paragraphTranslation.context?.pending.has(segmentGroup.body.uid) || paragraphTranslationRunning(paragraphTranslation.record))}
             pdfError={pdfPreviewError}
             onRetryPdf={onRetryPdfPreview}
             entryId={entryId}
@@ -385,19 +396,13 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
           onAddAssistantContext={onAddAssistantContext}
           onTranslateSegment={onTranslateSegment}
           displayActions={listItemAddress(menuSegment.uid) ? undefined : <ReflowSegmentContentActions component={componentKey} value={content} overridden={Boolean(segmentPreferences.override)}
-            sentenceTranslationDisabled={!paragraphTranslation.context?.ready}
             onChange={patch => {
               segmentPreferences.update(patch);
-              if (patch?.translationView === 'sentences' && !hasSentenceTranslation(paragraphTranslation.record)
-                && !paragraphTranslationRunning(paragraphTranslation.record)
-                && !paragraphTranslation.context?.pending.has(segmentGroup.body.uid)) {
-                paragraphTranslation.context?.translate(segmentGroup.body.uid, true);
-              }
               setMenuPosition(null);
             }} />}
           translationActions={paragraphTranslation.context ? <ParagraphTranslationActions segment={segmentGroup.body} close={() => setMenuPosition(null)}
             hasDocumentTranslation={hasMatchingDocumentTranslation(segmentGroup.body, translationBySegmentUid.get(segmentGroup.body.uid))}
-            viewControls={false} onTranslate={view => segmentPreferences.update({ translation: true, ...(view ? { translationView: view } : {}) })} /> : undefined}
+            viewControls={false} onTranslate={view => segmentPreferences.update({ translation: true, translationView: view ?? 'sentences' })} /> : undefined}
           onHideSegment={listItemAddress(menuSegment.uid) ? undefined : onHideSegment}
           onOpenSourceBacklink={onOpenSourceBacklink}
         />
@@ -410,6 +415,9 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
 function ReflowGroupContent({
   content,
   paragraphRecord,
+  focusedSentenceIndex,
+  onEnhance,
+  enhancing,
   pdfError,
   onRetryPdf,
   entryId,
@@ -425,6 +433,9 @@ function ReflowGroupContent({
 }: {
   content: ReflowContentPreference;
   paragraphRecord?: ParagraphTranslation;
+  focusedSentenceIndex?: number;
+  onEnhance?: () => void;
+  enhancing: boolean;
   pdfError?: string | null;
   onRetryPdf?: () => void;
   entryId: string;
@@ -439,6 +450,21 @@ function ReflowGroupContent({
   onRequirePdfDocument: () => void;
 }) {
   const componentPreferences = useReflowComponentPreferences();
+  const segment = segmentGroup.body;
+  const documentTranslation = translationBySegmentUid.get(segment.uid);
+  const savedTranslation = hasMatchingDocumentTranslation(segment, documentTranslation)
+    ? documentTranslation?.translated_text
+    : paragraphRecord?.paragraph.status === 'succeeded' ? paragraphRecord.paragraph.value : null;
+  const aiSentencesAvailable = paragraphRecord && hasSentenceTranslation(paragraphRecord);
+  const pairedContent = segment.segment_type !== 'paragraph' ? undefined : content.translationView === 'sentences'
+    ? content.translation && aiSentencesAvailable ? <ParagraphTranslationContent record={paragraphRecord} entryId={entryId} root={workspaceRoot}
+      showOriginal={content.parsed} view="sentences" segmentUid={segment.uid} focusedSentenceIndex={focusedSentenceIndex} />
+      : <SentenceAlignedTranslationContent source={segment.markdown ?? segment.text} savedTranslation={savedTranslation}
+        showOriginal={content.parsed} showTranslation={content.translation} entryId={entryId} workspaceRoot={workspaceRoot}
+        segmentUid={segment.uid} focusedSentenceIndex={focusedSentenceIndex}
+        onEnhance={content.translation ? onEnhance : undefined} enhancing={enhancing}
+        aiError={paragraphRecord?.sentences.status === 'failed' ? paragraphRecord.sentences.error : null} />
+    : undefined;
 
   return (
     <div className="grid min-w-0 gap-3">
@@ -460,13 +486,11 @@ function ReflowGroupContent({
           entryId={entryId} hoverPreviewEnabled={hoverPreviewEnabled} onPreviewChange={onPreviewChange} pdfDocument={pdfDocument}
           reflowTranslationMode="translation" relatedImagePath={null} segment={segmentGroup.body}
           translatedText={translationBySegmentUid.get(segmentGroup.body.uid)?.translated_text ?? null} workspaceRoot={workspaceRoot} />}
-        pairedContent={paragraphRecord ? <ParagraphTranslationContent record={paragraphRecord} entryId={entryId} root={workspaceRoot}
-          showOriginal={content.parsed} view={content.translationView} /> : undefined}
+        pairedContent={pairedContent}
         relatedImagePath={relatedImagePath}
         segment={segmentGroup.body}
         translatedText={
-          translationBySegmentUid.get(segmentGroup.body.uid)?.translated_text ??
-          null
+          translationBySegmentUid.get(segmentGroup.body.uid)?.translated_text ?? null
         }
         workspaceRoot={workspaceRoot}
       />
@@ -792,7 +816,7 @@ function SegmentText({
     );
   }
 
-  if (reflowTranslationMode === "bilingual" && translatedText?.trim()) {
+  if ((reflowTranslationMode === "bilingual" || reflowTranslationMode === "sentences") && translatedText?.trim()) {
     return (
       <div className="grid min-w-0 gap-2">
         <SourceSnapshotPreview

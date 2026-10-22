@@ -21,16 +21,47 @@ export function useSidebarResize({ width, min, max, enabled, onCommit, container
   useEffect(() => {
     if (!container) return;
     let active = true;
+    let restoreTimer: number | null = null;
+    let restoring = false;
     const update = () => {
       if (!active || !container.isConnected) return;
+      if (container.clientWidth <= 0) return;
       const activityWidth = parseFloat(getComputedStyle(container).getPropertyValue('--app-activity-width')) || 0;
       // Preserve room for the main workspace at high UI zoom; retain the user's preferred width for wider windows.
       setAvailableWidth(Math.max(min, container.clientWidth - activityWidth - WORKSPACE_SPLIT_STANDARD_MIN_WIDTH));
     };
+    const scheduleRestore = () => {
+      restoring = true;
+      if (restoreTimer !== null) window.clearTimeout(restoreTimer);
+      // WebView2 reports several provisional sizes before its surface returns.
+      restoreTimer = window.setTimeout(() => {
+        restoreTimer = null;
+        restoring = false;
+        update();
+      }, 400);
+    };
+    const suspend = () => {
+      restoring = true;
+      if (restoreTimer !== null) window.clearTimeout(restoreTimer);
+      restoreTimer = null;
+    };
     update();
-    const observer = new ResizeObserver(update);
+    const observer = new ResizeObserver(() => {
+      if (!restoring && !document.hidden) update();
+    });
     observer.observe(container);
-    return () => { active = false; observer.disconnect(); };
+    window.addEventListener('blur', suspend);
+    window.addEventListener('focus', scheduleRestore);
+    const onVisibilityChange = () => document.hidden ? suspend() : scheduleRestore();
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      active = false;
+      observer.disconnect();
+      window.removeEventListener('blur', suspend);
+      window.removeEventListener('focus', scheduleRestore);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      if (restoreTimer !== null) window.clearTimeout(restoreTimer);
+    };
   }, [container, min]);
   const maxWidth = Math.min(max, availableWidth);
   const clamp = (value: number) => Math.min(maxWidth, Math.max(min, Math.round(value)));

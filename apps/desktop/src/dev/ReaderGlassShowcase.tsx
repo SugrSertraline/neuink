@@ -10,6 +10,8 @@ import { SearchDialog } from '@/modules/search/components/SearchDialog';
 import { ToastContext } from '@/shared/hooks/useToast';
 import { ReaderSurfaceFrame } from '@/modules/reader/components/ReaderSurfaceFrame';
 import { ReaderToolbar } from '@/modules/reader/components/pdf-reader/ReaderToolbar';
+import { usePdfReaderZoom } from '@/modules/reader/components/pdf-reader/usePdfReaderZoom';
+import { PDF_ZOOM_STEP } from '@/modules/reader/components/pdf-reader/readerConstants';
 import { PdfReaderDocumentPane } from '@/modules/reader/components/pdf-reader/PdfReaderDocumentPane';
 import { SegmentRailLayout } from '@/modules/reader/components/pdf-reader/SegmentRailLayout';
 import { SegmentRail } from '@/modules/reader/components/pdf-reader/SegmentRail';
@@ -38,10 +40,12 @@ import { ArrayMathPreview } from './ArrayMathPreview';
 import { ReadingStateRetention } from '@/modules/reader/components/navigation/ReadingStateRetention';
 import { ReadingNavigationScope, useReadingNavigation } from '@/modules/reader/components/navigation/ReadingNavigation';
 import { usePdfReadingNavigation } from '@/modules/reader/components/navigation/usePdfReadingNavigation';
+import { textSelectionAnnotationDraft } from '@/modules/reader/components/pdf-reader/textSelectionAnnotation';
 import '../styles/globals.css';
 
 const noop = () => undefined;
 const interactionCheck = new URLSearchParams(location.search).has('interactions');
+const translationCheck = new URLSearchParams(location.search).has('selection-translation');
 const localPaperCheck = new URLSearchParams(location.search).has('local-paper');
 const blockDragCheck = new URLSearchParams(location.search).has('block-drag');
 const listItemsCheck = new URLSearchParams(location.search).has('list-items');
@@ -81,7 +85,6 @@ function PdfPreviewBody({ compact, paper, jumpRequest = null, onAddContext }: Pd
   const pdfState = usePdfDocument(bytes);
   const [mode, setMode] = useState<'ready'|'loading'|'error'>('ready');
   const [preferences, setPreferences] = useState(readStoredReaderPreferences);
-  const [zoom, setZoom] = useState(1);
   const [page, setPage] = useState(1);
   const [auxOpen, setAuxOpen] = useState(false);
   const [selectedSegment, setSelectedSegment] = useState<SourceSegment | null>(null);
@@ -101,8 +104,11 @@ function PdfPreviewBody({ compact, paper, jumpRequest = null, onAddContext }: Pd
   const pageCount = pdfState.document?.numPages ?? 4;
   const pages = useMemo(() => groupSegmentsByPage(paper?.segments ?? (listItemsCheck ? listInteractionSegments : interactionCheck ? interactionSegments : []), pageCount), [paper, pageCount]);
   const dual = preferences.pageDisplayMode === 'dual' && !(preferences.pageTurningMode === 'book' && pdfViewportWidth < 860);
+  const { zoom, updateZoom, pageWidth, handleCtrlWheelZoom, zoomSuppressRegions } = usePdfReaderZoom({
+    entryId: previewEntry.id, viewportWidth: pdfViewportWidth, pageDisplayMode: dual ? 'dual' : 'single', onInteractionStart: noop,
+  });
   const rows = useMemo(() => dual ? Array.from({ length: Math.ceil(pages.length / 2) }, (_, index) => pages.slice(index * 2, index * 2 + 2)) : pages.map(p => [p]), [dual, pages]);
-  usePdfReadingNavigation(pdfScrollRef, paper?.segments ?? interactionSegments, pdfState.status === 'ready', noop, { value: zoom, restore: setZoom });
+  usePdfReadingNavigation(pdfScrollRef, paper?.segments ?? interactionSegments, pdfState.status === 'ready', noop, { value: zoom, restore: value => updateZoom(() => value) });
   const goToPage = (next: number) => { navigation?.beginUserNavigation(); setPage(next); scrollToPage(next - 1, pdfScrollRef.current); };
   const { scrollToMountedOrPendingSegment, flashSegmentUid } = usePdfSegmentNavigation({
     entryId: previewEntry.id, entryTitle: previewEntry.title, layoutVersion: rows.length, pdfScrollRef,
@@ -120,7 +126,8 @@ function PdfPreviewBody({ compact, paper, jumpRequest = null, onAddContext }: Pd
     <div className="flex shrink-0 items-center gap-2 px-3 py-1 text-xs"><span>PDF.js 真实渲染 · {paper ? '本机教学论文（批注仅存内存）' : '4 页示例'}</span><Button size="xs" variant="plain" onClick={() => setMode(mode === 'ready' ? 'loading' : mode === 'loading' ? 'error' : 'ready')}>{mode === 'ready' ? '模拟加载' : mode === 'loading' ? '模拟失败' : '恢复正常'}</Button><Button size="xs" variant="plain" onClick={()=>setAuxOpen(v=>!v)}>笔记区域检查</Button></div>
     <ReadingSessionContext.Provider value={compact ? {active:true,onReady:noop} : null}>
       <ReaderSurfaceFrame className="pdf-reader-surface bg-muted/30" toolbar={<ReaderToolbar entry={previewEntry} currentPage={page} effectivePageDisplayMode={dual ? 'dual' : 'single'} pageCount={pageCount} segmentCount={pages.reduce((sum, page) => sum + page.regions.length, 0)}
-        readerPreferences={preferences} onReaderPreferencesChange={setPreferences} zoom={zoom} onZoomIn={() => setZoom(v => Math.min(2,v+.1))} onZoomOut={() => setZoom(v => Math.max(.5,v-.1))}
+        readerPreferences={preferences} onReaderPreferencesChange={setPreferences} zoom={zoom}
+        onZoomIn={() => updateZoom(v => v + PDF_ZOOM_STEP)} onZoomOut={() => updateZoom(v => v - PDF_ZOOM_STEP)} onZoomReset={() => updateZoom(() => 1)}
         recommendedTags={[]} selectedRecommendedTagPaths={[]} tagSuggestionBusy={false} tagSuggestionsOpen={false} translation={null} translationBusy={false}
         onCurrentPageChange={goToPage} onApplyRecommendedTags={noop} onDismissRecommendedTags={noop} onRecommendedTagToggle={noop} onTagSuggestionsOpenChange={noop}
         onExportTranslation={noop} onPauseTranslation={noop} onOpenTranslationTask={noop} onOpenPdf={noop}
@@ -130,17 +137,23 @@ function PdfPreviewBody({ compact, paper, jumpRequest = null, onAddContext }: Pd
           <SegmentRailLayout rail={<SegmentRail pages={pages} activeSegmentUid={null} flashSegmentUid={null} selectedSegmentUid={null} annotationsBySegmentUid={new Map()} notesBySegmentUid={new Map()} onJumpToSegment={noop}/>}>
           <PdfReaderDocumentPane entry={previewEntry} pdfState={shownState} pdfBytesState={{status:'ready',bytes,error:null,retry:()=>setMode('ready')}} pdfAvailable
             bookMode={preferences.pageTurningMode === 'book'} zoom={zoom} resumePageIdx={1}
-            pdfScrollRef={pdfScrollRef} bindPdfScrollElement={bindPdfScrollElement} rows={rows} leftInset={PDF_RAIL_WIDTH} pageWidth={Math.max(200,(pdfViewportWidth-40-PDF_RAIL_WIDTH)/(dual?2:1))*zoom}
+            pdfScrollRef={pdfScrollRef} bindPdfScrollElement={bindPdfScrollElement} rows={rows} leftInset={PDF_RAIL_WIDTH} pageWidth={pageWidth}
             flashSegmentUid={flashSegmentUid} hoveredSegmentUid={null} annotationsBySegmentUid={annotationsBySegmentUid} notesBySegmentUid={new Map()}
             hoverPreviewEnabled={interactionCheck} hoverPreviewFontSize="standard" hoverPreviewSize="standard" hoverPreviewShowRegion={interactionCheck} hoverPreviewShowOriginal={interactionCheck}
-            hoverPreviewShowNote={false} hoverPreviewShowAnnotation={false} hoverPreviewShowTranslation={false} showRegions={blockDragCheck} suppressRegions={false}
+            hoverPreviewShowNote={false} hoverPreviewShowAnnotation={false} hoverPreviewShowTranslation={false}
+            sentenceHoverShowOriginal={interactionCheck} sentenceHoverShowTranslation={false} showRegions={blockDragCheck} suppressRegions={zoomSuppressRegions}
             inlineAnnotationHoverEnabled={false}
             sourceBacklinksBySegmentUid={{}} translationBySegmentUid={new Map()} translationStatus={null} translationMode="hover" translationVisible={false} workspaceRoot={null}
-            onCtrlWheelZoom={({direction})=>setZoom(v=>Math.max(.5,Math.min(2,v+direction*.1)))} onOpenSegmentAnnotation={segment=>{setSelectedSegment(segment);setAuxOpen(true);}} onOpenSegmentNote={noop}
-            onOpenSourceBacklink={noop} onCloseSegmentOverlay={noop} onCreateTextSelectionAnnotation={({content,importance,selection,segment})=>setAnnotations(current=>[...current,{
-              annotation_id:crypto.randomUUID(),segment_uid:segment.uid,anchor_kind:'pdf_page',kind:'comment',content,importance,text_selection:selection,
-              created_at:new Date().toISOString(),updated_at:new Date().toISOString(),
-            }])} onToggleSegment={noop}
+            onCtrlWheelZoom={handleCtrlWheelZoom} onOpenSegmentAnnotation={segment=>{setSelectedSegment(segment);setAuxOpen(true);}} onOpenSegmentNote={noop}
+            onOpenSourceBacklink={noop} onCloseSegmentOverlay={noop} onCreateTextSelectionAnnotation={input => setAnnotations(current => {
+              const draft = textSelectionAnnotationDraft(input, current);
+              return draft.annotationId
+                ? current.map(annotation => annotation.annotation_id === draft.annotationId ? { ...annotation, content: draft.content, importance: draft.importance } : annotation)
+                : [...current, { annotation_id: crypto.randomUUID(), segment_uid: draft.segmentUid, kind: draft.kind,
+                  content: draft.content, importance: draft.importance, text_selection: input.selection,
+                  created_at: new Date().toISOString(), updated_at: new Date().toISOString() }];
+            })} onToggleSegment={noop}
+            onTranslateTextSelection={translationCheck ? async () => '示例译文：多个来源的证据可以在同一份研究笔记中比较。' : undefined}
             onAddAssistantContext={blockDragCheck ? (segment, options) => onAddContext?.(readingAssistantContext(previewEntry, segment, options)) : undefined}
             searchQuery={search.query} searchMatchCountsByPage={search.matchCountsByPage} activeSearchPageIdx={search.activeMatch?.pageIdx}
             onVisiblePageIndexesChange={indexes=>{if(indexes.length)setPage(indexes[0]+1);}} />

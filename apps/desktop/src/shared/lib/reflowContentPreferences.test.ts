@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { beforeEach, describe, expect, it } from 'vitest';
-import { readStoredReaderPreferences, persistReaderPreferences } from './readerPreferences';
+import { readStoredReaderPreferences, persistReaderPreferences, reflowDisplayOptions, withReflowDisplayOptions, withReflowTranslationMode } from './readerPreferences';
 import { resolveReflowContent } from './reflowContentPreferences';
 
 beforeEach(() => localStorage.clear());
@@ -23,6 +23,28 @@ describe('reflow content preferences', () => {
   it('overrides only explicitly selected segment fields while inheriting subsequent type changes', () => {
     const result = resolveReflowContent('figure', 'source', { original: false, translation: true, parsed: true }, { parsed: false });
     expect(result).toMatchObject({ image: false, translation: true, parsed: false });
+  });
+  it('persists the fourth display mode without changing the original bilingual layout', () => {
+    const preferences = readStoredReaderPreferences();
+    persistReaderPreferences(withReflowTranslationMode(preferences, 'sentences'));
+    expect(readStoredReaderPreferences().reflowTranslationMode).toBe('sentences');
+    expect(resolveReflowContent('paragraph', 'sentences').translationView).toBe('sentences');
+    expect(resolveReflowContent('paragraph', 'bilingual').translationView).toBe('paragraph');
+    const bilingual = withReflowTranslationMode(readStoredReaderPreferences(), 'bilingual');
+    expect(resolveReflowContent('paragraph', 'bilingual', bilingual.reflowComponents.content?.paragraph).translationView).toBe('paragraph');
+  });
+  it.each([
+    ['hidden', false], ['hidden', true], ['original', false],
+    ['original', true], ['sentences', false], ['sentences', true],
+  ] as const)('persists original display %s and translation %s independently', (original, translation) => {
+    const updated = withReflowDisplayOptions(readStoredReaderPreferences(), original, translation);
+    persistReaderPreferences(updated);
+    const restored = readStoredReaderPreferences();
+    expect(reflowDisplayOptions(restored)).toEqual({ original, translation });
+    const content = resolveReflowContent('paragraph', restored.reflowTranslationMode, restored.reflowComponents.content?.paragraph);
+    expect(content.parsed).toBe(original !== 'hidden');
+    expect(content.translation).toBe(translation);
+    expect(content.translationView).toBe(original === 'sentences' ? 'sentences' : 'paragraph');
   });
   it('migrates legacy original flags by type without conflating images with parsed text', () => {
     expect(resolveReflowContent('paragraph', 'source', { original: false })).toMatchObject({ image: false, parsed: false });

@@ -103,7 +103,7 @@ type EntryWorkspaceViewProps = EntryPdfHandlers & {
     segmentUid: string;
     source: 'pdf' | 'segment-notes' | 'reflow';
   } | null;
-  reflowSyncSegment: { requestKey: number; segmentUid: string } | null;
+  reflowSyncSegment: { requestKey: number; segmentUid: string; sentenceIndex?: number } | null;
   splitReaderLinked: boolean;
   segmentRecordsLinkedReader: WorkspaceReaderSurfaceKind | null;
   sharedSegmentNoteDrafts: Record<string, string>;
@@ -354,6 +354,7 @@ export function EntryWorkspaceView({
                   onSaveSegmentNote={onSaveSegmentNote}
                   onSharedSegmentNoteDraftChange={onSharedSegmentNoteDraftChange}
                   syncOnlyOnSegmentClick={splitReaderLinked}
+                  sentenceLinkEnabled={splitReaderLinked}
                 />
               </div>
             ) : null}
@@ -383,6 +384,7 @@ export function EntryWorkspaceView({
                   suppressClickOverlay={splitReaderLinked}
                   syncSegmentUid={reflowSyncSegment?.segmentUid}
                   syncRequestKey={reflowSyncSegment?.requestKey}
+                  syncSentenceIndex={reflowSyncSegment?.sentenceIndex}
                   onSegmentClick={(segment) => onReflowSegmentClick?.(segment.uid, segment.page_idx)}
                 />
               </div>

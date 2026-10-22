@@ -65,7 +65,7 @@ export function usePdfSegmentNavigation({
   }, []);
 
   const flashSegment = useCallback(
-    (segment: SourceSegment) => {
+    (segment: SourceSegment, sentenceIndex?: number) => {
       restartSegmentHighlight(segment.uid);
       onActiveSegmentChange?.({
         entryId,
@@ -73,6 +73,7 @@ export function usePdfSegmentNavigation({
         pageIdx: segment.page_idx,
         // The backend hydrates assistant context using the persisted real uid.
         segmentUid: segment.uid,
+        ...(sentenceIndex === undefined ? {} : { sentenceIndex }),
         text: segment.markdown ?? segment.text,
       });
     },

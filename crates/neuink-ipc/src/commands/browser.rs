@@ -221,6 +221,11 @@ pub async fn browser_command<R: Runtime>(
                 false
             });
         // Async command avoids the WebView2 synchronous creation deadlock.
+        let builder = if let Some(paths) = crate::storage::portable(&app) {
+            builder.data_directory(paths.data().join("browser"))
+        } else {
+            builder
+        };
         let view = window
             .add_child(builder, rect.position, rect.size)
             .map_err(|_| "创建网页失败，请重试")?;
