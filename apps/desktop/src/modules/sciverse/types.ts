@@ -65,6 +65,7 @@ export type SciversePaperImportPreparation = {
   access_oa_url?: string | null;
   access_license?: string | null;
   pdf_path?: string | null;
+  pdf_source_url?: string | null;
   degradation_reason?: string | null;
   resource_attempts: string[];
 };

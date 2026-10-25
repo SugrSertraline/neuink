@@ -5,7 +5,8 @@ import { answerWithGroundedAgent } from './qna';
 import { createAssistantTools } from './tools';
 import { DEFAULT_AGENT_RUNTIME_SETTINGS } from '@/shared/lib/agentRuntimeSettings';
 import { invokeAssistantTool, invokeMcpTool, listTools, listMcpTools, loadPrompt, type LlmProfile } from '@/shared/ipc/assistantApi';
-import { ResearchImportNotApprovedError, runResearchTool } from '@/shared/ipc/researchApi';
+import { ResearchImportNotApprovedError, runResearchTool, previewResearchImport } from '@/shared/ipc/researchApi';
+import { requestToolApproval, getToolApprovals } from '../runtime/toolApproval';
 import { saveAgentExecution } from '@/shared/ipc/agentExecutionApi';
 import { DurableExecution } from '../runtime/durableExecution';
 import { buildDirectExecution } from '../runtime/executionPolicy';
@@ -14,7 +15,7 @@ import { AgentPersistenceError, AgentStoppedError, RunBudget, type AgentCheckpoi
 vi.mock('./provider', () => ({ createNeuinkModel: vi.fn(), generationSettings: () => ({}) }));
 vi.mock('@/shared/ipc/assistantApi', async original => ({ ...await original<typeof import('@/shared/ipc/assistantApi')>(),
   listTools: vi.fn(), listMcpTools: vi.fn(), invokeAssistantTool: vi.fn(), invokeMcpTool: vi.fn(), loadPrompt: vi.fn() }));
-vi.mock('@/shared/ipc/researchApi', async original => ({ ...await original<typeof import('@/shared/ipc/researchApi')>(), runResearchTool: vi.fn() }));
+vi.mock('@/shared/ipc/researchApi', async original => ({ ...await original<typeof import('@/shared/ipc/researchApi')>(), runResearchTool: vi.fn(), previewResearchImport: vi.fn() }));
 vi.mock('@/shared/ipc/agentExecutionApi', () => ({ saveAgentExecution: vi.fn() }));
 const profile = { id: 'test', model: 'test', base_url: 'https://example.invalid', api_key: null } as LlmProfile;
 const scope = { entry_ids: ['entry'], entry_titles: ['Paper'], tag_ids: [], tag_names: [] };
@@ -61,6 +62,24 @@ beforeEach(() => {
 });
 
 describe('ordinary failures stay inside the tool boundary', () => {
+  it('returns missing public PDFs to the model without confirmation, writes or an uncertain outcome', async () => {
+    vi.mocked(listTools).mockResolvedValue([{ name: 'import_papers', description: 'Import', parameters_schema: {
+      type: 'object', properties: { paper_ids: { type: 'array', items: { type: 'string' } } }, required: ['paper_ids'] } }]);
+    vi.mocked(previewResearchImport).mockResolvedValue([{ id: 'paper-1', title: 'Paper', authors: [], year: '',
+      abstract_text: '', doi: '', url: 'https://example.org/paper', pdf_url: null, provider: 'crossref', evidence_level: 'metadata' }]);
+    const input = options();
+    const provider = model([{ call: { name: 'import_papers', args: { paper_ids: ['paper-1'] } } },
+      { text: '这条检索记录没有公开 PDF，未下载。' }]);
+    const result = await answerWithGroundedAgent({ ...input, requestToolApproval: requestToolApproval('fixture', 'conversation') });
+    expect(result.answer).toContain('未下载');
+    expect(getToolApprovals()).toHaveLength(0);
+    expect(runResearchTool).not.toHaveBeenCalled();
+    expect(input.budget.writesBlocked).toBe(false);
+    expect(JSON.stringify(provider.doStreamCalls[1].prompt)).toContain('TOOL_NO_PUBLIC_PDF');
+    expect(JSON.stringify(provider.doStreamCalls[1].prompt)).toContain('没有可下载的公开 PDF');
+    expect(JSON.stringify(provider.doStreamCalls[1].prompt)).toContain('必须在面向用户的回复正文中明确提示');
+    expect(result.agentLoopState?.status).toBe('completed');
+  });
   it('lets the model correct a diagram semantic error in a durable run', async () => {
     const invalid = { ...diagramCall, args: { ...diagramCall.args, nodes: [
       { id: 'root', label: 'Root' }, { id: 'child', label: 'Child', parent_id: 'missing' }

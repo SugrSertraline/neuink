@@ -3,6 +3,7 @@ import { buildAgentSystemPrompt } from '@/shared/lib/agentRuntimeSettings';
 import { Agent, RunBudget, createAgentLoopState } from '../agent-core';
 import { bindExecutionIdentity } from '../runtime/durableExecution';
 import { createAgentDriver } from './agentDriver';
+import { hasAssistantToolMarkup } from './assistantAnswerMarkup';
 import type { answerWithGroundedAgent, GroundedAnswer } from './qna';
 
 /** Same durable Agent and provider, but no workspace, tool catalog, MCP or evidence hydration. */
@@ -29,8 +30,8 @@ export async function answerLightweightChat(options: Parameters<typeof answerWit
       execution.set('loop:main', state);
       await execution.saveActor('main', checkpoint);
     } : undefined,
-    verify: text => !text.trim() || /\[S\d+]/.test(text)
-      ? 'Give a brief greeting without unsupported source citations.' : undefined,
+    verify: text => !text.trim() || /\[S\d+]/.test(text) || hasAssistantToolMarkup(text)
+      ? 'Give a brief greeting without unsupported source citations or tool-control tags.' : undefined,
   });
   const answer = await agent.run();
   state.status = 'completed';

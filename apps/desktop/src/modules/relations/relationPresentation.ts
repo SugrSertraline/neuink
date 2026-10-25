@@ -35,12 +35,18 @@ export function focusOffsets(nodes: SceneNode[], links: SceneLink[], id: string,
   adjacent.delete(id);
   const neighbors = nodes.filter(node => adjacent.has(node.id)).sort((a, b) =>
     a.data.kind.localeCompare(b.data.kind) || a.data.title.localeCompare(b.data.title) || a.id.localeCompare(b.id));
-  const shown = neighbors.slice(0, limit), offsets = new Map<string, Vector3>([[id, new Vector3()]]);
-  const leftCount = shown.length > 4 ? Math.ceil(shown.length / 2) : 0;
-  shown.forEach((node, index) => {
-    const left = index < leftCount, count = left ? leftCount : shown.length - leftCount;
-    const row = left ? index : index - leftCount;
-    offsets.set(node.id, new Vector3(left ? -230 : 230, ((count - 1) / 2 - row) * 58, 0));
+  // Parents/owners go left; children, assigned entries and cited sources go right.
+  const incoming = new Set(links.filter(link => endpoint(link.target) === id).map(link => String(endpoint(link.source))));
+  const perSide = Math.max(1, Math.floor(limit / 2));
+  const shown = [...neighbors.filter(node => incoming.has(node.id)).slice(0, perSide),
+    ...neighbors.filter(node => !incoming.has(node.id)).slice(0, perSide)];
+  const offsets = new Map<string, Vector3>([[id, new Vector3()]]);
+  const leftCount = shown.filter(node => incoming.has(node.id)).length;
+  let leftRow = 0, rightRow = 0;
+  shown.forEach(node => {
+    const left = incoming.has(node.id), count = left ? leftCount : shown.length - leftCount;
+    const row = left ? leftRow++ : rightRow++;
+    offsets.set(node.id, new Vector3(left ? -260 : 260, ((count - 1) / 2 - row) * 76, 0));
   });
   return { offsets, total: neighbors.length, shown: shown.length };
 }
@@ -99,7 +105,7 @@ export function createRelationPresentation({ camera, target, nodes, links, size,
     const from = sample(), fromCamera = pose();
     cancelAnimationFrame(raf); raf = 0;
     mode = entering ? 'entering' : 'leaving';
-    tween = { started: active ? performance.now() : pausedAt, duration: 620, from, to, fromCamera, toCamera, entering };
+    tween = { started: active ? performance.now() : pausedAt, duration: 220, from, to, fromCamera, toCamera, entering };
     report();
     if (media?.matches) finish();
     else if (active) raf = requestAnimationFrame(tick);
@@ -116,16 +122,18 @@ export function createRelationPresentation({ camera, target, nodes, links, size,
     if (!saved) saved = pose();
     const origin = pointOf(nodes().find(node => node.id === id)!);
     const { width, height, scale } = size(), logicalWidth = width / scale, compact = logicalWidth < 880;
-    const { offsets, total, shown } = focusOffsets(nodes(), links(), id, compact ? 6 : 12); counts = { total, shown, ids: [...offsets.keys()] };
+    const reserved = compact ? 0 : 340 * scale;
+    const reservedBottom = compact ? Math.min(180 * scale, height * .42) : 0;
+    // Fixed-size DOM labels need actual screen space, not just a bounded node count.
+    const rows = Math.max(1, Math.floor((height - 120 * scale - reservedBottom) / (64 * scale)));
+    const { offsets, total, shown } = focusOffsets(nodes(), links(), id, Math.min(compact ? 6 : 12, rows * 2)); counts = { total, shown, ids: [...offsets.keys()] };
     const right = new Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
     const up = new Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
     const direction = camera.position.clone().sub(target).normalize();
     const destination = spatial(), extent = new Box3().setFromPoints([...offsets.values()]);
     // Include label space in the planar bounds, so labels don't crowd the bubble or viewport edge.
-    extent.min.x -= 24; extent.max.x += 166; extent.min.y -= 34; extent.max.y += 34;
+    extent.min.x -= 24; extent.max.x += 200; extent.min.y -= 46; extent.max.y += 46;
     const center = extent.getCenter(new Vector3()), span = extent.getSize(new Vector3());
-    const reserved = compact ? 0 : 340 * scale;
-    const reservedBottom = compact ? Math.min(180 * scale, height * .42) : 0;
     const fov = 24, tan = Math.tan(fov * Math.PI / 360);
     const distance = Math.max(280, span.y / (2 * tan * Math.max(.2, (height - 120 * scale - reservedBottom) / height)),
       span.x / (2 * tan * camera.aspect * Math.max(.25, (width - reserved - 80 * scale) / width)));

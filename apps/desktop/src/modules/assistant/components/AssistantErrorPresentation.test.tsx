@@ -4,8 +4,10 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ConversationMessage } from '@/shared/ipc/assistantApi';
 import { setAssistantDebug } from '@/shared/lib/assistantDebug';
 import { ASSISTANT_READ_FAILURES } from '@/shared/lib/assistantReadFailure';
+import { ASSISTANT_MODEL_BILLING_ERROR } from '@/shared/lib/assistantModelErrors';
 import { ChatMessage } from './ChatMessage';
 import { AssistantConversationHistory } from './assistantPanelViews';
+import { buildAssistantMessageParts } from './assistantPanelState';
 
 const raw = 'Timeout HTTP 504 Authorization: Bearer sk-private C:\\Users\\Alice\\private.pdf /home/alice/private <html>REMOTE_BODY</html>';
 beforeEach(() => setAssistantDebug(false));
@@ -18,6 +20,28 @@ const message = (): ConversationMessage => ({ message_id: 'historical', role: 'a
       verifierErrors: 0, verifierWarnings: 0, nodes: [{ id: 'node', kind: 'tool', status: 'failed', startedAt: '',
         title: '论文添加', error: raw, inputSummary: raw, outputSummary: raw }] } },
   ] });
+
+it('shows a persisted billing failure with a recovery action instead of generic retry copy', () => {
+  const ui = render(<ChatMessage message={{ message_id: 'billing', role: 'assistant', created_at: '', content: '', source_links: [],
+    parts: [{ type: 'error', message: ASSISTANT_MODEL_BILLING_ERROR }] }} streaming={false} onOpenSource={vi.fn()} />);
+  expect(ui.getByText(ASSISTANT_MODEL_BILLING_ERROR)).toBeTruthy();
+  expect(ui.queryByText('本次执行已结束，部分操作未完成；请核对结果后再试。')).toBeNull();
+});
+
+it('preserves recovered reads after serialization and does not claim the operation remains unfinished', () => {
+  const parts = buildAssistantMessageParts({content:'根据取得的文字回答。',sourceLinks:[],toolEvents:[
+    {id:'invalid',toolName:'claude.mcp__neuink__read_pdf_pages',status:'error',recovered:true,summary:'已纠正读取请求',error:ASSISTANT_READ_FAILURES.pageBatch}
+  ]});
+  const ui = render(<ChatMessage message={{message_id:'recovered',role:'assistant',created_at:'',content:'根据取得的文字回答。',source_links:[],parts:JSON.parse(JSON.stringify(parts))}}
+    streaming={false} onOpenSource={vi.fn()} />);
+  expect(ui.getByText('已完成 · 已纠正读取请求')).toBeTruthy();
+  expect(ui.container.textContent).not.toContain('部分操作未完成');
+  fireEvent.click(ui.getByRole('button',{name:'展开执行详情'}));
+  expect(ui.getByText('已纠正')).toBeTruthy();
+  expect(ui.getByText('读取 PDF 文字')).toBeTruthy();
+  expect(ui.container.textContent).not.toContain('claude.mcp__neuink__');
+  expect(ui.getByText('读取请求已调整，后续调用已覆盖原请求页码。')).toBeTruthy();
+});
 
 it('protects historical error parts and failed-node tooltips, including when debug changes while mounted', () => {
   const original = message();

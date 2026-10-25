@@ -25,10 +25,9 @@ export function ReflowContentControls({ component, label, value, disabled, onCha
   </div>;
 }
 
-export function ReflowSegmentContentActions({ component, value, overridden, onChange, sentenceTranslationDisabled = false }: {
+export function ReflowSegmentContentActions({ component, value, overridden, onChange }: {
   component: ReflowComponentKey; value: ReflowContentPreference; overridden: boolean;
   onChange: (patch: ReflowContentOverrides | null) => void;
-  sentenceTranslationDisabled?: boolean;
 }) {
   const check = (selected: boolean) => <span className="inline-flex size-3.5 shrink-0">{selected ? <Check size={14} aria-hidden="true" /> : null}</span>;
   return <div className="my-1 border-y py-1" role="group" aria-label="此片段显示">
@@ -38,7 +37,6 @@ export function ReflowSegmentContentActions({ component, value, overridden, onCh
     {component === 'paragraph' ? <div role="group" aria-label="对照方式">
       <div className="px-2 py-1 text-xs text-muted-foreground">翻译排列</div>
       {(['paragraph', 'sentences'] as const).map(view => <SegmentMenuButton key={view} role="menuitemradio" aria-checked={value.translationView === view}
-        disabled={view === 'sentences' && sentenceTranslationDisabled}
         icon={check(value.translationView === view)} label={view === 'paragraph' ? '整段对照' : '逐句对照'}
         onClick={() => onChange({ translationView: view, translation: true })} />)}
     </div> : null}

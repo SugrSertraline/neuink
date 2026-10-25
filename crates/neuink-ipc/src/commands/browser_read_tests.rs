@@ -282,3 +282,19 @@ fn player_page_text_cannot_claim_subtitles_or_visual_understanding() {
         .iter()
         .any(|limit| limit.contains("不能声称观看")));
 }
+
+#[test]
+fn article_with_embedded_player_remains_webpage_text() {
+    let target = tauri::Url::parse("https://example.org/article").unwrap();
+    let raw = serde_json::json!({"status":"ok", "url":target.as_str(),
+        "text":"Readable article body", "isVideo":true, "extractor":"mozilla-readability"})
+    .to_string();
+    let result = parse_snapshot(&raw, &target).unwrap();
+    assert_eq!(result.content_type, "webpage");
+    assert_eq!(result.extractor, "mozilla-readability");
+    assert_eq!(result.text, "Readable article body");
+    assert!(result
+        .limitations
+        .iter()
+        .any(|limit| limit.contains("不能声称观看")));
+}

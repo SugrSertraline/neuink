@@ -1,3 +1,5 @@
+import { SelectionTranslationServiceError } from '@/shared/ipc/selectionTranslationApi';
+
 const GENERIC_TRANSLATION_FAILURE =
   '翻译模型未返回可用结果，请稍后重试；若持续失败，请检查任务模型配置。';
 
@@ -10,6 +12,7 @@ function summarizeOriginal(message: string) {
 }
 
 export function describeTranslationFailure(error: unknown): string {
+  if (error instanceof SelectionTranslationServiceError) return error.message;
   const message = error instanceof Error ? error.message : String(error ?? '');
 
   let headline: string;

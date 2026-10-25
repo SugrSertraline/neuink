@@ -31,4 +31,11 @@ describe('useGuardedSegmentAction', () => {
 
     expect(action).toHaveBeenCalledTimes(2);
   });
+  it('forwards the hovered sentence index with the selected segment', () => {
+    const action = vi.fn((_segment: SourceSegment, _sentenceIndex?: number) => undefined);
+    const segment = { uid: 'segment-1' } as SourceSegment;
+    const { result } = renderHook(() => useGuardedSegmentAction(action));
+    act(() => result.current(segment, 2));
+    expect(action).toHaveBeenCalledWith(segment, 2);
+  });
 });

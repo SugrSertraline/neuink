@@ -9,6 +9,7 @@ import { ResearchPaperActionsProvider } from '@/modules/assistant/components/Res
 import { ToastContext } from '@/shared/hooks/useToast';
 import { Button } from '@/components/ui/button';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { ASSISTANT_MODEL_BILLING_ERROR } from '@/shared/lib/assistantModelErrors';
 import type { ConversationMessage } from '@/shared/ipc/assistantApi';
 import '@/styles/globals.css';
 
@@ -24,6 +25,7 @@ const message: ConversationMessage = {
 const narrow = new URLSearchParams(location.search).has('narrow');
 const zoom = new URLSearchParams(location.search).has('zoom');
 const research = new URLSearchParams(location.search).has('research');
+const billing = new URLSearchParams(location.search).has('billing');
 const researchMessage: ConversationMessage = {
   ...message, message_id: 'research',
   content: '以下是按研究方向整理的检索结果（演示数据）：\n\n```neuink-papers\n{"items":[{"ref":"sciverse:demo-private-id","group":"时间序列预测","reason":"基于摘要讨论不规则采样 [S1]。会议归属待核实。"}]}\n```\n\n检索摘要不足以核实全部实验结论。网页资料参见[论文主页](https://example.com/paper)。',
@@ -57,7 +59,7 @@ function Fixture() {
       toolEvents={[]}
       onOpenSource={() => undefined} />
     <ChatMessage message={{ ...message, message_id: 'failed', content: '', parts: [
-      { type: 'error', message: '示例：资料库无法访问，请检查后重试。' },
+      { type: 'error', message: billing ? ASSISTANT_MODEL_BILLING_ERROR : '示例：资料库无法访问，请检查后重试。' },
     ] }} streaming={false} onOpenSource={() => undefined} />
   </main>
   {reply && <div className="min-w-0 flex-1"><div className="flex items-center border-b bg-muted"><span className="p-2">完整回复 · 标签页演示</span><Button size="xs" variant="ghost" onClick={() => setReply(null)}>关闭标签页</Button></div><AssistantReplyReader message={reply} /></div>}

@@ -1,8 +1,15 @@
 pub mod commands;
+pub mod storage;
 
 pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     let handler: Box<dyn Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync> =
         Box::new(tauri::generate_handler![
+            commands::local_agent::detect_claude_code,
+            commands::local_agent::detect_local_agent,
+            commands::local_agent::runtime::run_local_agent,
+            commands::local_agent::runtime::connection::test_local_agent_connection,
+            commands::local_agent::runtime::cancel_local_agent,
+            commands::local_agent::runtime::respond_local_agent,
             commands::browser::browser_command,
             commands::browser::read_browser_tab,
             commands::browser::cancel_browser_read,
@@ -11,6 +18,10 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
             commands::pdf_text::read_assistant_pdf_bytes,
             commands::pdf_text::cache_pdf_text,
             commands::research::get_research_settings,
+            commands::selection_translation::get_selection_translation_settings,
+            commands::selection_translation::save_selection_translation_settings,
+            commands::selection_translation::translate_selection_service,
+            commands::selection_translation::test_selection_translation_service,
             commands::research::save_research_settings,
             commands::research::run_research_tool,
             commands::research::cancel_research_call,
@@ -29,7 +40,6 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
             commands::workspace::forget_recent_workspace,
             commands::workspace::get_workspace_settings,
             commands::workspace::inspect_workspace_path,
-            commands::workspace::migrate_workspace_root,
             commands::workspace::open_dev_workspace,
             commands::workspace::reset_workspace_root,
             commands::workspace::set_workspace_root,
@@ -70,6 +80,7 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
             commands::entry::submit_queued_pdf_parse,
             commands::entry::update_note,
             commands::entry::update_entry_meta,
+            commands::entry::apply_entry_tag_paths,
             commands::annotation::list_annotations,
             commands::annotation::create_annotation,
             commands::annotation::update_annotation,
@@ -130,12 +141,14 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
             commands::sciverse::test_sciverse_connection,
             commands::sciverse::sciverse_agentic_search,
             commands::sciverse::sciverse_read_content,
+            commands::sciverse::note_images::save_sciverse_note_image,
             commands::sciverse::sciverse_meta_catalog,
             commands::sciverse::sciverse_meta_search,
             commands::sciverse::sciverse_meta_paper_relations,
             commands::sciverse::sciverse_paper_schema,
             commands::sciverse::sciverse_paper_schema_search,
-            commands::sciverse::prepare_sciverse_paper_import,
+            commands::sciverse::paper_import::prepare_sciverse_paper_import,
+            commands::sciverse::saved_entry::fetch_entry_pdf,
             commands::search::get_search_index_build_status,
             commands::search::rebuild_search_index,
             commands::search::search_entries,

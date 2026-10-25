@@ -1136,6 +1136,47 @@ fn stores_real_segment_uid_for_group_targeted_segment_note() {
 }
 
 #[test]
+fn list_item_notes_annotations_and_references_survive_reopening_independently() {
+    use neuink_domain::{AnnotationImportance, SegmentType, SegmentUid, SourceSegment};
+    let root = std::env::temp_dir().join(format!("neuink_list_items_{}", unique_suffix()));
+    let pdf = root.with_extension("pdf");
+    fs::write(&pdf, b"%PDF-1.7").unwrap();
+    let workspace = Workspace::create(&root).unwrap();
+    let entry = create_parsed_entry_with_segment(&workspace, &pdf);
+    let mut list = SourceSegment::new(SegmentType::List, 0, Some([100., 100., 900., 900.]), "First\nSecond".into());
+    list.mineru_metadata.insert("list_item_regions".into(), json!([
+        { "text": "First", "bbox": [100, 100, 900, 300] },
+        { "text": "Second", "bbox": [100, 100, 900, 300], "page_idx": 1 }
+    ]).to_string());
+    workspace.write_segments(&entry.id, &[list.clone()]).unwrap();
+    let first = SegmentUid::from_string(format!("{}:list-item:0", list.uid));
+    let second = SegmentUid::from_string(format!("{}:list-item:1", list.uid));
+    workspace.upsert_segment_note(&entry.id, first.clone(), "First note".into()).unwrap();
+    workspace.upsert_segment_note(&entry.id, second.clone(), "Second note".into()).unwrap();
+    workspace.set_segment_note_bookmark(&entry.id, second.clone(), true).unwrap();
+    let annotations = workspace.create_annotation(&entry.id, second.clone(), "comment".into(), "Second annotation".into(), AnnotationImportance::Normal).unwrap();
+    assert_eq!(annotations[0].segment_snapshot.as_ref().unwrap().text, "Second");
+    let updated = workspace.create_note(&entry.id, "Reading note").unwrap();
+    let neuink_domain::ContentItem::Note { note_id, .. } = &updated.contents[0];
+    let link = workspace.create_note_source_link(&entry.id, note_id, &entry.id, second.clone()).unwrap();
+    assert_eq!(link.sources[0].snapshot_text, "Second");
+    assert_eq!(link.sources[0].page, 2);
+    drop(workspace);
+    let reopened = Workspace::open(&root).unwrap();
+    assert_eq!(reopened.resolve_source_segment(&entry.id, &second).unwrap().text, "Second");
+    assert_eq!(reopened.resolve_source_segment(&entry.id, &list.uid).unwrap().text, "First\nSecond");
+    let notes = reopened.read_segment_notes(&entry.id).unwrap();
+    assert_eq!(notes.len(), 2);
+    assert!(notes.iter().any(|note| note.segment_uid == first && note.text == "First note"));
+    assert!(notes.iter().any(|note| note.segment_uid == second && note.bookmarked && note.text == "Second note"));
+    assert!(reopened.inspect_sources(&link.sources)[0].can_locate);
+    reopened.delete_segment_note(&entry.id, second).unwrap();
+    assert_eq!(reopened.read_segment_notes(&entry.id).unwrap().len(), 1);
+    fs::remove_file(pdf).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn rejects_segment_note_over_limit_before_writing() {
     let root = std::env::temp_dir().join(format!("neuink_workspace_{}", unique_suffix()));
     let workspace = Workspace::create(&root).unwrap();

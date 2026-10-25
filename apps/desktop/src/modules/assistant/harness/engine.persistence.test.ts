@@ -9,6 +9,7 @@ import { createNeuinkModel } from '../sdk/provider';
 import { scriptedModel } from '../sdk/testHelpers/model';
 import { readNote } from '@/shared/ipc/workspaceApi';
 import { getAssistantRouteSignals } from '@/shared/ipc/assistantRoutingApi';
+import { ASSISTANT_MODEL_BILLING_ERROR } from '@/shared/lib/assistantModelErrors';
 vi.mock('@/shared/ipc/assistantRoutingApi', () => ({ getAssistantRouteSignals: vi.fn(async () => ({ status: 'unavailable', scores: [] })) }));
 
 vi.mock('../sdk/provider', () => ({ createNeuinkModel: vi.fn(), generationSettings: () => ({}) }));
@@ -46,6 +47,15 @@ beforeEach(() => {
 });
 
 describe('real harness wiring (only model and IPC transports are replaced)', () => {
+  it('keeps provider billing failures actionable without persisting the remote error body', async () => {
+    const model = scriptedModel([]);
+    model.doStream = vi.fn().mockRejectedValue(Object.assign(new Error('private-provider-body'), { statusCode: 402 }));
+    vi.mocked(createNeuinkModel).mockReturnValue(model);
+    await expect(runAssistantHarness(options)).rejects.toThrow(ASSISTANT_MODEL_BILLING_ERROR);
+    expect(stored.status).toBe('failed');
+    expect(JSON.stringify(stored)).not.toContain('private-provider-body');
+    expect(invokeAssistantTool).not.toHaveBeenCalled();
+  });
   it('delivers and saves the parent answer after a failed read without failing the conversation', async () => {
     vi.mocked(createNeuinkModel).mockReturnValue(scriptedModel([
       { call: { name: 'read_segment_content', args: { entry_id: 'entry', segment_uid: 's1' } } },

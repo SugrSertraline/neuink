@@ -15,6 +15,7 @@ import { availableTurnTools, toolCallError } from './toolAvailability';
 import { researchFailureMessage } from './researchRecovery';
 import { TOOL_FAILURE_INSTRUCTIONS } from './toolFailurePolicy';
 import { canReplayAssistantTool } from '../runtime/durableExecution';
+import { isPotentialRawModelToolCall, isRawModelToolCall } from './modelToolCallMarkup';
 import { createCaptureContext, dumpSdkRequest, dumpSdkResponse } from './promptDump';
 
 /** AI SDK is a single-turn provider adapter, never the owner of our agent loop. */
@@ -28,6 +29,7 @@ export function createAgentDriver(options: {
   onReasoningDelta?: (text: string) => void;
   /** Durable compaction boundary, keyed per actor by the caller. */
   projection?: { restored?: unknown; onState?: (state: ProjectionState) => void };
+  entryContextReadLimit?: number;
 }): AgentDriver<ModelMessage> {
   const declarations: ToolSet = Object.fromEntries(Object.entries(options.tools).map(([name, definition]) => {
     const { execute: _execute, needsApproval: _approval, ...declaration } = definition;
@@ -41,7 +43,8 @@ export function createAgentDriver(options: {
       const permitted = options.budget?.writesBlocked
         ? Object.fromEntries(Object.entries(declarations).filter(([name]) => canReplayAssistantTool(name)))
         : declarations;
-      const availability = availableTurnTools(permitted, messages, turnOptions?.finalTurn);
+      const availability = availableTurnTools(permitted, messages, turnOptions?.finalTurn,
+        options.entryContextReadLimit);
       const system = [options.system, TOOL_FAILURE_INSTRUCTIONS, availability.instructions].filter(Boolean).join('\n\n');
       // Two scales, never substituted for one another: the compaction trigger is measured in
       // provider tokens, while this character budget only bounds how much transcript a cut keeps.
@@ -85,10 +88,17 @@ export function createAgentDriver(options: {
         maxRetries: 0
       });
       let text = '';
+      let streamedChars = 0;
       const calls: AgentToolCall[] = [];
       for await (const part of response.fullStream) {
         requestSignal.throwIfAborted();
-        if (part.type === 'text-delta') { text += part.text; options.onDelta?.(part.text); }
+        if (part.type === 'text-delta') {
+          text += part.text;
+          if (!isPotentialRawModelToolCall(text)) {
+            options.onDelta?.(text.slice(streamedChars));
+            streamedChars = text.length;
+          }
+        }
         if (part.type === 'reasoning-delta') options.onReasoningDelta?.(part.text);
         if (part.type === 'error') throw part.error;
         if (part.type === 'tool-call') calls.push({
@@ -127,6 +137,12 @@ export function createAgentDriver(options: {
         }
         if (!calls.length) throw new AgentLocalLimitError('output_length', '模型输出达到长度上限，未把不完整回答标记为完成。');
       }
+      if (isRawModelToolCall(text)) {
+        // A textual tool envelope is neither a tool call nor a user-facing answer.
+        return { text: '', calls, messages: calls.length
+          ? result.messages.filter(message => message.role === 'assistant') : [] };
+      }
+      if (streamedChars < text.length) options.onDelta?.(text.slice(streamedChars));
       return { text, calls, messages: result.messages.filter((message) => message.role === 'assistant') };
     },
     instruction: (text) => ({ role: 'user', content: text }),
@@ -187,7 +203,7 @@ export function agentExecutors(tools: ToolSet, requestApproval?: RequestToolAppr
           approved = await requestApproval({ toolCallId: context.id, toolName: name, input: structuredClone(frozenInput) }, context.signal);
         } catch (error) {
           context.signal?.throwIfAborted();
-          if (error instanceof AgentStoppedError) throw error;
+          if (error instanceof AgentStoppedError || error instanceof AgentToolNotExecutedError) throw error;
           throw new AgentToolNotExecutedError(undefined, 'TOOL_APPROVAL_UNAVAILABLE');
         }
         if (!approved) {

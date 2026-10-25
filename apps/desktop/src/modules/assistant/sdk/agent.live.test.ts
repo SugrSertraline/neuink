@@ -13,13 +13,15 @@ const settingsPath = process.env.NEUINK_LIVE_SETTINGS;
 
 it.skipIf(!settingsPath)('live provider: parent delegates, child reads, both preserve citations; fixed task has no tools', async () => {
   const saved = JSON.parse(await readFile(settingsPath!, 'utf8')) as { llm_profiles: LlmProfile[]; assistant_llm_profile_id: string };
-  const profile = saved.llm_profiles.find((item) => item.id === saved.assistant_llm_profile_id);
+  const selectedId = process.env.NEUINK_LIVE_PROFILE_ID ?? saved.assistant_llm_profile_id;
+  const profile = saved.llm_profiles.find((item) => item.id === selectedId);
   if (!profile?.api_key) throw new Error('No configured assistant profile credential available');
   const settings = { ...profile, max_output_tokens: 2048, temperature: 0, top_p: null };
   const budget = new RunBudget(8, 4);
   const signal = AbortSignal.timeout(120_000);
   let reads = 0;
   let children = 0;
+  let phase = 'agent';
   const childTools: ToolSet = {
     read_evidence: tool({
       description: 'Read the fixture paper evidence.',
@@ -51,15 +53,21 @@ it.skipIf(!settingsPath)('live provider: parent delegates, child reads, both pre
     expect(reads).toBe(1);
     expect(answer).toContain('42');
     expect(answer).toContain('[S1]');
+    phase = 'structured-task';
     const output = await runJsonModelTask({
       settings, name: 'translation_test', description: 'Translate one sentence, preserving its marker.',
       system: 'Return JSON only: {"translation":"Chinese translation including [S1]"}.',
       prompt: 'The trial enrolled 42 participants. [S1]', abortSignal: signal
     }) as { translation: string };
-    expect(output.translation).toContain('42');
+    phase = 'structured-task:number';
+    expect(output.translation).toMatch(/42|四十二/);
+    phase = 'structured-task:citation';
     expect(output.translation).toContain('[S1]');
-  } catch {
-    // SDK errors can carry request headers; intentionally do not print the cause.
-    throw new Error('Live agent/structured-task verification failed (provider details redacted).');
+  } catch (error) {
+    // Report only bounded diagnostic fields, never headers, bodies, URLs or the cause.
+    const failure = error as { statusCode?: unknown; name?: unknown };
+    const status = typeof failure?.statusCode === 'number' ? failure.statusCode : 'none';
+    const kind = typeof failure?.name === 'string' && /^[A-Za-z_]{1,64}$/.test(failure.name) ? failure.name : 'unknown';
+    throw new Error(`Live verification failed: phase=${phase}, kind=${kind}, HTTP=${status}, children=${children}, reads=${reads} (provider details redacted).`);
   }
 }, 150_000);

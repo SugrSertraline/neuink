@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { runLocalBackgroundJob } from '../lib/localBackgroundJobs';
+import { noteMutation, SEGMENT_BOOKMARK_CHANGED } from './noteCatalogApi';
 
 import type {
   EntryId,
@@ -145,6 +146,8 @@ export type OpenDevWorkspaceResponse = {
 };
 
 export type WorkspaceSettings = {
+  data_root?: string | null;
+  legacy_import_notice?: string | null;
   default_root: string;
   root: string;
   custom_root: string | null;
@@ -175,12 +178,6 @@ export type TranslationAutomationSettings = {
   segment_types: string[];
 };
 
-export type MigrateWorkspaceRootResponse = {
-  from_root: string;
-  root: string;
-  restart_requested: boolean;
-};
-
 export async function openDevWorkspace(): Promise<OpenDevWorkspaceResponse> {
   return invoke<OpenDevWorkspaceResponse>('open_dev_workspace');
 }
@@ -209,12 +206,6 @@ export async function updateTranslationAutomationSettings(
 
 export async function setWorkspaceRoot(root: string): Promise<OpenDevWorkspaceResponse> {
   return invoke<OpenDevWorkspaceResponse>('set_workspace_root', {
-    request: { root }
-  });
-}
-
-export async function migrateWorkspaceRoot(root: string): Promise<MigrateWorkspaceRootResponse> {
-  return invoke<MigrateWorkspaceRootResponse>('migrate_workspace_root', {
     request: { root }
   });
 }
@@ -295,6 +286,16 @@ export async function updateEntryMeta(
       fields,
       tags
     }
+  });
+}
+
+export async function applyEntryTagPaths(
+  root: string,
+  entryId: EntryId,
+  paths: string[]
+): Promise<{ entry: EntryMeta; tags: TagMeta[] }> {
+  return invoke('apply_entry_tag_paths', {
+    request: { root, entry_id: entryId, paths }
   });
 }
 
@@ -647,9 +648,11 @@ export type RefreshParseStatusResponse = {
 };
 
 export async function setSegmentNoteBookmark(root: string, entryId: string, segmentUid: string, bookmarked: boolean) {
-  return invoke<SegmentBlockNote[]>('set_segment_note_bookmark', {
+  const notes = await noteMutation(root, invoke<SegmentBlockNote[]>('set_segment_note_bookmark', {
     request: { root, entry_id: entryId, segment_uid: segmentUid, bookmarked }
-  });
+  }));
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(SEGMENT_BOOKMARK_CHANGED, { detail: { root, entryId } }));
+  return notes;
 }
 
 export type PdfReaderResponse = {
@@ -1093,14 +1096,14 @@ export async function upsertSegmentNote(
   segmentUid: string,
   text: string
 ): Promise<SegmentBlockNote[]> {
-  return invoke<SegmentBlockNote[]>('upsert_segment_note', {
+  return noteMutation(root, invoke<SegmentBlockNote[]>('upsert_segment_note', {
     request: {
       root,
       entry_id: entryId,
       segment_uid: segmentUid,
       text
     }
-  });
+  }));
 }
 
 export async function listAnnotations(root: string): Promise<AnnotationCatalogRecord[]> {
@@ -1230,13 +1233,13 @@ export async function deleteSegmentNote(
   entryId: EntryId,
   segmentUid: string
 ): Promise<SegmentBlockNote[]> {
-  return invoke<SegmentBlockNote[]>('delete_segment_note', {
+  return noteMutation(root, invoke<SegmentBlockNote[]>('delete_segment_note', {
     request: {
       root,
       entry_id: entryId,
       segment_uid: segmentUid
     }
-  });
+  }));
 }
 
 export async function getSearchIndexBuildStatus(

@@ -14,13 +14,13 @@ export function isVisualReflowComponent(key: ReflowComponentKey) {
   return key === 'figure' || key === 'chart' || key === 'table';
 }
 
-export function resolveReflowContent(key: ReflowComponentKey, mode: 'source' | 'translation' | 'bilingual',
+export function resolveReflowContent(key: ReflowComponentKey, mode: 'source' | 'translation' | 'bilingual' | 'sentences',
   component?: ReflowContentOverrides, segment?: ReflowContentOverrides): ReflowContentPreference {
   return {
     image: isVisualReflowComponent(key),
     translation: mode !== 'source',
     parsed: !isVisualReflowComponent(key) && mode !== 'translation',
-    translationView: 'paragraph',
+    translationView: key === 'paragraph' && mode === 'sentences' ? 'sentences' : 'paragraph',
     ...migrateContent(key, component),
     ...migrateContent(key, segment),
   };

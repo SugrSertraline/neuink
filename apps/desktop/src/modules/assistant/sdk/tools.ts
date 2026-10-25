@@ -826,6 +826,7 @@ export async function createAssistantTools({
             settings: profile
           });
           loopGuard?.recordSuccess(result);
+          observations.push({ toolName: 'task.run_subagent', output: { externalSourceUrls: result.externalSourceUrls } });
           emit({
             id: toolCallId,
             input: publicInput(input),
@@ -840,6 +841,7 @@ export async function createAssistantTools({
             agent_id: resolvedAgent.id,
             agent_name: resolvedAgent.name,
             kind: 'subagent_result',
+            externalSourceUrls: result.externalSourceUrls,
             sources: result.sources,
             agent_summary: buildAgentSystemPrompt(resolvedAgent),
             trace: result.trace

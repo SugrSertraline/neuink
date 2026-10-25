@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { pdfBlockDrag, type PdfBlockDragItem } from '@/shared/lib/pdfBlockDrag';
+import { listItemSegments } from '@/shared/lib/listItemSegments';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AssistantComposerEditor, findInlineMention, type AssistantComposerDraft } from './AssistantComposerEditor';
@@ -18,23 +20,146 @@ beforeEach(() => {
   } });
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals();
+  pdfBlockDrag.cancel();
   if (rangeRectsDescriptor) Object.defineProperty(Range.prototype, 'getClientRects', rangeRectsDescriptor);
   else Reflect.deleteProperty(Range.prototype, 'getClientRects');
 });
 
+const dropEntry = { id: 'drop-paper', title: '拖入的论文', contents: [], tagIds: [], tags: [], fields: {},
+  createdAt: '', updatedAt: '', pdfFileName: 'paper.pdf', parseMessage: null, parseEndpoint: null,
+  status: 'Parsed' as const, progress: 100 };
+const block: PdfBlockDragItem = {
+  entryId: dropEntry.id, workspaceRoot: 'library-a', bbox: [100, 100, 800, 400],
+  segment: { uid: 'block-4', bbox: [100, 100, 800, 400], page_idx: 3, segment_type: 'paragraph', text: 'Exact block evidence.', markdown: '**Exact** block evidence.' } as PdfBlockDragItem['segment'],
+};
+
+describe('PDF block attachments', () => {
+  it('retains two sibling list references separately and deduplicates only the same item', async () => {
+    const onChange = vi.fn();
+    const view = render(<AssistantComposerEditor {...editorProps(textDraft('比较这两项'))} entries={[dropEntry]} workspaceRoot="library-a" onChange={onChange} />);
+    const target = view.container.querySelector('[data-material="composer"]') as HTMLElement;
+    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(new DOMRect(500, 100, 300, 250));
+    const items = listItemSegments({ ...block.segment, uid: 'list', segment_type: 'list', markdown: '- Alpha\n- Beta', text: 'Alpha\nBeta' });
+    for (const segment of [items[0], items[1], items[0]]) {
+      act(() => { pdfBlockDrag.begin({ ...block, segment }, 600, 200); pdfBlockDrag.finish(600, 200); });
+    }
+    await waitFor(() => expect(view.container.querySelectorAll('[data-context-mention]')).toHaveLength(2));
+    expect(onChange.mock.lastCall?.[1]).toEqual([
+      expect.objectContaining({ segmentUid: 'list:list-item:0', text: 'Alpha' }),
+      expect.objectContaining({ segmentUid: 'list:list-item:1', text: 'Beta' }),
+    ]);
+  });
+  it('adds exact evidence inline without replacing the question or submitting, deduplicates, and restores the attachment', async () => {
+    const onChange = vi.fn();
+    const onSubmit = vi.fn();
+    const props = { ...editorProps(textDraft('请解释这段话 ')), entries: [dropEntry], workspaceRoot: 'library-a', onChange, onSubmit };
+    const view = render(<AssistantComposerEditor {...props} />);
+    const target = view.container.querySelector('[data-material="composer"]') as HTMLElement;
+    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(new DOMRect(500, 100, 300, 250));
+    act(() => { pdfBlockDrag.begin(block, 600, 200); });
+    expect(target.dataset.blockDropActive).toBe('true');
+    expect(screen.getByRole('status').textContent).toContain('松开鼠标，加入此片段');
+    act(() => { pdfBlockDrag.finish(600, 200); });
+    expect(screen.queryByRole('status')).toBeNull();
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    const [snapshot, items, document] = onChange.mock.lastCall!;
+    expect(snapshot.text).toContain('请解释这段话');
+    expect(items).toEqual([expect.objectContaining({ kind: 'segment', entryId: dropEntry.id, entryTitle: dropEntry.title,
+      pageIdx: 3, segmentUid: 'block-4', text: '**Exact** block evidence.' })]);
+    expect(onSubmit).not.toHaveBeenCalled();
+    act(() => { pdfBlockDrag.begin(block, 600, 200); pdfBlockDrag.finish(600, 200); });
+    expect(view.container.querySelectorAll('[data-context-mention]')).toHaveLength(1);
+    view.unmount();
+    const restored = render(<AssistantComposerEditor {...props} composerDraft={{ document, snapshot }} />);
+    await waitFor(() => expect(restored.container.querySelector('[data-context-mention]')?.textContent).toContain('第 4 页'));
+    // Editing restored content serializes the original text and page as well.
+    fireEvent.keyDown(restored.container.querySelector('.ProseMirror')!, { key: 'Enter' });
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(document.content.flatMap((p: any) => p.content).find((n: any) => n.type === 'contextMention').attrs)
+      .toMatchObject({ text: '**Exact** block evidence.', pageIdx: 3 });
+  });
+
+  it.each(['disabled', 'other-library', 'missing-entry', 'outside', 'empty', 'cancelled'] as const)('rejects a %s drop without changing the draft', kind => {
+    const onChange = vi.fn();
+    const view = render(<AssistantComposerEditor {...editorProps(textDraft('保留草稿'))} entries={kind === 'missing-entry' ? [] : [dropEntry]}
+      workspaceRoot={kind === 'other-library' ? 'library-b' : 'library-a'} disabled={kind === 'disabled'} onChange={onChange} />);
+    const target = view.container.querySelector('[data-material="composer"]') as HTMLElement;
+    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(new DOMRect(500, 100, 300, 250));
+    onChange.mockClear();
+    act(() => {
+      pdfBlockDrag.begin(kind === 'empty' ? { ...block, segment: { ...block.segment, text: '', markdown: null } } : block, 600, 200);
+      if (kind === 'cancelled') pdfBlockDrag.cancel();
+      pdfBlockDrag.finish(kind === 'outside' ? 300 : 600, 200);
+    });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(view.container.querySelector('.ProseMirror')?.textContent).toBe('保留草稿');
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('shows feedback only over a valid target and clears it on leave, cancellation and disabling', () => {
+    const onChange = vi.fn();
+    const props = { ...editorProps(textDraft('保留问题')), entries: [dropEntry], workspaceRoot: 'library-a', onChange };
+    const view = render(<AssistantComposerEditor {...props} />);
+    const target = view.container.querySelector('[data-material="composer"]') as HTMLElement;
+    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(new DOMRect(500, 100, 300, 250));
+    onChange.mockClear();
+    act(() => { pdfBlockDrag.begin(block, 300, 200); });
+    expect(screen.queryByRole('status')).toBeNull();
+    act(() => { pdfBlockDrag.update(600, 200); });
+    expect(screen.getByRole('status')).toBeTruthy();
+    act(() => { pdfBlockDrag.update(300, 200); });
+    expect(screen.queryByRole('status')).toBeNull();
+    act(() => { pdfBlockDrag.update(600, 200); pdfBlockDrag.cancel(); });
+    expect(screen.queryByRole('status')).toBeNull();
+    act(() => { pdfBlockDrag.begin(block, 600, 200); });
+    view.rerender(<AssistantComposerEditor {...props} disabled />);
+    expect(screen.queryByRole('status')).toBeNull();
+    onChange.mockClear();
+    act(() => { pdfBlockDrag.finish(600, 200); });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('textbox', { name: '输入问题' }).textContent).toBe('保留问题');
+  });
+
+  it('restores an attachment-only draft without an extra input cue or placeholder', async () => {
+    const onChange = vi.fn();
+    const view = render(<AssistantComposerEditor {...editorProps(textDraft(''))} composerDraft={null}
+      entries={[dropEntry]} workspaceRoot="library-a" onChange={onChange} />);
+    const target = view.container.querySelector('[data-material="composer"]') as HTMLElement;
+    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(new DOMRect(500, 100, 300, 250));
+    act(() => { pdfBlockDrag.begin(block, 600, 200); pdfBlockDrag.finish(600, 200); });
+    await waitFor(() => expect(view.container.querySelector('[data-context-mention]')).not.toBeNull());
+    expect(screen.queryByText('已添加引用，继续输入问题')).toBeNull();
+    expect(screen.queryByText('输入问题', { exact: true })).toBeNull();
+    expect(view.container.querySelector('[data-composer-placeholder]')).toBeNull();
+    const [snapshot, , document] = onChange.mock.lastCall!;
+    expect(snapshot.text.trim()).toBe('[C1]');
+    view.unmount();
+    const restored = render(<AssistantComposerEditor {...editorProps({ document, snapshot })} entries={[dropEntry]} workspaceRoot="library-a" />);
+    await waitFor(() => expect(restored.container.querySelector('[data-context-mention]')).not.toBeNull());
+    expect(restored.container.querySelector('[data-composer-placeholder]')).toBeNull();
+  });
+});
+
 describe('AssistantComposerEditor draft restoration', () => {
-  it('centers the empty hint within the editable area and removes it for a restored draft', () => {
+  it('labels the multiline input, keeps the empty hint while focused and removes it for a restored draft', () => {
     const empty = render(<AssistantComposerEditor {...editorProps(textDraft(''))} composerDraft={null} />);
-    const placeholder = empty.container.querySelector('[data-composer-placeholder]');
-    expect(placeholder?.parentElement?.className).toContain('relative');
-    expect(placeholder?.className).toContain('items-center');
-    expect(placeholder?.className).toContain('justify-center');
-    expect(placeholder?.className).toContain('inset-x-3');
-    expect(placeholder?.className).toContain('text-[11px]');
+    const input = screen.getByRole('textbox', { name: '输入问题' });
+    expect(input.getAttribute('aria-multiline')).toBe('true');
+    fireEvent.focus(input);
+    expect(empty.container.querySelector('[data-composer-placeholder]')?.textContent).toContain('输入问题');
     empty.unmount();
 
     const filled = render(<AssistantComposerEditor {...editorProps(textDraft('已有问题'))} />);
     expect(filled.container.querySelector('[data-composer-placeholder]')).toBeNull();
+  });
+
+  it('shows an unavailable state without inviting typing when editing is disabled', () => {
+    const view = render(<AssistantComposerEditor {...editorProps(textDraft('已有问题'))} disabled />);
+    const input = screen.getByRole('textbox', { name: '输入问题' });
+    expect(input.getAttribute('contenteditable')).toBe('false');
+    expect(input.getAttribute('aria-disabled')).toBe('true');
+    expect(view.container.querySelector('[data-composer-placeholder]')).toBeNull();
+    expect(input.textContent).toBe('已有问题');
   });
 
   it('keeps element selection and send actions inside the composer surface', () => {
@@ -94,7 +219,7 @@ describe('AssistantComposerEditor draft restoration', () => {
     expect(view.container.querySelector('.ProseMirror')?.textContent).toContain(draft.snapshot.text);
   });
 
-  it('restores an explicitly selected @ Entry as an inline token', () => {
+  it('restores an explicitly selected @ Entry as an inline token', async () => {
     const draft: AssistantComposerDraft = {
       document: {
         type: 'doc',
@@ -140,10 +265,10 @@ describe('AssistantComposerEditor draft restoration', () => {
     };
 
     const view = render(<AssistantComposerEditor {...editorProps(draft)} />);
-    expect(view.container.querySelector('[data-context-mention]')?.textContent).toContain('Paper Alpha');
+    await waitFor(() => expect(view.container.querySelector('[data-context-mention]')?.textContent).toContain('Paper Alpha'));
   });
 
-  it('restores an explicitly selected @ Tag as an inline search scope', () => {
+  it('restores an explicitly selected @ Tag as an inline search scope', async () => {
     const draft: AssistantComposerDraft = {
       document: {
         type: 'doc',
@@ -175,7 +300,7 @@ describe('AssistantComposerEditor draft restoration', () => {
     };
 
     const view = render(<AssistantComposerEditor {...editorProps(draft)} />);
-    expect(view.container.querySelector('[data-context-mention]')?.textContent).toContain('Methods');
+    await waitFor(() => expect(view.container.querySelector('[data-context-mention]')?.textContent).toContain('Methods'));
     expect(view.container.querySelector('[data-context-mention]')?.textContent).toContain('Tag');
   });
 });

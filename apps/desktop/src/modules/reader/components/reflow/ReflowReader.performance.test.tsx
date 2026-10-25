@@ -75,7 +75,7 @@ describe('ReflowReader virtualization', () => {
     ).toBe('240');
     expect(container.querySelectorAll('[data-reflow-virtual-item]').length).toBeLessThan(40);
     expect(
-      (container.querySelector('[data-reflow-font-size]') as HTMLElement | null)?.style.fontSize
+      (container.querySelector('[data-reflow-font-size]') as HTMLElement | null)?.style.getPropertyValue('--reflow-preferred-font-size')
     ).toBe('20px');
     expect(
       (container.querySelector('[data-reflow-background-color]') as HTMLElement | null)?.style

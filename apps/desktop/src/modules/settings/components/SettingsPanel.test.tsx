@@ -113,13 +113,18 @@ describe('settings information architecture and navigation', () => {
     expect(page).toBeTruthy();
     expect(within(page as HTMLElement).getAllByRole('heading', { level: 3 }).map(heading => heading.textContent)).toEqual(['默认模型', '模型连接']);
     expect(screen.queryByRole('heading', { name: '模型高级参数' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: '设置阅读翻译模型 →' }));
-    expect(screen.getByRole('combobox', { name: '阅读翻译模型' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '设置选中文字与整体翻译 →' }));
+    expect(screen.getByRole('combobox', { name: '整体翻译模型' })).toBeTruthy();
+    const selectionGroup = screen.getByRole('heading', { name: '选中文字翻译' }).closest('section')!;
+    const wholeGroup = screen.getByRole('heading', { name: '整篇与片段翻译' }).closest('section')!;
+    expect(selectionGroup.contains(screen.getByRole('switch', { name: '选中文字后自动翻译' }))).toBe(true);
+    expect(wholeGroup.contains(screen.getByRole('switch', { name: '解析后自动翻译 PDF' }))).toBe(true);
+    expect(wholeGroup.contains(screen.getByRole('combobox', { name: '整体翻译模型' }))).toBe(true);
     view.rerender(<Harness target={{ id: 'tools-services', nonce: 2 }} />);
-    const service = view.container.querySelector<HTMLDetailsElement>('[data-setting-id="tools-services"]')!;
-    await waitFor(() => expect(service.open).toBe(true));
-    expect(service.querySelector('summary')).toBe(document.activeElement);
-    expect(screen.getByRole('heading', { level: 2, name: '工具与扩展' }).closest('.settings-form')).toBeTruthy();
+    const service = view.container.querySelector<HTMLElement>('[data-setting-id="tools-services"]')!;
+    await waitFor(() => expect(service.contains(document.activeElement) || service === document.activeElement).toBe(true));
+    expect(service.querySelector('summary')).toBeNull();
+    expect(screen.getByRole('heading', { level: 2, name: '检索与工具' }).closest('.settings-form')).toBeTruthy();
     expect(screen.getByRole('heading', { name: '基础检索' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '可选服务' })).toBeTruthy();
     expect(view.container.querySelectorAll('.settings-service')).toHaveLength(2);
@@ -195,15 +200,20 @@ describe('settings information architecture and navigation', () => {
     expect(mocks.loadAgentRuntimeSettings).not.toHaveBeenCalled();
     expect(mocks.saveAgentRuntimeSettings).not.toHaveBeenCalled();
   });
-  it('has seven categories and keeps every searchable target mounted at a stable address', async () => {
+  it('keeps onboarding separate from storage and every searchable target at a stable address', async () => {
     const { container } = render(<Harness />);
-    expect(within(screen.getByRole('navigation', { name: '设置分类' })).getAllByRole('button')).toHaveLength(7);
+    expect(within(screen.getByRole('navigation', { name: '设置分类' })).getAllByRole('button')).toHaveLength(8);
+    const tutorial = screen.getByRole('heading', { level: 2, name: '入门与教程' }).closest('.settings-form')!;
+    const storage = screen.getByRole('heading', { level: 2, name: '资料与存储' }).closest('.settings-form')!;
+    expect(tutorial.querySelector('[data-setting-id="data-onboarding"]')).toBeTruthy();
+    expect(storage.querySelector('[data-setting-id="data-onboarding"]')).toBeNull();
     for (const item of SETTINGS_CATALOG) expect(container.querySelectorAll(`[data-setting-id="${item.id}"]`).length, item.id).toBe(1);
     await waitFor(() => expect(screen.queryByText('正在读取配置…')).toBeNull());
   });
-  it('locates and expands advanced settings, including repeated requests', async () => {
+  it('locates flat settings, including repeated requests', async () => {
     const { rerender, container } = render(<Harness target={{ id: 'reader-preview-size', nonce: 1 }} />);
-    await waitFor(() => expect(container.querySelector('details[data-setting-id="reader-preview-size"]')?.hasAttribute('open')).toBe(true));
+    await waitFor(() => expect(container.querySelector('section[data-setting-id="reader-preview-size"]')?.getAttribute('data-setting-highlight')).toBe('true'));
+    expect(container.querySelector('details[data-setting-id="reader-preview-size"]')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '翻译' }));
     rerender(<Harness target={{ id: 'reader-preview-size', nonce: 2 }} />);
     await waitFor(() => expect(screen.getByRole('heading', { name: '阅读与批注' })).toBeTruthy());
@@ -220,7 +230,7 @@ describe('settings information architecture and navigation', () => {
   });
   it('retains shared preview content when PDF preview is off but reflow preview is on', async () => {
     render(<Harness target={{ id: 'reader-preview', nonce: 1 }} />);
-    const pdf = await screen.findByRole('switch', { name: 'PDF 悬停预览' });
+    const pdf = await screen.findByRole('switch', { name: 'PDF 片段悬停' });
     fireEvent.click(pdf);
     const original = screen.getByRole('checkbox', { name: '解析后原文' });
     expect(original.hasAttribute('disabled')).toBe(false);
@@ -237,7 +247,7 @@ describe('settings information architecture and navigation', () => {
     expect(toggle.getAttribute('aria-checked')).toBe('true');
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-checked')).toBe('false');
-    expect(screen.getByRole('switch', { name: 'PDF 悬停预览' }).getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByRole('switch', { name: 'PDF 片段悬停' }).getAttribute('aria-checked')).toBe('true');
     fireEvent.click(screen.getByRole('button', { name: '翻译' }));
     fireEvent.click(screen.getByRole('button', { name: '阅读与批注' }));
     expect(screen.getByRole('switch', { name: '有 PDF 时直接打开 PDF' }).getAttribute('aria-checked')).toBe('false');

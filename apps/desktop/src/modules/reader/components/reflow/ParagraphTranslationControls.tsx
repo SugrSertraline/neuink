@@ -6,6 +6,7 @@ import type { ParagraphTranslation, TranslationPart, ParagraphLiveProgress, Tran
 import { useParagraphTranslation, useParagraphProgress } from './ParagraphTranslationContext';
 import { SegmentMenuButton } from '../SegmentMenuButton';
 import { hasParagraphTranslation, hasSentenceTranslation, paragraphTranslationRunning } from './paragraphTranslationState';
+import { cn } from '@/lib/utils';
 
 export function ParagraphTranslationActions({ segment, close, viewControls = true, onTranslate, hasDocumentTranslation = false }: {
   segment: SourceSegment; close: () => void; viewControls?: boolean; onTranslate?: (view?: ParagraphTranslation['view']) => void; hasDocumentTranslation?: boolean;
@@ -19,7 +20,7 @@ export function ParagraphTranslationActions({ segment, close, viewControls = tru
   const run = (retry: boolean) => { onTranslate?.(supplement ? 'sentences' : undefined); context.translate(segment.uid, retry); close(); };
   return <div className="my-1 border-y py-1" role="group" aria-label="段落翻译">
     <SegmentMenuButton disabled={!context.ready || submitting || running} onClick={() => run(supplement)}
-      icon={<Languages size={14} aria-hidden="true" />} label={running || submitting ? (supplement ? '正在补充逐句翻译…' : '正在翻译此段…') : supplement ? '补充逐句翻译' : record ? '重新翻译此段' : '翻译此段'} />
+      icon={<Languages size={14} aria-hidden="true" />} label={running || submitting ? (supplement ? '正在补充 AI 逐句翻译…' : '正在 AI 翻译此段…') : supplement ? 'AI 增强逐句翻译' : record ? '重新 AI 翻译此段' : 'AI 翻译此段'} />
     {failed ? <SegmentMenuButton disabled={submitting || running} onClick={() => run(true)} icon={<RotateCcw size={14} aria-hidden="true" />} label="重试失败的翻译" /> : null}
     {record && viewControls ? <div role="group" aria-label="对照方式">
       <div className="px-2 py-1 text-xs text-muted-foreground">对照方式</div>
@@ -44,8 +45,10 @@ function timingTitle(timing?: TranslationTiming | null) {
   return timing ? `排队 ${seconds(timing.queued_ms)}，限流等待 ${seconds(timing.rate_limit_ms)}，生成与传输 ${seconds(timing.generation_ms)}` : undefined;
 }
 
-export function ParagraphTranslationContent({ record, entryId, root, view = record.view, showOriginal = true }: {
+export function ParagraphTranslationContent({ record, entryId, root, view = record.view, showOriginal = true,
+  segmentUid, focusedSentenceIndex }: {
   record: ParagraphTranslation; entryId: string; root: string | null; view?: ParagraphTranslation['view']; showOriginal?: boolean;
+  segmentUid?: string; focusedSentenceIndex?: number;
 }) {
   const live = useParagraphProgress(record);
   const running = record.paragraph.status === 'running' || record.sentences.status === 'running';
@@ -63,8 +66,11 @@ export function ParagraphTranslationContent({ record, entryId, root, view = reco
     : record.sentences.value;
   const selected = view === 'sentences' ? record.sentences : record.paragraph;
   return <div className="min-w-0" data-paragraph-translation={view}>
+    <div className="mb-2 text-xs text-muted-foreground">{view === 'sentences' ? 'AI 逐句译文' : 'AI 整段译文'}</div>
     {view === 'sentences' && pairs?.length ? <div className="grid min-w-0 gap-3">
-      {pairs.map(pair => <div key={pair.id} className="min-w-0 space-y-1">
+      {pairs.map((pair, index) => <div key={pair.id} data-reading-segment-uid={segmentUid}
+        data-reading-sentence-index={index}
+        className={cn('min-w-0 space-y-1 rounded-sm', focusedSentenceIndex === index && 'bg-primary/10 ring-1 ring-primary/40')}>
         {showOriginal ? <div lang="en">{renderText(pair.source)}</div> : null}
         {pair.translation ? <div lang="zh-CN" className="text-[0.95em] text-muted-foreground">{renderText(pair.translation, streaming)}</div> : null}
       </div>)}

@@ -28,6 +28,7 @@ export function verifyHarnessResult({
   const entryMetaProposals = grounded.entryMetaProposals ?? [];
   const tagProposals = grounded.tagProposals ?? [];
   const toolEvents = grounded.toolEvents ?? [];
+  const hasExternalCitations = Boolean(grounded.externalCitationUrls?.length);
   const wantsTag = plan.deliverables.includes('tag_change_proposal');
   const wantsEntryMeta = plan.deliverables.includes('entry_meta_change_proposal');
   const modelDriven = plan.executionMode !== undefined;
@@ -71,19 +72,20 @@ export function verifyHarnessResult({
     warnings.push('The plan requested segment search, but no search evidence was produced.');
   }
   if (plan.deliverables.includes('chat_answer') &&
-    plan.citationPolicy === 'required' && grounded.sources.length === 0) {
+    plan.citationPolicy === 'required' && grounded.sources.length === 0 && !hasExternalCitations) {
     incomplete('A paper-grounded answer was produced without a valid source citation.');
   }
   if (
     invocationPlan.sourcePolicy === 'sciverse_only' &&
-    (grounded.sources.length === 0 || grounded.sources.some((source) => !isSciverseConversationSource(source)))
+    (hasExternalCitations || grounded.sources.length === 0 || grounded.sources.some((source) => !isSciverseConversationSource(source)))
   ) {
-    if (grounded.sources.length === 0) incomplete('The task required Sciverse evidence, but no source could be cited.');
-    else errors.push('The task required Sciverse-only evidence, but the final sources did not satisfy that policy.');
+    if (hasExternalCitations || grounded.sources.some(source => !isSciverseConversationSource(source))) {
+      errors.push('The task required Sciverse-only evidence, but the final sources did not satisfy that policy.');
+    } else incomplete('The task required Sciverse evidence, but no source could be cited.');
   }
   if (
     invocationPlan.sourcePolicy === 'workspace_only' &&
-    grounded.sources.some((source) => !isLocalConversationSource(source))
+    (hasExternalCitations || grounded.sources.some((source) => !isLocalConversationSource(source)))
   ) {
     errors.push('The task required workspace-only evidence, but an external source was included.');
   }

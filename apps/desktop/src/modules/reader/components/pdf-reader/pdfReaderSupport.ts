@@ -1,7 +1,7 @@
 import type { LibraryEntry } from "../../../library/components/LibrarySidebar";
 import type { SourceSegment } from "@/shared/types/domain";
 
-import { logicalSegmentUid } from "./readerUtils";
+import { findSourceSegment } from '@/shared/lib/listItemSegments';
 
 export function formatPdfParseStatus(status: LibraryEntry["status"]) {
   switch (status) {
@@ -28,8 +28,5 @@ export function findSegmentByLogicalOrRealUid(
   segments: SourceSegment[],
   segmentUid: string,
 ) {
-  return segments.find(
-    (segment) =>
-      segment.uid === segmentUid || logicalSegmentUid(segment) === segmentUid,
-  );
+  return findSourceSegment(segments, segmentUid);
 }

@@ -1,13 +1,10 @@
-use std::{fs, net::IpAddr, path::PathBuf};
-
 use keyring::{credential::CredentialPersistence, Entry};
 use neuink_sciverse::{
     AgenticSearchRequest, AgenticSearchResponse, ContentRequest, ContentResponse, SciverseClient,
     DEFAULT_SCIVERSE_BASE_URL,
 };
-use reqwest::{redirect::Policy, Url};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use tauri::{AppHandle, Runtime};
 
 use super::settings::{read_settings, write_settings};
@@ -16,7 +13,12 @@ const CREDENTIAL_SERVICE: &str = "Neuink";
 const CREDENTIAL_USER: &str = "sciverse-api-token";
 const CREDENTIAL_REF: &str = "keyring:sciverse-api-token";
 const ENV_API_TOKEN: &str = "SCIVERSE_API_TOKEN";
-const MAX_IMPORT_PDF_BYTES: usize = 64 * 1024 * 1024;
+pub(crate) mod paper_import;
+pub(crate) mod note_images;
+pub(super) mod pdf_download;
+pub use paper_import::prepare_sciverse_paper_import;
+pub(crate) mod saved_entry;
+pub use saved_entry::fetch_entry_pdf;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct SciverseSettingsState {
@@ -74,6 +76,7 @@ pub struct SciversePaperImportPreparation {
     pub access_oa_url: Option<String>,
     pub access_license: Option<String>,
     pub pdf_path: Option<String>,
+    pub pdf_source_url: Option<String>,
     pub degradation_reason: Option<String>,
     pub resource_attempts: Vec<String>,
 }
@@ -246,381 +249,6 @@ pub async fn sciverse_paper_schema_search<R: Runtime>(
         .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-pub async fn prepare_sciverse_paper_import<R: Runtime>(
-    app: AppHandle<R>,
-    request: PrepareSciversePaperImportRequest,
-) -> Result<SciversePaperImportPreparation, String> {
-    let settings = read_settings(&app)?;
-    ensure_enabled(settings.sciverse.enabled)?;
-    let client = configured_client(&settings.sciverse)?;
-    let mut preparation = SciversePaperImportPreparation {
-        title: request.title.trim().to_string(),
-        doc_id: request.doc_id.trim().to_string(),
-        doi: clean_optional(request.doi),
-        authors: Vec::new(),
-        abstract_text: None,
-        publication_year: None,
-        venue: None,
-        access_oa_url: clean_optional(request.access_oa_url),
-        access_license: None,
-        pdf_path: None,
-        degradation_reason: None,
-        resource_attempts: Vec::new(),
-    };
-    if preparation.doc_id.is_empty() || preparation.title.is_empty() {
-        return Err("Sciverse paper import requires doc_id and title".to_string());
-    }
-
-    let metadata = resolve_paper_metadata(&client, &preparation.doc_id, &preparation.title)
-        .await
-        .ok();
-    if let Some(metadata) = metadata.as_ref() {
-        apply_paper_metadata(&mut preparation, &metadata);
-    }
-
-    let mut failures = Vec::new();
-    let mut resource_candidates = Vec::new();
-    push_unique(
-        &mut resource_candidates,
-        clean_optional(request.resource_file_name),
-    );
-    if let Some(metadata) = metadata.as_ref() {
-        collect_pdf_resource_candidates(metadata, &mut resource_candidates);
-    }
-    for file_name in &resource_candidates {
-        match client.resource(&preparation.doc_id, file_name).await {
-            Ok(resource) if looks_like_pdf(resource.content_type.as_deref(), &resource.bytes) => {
-                preparation.pdf_path = Some(save_import_pdf(&preparation.doc_id, &resource.bytes)?);
-                break;
-            }
-            Ok(_) => failures.push(format!("资源 {file_name} 不是 PDF")),
-            Err(error) => failures.push(format!("资源 {file_name}：{error}")),
-        }
-    }
-
-    if preparation.pdf_path.is_none() {
-        let mut open_access_urls = Vec::new();
-        push_unique(&mut open_access_urls, preparation.access_oa_url.clone());
-        if let Some(metadata) = metadata.as_ref() {
-            collect_open_access_pdf_urls(metadata, &mut open_access_urls);
-        }
-        for url in &open_access_urls {
-            match download_open_access_pdf(url).await {
-                Ok(bytes) => {
-                    preparation.pdf_path = Some(save_import_pdf(&preparation.doc_id, &bytes)?);
-                    break;
-                }
-                Err(error) => failures.push(format!("开放获取链接 {url}：{error}")),
-            }
-        }
-    }
-
-    if preparation.pdf_path.is_none() {
-        preparation.degradation_reason = Some(if failures.is_empty() {
-            "Sciverse 未返回 PDF 资源路径或开放获取链接；此论文只能保存为元数据条目，需用户后续手动补充 PDF。".to_string()
-        } else {
-            format!(
-                "已尝试 {} 个候选 PDF 来源但均不可下载；条目将仅保存元数据。最近失败：{}",
-                failures.len(),
-                failures.last().expect("failures is not empty")
-            )
-        });
-    }
-    preparation.resource_attempts = failures;
-    Ok(preparation)
-}
-
-async fn resolve_paper_metadata(
-    client: &SciverseClient,
-    doc_id: &str,
-    title: &str,
-) -> Result<Value, String> {
-    let response = client
-        .meta_search(&json!({
-            "query": title,
-            "filters": [],
-            "fields": [
-                "title", "doc_id", "doi", "author", "abstract",
-                "publication_published_year", "publication_venue_name_unified",
-                "access_oa_url", "access_license", "locations", "file_name"
-            ],
-            "page": 1,
-            "page_size": 10
-        }))
-        .await
-        .map_err(|error| error.to_string())?;
-    let results = response
-        .get("results")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "Sciverse meta-search returned no result list".to_string())?;
-    results
-        .iter()
-        .find(|item| item.get("doc_id").and_then(Value::as_str) == Some(doc_id))
-        .or_else(|| {
-            results.iter().find(|item| {
-                item.get("title")
-                    .and_then(Value::as_str)
-                    .is_some_and(|candidate| candidate.eq_ignore_ascii_case(title))
-            })
-        })
-        .cloned()
-        .ok_or_else(|| "Sciverse metadata did not contain the selected paper".to_string())
-}
-
-fn push_unique(candidates: &mut Vec<String>, value: Option<String>) {
-    if let Some(value) = value {
-        if !candidates.iter().any(|candidate| candidate == &value) {
-            candidates.push(value);
-        }
-    }
-}
-
-fn collect_pdf_resource_candidates(value: &Value, candidates: &mut Vec<String>) {
-    match value {
-        Value::Object(object) => {
-            for (key, child) in object {
-                if let Some(text) = child.as_str() {
-                    let normalized = text.trim();
-                    if (key.contains("file") || key.contains("resource") || key.contains("path"))
-                        && normalized.to_ascii_lowercase().ends_with(".pdf")
-                        && is_safe_resource_path(normalized)
-                    {
-                        push_unique(candidates, Some(normalized.to_string()));
-                    }
-                }
-                collect_pdf_resource_candidates(child, candidates);
-            }
-        }
-        Value::Array(values) => {
-            for child in values {
-                collect_pdf_resource_candidates(child, candidates);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn collect_open_access_pdf_urls(value: &Value, candidates: &mut Vec<String>) {
-    match value {
-        Value::Object(object) => {
-            for (key, child) in object {
-                if let Some(text) = child.as_str() {
-                    let normalized = text.trim();
-                    if (key.contains("oa") || key.contains("pdf") || key.contains("url"))
-                        && normalized.starts_with("https://")
-                        && (key.contains("pdf") || normalized.to_ascii_lowercase().contains("pdf"))
-                    {
-                        push_unique(candidates, Some(normalized.to_string()));
-                    }
-                }
-                collect_open_access_pdf_urls(child, candidates);
-            }
-        }
-        Value::Array(values) => {
-            for child in values {
-                collect_open_access_pdf_urls(child, candidates);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn is_safe_resource_path(value: &str) -> bool {
-    !value.is_empty()
-        && !value.starts_with('/')
-        && !value.contains('\\')
-        && !value.split('/').any(|segment| segment == "..")
-        && !value.contains("://")
-}
-
-fn apply_paper_metadata(preparation: &mut SciversePaperImportPreparation, value: &Value) {
-    if let Some(title) = value
-        .get("title")
-        .and_then(Value::as_str)
-        .and_then(clean_text)
-    {
-        preparation.title = title;
-    }
-    preparation.doi = preparation.doi.take().or_else(|| {
-        value
-            .get("doi")
-            .and_then(Value::as_str)
-            .and_then(clean_text)
-    });
-    preparation.abstract_text = value
-        .get("abstract")
-        .and_then(Value::as_str)
-        .and_then(clean_text);
-    preparation.publication_year = value
-        .get("publication_published_year")
-        .and_then(Value::as_u64)
-        .and_then(|year| u32::try_from(year).ok());
-    preparation.venue = value
-        .get("publication_venue_name_unified")
-        .and_then(Value::as_str)
-        .and_then(clean_text);
-    preparation.access_oa_url = preparation.access_oa_url.take().or_else(|| {
-        value
-            .get("access_oa_url")
-            .and_then(Value::as_str)
-            .and_then(clean_text)
-    });
-    preparation.access_license = value
-        .get("access_license")
-        .and_then(Value::as_str)
-        .and_then(clean_text);
-    preparation.authors = value
-        .get("author")
-        .and_then(Value::as_array)
-        .map(|authors| {
-            authors
-                .iter()
-                .filter_map(|author| {
-                    author.as_str().and_then(clean_text).or_else(|| {
-                        author
-                            .get("name")
-                            .and_then(Value::as_str)
-                            .and_then(clean_text)
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-}
-
-async fn download_open_access_pdf(url: &str) -> Result<Vec<u8>, String> {
-    let mut current = Url::parse(url).map_err(|_| "invalid open-access URL".to_string())?;
-    let http = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(45))
-        .redirect(Policy::none())
-        .build()
-        .map_err(|error| error.to_string())?;
-
-    for _ in 0..5 {
-        validate_external_pdf_url(&current)?;
-        let mut response = http
-            .get(current.clone())
-            .header(
-                reqwest::header::USER_AGENT,
-                "Neuink/0.1 Sciverse paper importer",
-            )
-            .send()
-            .await
-            .map_err(|error| error.to_string())?;
-        if response.status().is_redirection() {
-            let location = response
-                .headers()
-                .get(reqwest::header::LOCATION)
-                .and_then(|value| value.to_str().ok())
-                .ok_or_else(|| "open-access redirect omitted Location".to_string())?;
-            current = current
-                .join(location)
-                .map_err(|_| "invalid open-access redirect URL".to_string())?;
-            continue;
-        }
-        if !response.status().is_success() {
-            return Err(format!(
-                "open-access PDF returned HTTP {}",
-                response.status()
-            ));
-        }
-        if response
-            .content_length()
-            .is_some_and(|length| length as usize > MAX_IMPORT_PDF_BYTES)
-        {
-            return Err("open-access PDF exceeds the 64 MB import limit".to_string());
-        }
-        let content_type = response
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .map(ToString::to_string);
-        let mut bytes = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(|error| error.to_string())? {
-            if bytes.len() + chunk.len() > MAX_IMPORT_PDF_BYTES {
-                return Err("open-access PDF exceeds the 64 MB import limit".to_string());
-            }
-            bytes.extend_from_slice(&chunk);
-        }
-        if !looks_like_pdf(content_type.as_deref(), &bytes) {
-            return Err("open-access URL did not return a PDF".to_string());
-        }
-        return Ok(bytes);
-    }
-    Err("open-access PDF redirected too many times".to_string())
-}
-
-fn validate_external_pdf_url(url: &Url) -> Result<(), String> {
-    if url.scheme() != "https" {
-        return Err("only HTTPS open-access PDF URLs are allowed".to_string());
-    }
-    let host = url
-        .host_str()
-        .ok_or_else(|| "open-access URL has no host".to_string())?;
-    if host.eq_ignore_ascii_case("localhost")
-        || host.ends_with(".localhost")
-        || host.ends_with(".local")
-        || host.parse::<IpAddr>().is_ok_and(is_private_address)
-    {
-        return Err("open-access URL points to a local or private address".to_string());
-    }
-    Ok(())
-}
-
-fn is_private_address(address: IpAddr) -> bool {
-    match address {
-        IpAddr::V4(address) => {
-            address.is_private()
-                || address.is_loopback()
-                || address.is_link_local()
-                || address.is_unspecified()
-                || address.is_multicast()
-        }
-        IpAddr::V6(address) => {
-            address.is_loopback()
-                || address.is_unspecified()
-                || address.is_multicast()
-                || (address.segments()[0] & 0xfe00) == 0xfc00
-                || (address.segments()[0] & 0xffc0) == 0xfe80
-        }
-    }
-}
-
-fn looks_like_pdf(content_type: Option<&str>, bytes: &[u8]) -> bool {
-    content_type.is_some_and(|value| value.to_ascii_lowercase().contains("application/pdf"))
-        || bytes.starts_with(b"%PDF-")
-}
-
-fn save_import_pdf(doc_id: &str, bytes: &[u8]) -> Result<String, String> {
-    let safe_id = doc_id
-        .chars()
-        .filter(|character| character.is_ascii_alphanumeric())
-        .take(48)
-        .collect::<String>();
-    let directory = std::env::temp_dir().join("neuink-sciverse-imports");
-    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
-    let path: PathBuf = directory.join(format!(
-        "{}.pdf",
-        if safe_id.is_empty() {
-            "paper"
-        } else {
-            &safe_id
-        }
-    ));
-    fs::write(&path, bytes).map_err(|error| error.to_string())?;
-    Ok(path.to_string_lossy().to_string())
-}
-
-fn clean_optional(value: Option<String>) -> Option<String> {
-    value.and_then(|value| clean_text(&value))
-}
-
-fn clean_text(value: &str) -> Option<String> {
-    let value = value.trim();
-    (!value.is_empty()).then(|| value.to_string())
-}
-
 fn settings_state(
     settings: &neuink_config::SciverseSettings,
 ) -> Result<SciverseSettingsState, String> {
@@ -739,13 +367,15 @@ pub(crate) fn assistant_tools_enabled<R: Runtime>(app: &AppHandle<R>) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use reqwest::Url;
+#[path = "sciverse/live_tests.rs"]
+mod live_tests;
+#[cfg(test)]
+#[path = "sciverse/note_images_live_tests.rs"]
+mod note_images_live_tests;
 
-    use super::{
-        ensure_persistent_credential_store, looks_like_pdf, normalize_credential_result,
-        validate_external_pdf_url,
-    };
+#[cfg(test)]
+mod tests {
+    use super::{ensure_persistent_credential_store, normalize_credential_result};
 
     #[test]
     fn missing_credential_is_treated_as_unconfigured() {
@@ -758,29 +388,5 @@ mod tests {
     #[test]
     fn platform_credential_store_persists_until_deleted() {
         assert_eq!(ensure_persistent_credential_store(), Ok(()));
-    }
-
-    #[test]
-    fn import_pdf_validation_accepts_pdf_bytes_without_a_reliable_content_type() {
-        assert!(looks_like_pdf(
-            Some("application/octet-stream"),
-            b"%PDF-1.7\n"
-        ));
-        assert!(!looks_like_pdf(Some("text/html"), b"<html>login</html>"));
-    }
-
-    #[test]
-    fn open_access_download_rejects_local_and_insecure_urls() {
-        assert!(
-            validate_external_pdf_url(&Url::parse("https://127.0.0.1/paper.pdf").unwrap()).is_err()
-        );
-        assert!(
-            validate_external_pdf_url(&Url::parse("http://example.com/paper.pdf").unwrap())
-                .is_err()
-        );
-        assert!(
-            validate_external_pdf_url(&Url::parse("https://example.com/paper.pdf").unwrap())
-                .is_ok()
-        );
     }
 }

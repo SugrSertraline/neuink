@@ -1,5 +1,19 @@
 # Sciverse integration notes
 
+## 全文图片保存合同
+
+依据现行 [content](https://sciverse.opendatalab.org.cn/docs/sciverse/api/content) 与 [resource](https://sciverse.opendatalab.org.cn/docs/sciverse/api/resource) 文档，全文中的相对图片路径属于 Sciverse 资源存储，应由后端携带配置的 Bearer Token 请求 `/resource?file_name=…`，不能相对论文 DOI／开放获取网址解析，也不能用 doc_id 代替路径。完整资源网址仅在匹配配置的资源接口时提取 file_name；其他公开图片不接收服务凭据。
+
+保存离线全文优先请求不带 offset 的完整响应。实测服务会在分页后重写部分图片引用，分页边界位于原图片路径内部时可能出现重复尾部；不能将 next_offset 当作返回文本的索引重新截断。需要续读时保持返回文本的原始空白。图片落盘经 Workspace 校验，限制单张 20 MB、并行 3 个，生成笔记同目录的相对附件引用；不把错误页面、Token 或原始服务异常写入笔记。
+
+## PDF 获取合同
+
+现行官网：[meta-search](https://sciverse.opendatalab.org.cn/docs/sciverse/api/meta-search)、[resource](https://sciverse.opendatalab.org.cn/docs/sciverse/api/resource)。检索到文献或可读全文不保证有 PDF 附件。resource 只接收返回的相对 file_name，不能按 doc_id 猜造资源路径。meta-search 使用精确文献标识与默认字段投影；未列入字段合同的 file_name 不能强行请求。
+
+导入与已保存条目的“获取 PDF”共用候选解析和下载服务。access_oa_url 按字符串／数组兼容，locations 只取当前论文的开放位置，不递归收集参考文献里的 PDF。HTTP 元数据升级到 HTTPS 后仍须通过公开网络校验；论文网页只允许明确声明或唯一标注的 PDF 下载入口。下载是开放版本时保存来源说明；不把平台全文文本、登录 HTML 或工作论文宣称为期刊原版。操作和验收记录见开发计划。
+
+下文保留接入初期的快照与分阶段说明，不代表当前完整实现状态。
+
 本目录保存 Sciverse 官网文档快照和 Neuink 接入前的边界说明。
 
 ## Source snapshot
@@ -25,7 +39,7 @@
 | --- | --- | --- |
 | `agentic-search` | 自然语言语义检索，返回可引用的文献片段 | `chunk_id`, `chunk`, `doc_id`, `offset`, `page_no`, metadata |
 | `content` | 按 `doc_id` 读取全文或上下文片段 | `text`, `chars_returned`, `next_offset`, `more` |
-| `resource` | 按相对 `file_name` 下载论文图片、表格等二进制资源 | `doc_id`, `file_name` |
+| `resource` | 按相对 `file_name` 下载论文图片、表格等二进制资源 | `file_name` |
 | `meta-search` | 按结构化条件筛选、排序和导出论文元数据 | `unique_id`, `doc_id`, fields, page/cursor |
 | `meta-catalog` | 运行期返回 `meta-search` 的字段、算子和样例值 | field capabilities, operators, default fields |
 | `meta-paper-relations` | 分页读取引用、被引和相关工作关系 | `unique_id`, relation, items, total pages |

@@ -3,6 +3,7 @@ import type { Virtualizer } from '@tanstack/react-virtual';
 import type { ReflowSegmentGroup } from '../reflow/buildReflowBlocks';
 import { useReadingNavigation, type ReadingAdapter } from './ReadingNavigation';
 import { observeReadingWidth } from './observeReadingWidth';
+import { listItemAddress } from '@/shared/lib/listItemSegments';
 
 export function useReflowReadingNavigation(scrollRef: RefObject<HTMLDivElement>, groups: ReflowSegmentGroup[],
   virtualizer: Virtualizer<HTMLDivElement, Element>, groupIndex: Map<string, number>) {
@@ -66,7 +67,25 @@ export function useReflowReadingNavigation(scrollRef: RefObject<HTMLDivElement>,
         if (index === undefined || index < 0) return false;
         virtualizer.scrollToIndex(index, { align: 'center' });
         if (target.focus !== false) scrollRef.current?.focus({ preventScroll: true });
-        setFlashUid(groups[index].body.uid); return true;
+        const uid = target.segmentUid ?? groups[index].body.uid;
+        setFlashUid(uid);
+        if (listItemAddress(uid)) {
+          const settle = (remaining: number) => {
+            frame = requestAnimationFrame(() => {
+              const scroll = scrollRef.current;
+              const item = [...scroll?.querySelectorAll<HTMLElement>('[data-reflow-list-item]') ?? []]
+                .find(element => element.dataset.reflowListItem === uid);
+              if (scroll && item) {
+                const viewport = scroll.getBoundingClientRect(), rect = item.getBoundingClientRect();
+                const scale = scroll.offsetWidth > 0 ? viewport.width / scroll.offsetWidth : 1;
+                if (scale > 0) virtualizer.scrollToOffset(Math.max(0, scroll.scrollTop + (rect.top - viewport.top - viewport.height / 2 + rect.height / 2) / scale));
+              }
+              if (remaining > 1) settle(remaining - 1);
+            });
+          };
+          settle(3);
+        }
+        return true;
       }
     };
     const unregister = register?.(adapter, scrollRef.current);

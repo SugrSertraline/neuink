@@ -1,3 +1,4 @@
+import { withListItemSegments } from '@/shared/lib/listItemSegments';
 import { SegmentBookmarksProvider, usePublishSegmentNotes, type SetSegmentBookmark } from './SegmentBookmarks';
 import {
   FileText,
@@ -102,7 +103,7 @@ type EntryWorkspaceViewProps = EntryPdfHandlers & {
     segmentUid: string;
     source: 'pdf' | 'segment-notes' | 'reflow';
   } | null;
-  reflowSyncSegment: { requestKey: number; segmentUid: string } | null;
+  reflowSyncSegment: { requestKey: number; segmentUid: string; sentenceIndex?: number } | null;
   splitReaderLinked: boolean;
   segmentRecordsLinkedReader: WorkspaceReaderSurfaceKind | null;
   sharedSegmentNoteDrafts: Record<string, string>;
@@ -235,6 +236,7 @@ export function EntryWorkspaceView({
   onOpenContent,
   onApplyEntryTagPaths,
   onUpdateEntry,
+  onFetchPdf,
   onAttachPdf,
   onCreatePdfVersion,
   onImportMineruClientResult,
@@ -352,6 +354,7 @@ export function EntryWorkspaceView({
                   onSaveSegmentNote={onSaveSegmentNote}
                   onSharedSegmentNoteDraftChange={onSharedSegmentNoteDraftChange}
                   syncOnlyOnSegmentClick={splitReaderLinked}
+                  sentenceLinkEnabled={splitReaderLinked}
                 />
               </div>
             ) : null}
@@ -381,6 +384,7 @@ export function EntryWorkspaceView({
                   suppressClickOverlay={splitReaderLinked}
                   syncSegmentUid={reflowSyncSegment?.segmentUid}
                   syncRequestKey={reflowSyncSegment?.requestKey}
+                  syncSentenceIndex={reflowSyncSegment?.sentenceIndex}
                   onSegmentClick={(segment) => onReflowSegmentClick?.(segment.uid, segment.page_idx)}
                 />
               </div>
@@ -429,7 +433,7 @@ export function EntryWorkspaceView({
                 tags={tags}
                 workspaceRoot={workspaceRoot}
                 onReparsePdf={onRetryPdfParse}
-                onAttachPdf={onAttachPdf}
+                onFetchPdf={onFetchPdf} onAttachPdf={onAttachPdf}
                 onCreatePdfVersion={onCreatePdfVersion}
                 onImportMineruClientResult={onImportMineruClientResult}
                 onApplyEntryTagPaths={onApplyEntryTagPaths}
@@ -579,7 +583,7 @@ function SegmentNotesOverview({
   );
   const [annotations, setAnnotations] = useState(sourceAnnotations);
   const sourceSegments = useMemo(
-    () => mergePdfAnnotationAnchorSegments(parsedSourceSegments, annotations),
+    () => mergePdfAnnotationAnchorSegments(withListItemSegments(parsedSourceSegments), annotations),
     [annotations, parsedSourceSegments]
   );
   const [annotationBusy, setAnnotationBusy] = useState(false);
@@ -1046,7 +1050,7 @@ function SegmentNotesOverview({
                       ) : null}
                       {note?.text ? <div className="mt-1 line-clamp-2 text-xs text-foreground">{getSegmentNoteVisibleText(note.text)}</div> : null}
                       <div className="mt-2 flex flex-wrap gap-1 border-t pt-2">
-                        {note?.bookmarked ? <Badge variant="secondary">收藏位置</Badge> : null}
+                        {note?.bookmarked ? <Badge variant="secondary">收藏</Badge> : null}
                         {note ? <Badge variant="secondary">笔记</Badge> : null}
                         {itemAnnotations.length > 0 ? (
                           <Badge variant="outline">批注 {itemAnnotations.length}</Badge>

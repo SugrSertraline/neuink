@@ -56,3 +56,23 @@ it('shows a picker failure and allows retry', async () => {
   fireEvent.click(view.getByRole('button', { name: '导入客户端解析结果' }));
   await waitFor(() => expect(onImportMineruClientResult).toHaveBeenCalledWith(entry.id, 'C:/result.zip'));
 });
+
+it('fetches only missing PDFs, prevents duplicate actions, and keeps failure retryable', async () => {
+  let reject!: (reason: Error) => void;
+  const pending = new Promise<void>((_resolve, fail) => { reject = fail; });
+  const onFetchPdf = vi.fn().mockReturnValueOnce(pending).mockResolvedValueOnce(undefined);
+  const view = render(<EntryPdfActions entry={{ ...entry, pdfFileName: null }} onFetchPdf={onFetchPdf} onAttachPdf={vi.fn()} />);
+  fireEvent.click(view.getByRole('button', { name: '获取 PDF' }));
+  expect(onFetchPdf).toHaveBeenCalledWith(entry.id);
+  expect((view.getByRole('button', { name: '上传 PDF' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(view.getByRole('button', { name: '正在获取 PDF…' }));
+  expect(onFetchPdf).toHaveBeenCalledTimes(1);
+  expect(view.getByRole('status').textContent).toContain('可切换页面');
+  reject(new Error('暂时没有可下载的 PDF'));
+  await waitFor(() => expect(view.getByRole('alert').textContent).toContain('暂时没有'));
+  fireEvent.click(view.getByRole('button', { name: '获取 PDF' }));
+  await waitFor(() => expect(view.queryByRole('status')).toBeNull());
+  expect(onFetchPdf).toHaveBeenCalledTimes(2);
+  view.rerender(<EntryPdfActions entry={entry} onFetchPdf={onFetchPdf} />);
+  expect(view.queryByRole('button', { name: '获取 PDF' })).toBeNull();
+});

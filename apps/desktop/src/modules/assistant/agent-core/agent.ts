@@ -122,6 +122,8 @@ export class Agent<M> {
     budget: RunBudget;
     signal?: AbortSignal;
     maxTurns?: number;
+    /** Force answer synthesis early enough to let the verifier request corrections. */
+    synthesisReserveTurns?: number;
     /** A delegated reader must leave its parent one model turn, including compaction. */
     reserveParentTurn?: boolean;
     beforeTurn?: () => void;
@@ -263,7 +265,9 @@ export class Agent<M> {
           o.beforeTurn?.();
           await this.save(); // Reserve the attempt before network I/O, including interrupted requests.
           await this.emit({ type: 'turn_start' });
-          const finalTurn = this.turns >= (o.maxTurns ?? 12) || o.budget.turns >= o.budget.maxTurns - (o.reserveParentTurn ? 1 : 0)
+          const localMaxTurns = o.maxTurns ?? 12;
+          const synthesisTurn = Math.max(1, localMaxTurns - (o.synthesisReserveTurns ?? 0));
+          const finalTurn = this.turns >= synthesisTurn || o.budget.turns >= o.budget.maxTurns - (o.reserveParentTurn ? 1 : 0)
             || o.budget.toolCalls >= o.budget.maxToolCalls;
           const response = await abortable(o.driver.turn(this.messages, o.signal, { finalTurn }), o.signal);
           o.signal?.throwIfAborted();

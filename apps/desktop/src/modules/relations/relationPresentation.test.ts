@@ -4,7 +4,7 @@ import { PerspectiveCamera, Vector3 } from 'three';
 import { createRelationPresentation, focusOffsets, frontOpacity } from './relationPresentation';
 import type { SceneNode, SceneLink } from './relationSceneData';
 
-function setup(reduced = false) {
+function setup(reduced = false, size = { width: 1200, height: 600, scale: 1 }) {
   const media = { matches: reduced, addEventListener: vi.fn(), removeEventListener: vi.fn() };
   vi.stubGlobal('matchMedia', () => media);
   const nodes: SceneNode[] = ['a', 'b', 'c', 'd'].map((id, index) => ({
@@ -19,7 +19,7 @@ function setup(reduced = false) {
   camera.position.set(500, 400, 700); camera.lookAt(target); camera.updateMatrixWorld();
   const changed = vi.fn(), stateChanged = vi.fn();
   const view = createRelationPresentation({ camera, target, nodes: () => nodes, links: () => links,
-    size: () => ({ width: 1200, height: 600, scale: 1 }), changed, stateChanged });
+    size: () => size, changed, stateChanged });
   return { view, nodes, links, camera, target, media, changed, stateChanged };
 }
 beforeEach(() => {
@@ -41,7 +41,7 @@ describe('relation view presentation', () => {
   it('interpolates into a coplanar neighborhood and exactly restores the original 3D camera', () => {
     const h = setup(), before = JSON.stringify(h.nodes), original = h.camera.position.clone(), target = h.target.clone();
     h.view.select('b'); expect(h.view.mode).toBe('entering');
-    vi.advanceTimersByTime(300);
+    vi.advanceTimersByTime(100);
     expect(h.view.sample().flatness).toBeGreaterThan(0); expect(h.view.sample().flatness).toBeLessThan(1);
     vi.advanceTimersByTime(400); expect(h.view.mode).toBe('planar');
     const frame = h.view.sample(), forward = h.camera.position.clone().sub(h.target).normalize();
@@ -55,7 +55,7 @@ describe('relation view presentation', () => {
   });
   it('retargets rapid selections, pauses while hidden, and cancels all animation work on disposal', () => {
     const h = setup(), original = h.camera.position.clone();
-    h.view.select('a'); vi.advanceTimersByTime(200); h.view.select('b'); vi.advanceTimersByTime(100);
+    h.view.select('a'); vi.advanceTimersByTime(60); h.view.select('b'); vi.advanceTimersByTime(50);
     h.view.setActive(false); const atPause = h.view.sample().flatness, position = h.camera.position.clone();
     vi.advanceTimersByTime(1500); expect(h.view.sample().flatness).toBe(atPause);
     expect(h.camera.position.distanceTo(position)).toBeLessThan(.00001);
@@ -71,8 +71,25 @@ describe('relation view presentation', () => {
     const nodes = Array.from({ length: 100 }, (_, i) => ({ ...h.nodes[0], id: 'n' + i }));
     const links = nodes.slice(1).map(node => ({ ...h.links[0], source: 'n0', target: node.id }));
     const result = focusOffsets(nodes, links, 'n0');
-    expect(result.total).toBe(99); expect(result.shown).toBe(12); expect(result.offsets.size).toBe(13);
-    expect(new Set([...result.offsets.values()].map(point => point.toArray().join(','))).size).toBe(13);
+    expect(result.total).toBe(99); expect(result.shown).toBe(6); expect(result.offsets.size).toBe(7);
+    expect(new Set([...result.offsets.values()].map(point => point.toArray().join(','))).size).toBe(7);
     h.view.select(null); expect(h.view.mode).toBe('spatial'); h.view.dispose();
+  });
+  it('puts parent relationships on the left and child relationships on the right', () => {
+    const h = setup(true), result = focusOffsets(h.nodes, h.links, 'b');
+    expect(result.offsets.get('a')!.x).toBeLessThan(0);
+    expect(result.offsets.get('c')!.x).toBeGreaterThan(0);
+    expect(result.offsets.get('b')!.x).toBe(0);
+    h.view.dispose();
+  });
+  it('reduces displayed neighbors in short split panes while retaining the full relationship count', () => {
+    const h = setup(true, { width: 700, height: 440, scale: 1.25 });
+    for (let i = 0; i < 10; i++) {
+      const id = `extra-${i}`; h.nodes.push({ ...h.nodes[0], id });
+      h.links.push({ source: 'b', target: id, data: { id, from: 'b', to: id, kind: 'hierarchy', evidence: [] } });
+    }
+    h.view.select('b');
+    expect(h.stateChanged).toHaveBeenLastCalledWith(expect.objectContaining({ mode: 'planar', shown: 2, total: 12 }));
+    h.view.dispose();
   });
 });

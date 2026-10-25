@@ -121,7 +121,24 @@ function copyResources(source, destination) {
       fs.copyFileSync(safePath(source, name), output, fs.constants.COPYFILE_EXCL);
     }
     verifyResources(staging);
-    publishDirectory(staging, target);
+    try { publishDirectory(staging, target); }
+    catch (error) {
+      if (!['EPERM', 'EACCES', 'EBUSY'].includes(error.code)) throw error;
+      // Some Windows scanners keep a handle on copied executables long enough to
+      // prevent directory rename. Copy into a new target and verify it before use.
+      fs.mkdirSync(target);
+      try {
+        for (const name of [...Object.keys(manifest.files), MANIFEST]) {
+          const output = safePath(target, name);
+          fs.mkdirSync(path.dirname(output), { recursive: true });
+          fs.copyFileSync(safePath(staging, name), output, fs.constants.COPYFILE_EXCL);
+        }
+        verifyResources(target);
+      } catch (copyError) {
+        fs.rmSync(target, { recursive: true, force: true });
+        throw copyError;
+      }
+    }
   } finally { removeOwnedStaging(staging, path.dirname(target), '.browser-reader-copy-'); }
 }
 

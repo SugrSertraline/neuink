@@ -1,3 +1,4 @@
+import { safeAssistantModelError } from '@/shared/lib/assistantModelErrors';
 import type {
   AssistantContextSnapshot,
   AssistantToolTraceEvent
@@ -128,7 +129,7 @@ export function hydrateSummary(snapshot: AssistantContextSnapshot) {
 }
 
 export function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
+  return safeAssistantModelError(error) ?? (error instanceof Error ? error.message : String(error));
 }
 
 function markRunningNodes(

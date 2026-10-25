@@ -25,6 +25,9 @@ fn server(status: &str, body: &str) -> (String, std::thread::JoinHandle<()>) {
             assert!(Instant::now() < deadline, "parser was not called");
             std::thread::sleep(Duration::from_millis(10));
         };
+        // Accepted Windows sockets inherit nonblocking mode; the fixture's
+        // timed blocking read must wait for the client's request bytes.
+        socket.set_nonblocking(false).unwrap();
         socket
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();

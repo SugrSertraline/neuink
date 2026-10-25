@@ -1,6 +1,6 @@
 import type { WorkspacePathInspection } from '@/shared/ipc/workspaceApi';
 
-export type WorkspaceSelectionIntent = 'switch' | 'create' | 'migrate';
+export type WorkspaceSelectionIntent = 'switch' | 'create';
 
 export function resolveWorkspaceSelection(
   intent: WorkspaceSelectionIntent,
@@ -17,9 +17,6 @@ export function resolveWorkspaceSelection(
   }
   if (intent === 'create' && inspection.kind === 'empty_directory') {
     return { intent: 'create' };
-  }
-  if (intent === 'migrate' && inspection.kind === 'empty_directory') {
-    return { intent: 'migrate' };
   }
   if (intent === 'create' && inspection.kind === 'valid_workspace') {
     return { message: '该文件夹已经是 Neuink 工作区，请使用“打开其他工作区”。' };

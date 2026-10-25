@@ -4,7 +4,8 @@ import { availableTurnTools, toolCallError } from './toolAvailability';
 import { createAgentToolFailure } from '../agent-core/toolFailure';
 
 const definition = () => tool({ inputSchema: jsonSchema({ type: 'object', properties: {} }) });
-const tools = { search_sciverse_evidence: definition(), read_sciverse_content: definition(), note_propose_create: definition() };
+const tools = { search_sciverse_evidence: definition(), read_sciverse_content: definition(),
+  read_entry_assistant_context: definition(), note_propose_create: definition() };
 const result = (toolName: string, failed = false): ModelMessage => ({ role: 'tool', content: [{
   type: 'tool-result', toolCallId: 'test', toolName,
   output: failed ? { type: 'error-text', value: 'Failed' } : { type: 'json', value: { evidence: 'actual' } }
@@ -38,10 +39,17 @@ describe('authoritative per-turn tool availability', () => {
   it('caps search across providers, but keeps reading and confirmed-write tools', () => {
     const messages = Array.from({ length: 6 }, (_, i) => result(i % 2 ? 'search_papers' : 'search_sciverse_evidence'));
     const selected = availableTurnTools(tools, structuredClone(messages));
-    expect(Object.keys(selected.tools)).toEqual(['read_sciverse_content', 'note_propose_create']);
+    expect(Object.keys(selected.tools)).toEqual(['read_sciverse_content', 'read_entry_assistant_context', 'note_propose_create']);
     expect(selected.finish).toBe(false);
     expect(selected.instructions).toContain('search budget is reached');
     expect(tools.search_sciverse_evidence).toBeDefined();
+  });
+  it('stops paging through parsed text at the task read limit while preserving targeted search', () => {
+    const messages = [result('read_entry_assistant_context'), result('read_entry_assistant_context')];
+    const selected = availableTurnTools(tools, messages, false, 2);
+    expect(selected.tools).not.toHaveProperty('read_entry_assistant_context');
+    expect(selected.tools).toHaveProperty('search_sciverse_evidence');
+    expect(selected.instructions).toContain('parsed-document reading budget is reached');
   });
   it('switches to synthesis after three consecutive errors, but resets the streak after success', () => {
     const failures = Array.from({ length: 3 }, () => result('missing', true));

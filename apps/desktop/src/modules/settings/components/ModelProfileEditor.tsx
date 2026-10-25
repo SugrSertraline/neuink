@@ -123,7 +123,7 @@ export function ModelProfileEditor({ props, open, onOpenChange }: { props: Setti
                       <span className={modelSync.status === 'error' ? 'text-destructive' : 'text-muted-foreground'}>{modelSync.message}</span>
                       {modelSync.status === 'error' && <Button size="xs" type="button" variant="outline" onClick={modelSync.retry}>重试同步</Button>}
                     </div>
-                    <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">公开目录与同步说明</summary><div className="mt-2 grid gap-2">
+                    <section className="text-xs text-muted-foreground"><h4 className="cursor-pointer">公开目录与同步说明</h4><div className="mt-2 grid gap-2">
                     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <Button size="xs" variant="outline" type="button" disabled={publicCatalog.busy || busy} onClick={publicCatalog.refresh}>
                         <RefreshCw />{publicCatalog.busy ? '正在更新公开目录…' : '更新公开模型目录'}
@@ -134,7 +134,7 @@ export function ModelProfileEditor({ props, open, onOpenChange }: { props: Setti
                     {cachedModelCatalog && <p className="text-xs text-muted-foreground">当前接口列表缓存：{cachedModelCatalog.models.length} 项，{formatCacheTime(cachedModelCatalog.updatedAt)}。接口列表与公开目录独立更新。</p>}
                     {publicCatalog.error && <p role="alert" className="text-xs text-destructive">{publicCatalog.error}</p>}
                     {publicCatalog.catalog?.warnings.map(warning => <p key={warning} role="status" className="text-xs text-muted-foreground">{warning}</p>)}
-                    </div></details>
+                    </div></section>
     
                     <div className="settings-fields-grid grid gap-3">
                       <div className="grid gap-2">

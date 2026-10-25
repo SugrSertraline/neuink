@@ -19,10 +19,7 @@ pub(super) async fn translate(
         let segments = workspace
             .read_segments(&request.entry_id)
             .map_err(|error| error.to_string())?;
-        let segment = segments
-            .iter()
-            .find(|segment| segment.uid == request.segment_uid)
-            .cloned()
+        let segment = neuink_domain::find_source_segment(&segments, &request.segment_uid)
             .ok_or_else(|| "Source segment not found.".to_string())?;
         if !should_translate_segment(&segment) {
             return Err("This block is not suitable for translation.".to_string());

@@ -72,7 +72,7 @@ function SegmentRegionImpl({
   isContinuation: boolean;
   listItemIndex?: number;
   pageIdx: number;
-  previewPosition: { x: number; segmentTop: number; segmentBottom: number } | null;
+  previewPosition: { x: number; segmentRight?: number; segmentTop: number; segmentBottom: number } | null;
   previewFontSize?: PdfHoverPreviewFontSize;
   previewSize?: PdfHoverPreviewSize;
   previewShowRegion: boolean;
@@ -116,7 +116,7 @@ function SegmentRegionImpl({
     if (
       !fullTranslation ||
       segment.segment_type !== 'list' ||
-      listItemIndex === undefined
+      listItemIndex === undefined || translatedSegment?.segment_uid === segment.uid
     ) {
       return fullTranslation;
     }
@@ -433,7 +433,7 @@ function SegmentPreview({
   onPointerEnter,
   onPointerLeave
 }: {
-  position: { x: number; segmentTop: number; segmentBottom: number };
+  position: { x: number; segmentRight?: number; segmentTop: number; segmentBottom: number };
   isContinuation: boolean;
   listItemRegions: ListItemRegion[];
   pageIdx: number;
@@ -491,7 +491,9 @@ function SegmentPreview({
     showOriginal ? captionText : null,
     showTranslationPreview ? translatedText : null,
     showNotePreview ? noteText : null,
-    showAnnotationPreview ? annotations.map((annotation) => annotation.content).join('\n') : null
+    showAnnotationPreview ? annotations.map((annotation) =>
+      `${annotation.text_selection?.text?.trim() || segment.text.trim()}\n${annotation.content}`
+    ).join('\n') : null
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -508,7 +510,7 @@ function SegmentPreview({
 
   return (
     <PointerPreview
-      anchor={{ x: position.x, top: position.segmentTop, bottom: position.segmentBottom }}
+      anchor={{ x: position.x, right: position.segmentRight, top: position.segmentTop, bottom: position.segmentBottom }}
       width={previewLayout.width}
       maxHeight={previewLayout.maxHeight}
       interactive
@@ -605,6 +607,9 @@ function SegmentPreview({
                       <Badge variant="outline">{annotation.kind}</Badge>
                       <span>重要性 {annotation.importance}</span>
                     </div>
+                    <div className="mb-0.5 text-[11px] font-semibold text-muted-foreground">批注原文</div>
+                    <p className="mb-1 whitespace-pre-wrap break-words text-foreground">{annotation.text_selection?.text?.trim() || segment.text.trim()}</p>
+                    {annotation.content.trim() ? <div className="border-t pt-1 text-[11px] font-semibold text-muted-foreground">批注内容</div> : null}
                     <p className="whitespace-pre-wrap break-words text-foreground">{annotation.content}</p>
                   </div>
                 ))}
@@ -666,7 +671,7 @@ function getTranslationHint({
 type PreviewLayoutInput = {
   fontSize?: PdfHoverPreviewFontSize;
   hasFooter: boolean;
-  position: { x: number; segmentTop: number; segmentBottom: number };
+  position: { x: number; segmentRight?: number; segmentTop: number; segmentBottom: number };
   preferScrollable: boolean;
   size?: PdfHoverPreviewSize;
   text: string;
@@ -750,7 +755,7 @@ export function buildPreviewLayout({
 
   const safeHeight = Math.min(selected.estimatedHeight, maxHeight);
   const { left, top } = placePointerPreview(
-    { x: position.x, top: position.segmentTop, bottom: position.segmentBottom },
+    { x: position.x, right: position.segmentRight, top: position.segmentTop, bottom: position.segmentBottom },
     { width: selected.width, height: safeHeight },
     { width: viewportWidth, height: viewportHeight },
   );

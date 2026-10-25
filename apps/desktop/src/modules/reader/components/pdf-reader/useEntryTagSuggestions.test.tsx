@@ -61,6 +61,25 @@ describe('useEntryTagSuggestions', () => {
       root: 'C:/workspace',
     }));
   });
+
+  it('shares pending recommendations between entry detail and PDF reading without auto-saving', async () => {
+    mocks.getLlmSettings.mockResolvedValue(settings('assistant-profile'));
+    const paths = ['a', 'b', 'c', 'd'];
+    const entry = { ...options.entry, tags: paths };
+    const workspaceRoot = 'C:/shared-suggestions-test';
+    const onApplyEntryTagPaths = vi.fn().mockResolvedValue(undefined);
+    mocks.analyzeEntryTags.mockResolvedValue({ recommendations: ['c', 'd', 'e'].map(path => ({ path, confidence: 0.9, reason: '相关', dimension: '主题', source: 'existing' })), policy_version: '1' });
+    const detail = renderHook(() => useEntryTagSuggestions({ entry, workspaceRoot, onApplyEntryTagPaths }));
+    const reader = renderHook(() => useEntryTagSuggestions({ entry, workspaceRoot, onApplyEntryTagPaths }));
+    await waitFor(() => expect(detail.result.current.disabledReason).toBeNull());
+    await act(() => detail.result.current.generate());
+    expect(reader.result.current.recommendations.map(tag => tag.path)).toEqual(['c', 'd', 'e']);
+    expect(reader.result.current.selectedPaths.has('e')).toBe(true);
+    expect(onApplyEntryTagPaths).not.toHaveBeenCalled();
+    await act(() => reader.result.current.toggleRecommendation(reader.result.current.recommendations[0]));
+    await act(() => reader.result.current.apply());
+    expect(onApplyEntryTagPaths).toHaveBeenCalledWith(entry.id, ['c', 'e']);
+  });
 });
 
 const options = {

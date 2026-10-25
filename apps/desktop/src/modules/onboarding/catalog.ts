@@ -57,7 +57,7 @@ export const GUIDE_STEPS: GuideStep[] = [
     instructions:['高亮图标是“标签阅读”，用于按标签浏览论文和标签笔记。','例如选择“注意力机制”，可以在同一范围内比较多篇论文，左右分屏分别阅读。','没有标签时先看到空范围也正常；教程不会为了演示自动给你的论文添加标签。'] },
   { id:'nav-settings', task:'认识工作台', title:'设置：配置服务与阅读偏好', route:'settings', target:'.settings-panel-shell', relatedTarget:settingsEntry,
     cue:{ label:'设置', target:settingsEntry },
-    instructions:['高亮的齿轮是“设置”，设置页已自动打开。','解析服务、聊天模型、翻译模型和阅读偏好分别在对应分类配置，不能混用地址或密钥。','“资料库与数据 → 新手引导”可以继续或回放本教程。下一步自动带你了解论文解析。'] },
+    instructions:['高亮的齿轮是“设置”，设置页已自动打开。','解析服务、聊天模型、翻译模型和阅读偏好分别在对应分类配置，不能混用地址或密钥。','“入门与教程 → 新手引导”可以继续或回放本教程。下一步自动带你了解论文解析。'] },
   { id:'parse-choices', task:'解析论文', title:'推荐：从 MinerU 客户端导入', route:'parser-zip', target:'[data-setting-id="parser-zip"]',
     interaction:{ mode:'observe', actionTarget:'[data-setting-id="parser-zip"] button' },
     cue:{ label:'打开图文教程', target:'[data-setting-id="parser-zip"] button' },
@@ -155,6 +155,6 @@ export const GUIDE_STEPS: GuideStep[] = [
     cue:{ label:'生成推荐标签', target:'[data-guide="entry-tags"] button' },
     instructions:['可手动添加“注意力机制”“自然语言处理”等与你实际阅读内容一致的标签，或使用推荐标签并检查后添加。','“标签阅读”会按你选中的标签范围列出论文和标签笔记，适合跨论文比较；选标签不是自动创建另一个论文副本。','助手还能检索论文、推荐候选并在你确认后导入 PDF。下载成功不等于解析完成，也不会自动替你写笔记或加标签。'] },
   { id:'finish', task:'收尾与继续探索', title:'完成引导，回到自己的研究', route:'none', target:nav,
-    instructions:['你已了解导入与解析、内容块、翻译、分屏、片段记录、批注、文档笔记、溯源和助手。跳过的步骤仍会单独显示，不算完成。','示例论文和你创建的记录保留在当前资料库。回放教程只重置教程进度，不删除笔记，不覆盖示例，也不重复自动提交请求。','以后在设置 → 资料库与数据 → 新手引导继续或重新开始。'] },
+    instructions:['你已了解导入与解析、内容块、翻译、分屏、片段记录、批注、文档笔记、溯源和助手。跳过的步骤仍会单独显示，不算完成。','示例论文和你创建的记录保留在当前资料库。回放教程只重置教程进度，不删除笔记，不覆盖示例，也不重复自动提交请求。','以后在设置 → 入门与教程 → 新手引导继续或重新开始。'] },
 ];
 export const GUIDE_TASKS = [...new Set(GUIDE_STEPS.map(step => step.task))];

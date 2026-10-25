@@ -1,0 +1,1 @@
+{"name":"neuink-qiniu-release","private":true,"scripts":{"test":"node --test *.test.cjs"},"dependencies":{"qiniu":"7.15.2"}}

@@ -39,6 +39,10 @@ it('does not advertise disabled research tools or import capabilities', () => {
   const enabled = buildToolNotes(['search_papers', 'search_web', 'read_webpage', 'import_papers']);
   expect(enabled).toContain('limit (integer 1–10), not top_k');
   expect(enabled).toContain('host previews and requires approval');
+  expect(enabled).toContain('TOOL_NO_PUBLIC_PDF');
+  expect(enabled).toContain('control returns to you, the main agent');
+  expect(enabled).toContain('Explicitly tell the user in your reply');
+  expect(enabled).toContain('did not download or add papers');
 });
 
 describe('buildSelectedMarkdownContext', () => {

@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useRef } from 'react';
 import type { SourceSegment } from '@/shared/types/domain';
 import { readReflowSelection, useReflowTextSelection } from './useReflowTextSelection';
+import { hoverInteractionBlocked } from '@/components/ui/hover-interactions';
 const segment: SourceSegment = { uid: 's', text: 'Full paragraph context', markdown: null, page_idx: 2, segment_type: 'paragraph', bbox: null };
 afterEach(() => { cleanup(); vi.restoreAllMocks(); window.getSelection()?.removeAllRanges(); });
 function select(node: HTMLElement, other = node) {
@@ -39,4 +40,24 @@ it('dismisses on reader scrolling but permits interaction inside the selection t
   expect(screen.getByText('提问')).toBeTruthy();
   fireEvent.keyDown(window, { key: 'Escape' });
   expect(screen.queryByText('提问')).toBeNull();
+  expect(window.getSelection()?.isCollapsed).toBe(true);
+  expect(hoverInteractionBlocked()).toBe(false);
+});
+
+it('hides old controls as the next selection starts and preserves another pane on close', () => {
+  Range.prototype.getBoundingClientRect = () => new DOMRect();
+  function Reader() {
+    const ref = useRef<HTMLDivElement>(null), selection = useReflowTextSelection(ref, [segment]);
+    return <><div ref={ref} data-testid="reader" onPointerUp={selection.capture}><p data-reading-selection-source="s">Chosen words</p></div>
+      <button onClick={selection.close}>关闭选区</button><p>Another pane</p>
+      {selection.pending && <output>选区工具</output>}</>;
+  }
+  render(<Reader />); select(screen.getByText('Chosen words'));
+  fireEvent.pointerUp(screen.getByTestId('reader'));
+  expect(screen.getByRole('status')).toBeTruthy();
+  fireEvent.pointerDown(screen.getByText('Chosen words'));
+  expect(screen.queryByRole('status')).toBeNull();
+  select(screen.getByText('Another pane'));
+  fireEvent.click(screen.getByText('关闭选区'));
+  expect(window.getSelection()?.toString()).toBe('Anothe');
 });

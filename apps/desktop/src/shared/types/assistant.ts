@@ -391,6 +391,7 @@ export type AssistantActiveSegment = {
   entryTitle: string;
   pageIdx: number;
   segmentUid: string;
+  sentenceIndex?: number;
   text: string;
 };
 

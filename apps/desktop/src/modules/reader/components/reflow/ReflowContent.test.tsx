@@ -4,7 +4,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { ToastContext } from '@/shared/hooks/useToast';
-import { DEFAULT_REFLOW_COMPONENT_PREFERENCES } from '@/shared/lib/readerPreferences';
+import { DEFAULT_REFLOW_COMPONENT_PREFERENCES, readStoredReaderPreferences, withReflowDisplayOptions } from '@/shared/lib/readerPreferences';
 import { resolveReflowContent, type ReflowComponentContent } from '@/shared/lib/reflowContentPreferences';
 import type { SourceSegment } from '@/shared/types/domain';
 import type { ParagraphTranslation } from '@/shared/ipc/paragraphTranslationApi';
@@ -29,12 +29,20 @@ vi.mock('../navigation/PaperReferences', () => ({ PaperTextPreview: ({ markdown 
 const noop = () => {};
 const image: SourceSegment = { uid: 'image-1', segment_type: 'figure', raw_type: 'image', page_idx: 0, bbox: null, asset_path: 'https://example.com/source.png', text: '', markdown: '```mermaid\ngraph TD\nA-->B\n```' };
 const paragraph: SourceSegment = { uid: 'p1', segment_type: 'paragraph', page_idx: 0, bbox: null, markdown: null, text: 'First. Second.' };
-function surface({ root = 'workspace', entry = 'entry', source = image, content = {}, translations = new Map() }: { root?: string; entry?: string; source?: SourceSegment; content?: ReflowComponentContent; translations?: Map<string, TranslatedSegment> } = {}) {
+const translatedParagraph = (text: string, source = paragraph.text) => new Map<string, TranslatedSegment>([['p1', {
+  segment_uid: 'p1', page_idx: 0, segment_type: 'paragraph', source_hash: 'hash', source_text: source,
+  translated_text: text, status: 'translated', error: null, updated_at: '',
+}]]);
+function surface({ root = 'workspace', entry = 'entry', source = image, content = {}, translations = new Map(), mode = 'source', focusedSentenceIndex,
+  active = false, flashed = false, sentenceLinked = false }: { root?: string; entry?: string; source?: SourceSegment; content?: ReflowComponentContent; translations?: Map<string, TranslatedSegment>; mode?: 'source' | 'translation' | 'bilingual' | 'sentences'; focusedSentenceIndex?: number;
+  active?: boolean; flashed?: boolean; sentenceLinked?: boolean } = {}) {
   return <TooltipProvider><ToastContext.Provider value={{ notify: () => 'test', dismiss: noop }}>
     <ReflowComponentPreferencesProvider value={{ ...DEFAULT_REFLOW_COMPONENT_PREFERENCES, content }}>
       <ReflowSegmentPreferencesProvider root={root} entryId={entry}>
-        <ReflowSegmentGroupView active={false} annotationsBySegmentUid={new Map()} entryId={entry} flashed={false} hoverPreviewEnabled={false}
-          notesBySegmentUid={new Map()} pdfDocument={null} reflowTranslationMode="source" segmentGroup={buildReflowSegmentGroups([source])[0]}
+        <ReflowSegmentGroupView active={active} annotationsBySegmentUid={new Map()} entryId={entry} flashed={flashed} hoverPreviewEnabled={false}
+          focusedSentenceIndex={focusedSentenceIndex}
+          sentenceLinked={sentenceLinked}
+          notesBySegmentUid={new Map()} pdfDocument={null} reflowTranslationMode={mode} segmentGroup={buildReflowSegmentGroups([source])[0]}
           translationBySegmentUid={translations} sourceLinkCountBySegmentUid={new Map()} sourceBacklinksBySegmentUid={{}} workspaceRoot={root}
           onActivateSegment={noop} onOpenSegmentAnnotation={noop} onOpenSegmentNote={noop} onPreviewChange={noop} onRequirePdfDocument={noop}
           onHideSegment={noop} onCopyContent={noop} onCopySourceLink={noop} onOpenSourceBacklink={noop} />
@@ -47,16 +55,110 @@ beforeEach(() => { localStorage.clear(); record = undefined; pending = new Set()
 afterEach(cleanup);
 
 describe('reflow content display', () => {
-  it('starts missing translations when sentence view is selected and closes the menu', () => {
-    render(surface({ source: paragraph })); openMenu('p1');
-    fireEvent.click(screen.getByRole('menuitemradio', { name: '逐句对照' }));
+  it.each([
+    ['source', true, false, false],
+    ['translation', false, true, false],
+    ['bilingual', true, true, false],
+    ['sentences', true, true, true],
+  ] as const)('keeps %s as a distinct reflow display mode', (mode, showsSource, showsTranslation, paired) => {
+    const { container } = render(surface({ source: paragraph, mode, translations: translatedParagraph('第一句。第二句。') }));
+    expect(Boolean(screen.queryByText(paragraph.text))).toBe(showsSource && !paired);
+    expect(Boolean(screen.queryByText('第一句。第二句。'))).toBe(showsTranslation && !paired);
+    expect(Boolean(screen.queryByText('第一句。'))).toBe(paired);
+    expect(Boolean(container.querySelector('[data-paragraph-translation="sentences"]'))).toBe(paired);
+    expect(translate).not.toHaveBeenCalled();
+  });
+  it('shows the original and requests the existing whole-document translation when no result exists', () => {
+    render(surface({ source: paragraph, mode: 'sentences' }));
+    expect(translate).not.toHaveBeenCalled();
+    expect(screen.getByText('暂无整段译文，请先运行整体翻译。')).toBeTruthy();
+    expect(screen.getByText('First.')).toBeTruthy();
+    expect(screen.getByText('Second.')).toBeTruthy();
+    expect(screen.queryByText(/本地词义提示/)).toBeNull();
+  });
+  it('aligns an existing document translation by sentence without another AI request', () => {
+    const translations = new Map<string, TranslatedSegment>([['p1', { segment_uid:'p1', page_idx:0,
+      segment_type:'paragraph', source_hash:'hash', source_text:paragraph.text, translated_text:'第一句。第二句。',
+      status:'translated', error:null, updated_at:'' }]]);
+    render(surface({ source:paragraph, mode:'sentences', translations }));
+    expect(screen.getByText(/整体翻译 · 按标点、数字与顺序逐句配对/)).toBeTruthy();
+    expect(screen.getByText('第一句。')).toBeTruthy();
+    expect(screen.getByText('第二句。')).toBeTruthy();
+    expect(translate).not.toHaveBeenCalled();
+  });
+  it('highlights the translated sentence targeted by a PDF click', () => {
+    const { container } = render(surface({ source: paragraph, mode: 'sentences', focusedSentenceIndex: 1,
+      translations: translatedParagraph('第一句。第二句。') }));
+    const target = container.querySelector('[data-reading-segment-uid="p1"][data-reading-sentence-index="1"]');
+    expect(target?.textContent).toContain('第二句。');
+    expect(target?.className).toContain('ring-primary/40');
+    expect(container.querySelector('[data-reading-segment-uid="p1"][data-reading-sentence-index="0"]')?.className)
+      .not.toContain('ring-primary/40');
+  });
+  it('highlights a conservative source group when one saved translation covers two sentences', () => {
+    const source: SourceSegment = { ...paragraph, text: 'TPSSL (Gao et al., 2024) applies masked modeling. It also employs contrastive learning. However, limitations remain.' };
+    const translations = translatedParagraph('TPSSL（Gao等，2024）采用掩码建模，同时采用对比学习。然而，仍存在局限。', source.text);
+    const { container } = render(surface({ source, mode: 'sentences', focusedSentenceIndex: 1, translations }));
+    const group = container.querySelector('[data-reading-segment-uid="p1"][data-reading-sentence-index="0"]');
+    expect(group?.getAttribute('data-reading-sentence-end-index')).toBe('2');
+    expect(group?.textContent).toContain('It also employs contrastive learning.');
+    expect(group?.className).toContain('ring-primary/40');
+    expect(container.querySelector('[data-reading-sentence-index="2"]')?.className).not.toContain('ring-primary/40');
+  });
+  it('keeps the whole block unhighlighted for a linked sentence, including after its brief focus clears', () => {
+    const { container, rerender } = render(surface({ source: paragraph, mode: 'sentences', focusedSentenceIndex: 1,
+      active: true, flashed: true, sentenceLinked: true, translations: translatedParagraph('第一句。第二句。') }));
+    const block = container.querySelector('#reflow-segment-p1')!;
+    expect(block.className).not.toContain('segment-navigation-highlight');
+    expect(block.className).not.toContain('bg-primary/5');
+    expect(container.querySelector('[data-reading-sentence-index="1"]')?.className).toContain('ring-primary/40');
+    rerender(surface({ source: paragraph, mode: 'sentences', active: true, flashed: true, sentenceLinked: true,
+      translations: translatedParagraph('第一句。第二句。') }));
+    expect(block.className).not.toContain('segment-navigation-highlight');
+    expect(block.className).not.toContain('bg-primary/5');
+  });
+  it('shows separate original sentence rows when translation is switched off', () => {
+    const { container } = render(surface({ source: paragraph, mode: 'sentences', focusedSentenceIndex: 1,
+      content: { paragraph: { translation: false } }, translations: translatedParagraph('第一句。第二句。') }));
+    expect(container.querySelectorAll('[data-reading-sentence-index]')).toHaveLength(2);
+    expect(container.querySelector('[data-reading-sentence-index="1"]')?.className).toContain('ring-primary/40');
+    expect(screen.queryByText('第一句。')).toBeNull();
+    expect(screen.getByText('First.')).toBeTruthy();
+    expect(screen.getByText('Second.')).toBeTruthy();
+  });
+  it.each([
+    ['hidden', false, false, false, false],
+    ['hidden', true, false, true, false],
+    ['original', false, true, false, false],
+    ['original', true, true, true, false],
+    ['sentences', false, true, false, true],
+    ['sentences', true, true, true, true],
+  ] as const)('renders original=%s translation=%s', (original, translation, sourceVisible, translationVisible, sentenceRows) => {
+    const preferences = withReflowDisplayOptions(readStoredReaderPreferences(), original, translation);
+    const { container } = render(surface({ source: paragraph, mode: preferences.reflowTranslationMode,
+      content: preferences.reflowComponents.content, translations: translatedParagraph('第一句。第二句。') }));
+    expect(Boolean(screen.queryByText('First.')) || Boolean(screen.queryByText(paragraph.text))).toBe(sourceVisible);
+    expect(Boolean(screen.queryByText('第一句。')) || Boolean(screen.queryByText('第一句。第二句。'))).toBe(translationVisible);
+    expect(container.querySelectorAll('[data-reading-sentence-index]').length > 0).toBe(sentenceRows);
+  });
+  it('falls back to the saved full paragraph when sentence boundaries cannot be matched', () => {
+    render(surface({ source: paragraph, mode: 'sentences', translations: translatedParagraph('合并译文。') }));
+    expect(screen.getByText('合并译文。')).toBeTruthy();
+    expect(screen.getByText(/句界无法可靠配对/)).toBeTruthy();
+    expect(screen.queryByText(/本地词义提示/)).toBeNull();
+    expect(translate).not.toHaveBeenCalled();
+  });
+  it('starts AI enhancement only after the user clicks its explicit action', () => {
+    const translations = new Map<string, TranslatedSegment>([['p1', { segment_uid:'p1', page_idx:0,
+      segment_type:'paragraph', source_hash:'hash', source_text:paragraph.text, translated_text:'第一句。第二句。',
+      status:'translated', error:null, updated_at:'' }]]);
+    render(surface({ source:paragraph, mode:'sentences', translations }));
+    expect(translate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name:'AI 增强逐句翻译' }));
     expect(translate).toHaveBeenCalledExactlyOnceWith('p1', true);
-    expect(screen.queryByRole('menu')).toBeNull();
-    openMenu('p1');
-    expect(screen.getByRole('menuitemcheckbox', { name: '显示翻译' }).getAttribute('aria-checked')).toBe('true');
   });
   it('does not submit a second request while a paragraph submission is pending', () => {
-    pending.add('p1'); render(surface({ source: paragraph })); openMenu('p1');
+    pending.add('p1'); render(surface({ source: paragraph, mode:'sentences' })); openMenu('p1');
     fireEvent.click(screen.getByRole('menuitemradio', { name: '逐句对照' }));
     expect(translate).not.toHaveBeenCalled();
     expect(screen.queryByRole('menu')).toBeNull();
@@ -64,13 +166,12 @@ describe('reflow content display', () => {
   it.each([false, true])('offers incremental sentence translation for a document translation (stale=%s)', stale => {
     const translations = new Map<string, TranslatedSegment>([['p1', { segment_uid: 'p1', page_idx: 0, segment_type: 'paragraph',
       source_hash: 'hash', source_text: stale ? 'Old source.' : paragraph.text, translated_text: '已有整段译文。', status: 'translated', error: null, updated_at: '' }]]);
-    render(surface({ source: paragraph, translations })); openMenu('p1');
-    fireEvent.click(screen.getByRole('menuitem', { name: stale ? '翻译此段' : '补充逐句翻译' }));
+    render(surface({ source: paragraph, mode:'sentences', translations })); openMenu('p1');
+    fireEvent.click(screen.getByRole('menuitem', { name: stale ? 'AI 翻译此段' : 'AI 增强逐句翻译' }));
     expect(translate).toHaveBeenCalledExactlyOnceWith('p1', !stale);
     expect(screen.queryByRole('menu')).toBeNull();
     if (!stale) {
-      openMenu('p1');
-      expect(screen.getByRole('menuitemradio', { name: '逐句对照' }).getAttribute('aria-checked')).toBe('true');
+      expect(screen.getByText(/句界无法可靠配对/)).toBeTruthy();
     }
   });
   it.each(['figure', 'table'] as const)('shows only the original by default for %s, including an ungrouped visual segment', type => {
@@ -125,8 +226,8 @@ describe('reflow content display', () => {
       paragraph: { status: 'succeeded', value: '整段译文。', error: null }, sentences: { status: 'succeeded', value: [
         { id: 1, source: 'First.', translation: '第一句。' }, { id: 2, source: 'Second.', translation: '第二句。' },
       ], error: null } };
-    const { container } = render(surface({ source: paragraph }));
-    expect(screen.getByText('整段译文。')).toBeTruthy();
+    const { container } = render(surface({ source: paragraph, mode: 'sentences', translations: translatedParagraph('整段译文。') }));
+    expect(screen.getByText('第一句。')).toBeTruthy();
     openMenu('p1');
     fireEvent.click(screen.getByRole('menuitemradio', { name: '逐句对照' }));
     expect(screen.getByText('第一句。')).toBeTruthy();
@@ -149,9 +250,9 @@ describe('reflow content display', () => {
     expect(screen.queryByRole('menu')).toBeNull();
   });
   it('does not leak source text when only translation is requested but unavailable', () => {
-    render(surface({ source: paragraph, content: { paragraph: { original: false, translation: true } } }));
+    render(surface({ source: paragraph, content: { paragraph: { original: false, translation: true, translationView: 'sentences' } } }));
     expect(screen.queryByText(paragraph.text)).toBeNull();
-    expect(screen.getByText('暂无翻译，可通过翻译任务生成。')).toBeTruthy();
+    expect(screen.getByText('暂无整段译文，请先运行整体翻译。')).toBeTruthy();
   });
   it('uses a PDF crop if the original asset fails, without silently showing the parsed diagram', async () => {
     const pdf = {} as PDFDocumentProxy;
@@ -182,18 +283,14 @@ describe('reflow content display', () => {
     expect(screen.queryByText(/graph TD/)).toBeNull();
   });
   it.each([[true, true], [true, false], [false, true], [false, false]])('paragraph image=%s and parsed=%s are independent of the translation', (imageShown, parsedShown) => {
-    record = { segment_uid: 'p1', source_text: paragraph.text, source_hash: 'hash', job_id: 'job', model: 'model', view: 'paragraph',
-      paragraph: { status: 'succeeded', value: '完整翻译。', error: null }, sentences: { status: 'succeeded', value: [], error: null } };
-    render(surface({ source: { ...paragraph, asset_path: image.asset_path }, content: { paragraph: { image: imageShown, parsed: parsedShown, translation: true } } }));
+    render(surface({ source: { ...paragraph, asset_path: image.asset_path }, content: { paragraph: { image: imageShown, parsed: parsedShown, translation: true } }, translations: translatedParagraph('完整翻译。') }));
     expect(Boolean(screen.queryByRole('img', { name: '片段原图' }))).toBe(imageShown);
     expect(Boolean(screen.queryByText(paragraph.text))).toBe(parsedShown);
     expect(screen.getByText('完整翻译。')).toBeTruthy();
     expect(translate).not.toHaveBeenCalled();
   });
   it('right-click toggles the paragraph image and parsed layer without changing the translation', () => {
-    record = { segment_uid: 'p1', source_text: paragraph.text, source_hash: 'hash', job_id: 'job', model: 'model', view: 'paragraph',
-      paragraph: { status: 'succeeded', value: '完整翻译。', error: null }, sentences: { status: 'succeeded', value: [], error: null } };
-    render(surface({ source: { ...paragraph, asset_path: image.asset_path } }));
+    render(surface({ source: { ...paragraph, asset_path: image.asset_path }, content: { paragraph: { translation: true } }, translations: translatedParagraph('完整翻译。') }));
     openMenu('p1');
     fireEvent.click(screen.getByRole('menuitemcheckbox', { name: '显示原图' }));
     expect(screen.getByRole('img', { name: '片段原图' })).toBeTruthy();
@@ -212,7 +309,7 @@ describe('reflow content display', () => {
   it('starting translation preserves an image-only segment display', () => {
     render(surface({ source: { ...paragraph, asset_path: image.asset_path }, content: { paragraph: { image: true, parsed: false } } }));
     openMenu('p1');
-    fireEvent.click(screen.getByRole('menuitem', { name: '翻译此段' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'AI 翻译此段' }));
     expect(translate).toHaveBeenCalledExactlyOnceWith('p1', false);
     expect(screen.getByRole('img', { name: '片段原图' })).toBeTruthy();
     expect(screen.queryByText(paragraph.text)).toBeNull();

@@ -6,6 +6,8 @@
 
 本目录只保留长期维护的权威文档。历史方案、阶段审计和已经完成的实施计划由 Git 历史保存，不再作为独立文件留在仓库。
 
+面向用户的完整操作说明见[产品与使用手册](../website/README.md)，含 22 篇专题、站内搜索与 GitHub Pages 发布配置。网站源码与用户指南位于 `website/`；实现状态仍统一由本目录的开发计划维护。
+
 ## 权威文档
 
 - [第三方组件与许可证](deployment/third-party-components.md)：主要依赖的许可证摘要与分发声明入口。
@@ -15,6 +17,7 @@
 - [开发计划](development/dev-plan.md)：当前完成度、剩余工作和近期顺序。
 - [工程规范](development/engineering-guidelines.md)：当前仓库实际执行的约束。
 - [UI 设计与交互规范](development/ui-design-system.md)：桌面界面的视觉层级、组件复用、滚动、拖动、编辑器和验收标准。
+- [本地 Agent 接入](development/local-agent.md)：Claude Code、Codex、OpenCode 的官方协议、MCP 工具桥接与笔记审阅边界。
 - [P0 回归清单](development/p0-regression-checklist.md)：高风险用户闭环验收。
 - [打包与发行](deployment/packaging-and-distribution.md)：当前可执行的构建方式和未完成发行项。
 - [MinerU 输出参考](references/ref-mineru-output-files.md)：解析结果格式参考。

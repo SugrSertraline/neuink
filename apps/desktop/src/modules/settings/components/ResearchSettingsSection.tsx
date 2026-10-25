@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { getResearchSettings, saveResearchSettings, type ResearchSettings } from '@/shared/ipc/researchApi';
 import { registerSegmentEditorCloseHandler, setSegmentEditorDirty } from '@/modules/reader/components/segmentEditorDirtyRegistry';
-import { SettingsDisclosure, SettingsGroup, SettingSwitch } from './SettingsPrimitives';
+import { SettingsServiceSection, SettingsGroup, SettingSwitch } from './SettingsPrimitives';
 
 /** Settings owns draft/status; settings-viewport owns scrolling. No new drag or key interception. */
 export function ResearchSettingsSection({ active, children }: { active: boolean; children?: ReactNode }) {
@@ -68,7 +68,7 @@ export function ResearchSettingsSection({ active, children }: { active: boolean;
     <p className="mt-2 text-xs leading-5 text-muted-foreground">检索会发送关键词或目标网址，不上传本地 PDF；请勿输入敏感内容。</p>
   </SettingsGroup>
   <SettingsGroup title="可选服务" description="不配置也能使用免费检索。保存密钥不会自动启用服务。">
-      <SettingsDisclosure title="Tavily" description="替代免费网页搜索，需独立密钥，可能产生费用。"
+      <SettingsServiceSection title="Tavily" description="替代免费网页搜索，需独立密钥，可能产生费用。"
         status={key ? '未保存' : busy ? (settings ? '保存中…' : '读取中…') : !settings ? '未就绪' : settings.use_tavily ? '已启用' : settings.has_web_key ? '未启用' : '未配置'}>
         {settings ? <>
         <div className="mt-3 grid min-w-0 gap-2">
@@ -87,7 +87,7 @@ export function ResearchSettingsSection({ active, children }: { active: boolean;
         {error && key && <p role="alert" className="text-sm text-destructive [overflow-wrap:anywhere]">{error}</p>}
         </div>
         </> : <p className="text-xs text-muted-foreground">检索设置尚未就绪，请在上方重试。</p>}
-      </SettingsDisclosure>
+      </SettingsServiceSection>
       {children}
   </SettingsGroup></>;
 }

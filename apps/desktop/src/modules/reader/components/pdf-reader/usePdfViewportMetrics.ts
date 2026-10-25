@@ -2,11 +2,17 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { SourceSegment } from '@/shared/types/domain';
 
-import { DEFAULT_PAGE_WIDTH } from './readerConstants';
+import {
+  DEFAULT_PAGE_WIDTH,
+  PDF_RAIL_WIDTH,
+  PDF_VIEWPORT_PADDING
+} from './readerConstants';
 import { findNearestSegmentUidInViewport } from './readerUtils';
 
 const VIEWPORT_WIDTH_COMMIT_DELAY_MS = 240;
 const SPLIT_RESIZE_WIDTH_COMMIT_INTERVAL_MS = 72;
+const RESTORE_WIDTH_CHECK_DELAY_MS = 160;
+const MIN_PDF_VIEWPORT_WIDTH = PDF_RAIL_WIDTH + PDF_VIEWPORT_PADDING + 80;
 
 export function usePdfViewportMetrics({
   notePaneOpen,
@@ -19,6 +25,7 @@ export function usePdfViewportMetrics({
   const animationFrameRef = useRef<number | null>(null);
   const widthAnimationFrameRef = useRef<number | null>(null);
   const widthCommitTimerRef = useRef<number | null>(null);
+  const restoreCheckTimerRef = useRef<number | null>(null);
   const widthCommitModeRef = useRef<'debounce' | 'throttle' | null>(null);
   const measuredWidthRef = useRef(DEFAULT_PAGE_WIDTH);
   const hasMeasuredWidthRef = useRef(false);
@@ -41,7 +48,14 @@ export function usePdfViewportMetrics({
 
     const updateViewportWidth = (commitImmediately = false) => {
       const viewportWidth = element.clientWidth;
-      if (viewportWidth <= 0) {
+      // WebView2 can briefly report a 1px viewport when a native window is
+      // minimized. Committing it collapses every PDF page to a 1px bitmap.
+      if (viewportWidth < MIN_PDF_VIEWPORT_WIDTH) {
+        if (widthCommitTimerRef.current !== null) {
+          window.clearTimeout(widthCommitTimerRef.current);
+          widthCommitTimerRef.current = null;
+          widthCommitModeRef.current = null;
+        }
         return;
       }
 
@@ -98,6 +112,22 @@ export function usePdfViewportMetrics({
       });
     };
 
+    const remeasureAfterWindowRestore = () => {
+      scheduleImmediateViewportWidthUpdate();
+      if (restoreCheckTimerRef.current !== null) {
+        window.clearTimeout(restoreCheckTimerRef.current);
+      }
+      // Focus/visibility can precede the final WebView layout by one frame.
+      restoreCheckTimerRef.current = window.setTimeout(() => {
+        restoreCheckTimerRef.current = null;
+        scheduleImmediateViewportWidthUpdate();
+      }, RESTORE_WIDTH_CHECK_DELAY_MS);
+    };
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) remeasureAfterWindowRestore();
+    };
+
     updateViewportWidth(true);
 
     const observer = new ResizeObserver(() => updateViewportWidth());
@@ -106,6 +136,9 @@ export function usePdfViewportMetrics({
       'neuink:reader-surface-change',
       scheduleImmediateViewportWidthUpdate
     );
+    window.addEventListener('resize', scheduleImmediateViewportWidthUpdate);
+    window.addEventListener('focus', remeasureAfterWindowRestore);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       if (widthAnimationFrameRef.current !== null) {
@@ -116,12 +149,19 @@ export function usePdfViewportMetrics({
         window.clearTimeout(widthCommitTimerRef.current);
         widthCommitTimerRef.current = null;
       }
+      if (restoreCheckTimerRef.current !== null) {
+        window.clearTimeout(restoreCheckTimerRef.current);
+        restoreCheckTimerRef.current = null;
+      }
       widthCommitModeRef.current = null;
       observer.disconnect();
       window.removeEventListener(
         'neuink:reader-surface-change',
         scheduleImmediateViewportWidthUpdate
       );
+      window.removeEventListener('resize', scheduleImmediateViewportWidthUpdate);
+      window.removeEventListener('focus', remeasureAfterWindowRestore);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [pdfScrollElement]);
 

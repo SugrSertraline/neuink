@@ -6,6 +6,7 @@ const { DEFAULT_SOURCE: readerLicenseSource, verifyResources: verifyReaderLicens
   copyResources: copyReaderLicenses } = require('./reader-licenses.cjs');
 const { execFileSync, spawn } = require('node:child_process');
 const path = require('node:path');
+const { preparePortableLayout } = require('./portable-layout.cjs');
 
 if (process.platform !== 'win32') {
   throw new Error('release:portable 目前仅支持 Windows，因为压缩步骤使用 PowerShell Compress-Archive。');
@@ -76,6 +77,7 @@ async function main() {
   copyReaderLicenses(readerLicenseSource, path.join(portableRoot, 'resources', 'reader-licenses'));
   const includesOnboarding = copyOptionalResources(onboardingSource, path.join(portableRoot, 'resources', 'onboarding'));
   writeAvailabilityManifest(includesOnboarding, path.join(portableRoot, 'resources', 'onboarding-availability.json'));
+  preparePortableLayout(portableRoot);
   writeFileSync(path.join(portableRoot, '使用说明.txt'), '\ufeff' + [
     'Neuink Windows x64 便携版', '',
     '1. 完整解压此压缩包到一个可写目录。',
@@ -88,8 +90,13 @@ async function main() {
       : '本包未包含演示素材（构建时缺失或校验未通过）；不影响主程序、本地 PDF 阅读及 embedding 语义搜索。',
     '适用于 Windows 10 1903 或更新版本、Windows 11（64 位）。已附带 Visual C++ 运行库。',
     '系统需要 Microsoft Edge WebView2 Runtime；若提示缺失，请从微软官方网站安装后再运行。',
-    '资料库和设置沿用应用默认位置，可在“设置 → 资料库与数据”中更改资料库位置。',
-    '此包不包含个人资料库、模型密钥或聊天记录；在同一台电脑启动时会沿用已有设置。',
+    '资料库、设置和阅读界面状态默认保存在本包 data 文件夹；请连同程序一起复制到 U 盘。',
+    '数据固定保存在程序文件夹内，无需选择路径。启动时检查程序目录旁及所在磁盘根目录的 neuink_data，自动补入旧资料，冲突保留当前内容。',
+    '保留 neuink.portable.json 便携标记。换电脑或换盘符会自动定位包内资料；不会沿用另一台电脑的资料库设置。',
+    '旧资料合并校验完成后，旧目录放入系统回收站；回收站不可用或整理失败时保留原目录，不会永久删除。',
+    '本公开包的 data 为空；使用后其中可能包含个人论文、聊天和模型密钥，请勿将个人 data 公开分享。',
+    '更新前关闭程序并备份 data，新版程序文件与已有 data 放在一起；不要用新包的空 data 覆盖旧数据。',
+    '正常关闭 Neuink 后再安全弹出移动盘。Claude Code 等工具与登录仍需在每台电脑上配置。',
     '首次使用时，可在设置中配置翻译模型和 MinerU 解析服务；这两项服务不包含在压缩包中。',
     '本地 PDF 阅读无需配置模型。',
   ].join('\r\n'), 'utf8');

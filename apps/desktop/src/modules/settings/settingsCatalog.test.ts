@@ -24,8 +24,11 @@ describe('settings discovery', () => {
     expect(searchSettings('不存在的密钥值')).toEqual([]);
     expect(searchSettings('')).toEqual([]);
   });
-  it('gives each target a unique identity within the seven categories', () => {
-    expect(SETTINGS_CATEGORIES).toHaveLength(7);
+  it('gives each target a unique identity within the settings categories', () => {
+    expect(SETTINGS_CATEGORIES.map(category => category.id)).toEqual([
+      'getting-started', 'appearance', 'reader', 'translation', 'parser', 'models', 'external-tools', 'data',
+    ]);
+    expect(searchSettings('教程').find(item => item.id === 'data-onboarding')?.tab).toBe('getting-started');
     expect(new Set(SETTINGS_CATALOG.map(item => item.id)).size).toBe(SETTINGS_CATALOG.length);
     for (const item of SETTINGS_CATALOG) expect(settingsCategory(item.tab)).toBeTruthy();
   });

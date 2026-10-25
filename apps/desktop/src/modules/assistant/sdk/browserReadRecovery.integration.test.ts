@@ -69,16 +69,20 @@ it('does not continue the main agent after the user actually cancels a read', as
   expect(model.doStreamCalls).toHaveLength(1);
 });
 
-it('accepts an actually read browser PDF URL under a required-citation plan without inventing local markers', async () => {
+it.each([
+  ['Markdown link', (url: string) => `[论文](${url})`],
+  ['bracketed original URL', (url: string) => `[${url}]`],
+])('accepts an actually read browser PDF URL as a %s under a required-citation plan', async (_kind, citation) => {
   const input = options();
   input.plan.citationPolicy = 'required';
   vi.mocked(readBrowserTab).mockResolvedValue({ title: 'Paper', url: input.browserTabTarget.url, text: 'Actual returned text.',
     selection: '', truncated: false, capturedAt: '', limitations: [] });
   const model = scriptedModel([{ call: { name: 'read_browser_tab', args: {} } },
-    { text: `实际读取结果支持这一说明。[论文](${input.browserTabTarget.url})` }]);
+    { text: `实际读取结果支持这一说明。${citation(input.browserTabTarget.url)}` }]);
   vi.mocked(createNeuinkModel).mockReturnValue(model);
   const result = await answerWithGroundedAgent(input);
   expect(result.answer).toContain(input.browserTabTarget.url);
+  if (_kind === 'bracketed original URL') expect(result.answer).toContain(`[原始来源](${input.browserTabTarget.url})`);
   expect(result.sources).toEqual([]);
   expect(model.doStreamCalls).toHaveLength(2);
 });

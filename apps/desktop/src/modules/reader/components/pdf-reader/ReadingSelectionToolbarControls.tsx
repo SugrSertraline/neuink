@@ -1,11 +1,13 @@
-import { ClipboardCopy, Highlighter, Info, Languages, Loader2, MessageSquareText, X } from 'lucide-react';
+import { ClipboardCopy, Highlighter, Info, Languages, Loader2, MessageSquareText, Pin, X } from 'lucide-react';
+import type { HTMLAttributes } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 /** Presentation only. The reader owns requests and edits; tutorials provide no action handlers. */
 export function ReadingSelectionToolbarControls({
   text, demonstration = false, saving = false, translating = false, translationFailed = false,
-  panel = null, onClose, onTranslate, onAsk, onHighlight, onAnnotate, onCopy
+  panel = null, onClose, onTranslate, onAsk, onHighlight, onAnnotate, onCopy,
+  pinned = false, onTogglePin, dragHandleProps, selectionAvailable = true
 }: {
   text: string;
   demonstration?: boolean;
@@ -19,32 +21,46 @@ export function ReadingSelectionToolbarControls({
   onHighlight?: () => void;
   onAnnotate?: () => void;
   onCopy?: () => void;
+  pinned?: boolean;
+  onTogglePin?: () => void;
+  dragHandleProps?: HTMLAttributes<HTMLButtonElement>;
+  selectionAvailable?: boolean;
 }) {
   const busy = demonstration || saving;
+  const actionBusy = busy || !selectionAvailable;
   const actions = [
     { label: translationFailed ? '重试翻译' : '翻译', icon: translating ? Loader2 : Languages,
-      selected: panel === 'translation', disabled: busy || translating || !onTranslate, onClick: onTranslate },
+      selected: panel === 'translation', disabled: actionBusy || translating || !onTranslate, onClick: onTranslate },
     ...(demonstration || onAsk ? [
-      { label: '提问', icon: MessageSquareText, disabled: busy, onClick: () => onAsk?.('ask') },
-      { label: '解释', icon: Info, disabled: busy, onClick: () => onAsk?.('explain') }
+      { label: '提问', icon: MessageSquareText, disabled: actionBusy, onClick: () => onAsk?.('ask') },
+      { label: '解释', icon: Info, disabled: actionBusy, onClick: () => onAsk?.('explain') }
     ] : []),
     ...(demonstration || onHighlight ? [
-      { label: '仅高亮', icon: Highlighter, disabled: busy, onClick: onHighlight }
+      { label: '仅高亮', icon: Highlighter, disabled: actionBusy, onClick: onHighlight }
     ] : []),
     ...(demonstration || onAnnotate ? [
-      { label: '高亮并批注', icon: MessageSquareText, selected: panel === 'annotation', disabled: busy, onClick: onAnnotate }
+      { label: '高亮并批注', icon: MessageSquareText, selected: panel === 'annotation', disabled: actionBusy, onClick: onAnnotate }
     ] : [])
   ];
   return <>
-    <div className="flex items-center justify-between gap-2">
+    <div className="flex items-center gap-2">
       <div className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-foreground">
         <Highlighter size={14} aria-hidden="true" />
         <span className="truncate">已选 {text.length} 个字符</span>
       </div>
+      {pinned && !demonstration ? <Button size="xs" variant="ghost" type="button"
+        className="min-w-10 flex-1 touch-none cursor-grab px-2 active:cursor-grabbing"
+        aria-label="拖动选区工具，方向键调整位置" title="拖动或用方向键调整位置" {...dragHandleProps}>
+        <span aria-hidden="true" className="h-1 w-16 max-w-full rounded-full bg-muted-foreground/40" />
+      </Button> : <span className="flex-1" />}
       {demonstration ? <span className="shrink-0 text-[11px] text-muted-foreground">演示 · 不执行操作</span>
-        : <Button size="icon-xs" variant="ghost" title="关闭选区工具" type="button" onClick={onClose}>
+        : <div className="flex shrink-0 items-center gap-1">
+          {onTogglePin && <Button size="xs" variant="ghost" aria-pressed={pinned} onClick={onTogglePin}>
+            <Pin size={13} aria-hidden="true" />{pinned ? '取消固定' : '固定'}
+          </Button>}
+          <Button size="icon-xs" variant="ghost" aria-label="关闭选区工具" title="关闭选区工具" type="button" onClick={onClose}>
           <X size={14} aria-hidden="true" />
-        </Button>}
+        </Button></div>}
     </div>
     {demonstration ? <p className="mt-2 line-clamp-2 break-words rounded bg-muted/50 px-2 py-1.5 text-xs leading-5 text-foreground">“{text}”</p> : null}
     <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t pt-2">

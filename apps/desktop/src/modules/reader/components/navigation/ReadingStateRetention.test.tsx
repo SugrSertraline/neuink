@@ -4,8 +4,10 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest';
 import { ReadingNavigationScope, useReadingNavigation, type ReadingAdapter, type ReadingPosition } from './ReadingNavigation';
 import { ReadingSnapshotStore, ReadingStateRetention } from './ReadingStateRetention';
+import { ReadingViewSession } from './ReadingViewSession';
+import { saveReadingViewState } from './readingViewStorage';
 
-afterEach(() => { cleanup(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); localStorage.clear(); });
 function Reader({ adapter }: { adapter: ReadingAdapter }) {
   const ref = useRef<HTMLDivElement>(null);
   const nav = useReadingNavigation()!;
@@ -29,9 +31,55 @@ function fixture() {
     navigate: vi.fn(() => { current = { pageIdx: 9, offset: .15, left: 0 }; return true; }),
     cancelRestore: vi.fn() };
 }
-function Page({ mounted, adapter, identity = 'pdf:root:entry' }: { mounted: boolean; adapter: ReadingAdapter; identity?: string }) {
-  return <ReadingStateRetention>{mounted && <ReadingNavigationScope key={identity} retentionKey={identity}><Reader adapter={adapter} /></ReadingNavigationScope>}</ReadingStateRetention>;
+function Page({ mounted, adapter, identity = 'pdf:root:entry', storageKey }: { mounted: boolean; adapter: ReadingAdapter; identity?: string; storageKey?: string }) {
+  return <ReadingStateRetention key={storageKey} storageKey={storageKey}>{mounted && <ReadingNavigationScope key={identity} retentionKey={identity}><Reader adapter={adapter} /></ReadingNavigationScope>}</ReadingStateRetention>;
 }
+it('restores precise position after a full remount and flushes a pending scroll before the window closes', () => {
+  vi.useFakeTimers();
+  const first = fixture();
+  const ui = render(<Page mounted adapter={first} storageKey="reading:a:pdf" />);
+  fireEvent.scroll(screen.getByTestId('scroll')); // Do not wait for the queued frame or debounce.
+  fireEvent(window, new Event('beforeunload'));
+  ui.unmount();
+  // jsdom dispatches Storage events on a zero-delay timer; reader frames and
+  // persistence debounces must already have been cancelled by unmount.
+  act(() => vi.advanceTimersByTime(0));
+  expect(vi.getTimerCount()).toBe(0);
+  const second = fixture();
+  render(<Page mounted adapter={second} storageKey="reading:a:pdf" />);
+  expect(screen.getByText('retained')).toBeTruthy();
+  act(() => vi.runAllTimers());
+  expect(second.restore).toHaveBeenCalledWith({ pageIdx: 4, offset: .37, left: 25, zoom: 1.25 });
+  cleanup();
+  render(<Page mounted adapter={fixture()} storageKey="reading:b:pdf" />);
+  expect(screen.getByText('fresh')).toBeTruthy();
+});
+it('does not overwrite the saved position with the initial viewport while restoring', () => {
+  vi.useFakeTimers();
+  const first = fixture();
+  const ui = render(<Page mounted adapter={first} storageKey="reading:a:pdf" />);
+  fireEvent(window, new Event('pagehide'));
+  ui.unmount();
+  const saved = localStorage.getItem('reading:a:pdf');
+  render(<Page mounted adapter={fixture()} storageKey="reading:a:pdf" />);
+  fireEvent(window, new Event('beforeunload'));
+  expect(localStorage.getItem('reading:a:pdf')).toBe(saved);
+});
+it('restores each split view before allowing normal same-document scroll linking', () => {
+  vi.useFakeTimers();
+  const positions = [{ pageIdx: 2, offset: .25, left: 0 }, { pageIdx: 7, offset: .4, left: 10 }];
+  const adapters = [fixture(), fixture()];
+  positions.forEach((position, index) => saveReadingViewState(`split:${index}`, { positions: { 'pdf:root:entry': position } }));
+  render(<>{adapters.map((adapter, index) => <ReadingViewSession key={index} workspaceRoot="root" active surface={{ kind: 'pdf', entryId: 'entry', viewId: String(index) }}>
+    <Page mounted adapter={adapter} storageKey={`split:${index}`} />
+  </ReadingViewSession>)}</>);
+  act(() => vi.runAllTimers());
+  adapters.forEach((adapter, index) => expect(adapter.capture()).toEqual(positions[index]));
+  fireEvent.wheel(screen.getAllByTestId('scroll')[0]);
+  fireEvent.scroll(screen.getAllByTestId('scroll')[0]);
+  act(() => vi.runAllTimers());
+  expect(adapters[1].capture()).toEqual({ ...positions[0], zoom: undefined, left: 10 });
+});
 it('restores page offset, zoom, history and handled jumps after idle release, independently of heavy instances', () => {
   vi.useFakeTimers();
   const first = fixture();

@@ -30,7 +30,7 @@ export function ReflowContentLayers({ segment, content, relatedImagePath, entryI
         entryId={entryId} workspaceRoot={workspaceRoot} pdfDocument={pdfDocument} pdfError={pdfError}
         onRequirePdfDocument={onRequirePdfDocument} onRetryPdf={onRetryPdf} size={size} imageDetailEnabled={imageDetailEnabled} />
     </section> : null}
-    {pairedContent && content.translation ? <section aria-label={content.parsed ? '片段解析与翻译' : '片段翻译'}>
+    {pairedContent && (content.parsed || content.translation) ? <section aria-label={content.parsed && content.translation ? '片段解析与翻译' : content.parsed ? '片段解析后内容' : '片段翻译'}>
       {multiple ? <LayerLabel>{content.parsed ? '解析后内容与翻译' : '翻译'}</LayerLabel> : null}
       {pairedContent}
     </section> : <>

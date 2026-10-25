@@ -101,6 +101,20 @@ test('portable copy includes verified licenses and refuses to overwrite a destin
   assert.deepEqual(fs.readdirSync(path.dirname(destination)), ['browser-reader']);
 });
 
+test('portable copy verifies a new destination when Windows blocks directory rename', t => {
+  const source = runtime(t); const parent = temporary(t); const destination = path.join(parent, 'browser-reader');
+  const rename = fs.renameSync;
+  t.mock.method(fs, 'renameSync', (from, to) => {
+    if (path.basename(from).startsWith('.browser-reader-copy-') && to === destination) {
+      throw Object.assign(new Error('scanner holds an executable'), { code: 'EPERM' });
+    }
+    return rename(from, to);
+  });
+  copyResources(source, destination);
+  assert.deepEqual(verifyResources(destination), verifyResources(source));
+  assert.deepEqual(fs.readdirSync(parent), ['browser-reader']);
+});
+
 test('preparation updates a Windows tree without moving its root and preserves a recoverable snapshot', t => {
   const staging = runtime(t); const parent = temporary(t); const target = path.join(parent, 'browser-reader');
   copyResources(staging, target);

@@ -17,6 +17,7 @@ import {
   type PdfRenderJobHandle
 } from './pdfRenderQueue';
 import { schedulePdfRenderContinuation } from './pdfRenderScheduler';
+import { bindPdfTextSelectionEdges } from './pdfTextSelectionEdges';
 import { PdfTranslationPageMask } from './PdfTranslationPageMask';
 import type { SegmentRegionItem } from './types';
 
@@ -63,6 +64,11 @@ function PdfCanvasPageImpl({
   const [renderError, setRenderError] = useState<string | null>(null);
   const [renderAttempt, setRenderAttempt] = useState(0);
 
+  useEffect(() => {
+    const layer = textLayerRef.current;
+    if (layer && renderEnabled) return bindPdfTextSelectionEdges(layer);
+  }, [renderEnabled]);
+
   renderPriorityRef.current = renderPriority;
   searchActiveRef.current = searchActive;
   searchQueryRef.current = searchQuery;
@@ -71,6 +77,7 @@ function PdfCanvasPageImpl({
     hasRenderedPageRef.current = false;
     renderedPageWidthRef.current = null;
     pageAspectRatioRef.current = DEFAULT_PAGE_ASPECT_RATIO;
+    textLayerRef.current?.replaceChildren();
     setPageSize(null);
     setRenderError(null);
 
@@ -242,7 +249,6 @@ function PdfCanvasPageImpl({
   useEffect(() => {
     const textLayerElement = textLayerRef.current;
     if (!textLayerElement) return undefined;
-    textLayerElement.replaceChildren();
     if (
       !renderEnabled ||
       renderPriority !== 'visible' ||
@@ -309,7 +315,6 @@ function PdfCanvasPageImpl({
       cancelled = true;
       cancelSchedule();
       cancelTextLayerJob?.();
-      textLayerElement.replaceChildren();
     };
   }, [pageIdx, pageWidth, pdfDocument, renderEnabled, renderPriority, pageSize]);
 
@@ -324,6 +329,7 @@ function PdfCanvasPageImpl({
   return (
     <div
       data-guide="pdf-page"
+      data-pdf-geometry-ready={pageSize ? 'true' : undefined}
       className="relative z-[2] isolate bg-white"
       style={{
         height: `${pageWidth * displayAspectRatio}px`,

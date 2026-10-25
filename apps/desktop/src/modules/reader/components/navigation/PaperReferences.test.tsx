@@ -9,6 +9,28 @@ const figure: SourceSegment={uid:'f',text:'Figure 3. Results',markdown:null,page
 afterEach(cleanup);
 function Adapter({jump}:{jump:()=>boolean}) {const nav=useReadingNavigation()!; useEffect(()=>nav.register({capture:()=>({pageIdx:0,offset:0,left:0}),restore:vi.fn(),navigate:jump}),[nav.register,jump]);return null;}
 describe('paper reference interaction',()=>{
+  it('hides figure hover previews while preserving click navigation', async () => {
+    const jump = vi.fn(() => true);
+    render(<ReadingNavigationScope><Adapter jump={jump}/><PaperReferencesProvider segments={[figure]} entryId="e" workspaceRoot={null} pdfDocument={null} hoverEnabled={false}>
+      <PaperTextPreview markdown="See Figure 3 for details." />
+    </PaperReferencesProvider></ReadingNavigationScope>);
+    const link = screen.getByRole('button', { name: 'Figure 3，预览或定位原文' });
+    fireEvent.focus(link);
+    expect(screen.queryByText('Figure 3 · 第 2 页')).toBeNull();
+    fireEvent.click(link);
+    expect(jump).toHaveBeenCalledWith(expect.objectContaining({ segmentUid: 'f' }));
+  });
+  it('closes an open reference preview when the preference is switched off', async () => {
+    const jump = vi.fn(() => true);
+    const view = (hoverEnabled: boolean) => <ReadingNavigationScope><Adapter jump={jump}/><PaperReferencesProvider segments={[figure]} entryId="e" workspaceRoot={null} pdfDocument={null} hoverEnabled={hoverEnabled}>
+      <PaperTextPreview markdown="See Figure 3 for details." />
+    </PaperReferencesProvider></ReadingNavigationScope>;
+    const ui = render(view(true));
+    fireEvent.focus(screen.getByRole('button', { name: 'Figure 3，预览或定位原文' }));
+    expect(await screen.findByText('Figure 3 · 第 2 页')).toBeTruthy();
+    ui.rerender(view(false));
+    await waitFor(() => expect(screen.queryByText('Figure 3 · 第 2 页')).toBeNull());
+  });
   it('supports focus preview, click navigation, and leaves formulas/code untouched',async()=>{
     const jump=vi.fn(()=>true);
     render(<ReadingNavigationScope><Adapter jump={jump}/><PaperReferencesProvider segments={[figure]} entryId="e" workspaceRoot={null} pdfDocument={null}>

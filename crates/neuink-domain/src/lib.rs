@@ -2,6 +2,7 @@ pub mod annotation;
 pub mod entry;
 pub mod error;
 pub mod ids;
+pub mod list_item;
 pub mod note;
 pub mod parser;
 pub mod pdf;
@@ -19,6 +20,7 @@ pub use annotation::{
 pub use entry::{ContentItem, EntryMeta};
 pub use error::DomainError;
 pub use ids::{AnnotationId, ConversationId, EntryId, NoteId, SegmentUid, SourceLinkId, TagId};
+pub use list_item::{find_source_segment, list_item_segments};
 pub use note::{NoteOwner, NoteTarget, ReadingAuxiliaryView};
 pub use parser::NeuinkDocument;
 pub use pdf::{PdfAsset, PdfParseState, PdfParseStatus};

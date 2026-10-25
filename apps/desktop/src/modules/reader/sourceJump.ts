@@ -1,5 +1,6 @@
 import type { ReflowSegmentGroup } from './components/reflow/buildReflowBlocks';
 import type { PdfJumpRequest } from './types';
+import { findSourceSegment } from '@/shared/lib/listItemSegments';
 
 export function jumpForSurface(request: PdfJumpRequest | null, surfaceKey: string) {
   return request?.targetSurfaceKey && request.targetSurfaceKey !== surfaceKey ? null : request;
@@ -8,8 +9,8 @@ export function jumpForSurface(request: PdfJumpRequest | null, surfaceKey: strin
 export function reflowJumpTarget(visibleGroups: ReflowSegmentGroup[], request: PdfJumpRequest) {
   if (request.kind !== 'page') {
     for (const group of visibleGroups) {
-      const exact = group.segments.find(segment => segment.uid === request.segmentUid || segment.continuation_group_id === request.segmentUid);
-      if (exact) return { pageIdx: group.body.page_idx, segmentUid: exact.uid };
+      const exact = request.segmentUid ? findSourceSegment(group.segments, request.segmentUid) : undefined;
+      if (exact) return { pageIdx: exact.page_idx, segmentUid: exact.uid };
     }
   }
   // Page headers and hidden components have no mounted/virtual row. Resolve the

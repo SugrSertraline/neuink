@@ -124,7 +124,7 @@
   box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), inset 0 1px var(--atelier-control-highlight), inset 2px 0 var(--atelier-brass-edge), inset 3px 0 var(--atelier-control-highlight);
   transition-property: border-color, box-shadow; transition-duration: var(--atelier-motion-hover);
 }
-:root[data-appearance="atelier"] [data-material="composer"]:focus-within { border-color: var(--ring); }
+:root[data-appearance="atelier"] [data-material="composer"]:focus-within:not([data-block-drop-active], [data-disabled]) { border-color: var(--ring); }
 /* Resizing has priority over decoration. Never transition inline tab transforms or panel heights. */
 :root[data-appearance="atelier"] [data-sidebar-panel-group][data-resizing="true"] { --atelier-motion-hover: 0ms; --atelier-motion-press: 0ms; --atelier-motion-disclosure: 0ms; }
 :root[data-appearance="atelier"] [data-sidebar-panel-group][data-resizing="true"] [data-material="panel-body"] { animation: none; }

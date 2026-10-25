@@ -26,8 +26,8 @@ function fixture() {
   }) };
   return { document, pdf: document as unknown as PDFDocumentProxy };
 }
-function view(pdf: PDFDocumentProxy, jump: () => boolean, sources = segments) {
-  return <ReadingNavigationScope><Adapter jump={jump} /><PaperReferencesProvider segments={sources} entryId="e" workspaceRoot={null} pdfDocument={pdf}>
+function view(pdf: PDFDocumentProxy, jump: () => boolean, sources = segments, hoverEnabled = true) {
+  return <ReadingNavigationScope><Adapter jump={jump} /><PaperReferencesProvider segments={sources} entryId="e" workspaceRoot={null} pdfDocument={pdf} hoverEnabled={hoverEnabled}>
     <div><div className="pdf-text-layer">[1]</div><PdfReferenceLayer document={pdf} pageIdx={0} enabled /></div>
   </PaperReferencesProvider></ReadingNavigationScope>;
 }
@@ -38,6 +38,15 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 describe('native PDF citation interactions', () => {
+  it('hides native citation hover previews while preserving click navigation', async () => {
+    const { pdf } = fixture(), jump = vi.fn(() => true);
+    render(view(pdf, jump, segments, false));
+    const trigger = await screen.findByRole('button', { name: '文内引用，预览或定位原文' });
+    fireEvent.focus(trigger);
+    expect(screen.queryByText('[1] · 第 3 页')).toBeNull();
+    fireEvent.click(trigger);
+    await waitFor(() => expect(jump).toHaveBeenCalledWith(expect.objectContaining({ segmentUid: 'r1' })));
+  });
   it('previews the referenced right-column item, not the left item at the same height', async () => {
     const { pdf, document } = fixture(), jump = vi.fn(() => true);
     document.getDestination.mockResolvedValue([2, { name: 'XYZ' }, 360, 720, null]);

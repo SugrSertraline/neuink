@@ -17,4 +17,5 @@ neuink-domain = { path = "../neuink-domain" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tempfile = "3"
 zip.workspace = true

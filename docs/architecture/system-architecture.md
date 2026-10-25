@@ -186,6 +186,8 @@ RelationCanvas 使用共享 PointerPreview 和 Popover 展示悬停与节点详�
 
 ## 7. Assistant
 
+默认关闭的本地 Agent 入口预设 Claude Code、Codex、OpenCode，复用现有聊天与后台任务 UI。Rust 分别对接官方 stream-json、App Server 和 ACP，透过每轮短期、鉴权的回环 MCP 服务接入既有工具执行器。各 Agent 保留原生工具与循环，授权由宿主展示；恢复时重连本轮 MCP 并忽略历史回放，切换不同 Agent 新建独立对话。Markdown 修改要求本轮成功读取，再经 Verified Proposal 审阅保存；会话消息记录实际 session/thread ID 以续接，不冒充内置 agent 的持久检查点。实现与生命周期约束见 [本地 Agent 接入](../development/local-agent.md)。
+
 未解析 PDF 的降级读取复用 PDF.js：`read_pdf_pages` 每次至多 5 页，`search_pdf_text` 每次扫描至多 20 页；`read_entry_assistant_context` 在没有解析片段但存在 PDF 时自动读取前 3 页以内，并返回续读位置、空白／扫描页与截断提示。只在模型实际调用工具时提取，不自动 OCR、上传解析或扫描全库。工具受现有冻结范围、权限、预算、取消与恢复规则约束。
 
 Rust 仅通过验证后的 EntryId 读取本地 PDF、校验 BLAKE3 文件版本并原子保存可重建文字缓存；前端独占 PDF Worker 逐页提取、清理页面并在完成／异常／取消时销毁 Worker。同一 WebView 串行提取，限制 30 秒、64 MiB、2,000 页、每页 20,000 字符及每条目 8 MiB 缓存。缓存不包含 API Key，不修改 Segment、解析状态或业务更新时间。

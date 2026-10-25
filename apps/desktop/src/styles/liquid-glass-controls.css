@@ -57,6 +57,8 @@
   -webkit-backdrop-filter: var(--glass-control-filter); backdrop-filter: var(--glass-control-filter);
 }
 :root[data-appearance="liquid-glass"] [data-slot="input"] { border-radius: var(--glass-control-radius); }
+:root[data-appearance="liquid-glass"] :is([data-slot="input"], [data-slot="textarea"]):focus-visible:not(:disabled, [aria-invalid="true"]),
+:root[data-appearance="liquid-glass"] [data-material="composer"]:focus-within:not([data-block-drop-active], [data-disabled]) { border-color: var(--ring); }
 :root[data-appearance="liquid-glass"] :is([data-ui="button"], [data-ui="toggle"], [data-slot="select-trigger"], [data-slot="input"], [data-slot="textarea"], [data-slot="input-group"], [data-slot="checkbox"])[aria-invalid="true"] { border-color: var(--destructive); }
 :root[data-appearance="liquid-glass"] [data-slot="search-input-icon"] { z-index: 1; pointer-events: none; }
 

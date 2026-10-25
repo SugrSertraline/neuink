@@ -6,7 +6,7 @@ import { noteTargetKey } from '@/shared/lib/noteOwner';
 
 export type RelationKind = 'hierarchy' | 'membership' | 'ownership' | 'source';
 export const RELATION_LABELS: Record<RelationKind, string> = {
-  hierarchy: '标签层级', membership: '论文归属', ownership: '笔记归属', source: '来源引用',
+  hierarchy: '标签层级', membership: '条目所属标签', ownership: '笔记归属', source: '笔记引用原文',
 };
 export const RELATION_KINDS = Object.keys(RELATION_LABELS) as RelationKind[];
 export type RelationNode = {
@@ -71,10 +71,10 @@ export function buildRelationGraph(tags: TagMeta[], entries: LibraryEntry[], not
   for (const note of notes) {
     if (note.deleted_at) continue;
     const id = noteNodeId(note.target), owner = note.target.owner;
-    const parent = owner.kind === 'entry' ? ensureEntry(owner.entry_id) : ensureTag(owner.tag_id);
+    const parent = owner.kind === 'entry' ? ensureEntry(owner.entry_id) : owner.kind === 'tag_reading' ? ensureTag(owner.tag_id) : null;
     nodes.set(id, { id, kind: 'note', title: note.title, subtitle: owner.kind === 'entry' ? '文档笔记' : '标签笔记',
-      target: note.target, note, available: nodes.get(parent)?.available ?? false });
-    addEdge(parent, id, 'ownership');
+      target: note.target, note, available: parent ? nodes.get(parent)?.available ?? false : !note.error });
+    if (parent) addEdge(parent, id, 'ownership');
     const statuses = new Map(note.source_statuses?.map(item => [JSON.stringify([item.entry_id, item.segment_uid, item.quote_hash]), item]));
     for (const link of note.links) for (const source of link.sources) {
       const status = statuses.get(JSON.stringify([source.entry_id, source.segment_uid, source.quote_hash]));

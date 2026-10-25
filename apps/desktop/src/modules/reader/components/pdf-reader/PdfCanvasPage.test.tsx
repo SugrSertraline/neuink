@@ -484,6 +484,27 @@ describe('PdfCanvasPage', () => {
     expect(page?.style.height).toBe('450px');
     await act(async () => pendingRender.resolve());
   });
+
+  it('keeps selectable text mounted while a resized page renders', async () => {
+    const fixture = createPdfFixture(Promise.resolve());
+    mockCanvasContexts(fixture.drawImage);
+    const view = renderPage(fixture.document);
+    await waitFor(() => expect(view.container.querySelector('.pdf-text-layer span')).not.toBeNull());
+    const oldText = view.container.querySelector('.pdf-text-layer span');
+    const pendingRender = deferred<void>();
+    fixture.render.mockImplementationOnce(() => ({
+      promise: pendingRender.promise,
+      cancel: vi.fn(),
+      onContinue: null
+    }) as unknown as RenderTask);
+
+    view.rerender(<PdfCanvasPage pageIdx={0} pageWidth={800}
+      pdfDocument={fixture.document} renderEnabled renderPriority="visible" />);
+    await waitFor(() => expect(fixture.render).toHaveBeenCalledTimes(2));
+    expect(view.container.querySelector('.pdf-text-layer span')).toBe(oldText);
+    await act(async () => pendingRender.resolve());
+    await waitFor(() => expect(view.container.querySelector('.pdf-text-layer span')).not.toBe(oldText));
+  });
 });
 
 function renderPage(pdfDocument: PDFDocumentProxy) {

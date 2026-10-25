@@ -50,6 +50,13 @@ pub struct UpdateEntryMetaRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct ApplyEntryTagPathsRequest {
+    pub root: PathBuf,
+    pub entry_id: EntryId,
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct RenamePdfDisplayNameRequest {
     pub root: PathBuf,
     pub entry_id: EntryId,
@@ -315,6 +322,17 @@ pub fn update_entry_meta(request: UpdateEntryMetaRequest) -> Result<EntryMeta, S
             request.fields,
             request.tags,
         )
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn apply_entry_tag_paths(
+    request: ApplyEntryTagPathsRequest,
+) -> Result<neuink_workspace::tag_details::ApplyEntryTagPathsResponse, String> {
+    let workspace =
+        neuink_workspace::Workspace::open(request.root).map_err(|error| error.to_string())?;
+    workspace
+        .apply_entry_tag_paths(&request.entry_id, request.paths)
         .map_err(|error| error.to_string())
 }
 

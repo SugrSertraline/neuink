@@ -4,7 +4,6 @@ import { useToast } from '@/shared/hooks/useToast';
 import type { JobEvent } from '@/shared/ipc/workspaceApi';
 import { readParagraphTranslations, setParagraphTranslationView, translateParagraph, type ParagraphLiveProgress, type ParagraphTranslation, type ParagraphView } from '@/shared/ipc/paragraphTranslationApi';
 import type { SourceSegment } from '@/shared/types/domain';
-import { hasSentenceTranslation, paragraphTranslationRunning } from './paragraphTranslationState';
 
 type Context = {
   records: Record<string, ParagraphTranslation>; pending: Set<string>; ready: boolean;
@@ -96,10 +95,6 @@ function ParagraphTranslationSession({ root, entryId, children }: { root: string
     translate: (uid, retry = false) => { if (root) void mutate(uid, () => translateParagraph(root, entryId, uid, retry)); },
     setView: (uid, view) => {
       if (root && ready) void mutate(uid, async () => {
-        const record = recordsRef.current[uid];
-        if (view === 'sentences' && !hasSentenceTranslation(record) && !paragraphTranslationRunning(record)) {
-          await translateParagraph(root, entryId, uid, true);
-        }
         return setParagraphTranslationView(root, entryId, uid, view);
       });
     },

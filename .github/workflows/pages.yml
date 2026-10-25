@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths: ['website/**', '.github/workflows/pages.yml', 'apps/desktop/src-tauri/logo_assets/neuink_logo_transparent_1024.png']
   pull_request:
+    branches: [main]
     paths: ['website/**', '.github/workflows/pages.yml', 'apps/desktop/src-tauri/logo_assets/neuink_logo_transparent_1024.png']
   workflow_dispatch:
 
@@ -17,6 +18,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

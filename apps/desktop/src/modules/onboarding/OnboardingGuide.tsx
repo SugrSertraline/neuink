@@ -98,7 +98,7 @@ export function OnboardingGuide(props: Props) {
   const pause = () => {
     setOpen(false);
     const toastId = notify({ title:'新手引导已暂停', durationMs:7000,
-      description:'可从「设置 → 资料库与数据 → 新手引导 → 继续新手引导」恢复，当前进度已保留。',
+      description:'可从「设置 → 入门与教程 → 新手引导 → 继续新手引导」恢复，当前进度已保留。',
       action:<Button size="sm" variant="outline" onClick={() => { dismiss(toastId); props.onRoute('onboarding-settings', null); }}>前往设置</Button> });
   };
   if (!open) return null;

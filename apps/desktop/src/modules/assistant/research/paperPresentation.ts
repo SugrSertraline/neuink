@@ -62,6 +62,12 @@ export function paperPresentationError(text: string, records: Map<string, PaperR
   if (new Set(items.map(item => item.ref)).size !== items.length) return 'Do not repeat the same paper_ref in the recommended list.';
 }
 
+/** The rendered rows link to host-retrieved records, even without a duplicate prose URL. */
+export function presentedPaperRecords(text: string, records: ReadonlyMap<string, PaperRecord>): PaperRecord[] {
+  return parsePaperPresentation(text).flatMap(fragment => fragment.kind === 'papers'
+    ? fragment.items.flatMap(item => { const record = records.get(item.ref); return record ? [record] : []; }) : []);
+}
+
 export const PAPER_PRESENTATION_INSTRUCTIONS = [
   'For paper recommendations, the answer itself must be an interactive paper list, not a Markdown table plus a separate download list.',
   'Select and order actual retrieved papers using a fenced block with language neuink-papers and JSON {"items":[{"ref":"exact paper_ref from the retrieval result","reason":"brief supported recommendation and limitations","group":"optional category"}]}. Use at most 30 items. You may place short prose before/after the block.',

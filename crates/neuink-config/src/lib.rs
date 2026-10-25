@@ -16,6 +16,8 @@ pub struct AppSettings {
     pub translation_llm_profile_id: Option<String>,
     #[serde(default)]
     pub translation_automation: TranslationAutomationSettings,
+    #[serde(default, deserialize_with = "read_selection_translation")]
+    pub selection_translation: SelectionTranslationSettings,
     #[serde(default)]
     pub sciverse: SciverseSettings,
     #[serde(default)]
@@ -24,6 +26,54 @@ pub struct AppSettings {
     pub recent_workspaces: Vec<RecentWorkspace>,
     pub autosave_interval_ms: Option<u64>,
     pub theme: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct SelectionTranslationSettings {
+    pub provider: SelectionTranslationProvider,
+    pub endpoint: String,
+    pub model: String,
+    pub region: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SelectionTranslationProvider {
+    #[default]
+    ReadingModel,
+    Azure,
+    Deepl,
+    QwenMt,
+}
+
+// Migrate only persisted settings; removed providers remain invalid IPC input.
+fn read_selection_translation<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<SelectionTranslationSettings, D::Error> {
+    #[derive(Default, Deserialize)]
+    #[serde(default)]
+    struct SavedSelectionTranslation {
+        provider: Option<String>,
+        endpoint: String,
+        model: String,
+        region: String,
+    }
+    let saved = SavedSelectionTranslation::deserialize(deserializer)?;
+    if saved.provider.as_deref() == Some("openai") {
+        return Ok(SelectionTranslationSettings::default());
+    }
+    let provider = SelectionTranslationProvider::deserialize(
+        serde::de::value::StrDeserializer::<D::Error>::new(
+            saved.provider.as_deref().unwrap_or("reading_model"),
+        ),
+    )?;
+    Ok(SelectionTranslationSettings {
+        provider,
+        endpoint: saved.endpoint,
+        model: saved.model,
+        region: saved.region,
+    })
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

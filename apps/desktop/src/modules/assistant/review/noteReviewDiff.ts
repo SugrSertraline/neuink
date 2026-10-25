@@ -22,6 +22,11 @@ export function noteReviewVersions(proposal: AssistantNoteProposal) {
   return { before, after };
 }
 
+export function canReviewNoteProposal(proposal: AssistantNoteProposal): boolean {
+  try { noteReviewVersions(proposal); return true; }
+  catch { return false; }
+}
+
 /** Bounded line diff; very large changed regions remain one exact, untruncated change. */
 export function buildNoteReviewDiff(before: string, after: string): NoteReviewBlock[] {
   const lines = (value: string) => value.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n');

@@ -36,7 +36,6 @@ import {
   getWorkspaceSettings,
   forgetRecentWorkspace,
   inspectWorkspacePath,
-  migrateWorkspaceRoot,
   updateTranslationAutomationSettings,
   type TranslationAutomationSettings,
   type WorkspacePathInspection,
@@ -713,14 +712,9 @@ export function SettingsPanel({
         }
         await onCreateWorkspaceRoot(inspection.root);
         notify({ tone: 'success', title: '已新建并打开工作区' });
-      } else {
-        await migrateWorkspaceRoot(inspection.root);
-        notify({ tone: 'success', title: '工作区迁移完成', description: '工作区已复制并验证，应用正在重新打开。' });
       }
       setPendingWorkspaceAction(null);
-      if (intent !== 'migrate') {
-        setWorkspaceSettings(await getWorkspaceSettings());
-      }
+      setWorkspaceSettings(await getWorkspaceSettings());
     } catch (caught) {
       notifyFailure('工作区操作失败', caught);
     } finally {
@@ -794,7 +788,6 @@ export function SettingsPanel({
       onOpenWorkspace={() => void chooseWorkspaceFolder('switch')}
       onOpenMineruClientGuide={onOpenMineruClientGuide}
       onCreateWorkspace={() => void chooseWorkspaceFolder('create')}
-      onMigrateWorkspace={() => void chooseWorkspaceFolder('migrate')}
       onOpenCurrentWorkspace={() => {
         const root = workspaceRoot ?? workspaceSettings?.root;
         if (root) {

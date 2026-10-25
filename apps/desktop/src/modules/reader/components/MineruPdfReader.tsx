@@ -1,3 +1,4 @@
+import { workspaceStorageIdentity } from '@/shared/lib/workspaceStorageIdentity';
 import { PaperReferencesProvider } from './navigation/PaperReferences';
 import type { ComponentProps } from 'react';
 import { ReadingNavigationScope, useReadingNavigation } from './navigation/ReadingNavigation';
@@ -81,6 +82,7 @@ import { usePdfReaderZoom } from "./pdf-reader/usePdfReaderZoom";
 import { useReadingActivityTracker } from "./pdf-reader/useReadingActivityTracker";
 import { usePdfAnnotationActions } from "./pdf-reader/usePdfAnnotationActions";
 import { usePdfSegmentNavigation } from "./pdf-reader/usePdfSegmentNavigation";
+import { usePdfSourceJump } from './pdf-reader/usePdfSourceJump';
 import { usePdfSourceLinkActions } from "./pdf-reader/usePdfSourceLinkActions";
 import { usePdfTextSearch } from "./pdf-reader/usePdfTextSearch";
 import { usePdfTranslationController } from "./pdf-reader/usePdfTranslationController";
@@ -99,6 +101,8 @@ import {
   saveSegmentEditorsBeforeClose,
 } from "./segmentEditorDirtyRegistry";
 import { translateTextSelection } from "../translation/entryTranslation";
+import { ReadingSelectionToolbarProvider } from './pdf-reader/ReadingSelectionToolbarProvider';
+import { textSelectionAnnotationDraft, type TextSelectionAnnotationInput } from './pdf-reader/textSelectionAnnotation';
 import { TranslationTaskDialog } from "../translation/TranslationTaskDialog";
 import { PaperExportDialog } from "../export/PaperExportDialog";
 import { UnsavedSegmentChangesDialog } from "./pdf-reader/UnsavedSegmentChangesDialog";
@@ -163,6 +167,7 @@ type MineruPdfReaderProps = {
     options?: AssistantContextAddOptions,
   ) => void;
   onActiveSegmentChange?: (segment: AssistantActiveSegment | null) => void;
+  sentenceLinkEnabled?: boolean;
   syncOnlyOnSegmentClick?: boolean;
   onConsumePendingSourceLinkInsertion: (
     entryId: string,
@@ -252,6 +257,7 @@ function MineruPdfReaderBody({
   onOpenAnnotationsSurface,
   onAddAssistantContext,
   onActiveSegmentChange,
+  sentenceLinkEnabled = false,
   syncOnlyOnSegmentClick = false,
   onConsumePendingSourceLinkInsertion,
   onConsumePendingNoteImageInsertion,
@@ -304,7 +310,6 @@ function MineruPdfReaderBody({
   const [visiblePageIndexes, setVisiblePageIndexes] = useState<number[]>([]);
   const parseStatusToastRef = useRef<{ key: string; id: string } | null>(null);
   const resumedReadingStateKeyRef = useRef<string | null>(null);
-  const handledJumpRequestKeyRef = useRef<string | null>(null);
 
   const {
     busy: annotationBusy,
@@ -335,7 +340,7 @@ function MineruPdfReaderBody({
     apply: applyRecommendedTags,
     busy: tagSuggestionBusy,
     error: tagSuggestionError,
-    dismiss: dismissTagSuggestions,
+    discard: dismissTagSuggestions,
     open: tagSuggestionsOpen,
     recommendations: recommendedTags,
     selectedPaths: selectedSuggestedTagPaths,
@@ -683,7 +688,7 @@ function MineruPdfReaderBody({
 
   const activateSegment = (
     segment: SourceSegment,
-    options: { mode?: "segment" | "annotation"; localOnly?: boolean } = {},
+    options: { mode?: "segment" | "annotation"; localOnly?: boolean; sentenceIndex?: number } = {},
   ) => {
     if (
       selectedSegment &&
@@ -701,7 +706,7 @@ function MineruPdfReaderBody({
     setAnnotationFocusId(null);
     setNoteMode(options.mode ?? "segment");
     if (options.localOnly) restartSegmentHighlight(segment.uid);
-    else flashSegment(segment);
+    else flashSegment(segment, options.sentenceIndex);
     return true;
   };
 
@@ -734,14 +739,14 @@ function MineruPdfReaderBody({
     }
   }, [closeSegmentOverlayNow, editorScopeKey, segmentCloseBusy]);
 
-  const toggleSegment = (segment: SourceSegment) => {
+  const toggleSegment = (segment: SourceSegment, sentenceIndex?: number) => {
     const currentSegmentUid = selectedSegment
       ? logicalSegmentUid(selectedSegment)
       : null;
     const nextSegmentUid = logicalSegmentUid(segment);
 
     if (
-      readerPreferences.closeSegmentOverlayOnSameSegmentClick &&
+      !syncOnlyOnSegmentClick && readerPreferences.closeSegmentOverlayOnSameSegmentClick &&
       segmentOverlayOpen &&
       currentSegmentUid === nextSegmentUid
     ) {
@@ -751,6 +756,7 @@ function MineruPdfReaderBody({
 
     if (!activateSegment(segment, {
       mode: noteMode === "annotation" ? "annotation" : "segment",
+      sentenceIndex,
     })) return;
     if (readerPreferences.segmentNoteOpenGesture === 'single' && !syncOnlyOnSegmentClick) {
       setSegmentOverlayOpen(true);
@@ -770,30 +776,8 @@ function MineruPdfReaderBody({
   };
 
   const createTextSelectionAnnotation = useCallback(
-    async ({
-      content,
-      importance,
-      segment,
-      selection,
-    }: {
-      content: string;
-      importance: AnnotationImportance;
-      segment: SourceSegment;
-      selection: AnnotationTextSelection;
-    }) => {
-      const existing = annotations.find((annotation) =>
-        annotation.segment_uid === segment.uid &&
-        sameTextSelection(annotation.text_selection, selection)
-      );
-      await saveAnnotation({
-        annotationId: existing?.annotation_id,
-        content: content.trim() || existing?.content || '',
-        importance: content.trim() ? importance : existing?.importance ?? importance,
-        kind: "highlight",
-        segmentUid: segment.uid,
-        textSelection: selection,
-      });
-    },
+    async (input: TextSelectionAnnotationInput) =>
+      Boolean(await saveAnnotation(textSelectionAnnotationDraft(input, annotations))),
     [annotations, saveAnnotation],
   );
   const focusPdfAnnotation = useCallback(
@@ -910,42 +894,25 @@ function MineruPdfReaderBody({
         ? "要添加到笔记，请在左侧用分屏按钮打开笔记。"
         : "要添加到笔记，请先在左侧新建笔记，并用分屏按钮打开。";
 
-  useEffect(() => {
-    if (!jumpRequest || loadState.status !== "ready" || pdfState.status !== 'ready') {
-      return;
+  usePdfSourceJump({ entryId: entry.id, request: jumpRequest,
+    ready: loadState.status === 'ready' && pdfState.status === 'ready', isHandled: isJumpHandled, markHandled: markJumpHandled,
+    navigate: jumpRequest => {
+    if (jumpRequest.kind === 'page') {
+      rememberReadingPosition?.();
+      scrollToPage(jumpRequest.pageIdx, pdfScrollRef.current);
+      return true;
     }
-    const jumpKey = `${entry.id}:${jumpRequest.requestKey}`;
-    if (handledJumpRequestKeyRef.current === jumpKey || isJumpHandled?.(jumpKey)) {
-      return;
-    }
-
-    if (jumpRequest.kind === "page") {
-      const frame = window.requestAnimationFrame(() => {
-        handledJumpRequestKeyRef.current = jumpKey;
-        markJumpHandled?.(jumpKey, { localOnly: Boolean(jumpRequest.targetSurfaceKey) });
-        rememberReadingPosition?.();
-        scrollToPage(jumpRequest.pageIdx, pdfScrollRef.current);
-      });
-      return () => window.cancelAnimationFrame(frame);
-    }
-
     const segment = findSegmentByLogicalOrRealUid(
       navigableSegments,
       jumpRequest.segmentUid,
     );
     if (!segment) {
-      const frame = window.requestAnimationFrame(() => {
-        handledJumpRequestKeyRef.current = jumpKey;
-        markJumpHandled?.(jumpKey, { localOnly: Boolean(jumpRequest.targetSurfaceKey) });
-        rememberReadingPosition?.();
-        scrollToPage(jumpRequest.pageIdx, pdfScrollRef.current);
-      });
-      return () => window.cancelAnimationFrame(frame);
+      rememberReadingPosition?.();
+      scrollToPage(jumpRequest.pageIdx, pdfScrollRef.current);
+      return true;
     }
 
-    if (!activateSegment(segment, { localOnly: Boolean(jumpRequest.targetSurfaceKey) })) return;
-    handledJumpRequestKeyRef.current = jumpKey;
-    markJumpHandled?.(jumpKey, { localOnly: Boolean(jumpRequest.targetSurfaceKey) });
+    if (!activateSegment(segment, { localOnly: Boolean(jumpRequest.targetSurfaceKey) })) return false;
     if (jumpRequest.kind === "annotation") {
       const annotation = annotations.find(
         (candidate) => candidate.annotation_id === jumpRequest.annotationId,
@@ -955,25 +922,12 @@ function MineruPdfReaderBody({
       onOpenAnnotationsSurface(logicalSegmentUid(segment));
       if (annotation) {
         focusPdfAnnotation(annotation, segment);
-        return;
+        return true;
       }
     }
-    const frame = window.requestAnimationFrame(() => {
-      scrollToMountedOrPendingSegment(segment);
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [
-    jumpRequest?.requestKey,
-    rememberReadingPosition,
-    annotations,
-    focusPdfAnnotation,
-    loadState.status,
-    pdfState.status,
-    isJumpHandled,
-    markJumpHandled,
-    scrollToMountedOrPendingSegment,
-    navigableSegments,
-  ]);
+    scrollToMountedOrPendingSegment(segment);
+    return true;
+  } });
 
   const saveSegmentNote = async () => {
     return Boolean(await saveNote());
@@ -1073,7 +1027,7 @@ function MineruPdfReaderBody({
   }
 
   return (
-    <PaperReferencesProvider segments={segments} entryId={entry.id} workspaceRoot={workspaceRoot} pdfDocument={pdfState.status === "ready" ? pdfState.document : null}>
+    <PaperReferencesProvider segments={segments} entryId={entry.id} workspaceRoot={workspaceRoot} pdfDocument={pdfState.status === "ready" ? pdfState.document : null} hoverEnabled={readerPreferences.paperReferenceHoverEnabled && !readingSession?.resizing}>
     <ReaderSurfaceFrame className="pdf-reader-surface bg-muted/30" toolbar={
       <ReaderToolbar
         navigation={<ReadingNavigationControls segments={segments} entryId={entry.id} workspaceRoot={workspaceRoot} />}
@@ -1119,6 +1073,7 @@ function MineruPdfReaderBody({
         onTagSuggestionsOpenChange={setTagSuggestionsOpen}
         onZoomIn={() => { beginUserNavigation?.(); updateZoom((currentZoom) => currentZoom + PDF_ZOOM_STEP); }}
         onZoomOut={() => { beginUserNavigation?.(); updateZoom((currentZoom) => currentZoom - PDF_ZOOM_STEP); }}
+        onZoomReset={() => { beginUserNavigation?.(); updateZoom(() => 1); }}
       />
     }>
       <PaperExportDialog
@@ -1282,7 +1237,10 @@ function MineruPdfReaderBody({
             hoverPreviewShowOriginal={readerPreferences.hoverPreviewShowOriginal}
             hoverPreviewShowNote={readerPreferences.hoverPreviewShowNote}
             hoverPreviewShowAnnotation={readerPreferences.hoverPreviewShowAnnotation}
+            inlineAnnotationHoverEnabled={readerPreferences.inlineAnnotationHoverEnabled}
             hoverPreviewShowTranslation={readerPreferences.hoverPreviewShowTranslation}
+            sentenceHoverShowOriginal={readerPreferences.pdfSentenceHoverShowOriginal}
+            sentenceHoverShowTranslation={readerPreferences.pdfSentenceHoverShowTranslation}
             pdfScrollRef={pdfScrollRef}
             pdfState={pdfState}
             pdfAvailable={Boolean(pdfPath)}
@@ -1322,6 +1280,8 @@ function MineruPdfReaderBody({
             onCreateTextSelectionAnnotation={createTextSelectionAnnotation}
             onTranslateTextSelection={translateSelectedText}
             onToggleSegment={guardedToggleSegment}
+            sentenceLinkEnabled={sentenceLinkEnabled}
+            sentenceHoverEnabled={readerPreferences.pdfSentenceHoverEnabled && !readingSession?.resizing}
             onVisiblePageIndexesChange={setVisiblePageIndexes}
             altClickOpensNote={
               readerPreferences.segmentNoteOpenGesture === 'modifier' && !syncOnlyOnSegmentClick
@@ -1426,25 +1386,6 @@ function MineruPdfReaderBody({
   );
 }
 
-function sameTextSelection(
-  left: AnnotationTextSelection | null | undefined,
-  right: AnnotationTextSelection
-) {
-  if (
-    !left ||
-    left.page_idx !== right.page_idx ||
-    left.text.trim() !== right.text.trim() ||
-    left.rects.length !== right.rects.length
-  ) {
-    return false;
-  }
-  return left.rects.every((rect, index) =>
-    rect.every((coordinate, coordinateIndex) =>
-      Math.abs(coordinate - right.rects[index][coordinateIndex]) < 0.5
-    )
-  );
-}
-
 async function capturePdfSegmentScreenshot(
   pdfDocument: PDFDocumentProxy,
   pageWidth: number,
@@ -1509,6 +1450,6 @@ function clampCanvasCoordinate(value: number, max: number) {
 }
 
 export function MineruPdfReader(props: ComponentProps<typeof MineruPdfReaderBody>) {
-  const key = JSON.stringify(['pdf', props.workspaceRoot, props.entry.id, props.entry.pdfFileName]);
-  return <ReadingNavigationScope key={key} retentionKey={key}><MineruPdfReaderBody {...props} /></ReadingNavigationScope>;
+  const key = JSON.stringify(['pdf', props.workspaceRoot ? workspaceStorageIdentity(props.workspaceRoot) : null, props.entry.id, props.entry.pdfFileName]);
+  return <ReadingNavigationScope key={key} retentionKey={key}><ReadingSelectionToolbarProvider><MineruPdfReaderBody {...props} /></ReadingSelectionToolbarProvider></ReadingNavigationScope>;
 }

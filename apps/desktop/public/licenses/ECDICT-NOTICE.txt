@@ -1,0 +1,10 @@
+NeuInk's offline English word lookup contains a reduced, normalized selection
+of ECDICT dictionary entries and inflection mappings.
+
+Source: https://github.com/skywind3000/ECDICT
+Source revision: bc015ed2e24a7abef49fc6dbbb7fe32c1dadaf8b
+Source file: ecdict.csv
+License: MIT (see ECDICT-LICENSE.txt in this directory)
+
+NeuInk filters the source to commonly attested words, shortens definitions,
+and keeps its own reviewed academic terms ahead of the general dictionary.

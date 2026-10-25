@@ -1,4 +1,4 @@
-import { normalizeReflowComponentContent, type ReflowComponentContent } from './reflowContentPreferences';
+import { REFLOW_COMPONENT_KEYS, normalizeReflowComponentContent, type ReflowComponentContent } from './reflowContentPreferences';
 
 export type PdfHoverPreviewFontSize = 'small' | 'standard' | 'large';
 export type PdfHoverPreviewSize = 'compact' | 'standard' | 'large';
@@ -53,24 +53,60 @@ export type ReaderPreferences = {
   closeSegmentOverlayOnBlankClick: boolean;
   closeSegmentOverlayOnSameSegmentClick: boolean;
   hoverPreviewEnabled: boolean;
+  pdfSentenceHoverEnabled: boolean;
+  pdfSentenceHoverShowOriginal: boolean;
+  pdfSentenceHoverShowTranslation: boolean;
   pdfHoverPreviewFontSize: PdfHoverPreviewFontSize;
   pdfHoverPreviewSize: PdfHoverPreviewSize;
   hoverPreviewShowRegion: boolean;
   hoverPreviewShowOriginal: boolean;
   hoverPreviewShowNote: boolean;
   hoverPreviewShowAnnotation: boolean;
+  inlineAnnotationHoverEnabled: boolean;
+  paperReferenceHoverEnabled: boolean;
   hoverPreviewShowTranslation: boolean;
   leftClickOpensNotePane: boolean;
   segmentNoteOpenGesture: 'button' | 'single' | 'modifier';
   reflowBackgroundColor: string;
   reflowComponents: ReflowComponentPreferences;
   reflowFontSize: number;
-  reflowTranslationMode: 'source' | 'translation' | 'bilingual';
+  reflowTranslationMode: 'source' | 'translation' | 'bilingual' | 'sentences';
   reflowHoverSourceEnabled: boolean;
   showRegions: boolean;
   pageDisplayMode: 'single' | 'dual';
   pageTurningMode?: 'scroll' | 'book';
 };
+
+export type ReflowOriginalDisplay = 'hidden' | 'original' | 'sentences';
+
+export function reflowDisplayOptions(preferences: ReaderPreferences) {
+  const content = normalizeReflowComponentContent(preferences.reflowComponents.content)?.paragraph;
+  const parsed = content?.parsed ?? preferences.reflowTranslationMode !== 'translation';
+  const translation = content?.translation ?? preferences.reflowTranslationMode !== 'source';
+  const translationView = content?.translationView ?? (preferences.reflowTranslationMode === 'sentences' ? 'sentences' : 'paragraph');
+  return {
+    original: !parsed ? 'hidden' : translationView === 'sentences' ? 'sentences' : 'original',
+    translation,
+  } as const;
+}
+
+export function withReflowDisplayOptions(preferences: ReaderPreferences, original: ReflowOriginalDisplay,
+  translation: boolean): ReaderPreferences {
+  const mode: ReaderPreferences['reflowTranslationMode'] = original === 'sentences' ? 'sentences'
+    : original === 'hidden' ? 'translation' : translation ? 'bilingual' : 'source';
+  return { ...preferences, reflowTranslationMode: mode, reflowComponents: {
+    ...preferences.reflowComponents,
+    content: Object.fromEntries(REFLOW_COMPONENT_KEYS.map(key => [key, {
+      ...preferences.reflowComponents.content?.[key], parsed: original !== 'hidden', translation,
+      translationView: original === 'sentences' ? 'sentences' : 'paragraph',
+    }])),
+  } };
+}
+
+export function withReflowTranslationMode(preferences: ReaderPreferences, mode: ReaderPreferences['reflowTranslationMode']): ReaderPreferences {
+  return withReflowDisplayOptions(preferences, mode === 'translation' ? 'hidden' : mode === 'sentences' ? 'sentences' : 'original',
+    mode !== 'source');
+}
 
 const READER_PREFERENCES_STORAGE_KEY = 'neuink.reader.preferences';
 
@@ -80,12 +116,17 @@ const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
   closeSegmentOverlayOnBlankClick: true,
   closeSegmentOverlayOnSameSegmentClick: true,
   hoverPreviewEnabled: true,
+  pdfSentenceHoverEnabled: true,
+  pdfSentenceHoverShowOriginal: true,
+  pdfSentenceHoverShowTranslation: true,
   pdfHoverPreviewFontSize: 'standard',
   pdfHoverPreviewSize: 'standard',
   hoverPreviewShowRegion: true,
   hoverPreviewShowOriginal: true,
   hoverPreviewShowNote: true,
   hoverPreviewShowAnnotation: true,
+  inlineAnnotationHoverEnabled: true,
+  paperReferenceHoverEnabled: true,
   hoverPreviewShowTranslation: true,
   leftClickOpensNotePane: false,
   segmentNoteOpenGesture: 'button',
@@ -135,12 +176,17 @@ export function equalReaderPreferences(left: ReaderPreferences, right: ReaderPre
     left.closeSegmentOverlayOnSameSegmentClick ===
       right.closeSegmentOverlayOnSameSegmentClick &&
     left.hoverPreviewEnabled === right.hoverPreviewEnabled &&
+    left.pdfSentenceHoverEnabled === right.pdfSentenceHoverEnabled &&
+    left.pdfSentenceHoverShowOriginal === right.pdfSentenceHoverShowOriginal &&
+    left.pdfSentenceHoverShowTranslation === right.pdfSentenceHoverShowTranslation &&
     left.pdfHoverPreviewFontSize === right.pdfHoverPreviewFontSize &&
     left.pdfHoverPreviewSize === right.pdfHoverPreviewSize &&
     left.hoverPreviewShowRegion === right.hoverPreviewShowRegion &&
     left.hoverPreviewShowOriginal === right.hoverPreviewShowOriginal &&
     left.hoverPreviewShowNote === right.hoverPreviewShowNote &&
     left.hoverPreviewShowAnnotation === right.hoverPreviewShowAnnotation &&
+    left.inlineAnnotationHoverEnabled === right.inlineAnnotationHoverEnabled &&
+    left.paperReferenceHoverEnabled === right.paperReferenceHoverEnabled &&
     left.hoverPreviewShowTranslation === right.hoverPreviewShowTranslation &&
     left.leftClickOpensNotePane === right.leftClickOpensNotePane &&
     left.segmentNoteOpenGesture === right.segmentNoteOpenGesture &&
@@ -183,6 +229,18 @@ function normalizeReaderPreferences(value: unknown): ReaderPreferences {
       typeof candidate.hoverPreviewEnabled === 'boolean'
         ? candidate.hoverPreviewEnabled
         : DEFAULT_READER_PREFERENCES.hoverPreviewEnabled,
+    pdfSentenceHoverEnabled:
+      typeof candidate.pdfSentenceHoverEnabled === 'boolean'
+        ? candidate.pdfSentenceHoverEnabled
+        : DEFAULT_READER_PREFERENCES.pdfSentenceHoverEnabled,
+    pdfSentenceHoverShowOriginal:
+      typeof candidate.pdfSentenceHoverShowOriginal === 'boolean'
+        ? candidate.pdfSentenceHoverShowOriginal
+        : DEFAULT_READER_PREFERENCES.pdfSentenceHoverShowOriginal,
+    pdfSentenceHoverShowTranslation:
+      typeof candidate.pdfSentenceHoverShowTranslation === 'boolean'
+        ? candidate.pdfSentenceHoverShowTranslation
+        : DEFAULT_READER_PREFERENCES.pdfSentenceHoverShowTranslation,
     pdfHoverPreviewFontSize:
       candidate.pdfHoverPreviewFontSize === 'small' ||
       candidate.pdfHoverPreviewFontSize === 'standard' ||
@@ -211,6 +269,14 @@ function normalizeReaderPreferences(value: unknown): ReaderPreferences {
       typeof candidate.hoverPreviewShowAnnotation === 'boolean'
         ? candidate.hoverPreviewShowAnnotation
         : DEFAULT_READER_PREFERENCES.hoverPreviewShowAnnotation,
+    inlineAnnotationHoverEnabled:
+      typeof candidate.inlineAnnotationHoverEnabled === 'boolean'
+        ? candidate.inlineAnnotationHoverEnabled
+        : candidate.hoverPreviewEnabled !== false && candidate.hoverPreviewShowAnnotation !== false,
+    paperReferenceHoverEnabled:
+      typeof candidate.paperReferenceHoverEnabled === 'boolean'
+        ? candidate.paperReferenceHoverEnabled
+        : DEFAULT_READER_PREFERENCES.paperReferenceHoverEnabled,
     hoverPreviewShowTranslation:
       typeof candidate.hoverPreviewShowTranslation === 'boolean'
         ? candidate.hoverPreviewShowTranslation
@@ -231,7 +297,7 @@ function normalizeReaderPreferences(value: unknown): ReaderPreferences {
     reflowComponents: normalizeReflowComponentPreferences(candidate.reflowComponents),
     reflowFontSize: normalizeReflowFontSize(candidate.reflowFontSize),
     reflowTranslationMode:
-      candidate.reflowTranslationMode === 'translation' || candidate.reflowTranslationMode === 'bilingual'
+      candidate.reflowTranslationMode === 'translation' || candidate.reflowTranslationMode === 'bilingual' || candidate.reflowTranslationMode === 'sentences'
         ? candidate.reflowTranslationMode
         : DEFAULT_READER_PREFERENCES.reflowTranslationMode,
     reflowHoverSourceEnabled:

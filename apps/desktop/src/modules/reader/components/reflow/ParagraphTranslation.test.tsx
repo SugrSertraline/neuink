@@ -43,14 +43,14 @@ describe('paragraph translation', () => {
     let resolve!: (value: api.ParagraphTranslation) => void;
     vi.mocked(api.translateParagraph).mockImplementation(() => new Promise(done => { resolve = done; }));
     render(wrap());
-    const button = screen.getByRole('menuitem', { name: '翻译此段' });
+    const button = screen.getByRole('menuitem', { name: 'AI 翻译此段' });
     expect(button.hasAttribute('disabled')).toBe(true);
     await waitFor(() => expect(button.hasAttribute('disabled')).toBe(false));
     fireEvent.click(button); fireEvent.click(button);
     expect(api.translateParagraph).toHaveBeenCalledExactlyOnceWith('root', 'entry', 'p1', false);
     const running = record(); running.paragraph.status = 'running'; running.sentences.status = 'running';
     await act(async () => resolve(running));
-    expect(screen.getByRole('menuitem', { name: '正在翻译此段…' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('menuitem', { name: '正在 AI 翻译此段…' }).hasAttribute('disabled')).toBe(true);
   });
   it('renders sentence pairs inside one paragraph and switches cached views without translating', async () => {
     const saved = record();
@@ -75,12 +75,12 @@ describe('paragraph translation', () => {
     render(wrap());
     await screen.findByText('完整的段落译文。');
     expect(screen.getByRole('status').textContent).toContain('逐句翻译失败：模拟断网');
-    expect(screen.getByRole('menuitem', { name: '补充逐句翻译' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'AI 增强逐句翻译' })).toBeTruthy();
     fireEvent.click(screen.getByRole('menuitem', { name: '重试失败的翻译' }));
     await waitFor(() => expect(api.translateParagraph).toHaveBeenCalledExactlyOnceWith('root', 'entry', 'p1', true));
     expect(screen.getByText('完整的段落译文。')).toBeTruthy();
   });
-  it('starts only missing work before persisting sentence view from the paragraph menu', async () => {
+  it('switches to sentence view without silently starting AI work', async () => {
     const saved = record(); saved.view = 'paragraph'; saved.sentences = { status: 'failed', value: null, error: '未完成' };
     const running = { ...saved, sentences: { ...saved.sentences, status: 'running' as const, error: null } };
     vi.mocked(api.readParagraphTranslations).mockResolvedValue({ p1: saved });
@@ -89,7 +89,7 @@ describe('paragraph translation', () => {
     render(wrap()); await screen.findByText('完整的段落译文。');
     fireEvent.click(screen.getByRole('menuitemradio', { name: '逐句对照' }));
     await waitFor(() => expect(api.setParagraphTranslationView).toHaveBeenCalledExactlyOnceWith('root', 'entry', 'p1', 'sentences'));
-    expect(api.translateParagraph).toHaveBeenCalledExactlyOnceWith('root', 'entry', 'p1', true);
+    expect(api.translateParagraph).not.toHaveBeenCalled();
   });
   it('hides stale results after source edits and excludes non-paragraph blocks', async () => {
     vi.mocked(api.readParagraphTranslations).mockResolvedValue({ p1: record() });
@@ -97,7 +97,7 @@ describe('paragraph translation', () => {
     await screen.findByText('第一句。');
     rerender(wrap('entry', { ...segment, text: 'Changed.' }));
     expect(screen.queryByText('第一句。')).toBeNull();
-    expect(screen.getByRole('menuitem', { name: '翻译此段' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'AI 翻译此段' })).toBeTruthy();
     rerender(wrap('entry', { ...segment, segment_type: 'heading' }));
     expect(screen.queryByRole('menuitem')).toBeNull();
   });
@@ -130,7 +130,7 @@ describe('paragraph translation', () => {
       onOpenSegmentAnnotation={noop} onOpenSegmentNote={noop} onOpenSourceBacklink={noop} onClose={close}
       translationActions={<><button role="menuitem">翻译此段</button><button role="menuitemradio">逐句对照</button></>} />);
     const menu = screen.getByRole('menu');
-    expect(document.activeElement?.textContent).toBe('编辑片段笔记（浮窗）');
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: '为此处写笔记' }));
     fireEvent.keyDown(document.activeElement!, { key: 'End' });
     expect(document.activeElement?.textContent).toBe('逐句对照');
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' });

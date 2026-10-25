@@ -146,12 +146,12 @@ export function AgentSettingsSection({
         </EditorPanel>
         </div>
 
-        <details className="group rounded-lg border bg-card">
-          <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-semibold">
+        <section className="group rounded-lg border bg-card">
+          <h4 className="flex items-center gap-2 px-4 py-3 text-sm font-semibold">
             <Wrench className="text-muted-foreground" size={14} />
             高级设置
             <span className="ml-auto text-xs font-normal text-muted-foreground">系统提示词与 MCP 授权</span>
-          </summary>
+          </h4>
           <div className="grid gap-4 border-t p-4">
             <Field label="主 Agent 系统提示词">
               <Textarea
@@ -169,7 +169,7 @@ export function AgentSettingsSection({
             onUpdate={onUpdateAgent}
           />
           </div>
-        </details>
+        </section>
       </div>
     );
   }
@@ -378,8 +378,8 @@ function SubagentEditor({
         onCheckedChange={checked => onUpdate({ ...agent, enabled: checked })} />
       <SwitchRow checked={assignedToMain} description="允许主 Agent 在需要时把专项任务交给它。"
         label="允许主 Agent 委派" onCheckedChange={onAssignmentChange} />
-      <details className="group rounded-lg border border-border/70 bg-background">
-        <summary className="cursor-pointer px-3 py-2 text-sm font-medium">高级权限与提示词</summary>
+      <section className="group rounded-lg border border-border/70 bg-background">
+        <h4 className="px-3 py-2 text-sm font-medium">高级权限与提示词</h4>
         <div className="grid gap-3 border-t p-3">
           <SwitchRow checked={agent.permissions.canInvokeTools} label="允许调用工具"
             onCheckedChange={checked => onUpdate({ ...agent, permissions: { ...agent.permissions, canInvokeTools: checked } })} />
@@ -390,7 +390,7 @@ function SubagentEditor({
               onChange={event => onUpdate({ ...agent, systemPrompt: event.target.value })} />
           </Field>
         </div>
-      </details>
+      </section>
     </>
   );
 }

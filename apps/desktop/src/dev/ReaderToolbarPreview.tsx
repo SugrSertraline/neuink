@@ -54,7 +54,7 @@ export function ReaderToolbarPreview() {
         <ReaderToolbar entry={entry} pageCount={27} segmentCount={328} recommendedTags={[]} selectedRecommendedTagPaths={[]}
           tagSuggestionBusy={false} tagSuggestionsOpen={false} translation={translation} translationBusy={busy} reparseBusy={busy}
           readerPreferences={preferences} onReaderPreferencesChange={setPreferences} zoom={0.8}
-          onZoomIn={noop} onZoomOut={noop} onApplyRecommendedTags={noop} onDismissRecommendedTags={noop}
+          onZoomIn={noop} onZoomOut={noop} onZoomReset={noop} onApplyRecommendedTags={noop} onDismissRecommendedTags={noop}
           onRecommendedTagToggle={noop} onTagSuggestionsOpenChange={noop} onExportTranslation={noop}
           onExportPaper={() => setMessage('PDF 导出已触发')} onPauseTranslation={noop} onOpenTranslationTask={noop}
           onOpenPdf={noop} onRevealPdf={noop} />

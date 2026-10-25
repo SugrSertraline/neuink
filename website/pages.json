@@ -115,9 +115,9 @@
   },
   {
     "id": "data",
-    "title": "本地数据、迁移与恢复",
+    "title": "本地数据、便携与恢复",
     "group": "成果与设置",
-    "description": "资料库在哪里，哪些需要联网，如何迁移和恢复。"
+    "description": "程序内 data、U 盘使用、旧资料自动整理与备份恢复。"
   },
   {
     "id": "workflows",

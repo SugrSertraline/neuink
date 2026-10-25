@@ -31,7 +31,7 @@ describe('persistent manual tag recommendations', () => {
     const onApplyEntryTagPaths = vi.fn().mockResolvedValue(undefined);
     let view = render(page({ onApplyEntryTagPaths }));
     expect(analyzeEntryTags).not.toHaveBeenCalled(); await generate(view);
-    expect((view.getByRole('button', { name: '现有标签，已添加' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((view.getByRole('button', { name: '现有标签，已添加' }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(view.getByRole('button', { name: '添加所选标签' }));
     await waitFor(() => expect(onApplyEntryTagPaths).toHaveBeenCalledWith(entry.id, ['新标签']));
     const updated = { ...entry, tags: [...entry.tags, '新标签'] };
@@ -58,6 +58,21 @@ describe('persistent manual tag recommendations', () => {
     fireEvent.click(view.getByRole('button', { name: '添加所选标签' }));
     await waitFor(() => expect(onApplyEntryTagPaths).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(view.queryByRole('alert')).toBeNull());
+  });
+
+  it('allows selecting already applied recommendations and discarding pending results', async () => {
+    vi.mocked(analyzeEntryTags).mockResolvedValue(response('现有标签'));
+    const onApplyEntryTagPaths = vi.fn().mockResolvedValue(undefined);
+    const view = render(page({ onApplyEntryTagPaths })); await generate(view);
+    expect((view.getByRole('button', { name: '添加所选标签' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(view.getByRole('button', { name: '现有标签，已添加' }));
+    expect((view.getByRole('button', { name: '添加所选标签' }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(view.getByRole('button', { name: '添加所选标签' }));
+    await waitFor(() => expect(onApplyEntryTagPaths).toHaveBeenCalledWith(entry.id, ['现有标签']));
+    expect(view.getByRole('button', { name: '现有标签，已添加' })).toBeTruthy();
+    fireEvent.click(view.getByRole('button', { name: '丢弃推荐' }));
+    expect(view.queryByRole('button', { name: '现有标签，已添加' })).toBeNull();
+    expect(readTagSuggestions(tagSuggestionKey(root, entry.id)).recommendations).toEqual([]);
   });
 
   it('keeps delayed generation bound to the original workspace and survives unmount', async () => {

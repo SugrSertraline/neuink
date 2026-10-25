@@ -31,6 +31,14 @@ test('ambiguous old ZIPs are never silently published', async t => {
   fs.writeFileSync(path.join(root, 'release/Neuink-portable-20261003-010000.zip'), 'old');
   await assert.rejects(prepareRelease({ root, commit: 'a'.repeat(40), gitRef: '' }), /exactly one/);
 });
+test('release notes include only the matching version from the changelog', async t => {
+  const root = fixture(t, false);
+  fs.writeFileSync(path.join(root, 'CHANGELOG.md'), '# Releases\n\n## 0.1.0 preview\n\n- Current fix.\n\n## 0.0.9\n\n- Old fix.\n');
+  await prepareRelease({ root, commit: 'a'.repeat(40), gitRef: '' });
+  const notes = fs.readFileSync(path.join(root, 'release/publish/RELEASE_NOTES.md'), 'utf8');
+  assert.match(notes, /Current fix/);
+  assert.doesNotMatch(notes, /Old fix/);
+});
 test('wrong release tag fails before producing publish assets', async t => {
   const root = fixture(t, false);
   await assert.rejects(prepareRelease({ root, commit: 'a'.repeat(40), gitRef: 'refs/tags/v9.9.9' }), /tag mismatch/);

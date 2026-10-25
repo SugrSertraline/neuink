@@ -55,13 +55,13 @@ describe('3D relations page', () => {
     expect(details().getByRole('button', { name: '打开标签' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '前进到下一个对象' }));
     expect(details().getByRole('button', { name: '打开笔记' })).toBeTruthy();
-    expect((search as HTMLInputElement).value).toBe('软件工程'); expect(model.create).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByRole('button', { name: '关闭详情，返回关系图' }));
+    expect((search as HTMLInputElement).value).toBe(''); expect(model.create).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: '收起详情' }));
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(screen.getByRole('button', { name: '返回三维' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '返回总览' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '详情' }));
     expect(screen.getByRole('dialog', { name: '关系详情气泡' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '返回三维' }));
+    fireEvent.click(screen.getByRole('button', { name: '返回总览' }));
     expect(model.highlight).toHaveBeenLastCalledWith(null, null);
   });
   it('keeps unavailable citations and snapshots readable while disabling navigation', async () => {
@@ -74,19 +74,25 @@ describe('3D relations page', () => {
     fireEvent.click(details().getByRole('button', { name: /原论文已删除.*引用来源/ }));
     expect((details().getByRole('button', { name: '打开条目' }) as HTMLButtonElement).disabled).toBe(true);
   });
-  it('focuses relationships and clears filters without rebuilding the renderer', async () => {
+  it('resets selected relationships to overview, then restores them with history without rebuilding the renderer', async () => {
     render(<RelationsPage {...props()} />); await ready(); selectTag();
-    fireEvent.click(details().getByRole('button', { name: '只看关联' }));
-    expect(screen.queryByRole('button', { name: /论文：待整理/ })).toBeNull();
+    expect((screen.getByRole('button', { name: '全部关系' }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: '全部关系' }));
-    expect(screen.getByRole('button', { name: /论文：待整理/ })).toBeTruthy();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByRole('button', { name: '返回总览' })).toBeNull();
+    expect(model.highlight).toHaveBeenLastCalledWith(null, null);
     expect(model.create).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: '返回上一个对象' }));
+    expect(details().getByRole('button', { name: '打开标签' })).toBeTruthy();
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(screen.getByRole('button', { name: '返回总览' })).toBeTruthy();
+    fireEvent.keyDown(screen.getByLabelText('关系图画布'), { key: 'Escape' });
+    expect(screen.queryByRole('button', { name: '返回总览' })).toBeNull();
   });
   it('supports camera keyboard controls and ignores camera shortcuts typed in search', async () => {
     render(<RelationsPage {...props()} />); await ready();
-    const viewport = screen.getByLabelText('三维关系图画布');
+    const viewport = screen.getByLabelText('关系图画布');
     fireEvent.keyDown(viewport, { key: '+' }); expect(model.zoom).toHaveBeenLastCalledWith(.85);
     fireEvent.keyDown(viewport, { key: 'ArrowRight' }); expect(model.rotate).toHaveBeenCalledWith(.12, 0);
     fireEvent.keyDown(viewport, { key: 'Home' }); expect(model.fit).toHaveBeenCalledOnce();
@@ -97,16 +103,16 @@ describe('3D relations page', () => {
   it('offers searchable objects and retry after WebGL failure, then releases the recovered scene', async () => {
     model.fail = true; const view = render(<RelationsPage {...props()} />);
     await screen.findByRole('button', { name: '重试三维视图' });
-    fireEvent.click(screen.getByRole('button', { name: '选择对象' }));
-    fireEvent.click(screen.getByRole('button', { name: '软件工程' }));
+    fireEvent.click(screen.getByRole('button', { name: '查找对象' }));
+    fireEvent.click(screen.getByRole('button', { name: '标签：软件工程' }));
     expect(details().getByRole('button', { name: '打开标签' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '关闭详情，返回关系图' }));
+    fireEvent.click(screen.getByRole('button', { name: '收起详情' }));
     model.fail = false; fireEvent.click(screen.getByRole('button', { name: '重试三维视图' })); await ready();
     view.unmount(); expect(model.dispose).toHaveBeenCalledOnce();
   });
   it('distinguishes empty, loading and partial errors, retaining usable objects', async () => {
     const options = props(); const view = render(<RelationsPage {...options} entries={[]} tags={[]} catalog={{ notes: [], errors: [] }} />);
-    expect(screen.getByText('还没有标签、论文或笔记')).toBeTruthy(); expect(model.create).not.toHaveBeenCalled();
+    expect(screen.getByText('还没有标签、条目或笔记')).toBeTruthy(); expect(model.create).not.toHaveBeenCalled();
     view.rerender(<RelationsPage {...options} loading />); await ready();
     expect((screen.getByRole('button', { name: '更新中' }) as HTMLButtonElement).disabled).toBe(true);
     view.rerender(<RelationsPage {...options} error="读取失败" />);
@@ -120,6 +126,31 @@ describe('3D relations page', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
     fireEvent.pointerLeave(screen.getByRole('button', { name: '标签：软件工程' }));
     await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull());
+  });
+  it('searches all objects by keyboard and shows meaningful directional relationships', async () => {
+    render(<RelationsPage {...props()} />); await ready();
+    fireEvent.click(screen.getByRole('button', { name: '查找对象' }));
+    const input = screen.getByRole('textbox', { name: '查找关系对象' });
+    fireEvent.change(input, { target: { value: '需求对齐' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(screen.queryByRole('textbox', { name: '查找关系对象' })).toBeNull();
+    expect(details().getByRole('heading', { name: /上级标签/ })).toBeTruthy();
+    expect(details().getByRole('heading', { name: /直接归属的条目/ })).toBeTruthy();
+    fireEvent.click(details().getByRole('button', { name: /Bridging.*直接归属的条目/ }));
+    expect(details().getByRole('heading', { name: /所属标签/ })).toBeTruthy();
+    expect(details().getByRole('heading', { name: /引用此条目的笔记/ })).toBeTruthy();
+    fireEvent.keyDown(screen.getByRole('button', { name: '返回总览' }), { key: 'ArrowLeft', altKey: true });
+    expect(details().getByRole('button', { name: '打开标签' })).toBeTruthy();
+  });
+  it('leaves detail mode when searching and restores the selected tag and its filters with back', async () => {
+    const options = props(), view = render(<RelationsPage {...options} />); await ready(); selectTag();
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索关系图' }), { target: { value: 'missing' } });
+    expect(screen.queryByRole('dialog')).toBeNull(); expect(screen.getByText('没有符合当前范围的对象')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '返回上一个对象' })); await ready();
+    expect(details().getByRole('button', { name: '打开标签' })).toBeTruthy();
+    view.rerender(<RelationsPage {...options} tags={[]} entries={[]} catalog={{ notes: [], errors: [] }} />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByRole('button', { name: '返回总览' })).toBeNull();
   });
   it('never remounts an editor when adding the return control', () => {
     const mounted = vi.fn(), onReturn = vi.fn();

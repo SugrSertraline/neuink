@@ -39,6 +39,34 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('book page navigation', () => {
+  it('keeps the fitted paper size while the window is minimized and restored', async () => {
+    let notifyResize: (() => void) | undefined;
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) { notifyResize = callback; }
+      observe() {}
+      disconnect() {}
+    });
+    let width = 900;
+    let height = 800;
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => width);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(() => height);
+    render(<Harness />);
+    const root = screen.getByTestId('entry');
+    await act(async () => {});
+    const fittedWidth = root.dataset.width;
+    expect(Number(fittedWidth)).toBeLessThan(600);
+
+    width = 0;
+    height = 0;
+    await act(async () => notifyResize?.());
+    expect(root.dataset.width).toBe(fittedWidth);
+
+    width = 900;
+    height = 800;
+    await act(async () => notifyResize?.());
+    expect(root.dataset.width).toBe(fittedWidth);
+  });
+
   it('reveals page and evidence destinations before measuring and preserves page drafts', async () => {
     render(<Harness />);
     const root = screen.getByTestId('entry');

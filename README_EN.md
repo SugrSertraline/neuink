@@ -10,13 +10,38 @@
   <a href="https://sugrsertraline.github.io/neuink/start.html">Start reading</a> · <a href="https://sugrsertraline.github.io/neuink/screenshots.html">Screenshot guide</a> · <a href="https://cdn.sugrsertraline.top/Neuink-windows-x64-portable.zip">Download for Windows</a>
 </p>
 
+## What's new in the 0.1.3 preview
+
+- **Reliable shutdown:** finish active assistant work before closing and stop child processes launched by the app. Codex connections can reconnect after a disconnect.
+- **Web citations:** retain verified bracketed web citations in assistant answers.
+
+This update contains verified fixes from the stable branch. The experimental research memory feature is excluded. See the [release notes](CHANGELOG.md).
+
+## What's new in the 0.1.2 preview
+
+- **Carry your data with the app:** on Windows, papers, notes, chats, settings and reading state live in `data` beside the executable. Close Neuink before copying the complete folder to a USB drive.
+- **Import legacy data automatically:** startup checks `neuink_data` beside the app and at the drive root, retains current files on conflicts, and moves the old folder to the Recycle Bin only after verification succeeds.
+- **Read returned Agent reasoning:** preview thinking text or summaries supplied by Claude Code, Codex or OpenCode, expand the returned content, and revisit it in saved chats.
+
+Experimental global memory and LAN sharing are excluded. See [release notes and validation limits](CHANGELOG.md).
+
+## Reading improvements from 0.1.1
+
+- **Reading and citations:** improved PDF text selection and hover behavior. Hold Ctrl and drag a block into the composer; a translucent overlay marks the drop target. Preview citations on hover and click to return to the source, in drafts and sent messages. Draft references can be removed and restored.
+- **Individual list items:** references, numbered lists, and bullet lists now retain item-level context, notes, and annotations, with an explicit whole-list option.
+- **Resume reading:** restore workspace tabs, split views, and supported reading positions. New chats remember the last selected model or local Agent.
+- **Local Agents:** connect an installed Claude Code client, with Codex and OpenCode adapters also available. Approve operations once or remember permissions, and revoke them in settings. See the [release notes](CHANGELOG.md) for validation limits.
+- **Materials and notes:** retrieve a missing PDF from entry details, improved SciVerse PDF/image saving, stable image-resize controls, and formula corrections. Selection translation can use Azure, DeepL, or Qwen-MT independently.
+
+Read the [release changes and validation scope](CHANGELOG.md) or the [assistant guide](https://sugrsertraline.github.io/neuink/assistant.html) (Chinese).
+
 ## Downloads and updates
 
 **[Download Windows x64 portable ZIP (CDN)](https://cdn.sugrsertraline.top/Neuink-windows-x64-portable.zip)**
 
 Fully extract the ZIP, keep the bundled resource folders, and run `Neuink.exe`. Do not run it from inside the archive.
 
-Windows requires Windows 10 1903+ / 11 x64 and WebView2. To update, close the app, extract the new version to a new folder, and reopen your existing workspace.
+Windows requires Windows 10 1903+ / 11 x64 and WebView2. To update, close the app and back up the entire `data` folder. Keep your original `data` beside the new program files; never overwrite it with the empty folder from a public download.
 
 macOS preview builds for Apple Silicon and Intel are available from successful [automated builds](https://github.com/SugrSertraline/neuink/actions/workflows/windows-portable.yml). They are not notarized or validated on a physical Mac; Gatekeeper may block launch. Embedded web pages and the video-caption runtime have not been ported. See [downloads and platform details](docs/deployment/packaging-and-distribution.md).
 
@@ -49,7 +74,7 @@ macOS preview builds for Apple Silicon and Intel are available from successful [
 
 ## Complete product guide
 
-The [documentation website](website/README.md) contains 21 detailed guides in Chinese, covering workflows, controls, data boundaries, and troubleshooting, with section search and mobile navigation. It is published on GitHub Pages at [Neuink Product & User Guide](https://sugrsertraline.github.io/neuink/). The [guide sources](website/content) can also be read directly in this repository.
+The [documentation website](website/README.md) contains 22 detailed guides in Chinese, covering workflows, controls, data boundaries, and troubleshooting, with section search and mobile navigation. It is published on GitHub Pages at [Neuink Product & User Guide](https://sugrsertraline.github.io/neuink/). The [guide sources](website/content) can also be read directly in this repository.
 
 ## Core features
 
@@ -78,7 +103,7 @@ The [documentation website](website/README.md) contains 21 detailed guides in Ch
 ### 4. Local search and AI-assisted research
 
 - **Local search:** keyword search covers entries, tags, fields, document notes, segment notes, PDF pages, and parsed segments. Optional local embeddings enable semantic and hybrid search, with explicit fallback when unavailable.
-- **Context-aware conversations:** associate the current reading object, attach entries, tags, notes, or segments with `@`, or disconnect content. Conversations retain sources, tool activity, and proposal states.
+- **Context-aware conversations:** associate the current reading object, use `@` for PDFs and document notes, select entries or tags, Ctrl-drag individual segments, or disconnect content. Conversations retain sources, tool activity, and proposal states.
 - **Reviewable changes:** document-note, tag, and metadata changes are proposed for review before you apply them. General Agent writing to tag-level synthesis notes is not yet connected.
 - **Online research:** built-in paper search, web search, and content reading use configured sources including arXiv, Crossref, OpenAlex, and optional Tavily or Sciverse. Adding candidates requires confirmation; results distinguish downloaded PDFs from metadata-only entries.
 - **Model choice:** configure OpenAI-compatible, Anthropic, or Google connections and select separate models for the assistant and translation.
@@ -118,7 +143,7 @@ Read the [illustrated user guide](https://sugrsertraline.github.io/neuink/screen
 
 Extract the complete archive and open `Neuink.exe`, keeping its resource directories beside it. Node.js and Rust are not needed; Microsoft Edge WebView2 Runtime is required. Portable builds use the application's existing workspace and settings locations, so user data is not necessarily stored beside the executable.
 
-The project version is **0.1.0**. A Windows portable build workflow exists; signing, in-app updates, and native distribution validation still have outstanding work. See [packaging and distribution](docs/deployment/packaging-and-distribution.md) for automated builds, downloads, and platform validation status.
+The project version is **0.1.3**. A Windows portable build workflow exists; signing, in-app updates, and native distribution validation still have outstanding work. See [packaging and distribution](docs/deployment/packaging-and-distribution.md) for automated builds, downloads, and platform validation status.
 
 ### Your first paper
 

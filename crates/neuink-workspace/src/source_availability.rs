@@ -87,11 +87,7 @@ impl Workspace {
                             _ => SourceStatus::Unavailable,
                         }
                     }
-                    EntrySource::Segments(segments) => match segments.iter().find(|segment| {
-                        segment.uid == source.segment_uid
-                            || segment.continuation_group_id.as_deref()
-                                == Some(source.segment_uid.as_str())
-                    }) {
+                    EntrySource::Segments(segments) => match neuink_domain::find_source_segment(segments, &source.segment_uid) {
                         None => SourceStatus::SegmentMissing,
                         Some(segment) => {
                             let text = segment

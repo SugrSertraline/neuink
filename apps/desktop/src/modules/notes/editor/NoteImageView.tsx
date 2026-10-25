@@ -1,6 +1,11 @@
 import type { NodeViewProps } from '@tiptap/core';
 import { NodeViewWrapper } from '@tiptap/react';
-import { useEffect, useRef } from 'react';
+import { useCallback, useRef, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { ViewportOverlay } from '@/components/ui/viewport-overlay';
+import { useNoteImageToolbar } from './useNoteImageToolbar';
 
 import { resolveNoteImageSrc, type NoteImageOptions } from './NoteImage';
 
@@ -8,113 +13,54 @@ export function NoteImageView({ editor, extension, node, selected, updateAttribu
   const options = extension.options as NoteImageOptions;
   const alignment = node.attrs.alignment === 'left' || node.attrs.alignment === 'right' ? node.attrs.alignment : 'center';
   const width = Math.min(100, Math.max(10, Number(node.attrs.width ?? 100)));
-  const resizeInputRef = useRef<HTMLInputElement | null>(null);
-  const resizeAnchorTopRef = useRef<number | null>(null);
-  const resizeScrollContainerRef = useRef<HTMLElement | null>(null);
-  const resizeFrameRef = useRef<number | null>(null);
-  const resizeActiveRef = useRef(false);
-
-  useEffect(() => {
-    const finishResize = () => {
-      resizeActiveRef.current = false;
-      if (resizeFrameRef.current === null) {
-        resizeAnchorTopRef.current = null;
-        resizeScrollContainerRef.current = null;
-      }
-    };
-
-    window.addEventListener('pointerup', finishResize);
-    window.addEventListener('pointercancel', finishResize);
-    window.addEventListener('blur', finishResize);
-    return () => {
-      window.removeEventListener('pointerup', finishResize);
-      window.removeEventListener('pointercancel', finishResize);
-      window.removeEventListener('blur', finishResize);
-      resizeActiveRef.current = false;
-      resizeAnchorTopRef.current = null;
-      resizeScrollContainerRef.current = null;
-      if (resizeFrameRef.current !== null) cancelAnimationFrame(resizeFrameRef.current);
-      resizeFrameRef.current = null;
-    };
-  }, []);
-
-  const beginResize = () => {
-    const input = resizeInputRef.current;
-    if (!input) return;
-    resizeActiveRef.current = true;
-    resizeAnchorTopRef.current = input.getBoundingClientRect().top;
-    resizeScrollContainerRef.current = findScrollContainer(input, editor.view.dom);
-  };
-
-  const keepResizeAxisFixed = () => {
-    if (resizeFrameRef.current !== null) cancelAnimationFrame(resizeFrameRef.current);
-    resizeFrameRef.current = requestAnimationFrame(() => {
-      resizeFrameRef.current = null;
-      const anchorTop = resizeAnchorTopRef.current;
-      const input = resizeInputRef.current;
-      if (anchorTop === null || !input) return;
-
-      const delta = input.getBoundingClientRect().top - anchorTop;
-      if (delta) {
-        // The image height changes above this slider. Offset the editor scroll by the
-        // same amount so the thumb remains under the pointer throughout the drag.
-        resizeScrollContainerRef.current?.scrollBy({ top: delta });
-      }
-      if (!resizeActiveRef.current) {
-        resizeAnchorTopRef.current = null;
-        resizeScrollContainerRef.current = null;
-      }
-    });
-  };
-
+  const figureRef = useRef<HTMLElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const subscribe = useCallback((changed: () => void) => {
+    editor.on('update', changed);
+    return () => { editor.off('update', changed); };
+  }, [editor]);
+  const editable = useSyncExternalStore(subscribe, () => editor.isEditable);
+  const visible = selected && editable;
+  useNoteImageToolbar({ visible, editorRoot: editor.view.dom, figureRef, viewportRef, toolbarRef });
   const setWidth = (value: string) => {
-    updateAttributes({ width: Math.min(100, Math.max(10, Number(value) || 10)) });
-    keepResizeAxisFixed();
+    if (editor.isEditable) updateAttributes({ width: Math.min(100, Math.max(10, Number(value) || 10)) });
   };
 
   return (
     <NodeViewWrapper className="my-3" contentEditable={false} data-note-image="true">
-      <figure className={alignment === 'left' ? 'mr-auto' : alignment === 'right' ? 'ml-auto' : 'mx-auto'} style={{ width: `${width}%` }}>
+      <figure ref={figureRef} className={alignment === 'left' ? 'mr-auto' : alignment === 'right' ? 'ml-auto' : 'mx-auto'} style={{ width: `${width}%` }}>
         <img
           alt={node.attrs.alt || 'image'}
           className="block h-auto w-full rounded-lg border bg-muted/20 object-contain shadow-sm"
           src={resolveNoteImageSrc(node.attrs.src, options)}
         />
-        {selected ? (
-          <figcaption className="mt-1 flex flex-wrap items-center justify-center gap-1 rounded-md border bg-background/95 p-1 text-xs shadow-sm">
-            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => updateAttributes({ alignment: 'left' })}>左对齐</button>
-            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => updateAttributes({ alignment: 'center' })}>居中</button>
-            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => updateAttributes({ alignment: 'right' })}>右对齐</button>
+      </figure>
+        {visible ? createPortal(<ViewportOverlay enabled ref={viewportRef}>
+
+          <div ref={toolbarRef} role="group" aria-label="图片设置" contentEditable={false}
+            className="editor-toolbar absolute flex flex-wrap items-center justify-center gap-1 rounded-md border bg-popover p-1 text-xs text-popover-foreground shadow-md" style={{ visibility: 'hidden' }}>
+            <div className="flex shrink-0 items-center">
+            <Button type="button" size="xs" variant="ghost" aria-pressed={alignment === 'left'} onMouseDown={(event) => event.preventDefault()} onClick={() => editor.isEditable && updateAttributes({ alignment: 'left' })}>左对齐</Button>
+            <Button type="button" size="xs" variant="ghost" aria-pressed={alignment === 'center'} onMouseDown={(event) => event.preventDefault()} onClick={() => editor.isEditable && updateAttributes({ alignment: 'center' })}>居中</Button>
+            <Button type="button" size="xs" variant="ghost" aria-pressed={alignment === 'right'} onMouseDown={(event) => event.preventDefault()} onClick={() => editor.isEditable && updateAttributes({ alignment: 'right' })}>右对齐</Button>
+            </div>
+            <div className="flex min-w-0 flex-1 basis-40 items-center gap-1">
             <input
-              ref={resizeInputRef}
               aria-label="图片缩放"
-              className="w-24"
+              className="min-w-12 flex-1 accent-primary"
               max="100"
               min="10"
               step="1"
               type="range"
               value={width}
               onChange={(event) => setWidth(event.target.value)}
-              onPointerDown={beginResize}
             />
-            <input aria-label="图片宽度百分比" className="h-6 w-14 rounded border px-1" max="100" min="10" step="1" type="number" value={width} onChange={(event) => setWidth(event.target.value)} />
+            <Input aria-label="图片宽度百分比" className="h-6 w-14 shrink-0 px-1 text-xs" max="100" min="10" step="1" type="number" value={width} onChange={(event) => setWidth(event.target.value)} />
             <span>%</span>
-          </figcaption>
-        ) : null}
-      </figure>
+            </div>
+          </div>
+        </ViewportOverlay>, document.body) : null}
     </NodeViewWrapper>
   );
-}
-
-function findScrollContainer(element: HTMLElement, editorRoot: HTMLElement) {
-  let current: HTMLElement | null = element.parentElement;
-  while (current) {
-    const overflowY = window.getComputedStyle(current).overflowY;
-    if ((overflowY === 'auto' || overflowY === 'scroll') && current.scrollHeight > current.clientHeight) {
-      return current;
-    }
-    if (current === editorRoot) break;
-    current = current.parentElement;
-  }
-  return editorRoot.parentElement;
 }
