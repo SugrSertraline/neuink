@@ -5,17 +5,20 @@ const SEARCH_TOOLS = new Set([
   'search_sciverse_evidence', 'search_sciverse_metadata', 'search_sciverse_paper_schema', 'search_papers', 'search_web'
 ]);
 const MAX_SEARCH_ROUNDS = 6;
+const LOCAL_SEARCH_TOOLS = new Set(['search_segments', 'search_pdf_text']);
 
 /** Derive limits from the durable transcript, so restoring a run cannot reset them. */
 export function availableTurnTools(tools: ToolSet, messages: readonly ModelMessage[], finalTurn = false,
   entryContextReadLimit = 6) {
   let searchRounds = 0;
+  let localSearchRounds = 0;
   let entryContextReads = 0;
   let consecutiveFailures = 0;
   let limitReached = false;
   for (const message of messages) {
     if (message.role !== 'tool') continue;
     if (message.content.some(part => part.type === 'tool-result' && SEARCH_TOOLS.has(part.toolName))) searchRounds++;
+    if (message.content.some(part => part.type === 'tool-result' && LOCAL_SEARCH_TOOLS.has(part.toolName))) localSearchRounds++;
     for (const part of message.content) {
       if (part.type !== 'tool-result') continue;
       if (part.toolName === 'read_entry_assistant_context' && part.output.type !== 'error-text'
@@ -29,9 +32,11 @@ export function availableTurnTools(tools: ToolSet, messages: readonly ModelMessa
   }
   const finish = finalTurn || limitReached || consecutiveFailures >= 3;
   const searchLimited = searchRounds >= MAX_SEARCH_ROUNDS;
+  const localSearchLimited = localSearchRounds >= MAX_SEARCH_ROUNDS;
   const entryContextLimited = entryContextReads >= entryContextReadLimit;
   const available = Object.fromEntries(Object.entries(tools).filter(([name]) =>
     !finish && (!searchLimited || !SEARCH_TOOLS.has(name))
+      && (!localSearchLimited || !LOCAL_SEARCH_TOOLS.has(name))
       && (!entryContextLimited || name !== 'read_entry_assistant_context')));
   const instructions = [
     `Authoritative tools available for THIS model turn: ${Object.keys(available).join(', ') || '(none)'}.`,
@@ -44,6 +49,9 @@ export function availableTurnTools(tools: ToolSet, messages: readonly ModelMessa
         : 'Search only as needed. After a few searches, synthesize the evidence instead of repeatedly rephrasing the same question. Stop early when results are sufficient; report missing evidence honestly.',
     entryContextLimited && !finish
       ? 'The parsed-document reading budget is reached. Do not continue paging through the whole paper. Answer from the passages already read, or use a targeted search tool only if a specific fact is missing; state partial coverage.'
+      : '',
+    localSearchLimited && !finish
+      ? 'The local search budget is reached. Stop rephrasing segment/PDF searches. Read existing hits only when needed, then answer from verified evidence or explain missing details. Do not expand to external sources unless the user requested them.'
       : ''
   ].join('\n');
   return { tools: available, instructions, finish };
