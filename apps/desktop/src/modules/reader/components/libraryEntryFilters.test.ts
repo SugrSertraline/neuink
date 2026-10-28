@@ -10,6 +10,7 @@ const select = (view: Parameters<typeof filterEntries>[1], tags: Set<string> | n
   filterEntries(entries, view, tags, query, 'title', [], {}).map(e => e.id);
 
 it('includes only unstarted/canceled PDFs and keeps other categories separate', () => {
+  expect(select('pdf')).toEqual(statuses.filter(status => status !== 'No PDF'));
   expect(select('unparsed')).toEqual(['Not started', 'Canceled']);
   expect(select('parsing')).toEqual(['Queued', 'Uploading', 'Parsing']);
   expect(select('failed')).toEqual(['Failed']);
@@ -17,6 +18,8 @@ it('includes only unstarted/canceled PDFs and keeps other categories separate', 
   expect(select('no_pdf')).toEqual(['No PDF']);
 });
 it('combines the unparsed category with the existing tag/search filters', () => {
+  expect(select('pdf', new Set(['b']), 'Paper 5')).toEqual(['Parsed']);
+  expect(select('pdf', null, 'Paper 7')).toEqual([]);
   expect(select('unparsed', new Set(['a']))).toEqual(['Not started']);
   expect(select('unparsed', null, 'Paper 1')).toEqual(['Canceled']);
   expect(select('unparsed', new Set(['a']), 'Paper 1')).toEqual([]);

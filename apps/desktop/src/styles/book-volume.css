@@ -1,0 +1,60 @@
+/* Loaded by BookVolume itself: required layout must not depend on a cached
+ * global Tailwind import graph. Material-scoped selectors win over legacy
+ * book rules regardless of stylesheet insertion order. */
+:root[data-appearance="atelier"] .library-book.book-volume { transform: none; perspective: 1400px; container-type: normal; transform-style: preserve-3d; }
+.book-volume-body { position: relative; width: 100%; height: 100%; transform-style: preserve-3d; transform-origin: 50% 50% calc(var(--atelier-book-depth) / -2); transform: rotateX(var(--book-tilt-x, 0deg)) rotateY(var(--book-tilt-y, -6deg)); transition: transform 220ms ease; }
+.book-volume-front { position: absolute; inset: 0; transform-style: preserve-3d; transform-origin: left center; transform: rotateY(0deg); transition: transform 700ms cubic-bezier(.28,.1,.2,1); }
+.book-volume[data-open="true"] .book-volume-front { transform: rotateY(-158deg); }
+:root[data-appearance="atelier"] .book-volume .book-volume-front > .library-book-cover { position: absolute; inset: 0; backface-visibility: hidden; transform: translateZ(.5px); }
+.book-volume-inside { position: absolute; inset: 0; background: var(--atelier-note-paper); border: 5px solid var(--book-cover); transform: rotateY(180deg) translateZ(.5px); backface-visibility: hidden; box-shadow: inset -12px 0 15px var(--atelier-shadow-soft); }
+.book-volume-first-page { position: absolute; inset: 3px 1px 3px 3px; background: var(--reader-paper); color: var(--foreground); transform: translateZ(-2px); padding: 20% 12%; display: flex; flex-direction: column; gap: 18px; font: 16px/1.5 Georgia, 'Microsoft YaHei', serif; overflow: hidden; box-shadow: inset 12px 0 14px var(--atelier-shadow-soft); }
+.book-volume-first-page small { color: var(--muted-foreground); font-size: 11px; }
+:root[data-appearance="atelier"] .book-volume .library-book-spine > span { display: block; position: absolute; inset: 18% 2px; min-width: 0; min-height: 0; max-height: 64%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; writing-mode: vertical-rl; text-align: left; margin: auto; font: 600 13px/1.3 Georgia, 'Microsoft YaHei', serif; padding-top: 5px; }
+:root[data-appearance="atelier"] .book-volume .library-book-title { font-size: clamp(12px, 1.5vw, 22px); }
+:root[data-appearance="atelier"] .book-volume .library-book-kicker { font-size: 8px; }
+
+/* A shelf bay: flush book feet, varied heights, continuous wooden ledges. */
+:root[data-appearance="atelier"] .library-paper-shelf[data-display="spines"] { background: linear-gradient(90deg, var(--atelier-shadow-soft), transparent 18px calc(100% - 18px), var(--atelier-shadow-soft)), var(--atelier-paper); padding-inline: 18px; }
+:root[data-appearance="atelier"] .library-paper-shelf[data-display="spines"] .library-shelf-row { padding-top: 20px; background: linear-gradient(0deg, var(--atelier-shadow) 20px, transparent 64px); }
+:root[data-appearance="atelier"] .library-paper-shelf[data-display="spines"] .library-shelf-row::after { left: -18px; right: -18px; height: 20px; box-shadow: inset 0 2px var(--atelier-wood-light), inset 0 -4px var(--atelier-shadow), 0 10px 12px var(--atelier-shadow); }
+:root[data-appearance="atelier"] .library-paper-shelf[data-display="spines"] > .library-shelf-rows > .library-shelf-row > .library-shelf-entry { padding: 0 2px; }
+:root[data-appearance="atelier"] .library-paper-shelf[data-display="spines"] .library-book-standing { position: relative; display: block; width: 100%; height: var(--spine-height); margin-top: calc(234px - var(--spine-height)); padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; perspective: 1200px; }
+:root[data-appearance="atelier"] .library-book-standing .book-volume { position: absolute; top: 0; left: calc(50% - 78px); width: 156px; height: 100%; margin: 0; perspective: none; }
+:root[data-appearance="atelier"] .library-book-standing .book-volume-body { transform: rotateY(88deg); }
+:root[data-appearance="atelier"] .library-book-standing .library-book-title { font-size: 14px; }
+:root[data-appearance="atelier"] .library-book-standing .library-book-spine { box-shadow: inset 3px 0 3px var(--atelier-highlight), inset -5px 0 6px var(--atelier-shadow); }
+:root[data-appearance="atelier"] .library-book-standing .book-volume::after { content: none; }
+:root[data-appearance="atelier"] .library-shelf-entry:is(:hover,:focus-visible) .library-book-standing { transform: translateY(-4px); }
+:root[data-appearance="atelier"] .library-shelf-entry:is(:hover,:focus-visible) .library-book-standing .book-volume-body { transform: translateZ(14px) rotateY(78deg); }
+:root[data-appearance="atelier"] .library-shelf-entry[data-state="selected"] .library-book-standing .book-volume { outline: none; }
+:root[data-appearance="atelier"] .library-shelf-entry[data-state="selected"] .library-book-standing .library-book-spine { outline: 1px solid var(--atelier-brass-edge); outline-offset: 2px; }
+
+/* Radix supplies focus/Escape ownership. Reset individual transforms too:
+ * Tailwind v4 Dialog centering uses translate, independent of transform. */
+:root[data-appearance="atelier"] .book-opening-stage[data-slot="dialog-content"] { inset: 0; translate: none; scale: none; rotate: none; transform: none; width: 100%; height: 100%; max-width: none; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; animation: none; display: block; }
+:root[data-appearance="atelier"] .book-opening-shade[data-slot="dialog-overlay"] { background: var(--atelier-shadow); backdrop-filter: none; animation: none; }
+.book-opening-viewport { width: 100%; height: 100%; position: relative; overflow: hidden; perspective: 1600px; }
+.book-opening-mover { position: absolute; left: 0; top: 0; transform-origin: center; transform-style: preserve-3d; will-change: transform; }
+:root[data-appearance="atelier"] .book-opening-mover > .book-volume { width: 100%; height: 100%; margin: 0; perspective: none; --atelier-book-depth: 32px; }
+.book-opening-mover .book-volume-body, .book-opening-mover .book-volume-front { transition: none; }
+:root[data-appearance="atelier"] .book-opening-mover .library-book-title { font-size: clamp(19px, 2.2vw, 30px); line-height: 1.35; margin-top: 36px; }
+:root[data-appearance="atelier"] .book-opening-mover .library-book-cover { padding: 28px 24px 24px 34px; }
+.book-opening-status { position: absolute; bottom: 32px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 18px; color: var(--foreground); background: var(--card); padding: 6px 8px 6px 14px; border: 1px solid var(--border); border-radius: 4px; }
+
+.pdf-live-book { position: absolute; inset: 0; z-index: 24; pointer-events: none; perspective: 1600px; }
+.pdf-live-book[data-settled="true"] { visibility: hidden; }
+.pdf-live-book-volume { position: absolute; width: var(--live-book-width); height: var(--live-book-height); }
+:root[data-appearance="atelier"] .pdf-live-book-volume .book-volume { width: 100%; height: 100%; margin: 0; }
+.pdf-live-book-volume .book-volume-body { transform: rotateY(0deg); }
+.pdf-live-book[data-open="true"] .book-volume-first-page { visibility: hidden; }
+.pdf-live-book[data-open="true"] :is(.library-book-back,.library-book-pages,.library-book-top,.library-book-bottom) { visibility: hidden; }
+.pdf-live-book-open { position: absolute; display: flex; align-items: end; justify-content: center; pointer-events: auto; background: none !important; box-shadow: none !important; border: 0; padding: 24px; }
+.pdf-live-book-open > span { background: var(--card); border: 1px solid var(--border); padding: 6px 16px; color: var(--foreground); }
+:root[data-appearance="atelier"] .pdf-book-controls .pdf-book-corner { position: absolute; bottom: 30px; width: 42px; height: 42px; }
+:root[data-appearance="atelier"] .pdf-book-controls .pdf-book-corner[data-side="next"] { right: 44px; border-radius: 0 0 3px 0; clip-path: polygon(100% 0,100% 100%,0 100%); justify-content: end; align-items: end; padding: 5px; }
+:root[data-appearance="atelier"] .pdf-book-controls .pdf-book-corner[data-side="previous"] { left: 44px; clip-path: polygon(0 0,100% 100%,0 100%); justify-content: start; align-items: end; padding: 5px; }
+@media (prefers-reduced-motion: reduce), (forced-colors: active) {
+  .book-volume-body, .book-volume-front { transition: none; }
+  :root[data-appearance="atelier"] .library-shelf-entry:is(:hover,:focus-visible) .library-book-standing { transform: none; }
+  :root[data-appearance="atelier"] .library-shelf-entry:is(:hover,:focus-visible) .library-book-standing .book-volume-body { transform: rotateY(88deg); }
+}

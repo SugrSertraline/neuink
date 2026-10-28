@@ -1,0 +1,11 @@
+{
+  "component_id": "deerflow-2.1.0-9a11f9a-1",
+  "engine": "deerflow",
+  "engine_version": "2.1.0",
+  "platform": "windows-x64",
+  "commit": "9a11f9aec71b754ffe392b47a4950bfbce669454",
+  "source_url": "https://codeload.github.com/bytedance/deer-flow/zip/9a11f9aec71b754ffe392b47a4950bfbce669454",
+  "python_url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261021/cpython-3.12.15%2B20261021-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+  "python_sha256": "aac5d331fc3307343f95928fdbea4583f0d53973d08c7e1d081884fbd229a0e1",
+  "source_sha256": "0d7d3c24e23ad5fe507f7d68ce86f56fb4283405f666d964f6d0df490b32a65f"
+}

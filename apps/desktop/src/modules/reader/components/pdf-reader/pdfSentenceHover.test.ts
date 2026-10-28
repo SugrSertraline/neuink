@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { matchingSentenceOrder, pdfSentenceGeometry, sentenceAtPoint } from './pdfSentenceHover';
+import { matchingSentenceOrder, pdfSentenceGeometry, sentenceAtPoint, translatedSentenceGeometry } from './pdfSentenceHover';
 import type { SegmentRegionItem } from './types';
 
 describe('PDF sentence hover', () => {
@@ -83,4 +83,37 @@ describe('PDF sentence hover', () => {
       expect(sentenceAtPoint(geometry!, page, 100, 70)?.index).toBe(1);
     } finally { delete (Range.prototype as { getClientRects?: () => DOMRectList }).getClientRects; }
   });
+  it('uses rendered Chinese sentence positions and maps each to its source sentence', () => {
+    const layer = document.createElement('div');
+    for (const [index, text] of ['交通流量变化迅速。', '模型预测未来流量。'].entries()) {
+      const span = document.createElement('span');
+      span.textContent = text;
+      span.getBoundingClientRect = () => new DOMRect(140, 160 + index * 30, 150, 20);
+      layer.append(span);
+    }
+    const region = { id: 'paragraph', bbox: [100, 100, 900, 900], sourceSegment: {
+      segment_type: 'paragraph', text: 'Traffic flow changes rapidly. The model predicts future traffic.',
+    } } as unknown as SegmentRegionItem;
+    const page = new DOMRect(100, 100, 500, 500);
+    Object.defineProperty(Range.prototype, 'getClientRects', { configurable: true, value(this: Range) {
+      return [this.startContainer.parentElement!.getBoundingClientRect()] as unknown as DOMRectList;
+    } });
+    try {
+      const geometry = translatedSentenceGeometry(layer, region, page, '交通流量变化迅速。模型预测未来流量。');
+      expect(geometry).toHaveLength(2);
+      expect(sentenceAtPoint(geometry!, page, 160, 170)?.source).toBe('Traffic flow changes rapidly.');
+      expect(sentenceAtPoint(geometry!, page, 160, 200)?.linkedSentenceIndex).toBe(1);
+      expect(sentenceAtPoint(geometry!, page, 110, 110)).toBeNull();
+      expect(translatedSentenceGeometry(layer, region, page, '文字不匹配。')).toBeNull();
+    } finally { delete (Range.prototype as { getClientRects?: () => DOMRectList }).getClientRects; }
+  });
+
+  it('does not invent sentence positions when translation alignment fails', () => {
+    const layer = document.createElement('div');
+    layer.textContent = '仅有一个不匹配的数字 7。';
+    const region = { bbox: [0, 0, 1000, 1000], sourceSegment: { segment_type: 'paragraph',
+      text: 'The first result is 3. The second result is 4.' } } as unknown as SegmentRegionItem;
+    expect(translatedSentenceGeometry(layer, region, new DOMRect(0, 0, 500, 500), layer.textContent)).toBeNull();
+  });
+
 });

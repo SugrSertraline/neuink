@@ -208,6 +208,23 @@ describe('TranslationTaskDialog', () => {
     expect(getByText('正在翻译 · 2/5')).toBeTruthy();
   });
 
+  it('shows context preparation and an actionable model failure', () => {
+    const failed = {
+      ...translationWithSkippedSegment(segment),
+      status: 'failed' as const,
+      progress: { total: 1, translated: 0, skipped: 0, failed: 1 },
+      segments: [{ ...translationWithSkippedSegment(segment).segments[0], status: 'failed' as const }]
+    };
+    const props = { open: true, segments: [segment], onOpenChange: vi.fn(), onTranslate: vi.fn() };
+    const view = render(<TranslationTaskDialog {...props} translation={null} busy message="正在整理论文背景 · 等待模型正文" />);
+    expect(view.getByText('正在整理论文背景 · 等待模型正文 · 0/1')).toBeTruthy();
+    view.rerender(<TranslationTaskDialog {...props} translation={failed} />);
+    expect(view.getByRole('alert').textContent).toContain('1 个片段翻译失败');
+    expect(view.getByRole('button', { name: '重试失败项（1）' })).toBeTruthy();
+    view.rerender(<TranslationTaskDialog {...props} translation={{ ...failed, segments: [], error: 'model timeout' }} />);
+    expect(view.getByRole('alert').textContent).toContain('翻译任务失败');
+  });
+
   it('hides persistent low-level errors and keeps failed blocks retryable', () => {
     const rawError = '翻译模型调用失败，已停止全部任务：LLM did not return a JSON object';
     const failedTranslation: EntryTranslation = {

@@ -17,6 +17,7 @@ type PdfDropImportOptions = Pick<ToastContextValue, 'notify' | 'dismiss'> & {
     endpoint: string,
     apiKey: string
   ) => Promise<CreateEntryResult | undefined>;
+  onMineruSourceDrop: (path: string) => void;
 };
 
 type ImportProgress = { id: string; root: string; startedAt: number; completed: number; total: number };
@@ -37,6 +38,12 @@ export function droppedPdfFiles(paths: string[]) {
     files.push({ path, title });
   }
   return { files, skipped };
+}
+
+export function droppedMineruSource(paths: string[]) {
+  const archive = paths.find((path) => /\.(zip|rar)$/i.test(path));
+  if (archive || paths.some((path) => /\.pdf$/i.test(path))) return archive;
+  return paths[0];
 }
 
 function insideCreateEntryDropZone(position: NativeDropPosition) {
@@ -72,7 +79,7 @@ export function usePdfDropImport(options: PdfDropImportOptions) {
       }
       const { files, skipped } = droppedPdfFiles(paths);
       if (files.length === 0) {
-        current.notify({ title: '没有可导入的 PDF', description: '请拖入一个或多个 PDF 文件。', tone: 'danger' });
+        current.notify({ title: '没有可导入的文件', description: '请拖入 PDF、MinerU 结果目录、ZIP 或 RAR。', tone: 'danger' });
         return;
       }
       if (!current.workspaceReady || !current.workspaceRoot) {
@@ -146,13 +153,22 @@ export function usePdfDropImport(options: PdfDropImportOptions) {
         setDragActive(!insideCreateEntryDropZone(payload.position) && !importingRef.current);
       } else if (payload.type === 'drop') {
         setDragActive(false);
-        const zipDrop = insideCreateEntryDropZone(payload.position) &&
-          payload.paths.some((path) => /\.zip$/i.test(path));
-        if (!zipDrop) void importPaths(payload.paths);
+        const mineruSource = droppedMineruSource(payload.paths);
+        if (mineruSource) {
+          if (!insideCreateEntryDropZone(payload.position)) {
+            if (optionsRef.current.workspaceReady && optionsRef.current.workspaceRoot) {
+              optionsRef.current.onMineruSourceDrop(mineruSource);
+            } else {
+              optionsRef.current.notify({ title: '无法导入 MinerU 结果', description: '请先打开资料库。', tone: 'danger' });
+            }
+          }
+        } else {
+          void importPaths(payload.paths);
+        }
       }
     });
     void listener.catch(() => {
-      if (!closed) optionsRef.current.notify({ title: 'PDF 拖放不可用', description: '请通过“创建条目”选择 PDF。', tone: 'danger' });
+      if (!closed) optionsRef.current.notify({ title: '文件拖放不可用', description: '请通过“创建条目”选择文件。', tone: 'danger' });
     });
 
     return () => {

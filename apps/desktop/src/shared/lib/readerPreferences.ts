@@ -1,7 +1,29 @@
 import { REFLOW_COMPONENT_KEYS, normalizeReflowComponentContent, type ReflowComponentContent } from './reflowContentPreferences';
 
-export type PdfHoverPreviewFontSize = 'small' | 'standard' | 'large';
-export type PdfHoverPreviewSize = 'compact' | 'standard' | 'large';
+/** Percent of the standard preview. Legacy presets are migrated when preferences are loaded. */
+export type PdfHoverPreviewFontSize = number;
+export type PdfHoverPreviewSize = number;
+export type ReadingLinkMode = 'scroll' | 'click';
+export const PDF_PREVIEW_FONT_MIN = 80;
+export const PDF_PREVIEW_FONT_MAX = 180;
+export const PDF_PREVIEW_SIZE_MIN = 60;
+export const PDF_PREVIEW_SIZE_MAX = 160;
+
+export function normalizePdfPreviewFontSize(value: unknown): number {
+  if (value === 'small') return 85;
+  if (value === 'large') return 120;
+  return normalizePreviewPercent(value, PDF_PREVIEW_FONT_MIN, PDF_PREVIEW_FONT_MAX);
+}
+
+export function normalizePdfPreviewSize(value: unknown): number {
+  if (value === 'compact') return 82;
+  if (value === 'large') return 120;
+  return normalizePreviewPercent(value, PDF_PREVIEW_SIZE_MIN, PDF_PREVIEW_SIZE_MAX);
+}
+
+function normalizePreviewPercent(value: unknown, min: number, max: number) {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(min, Math.min(max, Math.round(value))) : 100;
+}
 
 export const REFLOW_FONT_SIZE_MIN = 13;
 export const REFLOW_FONT_SIZE_MAX = 24;
@@ -48,6 +70,7 @@ export const DEFAULT_REFLOW_COMPONENT_PREFERENCES: ReflowComponentPreferences = 
 };
 
 export type ReaderPreferences = {
+  readingLinkMode?: ReadingLinkMode;
   openEntryPdfByDefault: boolean;
   autoTranslateTextSelection: boolean;
   closeSegmentOverlayOnBlankClick: boolean;
@@ -111,6 +134,7 @@ export function withReflowTranslationMode(preferences: ReaderPreferences, mode: 
 const READER_PREFERENCES_STORAGE_KEY = 'neuink.reader.preferences';
 
 const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
+  readingLinkMode: 'scroll',
   openEntryPdfByDefault: true,
   autoTranslateTextSelection: false,
   closeSegmentOverlayOnBlankClick: true,
@@ -119,8 +143,8 @@ const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
   pdfSentenceHoverEnabled: true,
   pdfSentenceHoverShowOriginal: true,
   pdfSentenceHoverShowTranslation: true,
-  pdfHoverPreviewFontSize: 'standard',
-  pdfHoverPreviewSize: 'standard',
+  pdfHoverPreviewFontSize: 100,
+  pdfHoverPreviewSize: 100,
   hoverPreviewShowRegion: true,
   hoverPreviewShowOriginal: true,
   hoverPreviewShowNote: true,
@@ -170,6 +194,7 @@ export function persistReaderPreferences(preferences: ReaderPreferences) {
 
 export function equalReaderPreferences(left: ReaderPreferences, right: ReaderPreferences) {
   return (
+    (left.readingLinkMode ?? 'scroll') === (right.readingLinkMode ?? 'scroll') &&
     left.openEntryPdfByDefault === right.openEntryPdfByDefault &&
     left.autoTranslateTextSelection === right.autoTranslateTextSelection &&
     left.closeSegmentOverlayOnBlankClick === right.closeSegmentOverlayOnBlankClick &&
@@ -209,6 +234,7 @@ function normalizeReaderPreferences(value: unknown): ReaderPreferences {
   const candidate = value as Partial<ReaderPreferences>;
 
   return {
+    readingLinkMode: candidate.readingLinkMode === 'click' ? 'click' : 'scroll',
     openEntryPdfByDefault:
       typeof candidate.openEntryPdfByDefault === 'boolean'
         ? candidate.openEntryPdfByDefault
@@ -241,18 +267,8 @@ function normalizeReaderPreferences(value: unknown): ReaderPreferences {
       typeof candidate.pdfSentenceHoverShowTranslation === 'boolean'
         ? candidate.pdfSentenceHoverShowTranslation
         : DEFAULT_READER_PREFERENCES.pdfSentenceHoverShowTranslation,
-    pdfHoverPreviewFontSize:
-      candidate.pdfHoverPreviewFontSize === 'small' ||
-      candidate.pdfHoverPreviewFontSize === 'standard' ||
-      candidate.pdfHoverPreviewFontSize === 'large'
-        ? candidate.pdfHoverPreviewFontSize
-        : DEFAULT_READER_PREFERENCES.pdfHoverPreviewFontSize,
-    pdfHoverPreviewSize:
-      candidate.pdfHoverPreviewSize === 'compact' ||
-      candidate.pdfHoverPreviewSize === 'standard' ||
-      candidate.pdfHoverPreviewSize === 'large'
-        ? candidate.pdfHoverPreviewSize
-        : DEFAULT_READER_PREFERENCES.pdfHoverPreviewSize,
+    pdfHoverPreviewFontSize: normalizePdfPreviewFontSize(candidate.pdfHoverPreviewFontSize),
+    pdfHoverPreviewSize: normalizePdfPreviewSize(candidate.pdfHoverPreviewSize),
     hoverPreviewShowRegion:
       typeof candidate.hoverPreviewShowRegion === 'boolean'
         ? candidate.hoverPreviewShowRegion

@@ -611,7 +611,7 @@ export function MarkdownNoteEditor({
           onRevealFile={() => void revealMarkdownFile()}
           onSave={() => void save()}
           onSaveAs={() => void saveMarkdownAs()}
-          onExport={() => setExportOpen(true)}
+          onExport={() => noteOwner?.kind === 'daily' ? void saveMarkdownAs() : setExportOpen(true)}
           onStartTitleEdit={startTitleEditing}
           onTakeOver={takeOverEditing}
           onUndo={() => editor?.chain().focus().undo().run()}

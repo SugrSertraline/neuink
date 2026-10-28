@@ -102,7 +102,7 @@ export function useImageViewport(natural: Size) {
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || event.isPrimary === false || !canPan || drag.current) return;
     event.preventDefault();
-    event.stopPropagation();
+    // Let Radix observe the down/up pair so the next outside click dismisses once.
     event.currentTarget.focus({ preventScroll: true });
     event.currentTarget.setPointerCapture(event.pointerId);
     drag.current = { id: event.pointerId, start: localPoint(event.currentTarget, event.clientX, event.clientY),

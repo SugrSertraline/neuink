@@ -71,7 +71,7 @@ export function SameTagSidebar({ entries, tags, tagId, descendants, status, erro
     setLocateRequest(null);
   }, [locateRequest, currentEntryId, currentVisible, status]);
   const toolbar = <div className="flex items-center gap-1.5">
-        <SearchInput label="搜索标签或论文" placeholder="搜索标签或论文…" value={query} onValueChange={setQuery} />
+        <SearchInput compact label="搜索标签或论文" placeholder="搜索标签或论文…" value={query} onValueChange={setQuery} />
         <Tooltip><TooltipTrigger asChild><Toggle aria-label="包含子标签" pressed={descendants} onPressedChange={onDescendantsChange} disabled={!valid || status !== 'ready'} variant="outline" className="size-8 shrink-0 px-0 data-[state=on]:border-primary/30 data-[state=on]:bg-primary/10 data-[state=on]:text-primary">{descendants ? <ListTree size={15} aria-hidden="true" /> : <ListFilter size={15} aria-hidden="true" />}</Toggle></TooltipTrigger><TooltipContent>{descendants ? '包含子标签的论文和笔记 · 点击仅看当前标签' : '仅当前标签 · 点击包含子标签的论文和笔记'}</TooltipContent></Tooltip>
         {noteTagId ? <Tooltip><TooltipTrigger asChild><Button aria-label="定位笔记所属标签" size="icon-sm" variant="ghost" className="shrink-0 text-muted-foreground" disabled={!paths.has(noteTagId) || status !== 'ready'} onClick={() => {
           setQuery(''); setTagsOpen(true); onTagChange(noteTagId);

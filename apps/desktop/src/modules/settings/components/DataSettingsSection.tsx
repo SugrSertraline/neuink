@@ -2,8 +2,11 @@ import { ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SettingsGroup, SettingsPage } from './SettingsPrimitives';
 import { OnboardingSettings } from '@/modules/onboarding/OnboardingSettings';
+import { ONBOARDING_GUIDE_VISIBLE } from '@/modules/onboarding/availability';
 import type { SettingsNavigationTarget } from '../settingsCatalog';
 import { ParserSettingsSection } from './ParserSettingsSection';
+import { ZoteroSettingsSection } from './ZoteroSettingsSection';
+import { MineruSettingsSection } from './MineruSettingsSection';
 import type { SettingsPanelLayoutProps } from './SettingsPanelLayout';
 
 /** SettingsPage owns scrolling; this is read-only location information with one native button. */
@@ -12,10 +15,13 @@ export function DataSettingsSection({ props, navigationTarget }: {
   navigationTarget?: SettingsNavigationTarget | null;
 }) {
   return <>
-    <ParserSettingsSection props={props} navigationTarget={navigationTarget} />
-    <SettingsPage tab="getting-started" title="入门与教程" description="按真实任务练习阅读、翻译与整理；可以随时继续或回放。">
+    <ParserSettingsSection props={props} navigationTarget={navigationTarget}>
+      <ZoteroSettingsSection workspaceRoot={props.workspaceRoot ?? props.workspaceSettings?.root ?? null} active={props.activeSettingsTab === 'parser'} />
+      <MineruSettingsSection active={props.activeSettingsTab === 'parser'} />
+    </ParserSettingsSection>
+    {ONBOARDING_GUIDE_VISIBLE && <SettingsPage tab="getting-started" title="入门与教程" description="按真实任务练习阅读、翻译与整理；可以随时继续或回放。">
       <OnboardingSettings />
-    </SettingsPage>
+    </SettingsPage>}
     <SettingsPage tab="data" title="资料与存储" description="查看本机资料的保存位置和迁移方式。">
       <SettingsGroup id="data-workspace" title="数据位置"
         description="便携版和 Windows 安装版均使用程序文件夹内的 data，无需选择或配置路径。">

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+vi.mock('@/shared/ipc/translationLogApi', () => ({ logTranslationFailure: mocks.log }));
 
-const mocks = vi.hoisted(() => ({ settings: vi.fn(), generate: vi.fn(), service: vi.fn() }));
+const mocks = vi.hoisted(() => ({ settings: vi.fn(), generate: vi.fn(), service: vi.fn(), log: vi.fn(async () => true) }));
 vi.mock('@/shared/ipc/selectionTranslationApi', () => ({ translateSelectionService: mocks.service }));
 vi.mock('@/shared/ipc/assistantApi', () => ({ getLlmSettings: mocks.settings }));
 vi.mock('ai', () => ({ generateText: mocks.generate }));
@@ -112,6 +113,30 @@ describe('selection translation task lifecycle', () => {
     expect(registry.getLocalBackgroundJobs()).toEqual([]);
     expect(mocks.settings).not.toHaveBeenCalled();
     expect(mocks.generate).not.toHaveBeenCalled();
+  });
+
+  it.each(['glm-4.7-flash', 'glm-5.3', 'step-3.7-flash', 'future-model'])('does not inject vendor parameters for %s', async model => {
+    mocks.settings.mockResolvedValue({ translation_profile: {
+      model, base_url: 'https://open.bigmodel.cn/api/paas/v4', api_protocol: 'openai_compatible'
+    } });
+    mocks.generate.mockResolvedValue({ text: '完整译文', finishReason: 'stop' });
+    const { translateTextSelection } = await import('./entryTranslation');
+    await expect(translateTextSelection(request)).resolves.toBe('完整译文');
+    expect(mocks.generate.mock.calls[0][0].providerOptions).toBeUndefined();
+  });
+
+  it.each([
+    [{ text: '未完成的译文', finishReason: 'length' }, 'LLM_TRANSLATION_OUTPUT_LIMIT'],
+    [{ text: '', reasoningText: 'private reasoning', finishReason: 'stop' }, 'LLM_TRANSLATION_REASONING_ONLY'],
+    [{ text: '', finishReason: 'content-filter' }, 'LLM_TRANSLATION_CONTENT_FILTERED']
+  ])('does not accept an incomplete model answer', async (response, error) => {
+    mocks.generate.mockResolvedValue(response);
+    const { translateTextSelection } = await import('./entryTranslation');
+    await expect(translateTextSelection(request)).rejects.toThrow(error);
+    expect(mocks.log).toHaveBeenCalledWith(expect.any(Object), 'selection', expect.any(Error), expect.objectContaining({ input_chars: request.text.length }));
+    const registry = await import('@/shared/lib/localBackgroundJobs');
+    expect(registry.getLocalBackgroundJobs()[0].status).toBe('failed');
+    expect(JSON.stringify(registry.getLocalBackgroundJobs())).not.toContain('private reasoning');
   });
   it('ignores a selection containing only spaces and symbols', async () => {
     const { translateTextSelection } = await import('./entryTranslation');

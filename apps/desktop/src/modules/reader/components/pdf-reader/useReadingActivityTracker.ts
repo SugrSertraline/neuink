@@ -1,206 +1,148 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
-
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { readReadingState, updateReadingState } from '@/shared/ipc/workspaceApi';
 import { emitReadingStateUpdated } from '@/shared/lib/readingStateEvents';
 import type { EntryReadingState, ReadingMode } from '@/shared/types/domain';
 import { useReadingSession } from '../../parallel-reading/ReadingSessionContext';
+import { ReadingSessionBuffer } from './readingSessionBuffer';
 
 const IDLE_AFTER_MS = 60_000;
 const FLUSH_EVERY_MS = 15_000;
 const PAGE_VISIT_AFTER_MS = 2_000;
-let activeReaderElement: HTMLElement | null = null;
 const readerIsVisible = (element: HTMLElement | null) => Boolean(element?.isConnected && element.getClientRects().length);
+type ActiveReader = { element: HTMLElement | null; finish: () => void };
+let activeReader: ActiveReader | null = null;
 
-export function useReadingActivityTracker({
-  enabled,
-  entryId,
-  mode,
-  pageCount,
-  scrollRef,
-  visiblePageIndexes,
-  workspaceRoot
-}: {
-  enabled: boolean;
-  entryId: string;
-  mode: ReadingMode;
-  pageCount: number;
-  scrollRef: RefObject<HTMLDivElement>;
-  visiblePageIndexes: number[];
-  workspaceRoot: string | null;
+export function useReadingActivityTracker({ enabled, entryId, mode, pageCount, scrollRef, visiblePageIndexes, workspaceRoot }: {
+  enabled: boolean; entryId: string; mode: ReadingMode; pageCount: number;
+  scrollRef: RefObject<HTMLDivElement>; visiblePageIndexes: number[]; workspaceRoot: string | null;
 }) {
   const session = useReadingSession();
-  const sessionRef = useRef(session);
-  sessionRef.current = session;
+  const sessionRef = useRef(session); sessionRef.current = session;
+  const visiblePagesRef = useRef(visiblePageIndexes); visiblePagesRef.current = visiblePageIndexes;
+  const contextRef = useRef(''); contextRef.current = `${workspaceRoot}:${entryId}`;
+  const [savedState, setSavedState] = useState<EntryReadingState | null>(null);
   useEffect(() => {
     if (enabled && pageCount > 0 && session?.active) session.onReady();
   }, [enabled, pageCount, session?.active, session?.onReady]);
-  const [savedState, setSavedState] = useState<EntryReadingState | null>(null);
-  const activeContextRef = useRef(`${workspaceRoot ?? ''}:${entryId}`);
-  const activeMsRef = useRef(0);
-  const dirtyLocationRef = useRef(false);
-  const lastInteractionAtRef = useRef(Date.now());
-  const lastTickAtRef = useRef(Date.now());
-  const pageDwellMsRef = useRef(new Map<number, number>());
-  const pendingVisitedRef = useRef(new Set<number>());
-  const sessionStartedRef = useRef(false);
-  const visiblePagesRef = useRef(visiblePageIndexes);
-  const queueRef = useRef(Promise.resolve());
-  activeContextRef.current = `${workspaceRoot ?? ''}:${entryId}`;
-
-  useEffect(() => {
-    visiblePagesRef.current = visiblePageIndexes;
-    if (visiblePageIndexes.length > 0 && sessionRef.current?.active !== false) {
-      dirtyLocationRef.current = true;
-    }
-  }, [visiblePageIndexes]);
 
   useEffect(() => {
     setSavedState(null);
-    activeMsRef.current = 0;
-    dirtyLocationRef.current = false;
-    pageDwellMsRef.current.clear();
-    pendingVisitedRef.current.clear();
-    sessionStartedRef.current = false;
-    lastInteractionAtRef.current = Date.now();
-    lastTickAtRef.current = Date.now();
-    if (!workspaceRoot) {
-      return;
-    }
-    const contextKey = `${workspaceRoot}:${entryId}`;
-    let cancelled = false;
-    void readReadingState(workspaceRoot, entryId)
-      .then((state) => {
-        if (!cancelled && activeContextRef.current === contextKey) {
-          setSavedState(state);
-          emitReadingStateUpdated(state);
-        }
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [entryId, workspaceRoot]);
-
-  const flush = useCallback(() => {
-    if (!workspaceRoot || !enabled || pageCount <= 0) {
-      return;
-    }
-    const activeMs = Math.round(activeMsRef.current);
-    const visitedPages = [...pendingVisitedRef.current];
-    const currentPageIdx = visiblePagesRef.current[0] ?? null;
-    if (activeMs <= 0 && visitedPages.length === 0 && !dirtyLocationRef.current) {
-      return;
-    }
-    activeMsRef.current = 0;
-    pendingVisitedRef.current.clear();
-    dirtyLocationRef.current = false;
-    const sessionStart = !sessionStartedRef.current;
-    sessionStartedRef.current = true;
-    const localDate = formatLocalDate(new Date());
-    const contextKey = `${workspaceRoot}:${entryId}`;
-
-    queueRef.current = queueRef.current
-      .then(() =>
-        updateReadingState(workspaceRoot, entryId, {
-          mode,
-          current_page_idx: currentPageIdx,
-          page_count: pageCount,
-          visited_pages: visitedPages,
-          active_ms_delta: activeMs,
-          session_start: sessionStart,
-          local_date: localDate
-        })
-      )
-      .then((state) => {
-        if (activeContextRef.current === contextKey) {
-          setSavedState(state);
-          emitReadingStateUpdated(state);
-        }
-      })
-      .catch(() => {
-        if (activeContextRef.current === contextKey) {
-          activeMsRef.current += activeMs;
-          visitedPages.forEach((pageIdx) => pendingVisitedRef.current.add(pageIdx));
-          dirtyLocationRef.current = true;
-          sessionStartedRef.current = false;
-        }
-      });
-  }, [enabled, entryId, mode, pageCount, workspaceRoot]);
-
-  useEffect(() => {
-    if (!enabled) {
-      return;
-    }
+    if (!workspaceRoot || !enabled || pageCount <= 0) return;
+    const context = `${workspaceRoot}:${entryId}`;
     const container = scrollRef.current;
     const interactionRoot = container?.closest('[data-reading-frame]') ?? container?.closest('.workspace-pane-surface') ?? container;
+    const buffer = new ReadingSessionBuffer();
+    const acknowledged = new Map<string, number>();
+    const dwell = new Map<number, number>();
+    const visited = new Set<number>();
+    let alive = true, flushing = false, finalRetries = 0;
+    let lastInteraction = Date.now(), lastTick = Date.now(), sentLocation = '';
+    let autoClaim = true, wasVisible = readerIsVisible(container);
+    const publish = (state: EntryReadingState) => {
+      if (contextRef.current !== context) return;
+      if (alive) setSavedState(state);
+      emitReadingStateUpdated(state);
+    };
+    void readReadingState(workspaceRoot, entryId).then(state => { if (alive) publish(state); }).catch(() => undefined);
+
+    async function flush() {
+      if (flushing) return;
+      const location = visiblePagesRef.current.join(',');
+      const snapshots = buffer.snapshots();
+      const pages = [...visited];
+      if (!snapshots.length && !pages.length && location === sentLocation) return;
+      const currentPage = visiblePagesRef.current[0] ?? null;
+      // Capture location before waiting: another paper may reuse this component while IPC is pending.
+      flushing = true;
+      let success = false;
+      try {
+        for (const snapshot of snapshots.length ? snapshots : [undefined]) {
+          const state = await updateReadingState(workspaceRoot!, entryId, {
+            mode, current_page_idx: currentPage, page_count: pageCount, visited_pages: pages,
+            active_ms_delta: snapshot ? snapshot.active_ms - (acknowledged.get(snapshot.id) ?? 0) : 0,
+            session_start: false, local_date: snapshot?.local_date ?? null, reading_session: snapshot,
+          });
+          if (snapshot) { buffer.acknowledge(snapshot); acknowledged.set(snapshot.id, snapshot.active_ms); }
+          pages.forEach(page => visited.delete(page));
+          sentLocation = location;
+          publish(state);
+        }
+        success = true;
+      } catch {
+        // Keep exact checkpoints for the next flush. Backend replay is idempotent even if its reply was lost.
+      } finally {
+        flushing = false;
+        if (!alive && buffer.snapshots().length && (success || finalRetries++ < 3)) {
+          window.setTimeout(() => { void flush(); }, success ? 0 : 1_000);
+        }
+      }
+    }
+
+    const owner: ActiveReader = { element: container, finish: () => {
+      sample(Date.now()); buffer.end(); autoClaim = false;
+      if (activeReader === owner) activeReader = null;
+      void flush();
+    } };
+    function sample(now: number) {
+      const start = lastTick;
+      lastTick = now;
+      const eligible = activeReader === owner && sessionRef.current?.active !== false && readerIsVisible(container)
+        && document.visibilityState === 'visible' && document.hasFocus() && visiblePagesRef.current.length > 0;
+      // Sleep, clock changes and suspended event loops end a period; never credit the missing wall time.
+      if (!eligible || now < start || now - start > 2_000) { buffer.end(); return; }
+      const end = Math.min(now, lastInteraction + IDLE_AFTER_MS);
+      if (end > start) {
+        buffer.add(start, end);
+        for (const page of visiblePagesRef.current) {
+          const value = (dwell.get(page) ?? 0) + end - start;
+          dwell.set(page, value);
+          if (value >= PAGE_VISIT_AFTER_MS) visited.add(page);
+        }
+      }
+      if (now >= lastInteraction + IDLE_AFTER_MS) buffer.end();
+    }
     const markInteraction = (event?: Event) => {
+      if (event && event.target instanceof Node && !interactionRoot?.contains(event.target)) {
+        if (activeReader === owner && (event.type === 'pointerdown' || event.type === 'keydown')) owner.finish();
+        return;
+      }
       if (sessionRef.current?.active === false || !readerIsVisible(container)) return;
-      if (event && event.target instanceof Node && !interactionRoot?.contains(event.target)) return;
-      activeReaderElement = container;
-      lastInteractionAtRef.current = Date.now();
+      const now = Date.now(); sample(now);
+      if (activeReader !== owner) activeReader?.finish();
+      activeReader = owner; autoClaim = true;
+      lastInteraction = now; lastTick = now;
     };
     container?.addEventListener('scroll', markInteraction, { passive: true });
     window.addEventListener('keydown', markInteraction);
     window.addEventListener('pointerdown', markInteraction);
     window.addEventListener('wheel', markInteraction, { passive: true });
-
     const tick = window.setInterval(() => {
-      const now = Date.now();
-      const elapsed = Math.min(now - lastTickAtRef.current, 2_000);
-      lastTickAtRef.current = now;
-      const active =
-        sessionRef.current?.active !== false &&
-        readerIsVisible(container) &&
-        document.visibilityState === 'visible' &&
-        document.hasFocus() &&
-        now - lastInteractionAtRef.current <= IDLE_AFTER_MS;
-      if (!active || visiblePagesRef.current.length === 0) {
-        return;
-      }
-      if (!readerIsVisible(activeReaderElement)) activeReaderElement = container;
-      if (activeReaderElement !== container) return;
-      activeMsRef.current += elapsed;
-      for (const pageIdx of visiblePagesRef.current) {
-        const dwell = (pageDwellMsRef.current.get(pageIdx) ?? 0) + elapsed;
-        pageDwellMsRef.current.set(pageIdx, dwell);
-        if (dwell >= PAGE_VISIT_AFTER_MS) {
-          pendingVisitedRef.current.add(pageIdx);
-        }
-      }
+      const visible = readerIsVisible(container) && sessionRef.current?.active !== false;
+      if (!visible && wasVisible) owner.finish();
+      if (visible && !wasVisible) { autoClaim = true; lastInteraction = Date.now(); lastTick = lastInteraction; }
+      wasVisible = visible;
+      if (activeReader && !readerIsVisible(activeReader.element)) activeReader.finish();
+      if (!activeReader && visible && autoClaim) activeReader = owner;
+      sample(Date.now());
     }, 1_000);
-    const flushTimer = window.setInterval(flush, FLUSH_EVERY_MS);
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        flush();
-      } else {
-        markInteraction();
-        lastTickAtRef.current = Date.now();
-      }
+    const timer = window.setInterval(() => { void flush(); }, FLUSH_EVERY_MS);
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') owner.finish();
+      else { lastTick = Date.now(); autoClaim = true; lastInteraction = lastTick; }
     };
-    const handleBlur = () => flush();
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('blur', handleBlur);
-
+    const onBlur = () => owner.finish();
+    const onFocus = () => { lastTick = Date.now(); lastInteraction = lastTick; autoClaim = true; };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('blur', onBlur);
+    window.addEventListener('focus', onFocus);
     return () => {
-      window.clearInterval(tick);
-      window.clearInterval(flushTimer);
+      owner.finish(); alive = false;
+      window.clearInterval(tick); window.clearInterval(timer);
       container?.removeEventListener('scroll', markInteraction);
-      window.removeEventListener('keydown', markInteraction);
-      window.removeEventListener('pointerdown', markInteraction);
-      window.removeEventListener('wheel', markInteraction);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('blur', handleBlur);
-      flush();
-      if (activeReaderElement === container) activeReaderElement = null;
+      window.removeEventListener('keydown', markInteraction); window.removeEventListener('pointerdown', markInteraction); window.removeEventListener('wheel', markInteraction);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('blur', onBlur); window.removeEventListener('focus', onFocus);
     };
-  }, [enabled, flush, scrollRef]);
-
+  }, [enabled, entryId, mode, pageCount, workspaceRoot, scrollRef]);
   return savedState;
-}
-
-function formatLocalDate(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
 }

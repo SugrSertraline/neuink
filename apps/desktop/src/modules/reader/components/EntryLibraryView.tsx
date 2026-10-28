@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  CalendarDays,
   FilePlus2,
   Network,
   Trash2
@@ -45,13 +46,15 @@ import { LibraryPapers } from './LibraryPapers';
 import { LibraryTagNavigation } from './LibraryTagNavigation';
 import { LibraryPaperToolbar } from './LibraryPaperToolbar';
 import { PointerPreview } from '@/components/ui/pointer-preview';
+import { useBookOpening } from './book/BookOpeningProvider';
 import { useLibraryEntryDrag } from './useLibraryEntryDrag';
-import { buildReadingOverview } from './libraryReading';
-import { ReadingOverviewPopover } from './ReadingOverviewPopover';
 import { buildTagBreadcrumb, filterEntries } from './libraryEntryFilters';
 import { useAppearance } from '@/shared/components/AppearanceProvider';
+import type { PdfParseAction } from '@/modules/library/components/PdfParseButton';
 
 type EntryLibraryViewProps = {
+  pdfParseAction?: PdfParseAction;
+  onOpenDailyDashboard: () => void;
   section?: 'papers' | 'notes';
   onSectionChange?: (section: 'papers' | 'notes') => void;
   onUpdateTagDescription?: (id: string, value: string, expected: string) => Promise<TagMeta>;
@@ -65,6 +68,9 @@ type EntryLibraryViewProps = {
   trashItems: TrashItem[];
   isRefreshingParseStatus: boolean;
   libraryView: LibraryView;
+  onSelectView: (view: LibraryView) => void;
+  onClearFilters: () => void;
+  onManageTags: () => void;
   filterResetKey: number;
   recentReadingEntryIds: string[];
   selectedEntryId: string | null;
@@ -97,6 +103,8 @@ const ENTRY_LIBRARY_TAG_SCOPE_STORAGE_KEY = 'neuink.entryLibraryTagScope';
 const ENTRY_LIBRARY_COLUMNS_STORAGE_KEY = 'neuink.entryLibraryColumns.v1';
 export const ENTRY_LIBRARY_PINNED_EDGES_STORAGE_KEY = 'neuink.entryLibraryPinnedEdges.v1';
 export function EntryLibraryView({
+  pdfParseAction,
+  onOpenDailyDashboard,
   onOpenRelations,
   section: controlledSection, onSectionChange, onUpdateTagDescription, onOpenTagNote, onOpenTrash,
   onRestoreTagArchive,
@@ -106,6 +114,7 @@ export function EntryLibraryView({
   trashItems,
   isRefreshingParseStatus,
   libraryView,
+  onSelectView, onClearFilters, onManageTags,
   filterResetKey,
   recentReadingEntryIds,
   selectedEntryId,
@@ -185,7 +194,6 @@ export function EntryLibraryView({
     ? activeTagMeta?.name ?? (status === 'loading' ? '正在加载标签…' : '标签不可用')
     : viewTitle;
   const pageSummary = [
-    activeTagMeta && libraryView !== 'all' ? viewTitle : null,
     status === 'loading' ? '正在加载…' : status === 'error' ? '加载失败' : isTrashView
       ? '条目、标签与笔记'
       : `${query.trim() ? '搜索结果：' : ''}${filteredEntries.length} 个条目`,
@@ -194,10 +202,6 @@ export function EntryLibraryView({
       ? tagScope === 'descendants' ? '含子标签' : '仅当前标签'
       : null
   ].filter(Boolean).join(' · ');
-  const readingOverview = useMemo(
-    () => buildReadingOverview(filteredEntries, readingStates),
-    [filteredEntries, readingStates]
-  );
 
   const toggleColumn = (columnId: EntryLibraryColumnId, visible: boolean) => {
     setVisibleColumns((current) => {
@@ -252,7 +256,14 @@ export function EntryLibraryView({
     }
   };
 
-  const openEntry = (entryId: string) => {
+  const beginBookOpening = useBookOpening();
+  const openEntry = (entryId: string, element?: HTMLElement) => {
+    const entry = entries.find(value => value.id === entryId);
+    const source = element?.querySelector<HTMLElement>('.library-book-standing, .library-book');
+    if (appearance === 'atelier' && libraryDisplay !== 'list' && entry && source) {
+      beginBookOpening(entry, source, () => { onSelectEntry(entryId); onOpenEntryExplorer(entryId); });
+      return;
+    }
     onSelectEntry(entryId);
     onOpenEntryExplorer(entryId);
   };
@@ -310,6 +321,7 @@ export function EntryLibraryView({
     <>
       <Tabs value={section} onValueChange={changeSection} data-material="library-workspace" className="h-full min-h-0 min-w-0 gap-0 overflow-hidden bg-card">
           <LibraryHeading title={pageTitle} summary={pageSummary} tag={activeTagMeta} ancestors={folderBreadcrumb.slice(0, -1)} workspaceRoot={workspaceRoot}
+            hasTagContext={!isTrashView && Boolean(activeTag)} view={libraryView} onSelectView={onSelectView} onClearFilters={onClearFilters} onManageTags={onManageTags}
             disabled={status !== 'ready'} onNavigate={onSelectTag} onDescription={onUpdateTagDescription}
             actions={isTrashView ? <Button disabled={!trashItems.length || emptyTrashBusy} size="default" variant="destructive" onClick={() => setEmptyTrashConfirmOpen(true)}>清空条目与记录</Button> : <>
               {activeTagMeta ? <TabsList aria-label="标签内容" className="shrink-0">
@@ -317,7 +329,12 @@ export function EntryLibraryView({
                 <TabsTrigger value="notes" className="px-2 text-xs" disabled={!onOpenTagNote}>标签笔记{noteCount === null ? '' : ` ${noteCount}`}</TabsTrigger>
               </TabsList> : null}
               {onOpenRelations ? <Button size="default" variant="outline" aria-label="关系图" title="关系图" className="@max-[700px]/library-heading:w-8 @max-[700px]/library-heading:px-0" onClick={onOpenRelations}><Network size={14} aria-hidden="true" /><span className="@max-[700px]/library-heading:hidden">关系图</span></Button> : null}
-              <ReadingOverviewPopover overview={readingOverview} />
+              <Button aria-label="阅读统计" title="在每日看板查看全资料库阅读统计" variant="outline"
+                className="@max-[700px]/library-heading:w-8 @max-[700px]/library-heading:px-0"
+                onClick={onOpenDailyDashboard}>
+                <CalendarDays size={14} aria-hidden="true" />
+                <span className="@max-[700px]/library-heading:hidden">阅读统计</span>
+              </Button>
               <div hidden={section !== 'papers'}>
                 <Button size="default" aria-label="创建条目" title="创建条目" className="@max-[700px]/library-heading:w-8 @max-[700px]/library-heading:px-0" onClick={onOpenCreateEntryTab}><FilePlus2 size={14} aria-hidden="true" /><span className="@max-[700px]/library-heading:hidden">创建条目</span></Button>
               </div>
@@ -356,6 +373,7 @@ export function EntryLibraryView({
             </div>
           ) : <>
             <LibraryPapers active={section === 'papers'} entries={filteredEntries} status={status}
+              pdfParseAction={pdfParseAction}
               emptyMessage={activeTag && !activeTagMeta
                 ? '当前标签已移入回收站或不可用。返回全部条目或打开回收站继续。'
                 : query.trim() ? '没有符合当前筛选条件的条目。'
@@ -367,11 +385,14 @@ export function EntryLibraryView({
               visibleColumns={visibleColumns} pinnedEdges={pinnedEdges} reparseDisabled={activeJobs > 0}
               getRowProps={item => ({
                 ...entryDragHandlers(item),
-                onClick: () => { if (!consumeDragClick()) openEntry(item.id); },
+                onClick: event => {
+                  if (event.target instanceof Element && event.target.closest('button, a, input, select, textarea, [role="button"]')) return;
+                  if (!consumeDragClick()) openEntry(item.id, event.currentTarget);
+                },
                 onContextMenu: () => onSelectEntry(item.id),
                 onKeyDown: event => {
                   if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
-                    event.preventDefault(); openEntry(item.id);
+                    event.preventDefault(); openEntry(item.id, event.currentTarget);
                   }
                 }
               })}

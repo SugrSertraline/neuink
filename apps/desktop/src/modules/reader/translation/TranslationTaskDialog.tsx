@@ -103,11 +103,9 @@ export function TranslationTaskDialog({
   const displayedTotal = busy && progress ? progress.total : rows.length;
   const runningMessage = stopPending
     ? stopPending === 'resume' ? '正在继续翻译…' : stopPending === 'pause' ? '正在暂停翻译…' : '正在取消翻译…'
-    : busy
-    ? message?.match(/已接收\s*(\d+)\s*字/)
-      ? `正在翻译 · 已接收 ${message.match(/已接收\s*(\d+)\s*字/)?.[1]} 字`
-      : '正在翻译'
-    : message;
+    : busy && message?.startsWith('正在整理论文背景') ? message
+    : busy && message?.startsWith('正在翻译') ? message
+    : busy ? '正在翻译' : message;
   const progressValue = busy && progress
     ? progress.percent
     : rows.length > 0
@@ -196,6 +194,8 @@ export function TranslationTaskDialog({
             <span className="text-xs text-muted-foreground">{paused ? `任务已保留，剩余 ${translation?.task?.remaining_segment_uids.length ?? 0} 个片段；继续后处理原选择范围。` : '暂停可继续当前任务；取消结束任务，已有译文保留。'}</span>
           </div> : null}
           {!busy && translation?.status === 'canceled' ? <p className="text-xs text-muted-foreground">翻译任务已取消，已有译文保留。如有需要，请重新选择内容创建新任务。</p> : null}
+          {!busy && translation?.error && counts.failed === 0 ? <p className="text-xs text-destructive" role="alert">翻译任务失败，已有译文已保留。请检查模型连接后重新选择未完成内容翻译。</p> : null}
+          {!busy && counts.failed > 0 ? <p className="text-xs text-destructive" role="alert">{counts.failed} 个片段翻译失败，已有译文已保留；可使用下方“重试失败项”。</p> : null}
         </div>
 
         <div className="grid gap-2 rounded-md border p-2">

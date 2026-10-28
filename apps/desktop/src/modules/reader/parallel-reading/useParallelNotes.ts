@@ -43,7 +43,7 @@ export function useParallelNotes({ root, tagId, tagTitle, entries, memberIds, ta
   if (catalog) {
     options.length = 0;
     options.push(...catalog.catalog.notes.filter((note) => note.target.owner.kind === 'tag_reading' ? note.target.owner.tag_id === tagId
-      : memberIds.includes(note.target.owner.entry_id) || sameNoteTarget(note.target, target)).map((note) => ({ target: note.target, title: note.title,
+      : (note.target.owner.kind === 'entry' && memberIds.includes(note.target.owner.entry_id)) || sameNoteTarget(note.target, target)).map((note) => ({ target: note.target, title: note.title,
       ownerTitle: `${note.target.owner.kind === 'tag_reading' ? '标签笔记' : '条目笔记'} · ${note.owner_title}`, deleted: Boolean(note.deleted_at), revision: note.revision, error: note.error })));
   }
   for (const option of extra) if (!options.some((item) => sameNoteTarget(item.target, option.target))) options.push(option);

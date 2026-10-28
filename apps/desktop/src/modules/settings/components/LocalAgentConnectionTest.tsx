@@ -27,6 +27,7 @@ export function LocalAgentConnectionTest({ provider, available }: { provider: Lo
   return <div className="mt-2">
     <div className="flex flex-wrap items-center gap-2">
       <Button type="button" size="sm" variant="outline" aria-label={`测试 ${localAgentName(provider)} 连接`}
+        title="使用固定示例验证模型和工具连接，可能消耗少量额度；不发送资料库内容。"
         disabled={!available || state.kind === 'testing'} onClick={() => void start()}>测试连接</Button>
       {state.kind === 'testing' && <Button type="button" size="sm" variant="ghost" onClick={() => {
         pending.current?.abort(); pending.current = null; setState({ kind: 'idle', message: '连接测试已取消。' });

@@ -90,6 +90,7 @@ import {
 } from './assistantPanelViews';
 import { AssistantExternalContextItems } from './AssistantExternalContextItems';
 import { AssistantReadingContextControl } from './AssistantReadingContextControl';
+import type { PdfParseAction } from '@/modules/library/components/PdfParseButton';
 import { resolveAssistantReadingContext, type AssistantReadingChoice } from './assistantReadingContext';
 import { SciversePaperDetailDrawer } from '@/modules/sciverse/components/SciversePaperDetailDrawer';
 import {
@@ -123,6 +124,10 @@ import { LOCAL_AGENTS, localAgentName, readLastAssistantEngine, saveLastAssistan
 import { localAgentProfile, localAgentSelection, selectionLocalProvider, conversationLocalSession } from '../local-agent/session';
 import { useLocalAgentDetections } from '@/shared/lib/useLocalAgentDetections';
 import { latestConversationMemory } from '../harness/conversationMemory';
+import { ResearchPanel, ResearchSetup } from '../research/ResearchPanel';
+import { useResearchTasks, type ResearchModel } from '../research/useResearchTasks';
+import { useResearchChat } from '../research/useResearchChat';
+import { researchSelections } from '../research/researchChat';
 import {
   analyzeConversationLength,
   cloneAssistantContextItems,
@@ -135,6 +140,9 @@ import {
 } from './assistantPanelState';
 
 type AssistantPanelProps = {
+  pdfParseAction?: PdfParseAction;
+  researchModel?: ResearchModel;
+  researchOpenRequest?: number;
   activeEntry: LibraryEntry | null;
   activeTag: string | null;
   assistantContext: AssistantContext;
@@ -157,6 +165,7 @@ type AssistantPanelProps = {
   onDraftQuestionConsumed: () => void;
   onExportConversation: (conversation: Conversation) => Promise<void>;
   onOpenSettings: () => void;
+  onOpenResearchSettings?: () => void;
   onOpenSource: (source: ConversationSourceLink) => void;
   onAddSciverseSource: (
     source: Extract<ConversationSourceLink, { provider: 'sciverse' }>
@@ -170,6 +179,9 @@ const CONTEXT_WARNING_MIN_TOKENS = 32_000;
 
 const INITIAL_MESSAGE_RENDER_LIMIT = 30;
 export function AssistantPanel({
+  pdfParseAction,
+  researchModel,
+  researchOpenRequest,
   activeEntry,
   activeTag,
   assistantContext,
@@ -192,6 +204,7 @@ export function AssistantPanel({
   onDraftQuestionConsumed,
   onExportConversation,
   onOpenSettings,
+  onOpenResearchSettings,
   onOpenSource,
   onAddSciverseSource,
   onReplaceAssistantContext,
@@ -200,6 +213,11 @@ export function AssistantPanel({
   const { notify, dismiss } = useToast();
   const { appearance, setAppearance } = useAppearance();
   const [profiles, setProfiles] = useState<LlmProfile[]>([]);
+  const [researchMode, setResearchMode] = useState(false);
+  const fallbackResearch = useResearchTasks(researchModel ? null : root);
+  const research = researchModel ?? fallbackResearch;
+  const researchChat = useResearchChat(root, research);
+  useEffect(() => { if (researchOpenRequest) { setResearchMode(true); if (research.status?.active?.id && !research.status.active.installation) research.select(research.status.active.id); } }, [researchOpenRequest]);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const localAgentEnabled = useLocalAgentEnabled();
   const [selectedEngine, setSelectedEngine] = useState<AssistantEngine>(readLastAssistantEngine);
@@ -321,8 +339,8 @@ export function AssistantPanel({
     handleScroll: handleMessagesScroll,
     isAtBottom: messagesAtBottom
   } = useAssistantAutoScroll({
-    contentVersion: scrollContentVersion,
-    conversationId: conversation?.id
+    contentVersion: researchMode ? `${research.selected}:${research.task?.report.length}:${research.task?.stage}` : scrollContentVersion,
+    conversationId: researchMode ? `research-${research.selected ?? 'new'}` : conversation?.id
   });
   const conversationMemory = useMemo(
     () => latestConversationMemory(visibleMessages),
@@ -333,6 +351,8 @@ export function AssistantPanel({
     [selectedProfile, visibleMessages]
   );
   const question = composerSnapshot.text;
+  const researchSubmissionView = useRef({ root, researchMode, composerSnapshot });
+  researchSubmissionView.current = { root, researchMode, composerSnapshot };
   const selectableContextEntries = useMemo(
     () => [...entries].sort((left, right) => left.title.localeCompare(right.title)),
     [entries]
@@ -467,6 +487,19 @@ export function AssistantPanel({
 
   const send = async (queued?: QueuedAssistantDraft, resumeExecutionId?: string,
     continuedConversation?: Conversation, continuedGeneration?: number) => {
+    if (researchMode && !queued && !resumeExecutionId) {
+      if (!selectedProfile || usingLocalAgent || selectedProfile.api_protocol !== 'openai_compatible') return;
+      try {
+        const submitted = composerSnapshot;
+        const selections = researchSelections(orderedAssistantContextItems(assistantContext.items, composerSnapshot), composerSnapshot, entries);
+        if (await researchChat.send(question, selectedProfile.id, selections)) {
+          if (researchSubmissionView.current.root === root && researchSubmissionView.current.researchMode && researchSubmissionView.current.composerSnapshot === submitted) {
+            setComposerSnapshot({ mentions: [], text: '' }); setComposerResetKey(key => key + 1); forceNextScroll();
+          }
+        }
+      } catch (caught) { researchChat.setError(String(caught)); }
+      return;
+    }
     const trimmed = resumeExecutionId ? '继续未完成任务' : (queued?.question ?? question).trim();
     if (!root || !selectedProfile || !trimmed) {
       return;
@@ -1030,20 +1063,21 @@ export function AssistantPanel({
     <aside className="app-sidebar" data-assistant-context-dropzone="true">
       <div className="side-head min-w-0">
         <span className="min-w-0 truncate">助手</span>
+        <Button className="ml-auto" size="xs" variant={researchMode ? 'secondary' : 'ghost'} role="switch" aria-label="深度研究" aria-checked={researchMode} onClick={() => { setResearchMode(value => !value); setHistoryOpen(false); }}>深度研究{researchMode ? ' · 开' : ' · 关'}</Button>
         <AssistantRunStatus
-          busy={busy}
-          error={error}
-          queued={Boolean(messageQueue?.items.length)}
-          streaming={Boolean(streamingMessageId)}
-          toolEvents={runStatusToolEvents}
+          busy={researchMode ? Boolean(research.status?.active) || researchChat.sending : busy}
+          error={researchMode ? research.error : error}
+          queued={!researchMode && Boolean(messageQueue?.items.length)}
+          streaming={researchMode ? research.task?.status === 'running' && Boolean(research.task.report) : Boolean(streamingMessageId)}
+          toolEvents={researchMode ? [] : runStatusToolEvents}
         />
       </div>
 
-      <div className="relative grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
+      <div className="grid relative min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
         <div className="min-w-0 border-b p-2" data-material="sidebar-toolbar">
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
-              <div className="truncate text-xs font-medium">{scopeLabel(scope)}</div>
+              <div className="truncate text-xs font-medium">{researchMode ? '深度研究 · 自动检索' : scopeLabel(scope)}</div>
             </div>
             <div className="flex shrink-0 items-center gap-1">
               <Button
@@ -1052,7 +1086,7 @@ export function AssistantPanel({
                 aria-label="聊天历史"
                 type="button"
                 variant={historyOpen ? 'secondary' : 'ghost'}
-                onClick={() => void toggleConversationHistory()}
+                onClick={() => researchMode ? setHistoryOpen(value => !value) : void toggleConversationHistory()}
               >
                 <History />
               </Button>
@@ -1062,7 +1096,7 @@ export function AssistantPanel({
                 aria-label="新建对话"
                 type="button"
                 variant="ghost"
-                onClick={() => startNewConversation()}
+                onClick={() => { if (researchMode) { research.select(null); setHistoryOpen(false); } else startNewConversation(); }}
               >
                 <MessageSquarePlus />
               </Button>
@@ -1105,13 +1139,13 @@ export function AssistantPanel({
             </div>
           ) : null}
 
-          {error ? (
+          {!researchMode && error ? (
             <div className="mt-2 rounded-md border border-destructive/25 bg-destructive/5 p-2 text-xs leading-5 text-destructive">
               {formatAssistantError(error, { debug, fallback: busy ? ASSISTANT_TOOL_PENDING : '助手未完成本次操作，请核对结果后再继续。' })}
             </div>
           ) : null}
 
-          {conversationMemory && visibleMessages.length > 0 ? (
+          {!researchMode && conversationMemory && visibleMessages.length > 0 ? (
             <div className="mt-2 rounded-md border bg-muted/20 px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
               <div className="flex min-w-0 items-center gap-1.5">
                 <Info className="shrink-0" size={12} aria-hidden="true" />
@@ -1133,7 +1167,7 @@ export function AssistantPanel({
           error={historyError}
           items={visibleConversations}
           loading={historyLoading}
-          open={historyOpen}
+          open={historyOpen && !researchMode}
           onClose={() => setHistoryOpen(false)}
           onDelete={setConversationPendingDelete}
           onExport={(item) => void exportConversationHistory(item)}
@@ -1145,7 +1179,9 @@ export function AssistantPanel({
         />
 
         <div className="assistant-message-layout relative min-h-0 min-w-0 overflow-hidden">
-          <AssistantMessageList
+          {researchMode ? <ResearchPanel root={root} model={research} entries={entries} onApply={onApplyNoteProposal} onOpenSource={onOpenSource}
+            scrollRef={messagesScrollRef} contentRef={messagesContentRef} endRef={messagesEndRef} onScroll={handleMessagesScroll}
+            historyOpen={historyOpen} onCloseHistory={() => setHistoryOpen(false)} /> : <AssistantMessageList
             awaitingApproval={awaitingApproval}
             proposalsDisabled={busy || decidingProposal !== null || Boolean(noteReview?.deciding.length)}
             decidingProposalId={decidingProposal}
@@ -1175,7 +1211,7 @@ export function AssistantPanel({
             onRetryAgentRun={handleMessageRetryAgentRun}
             onReturnToLatest={forceNextScroll}
             onScroll={handleMessagesScroll}
-          />
+          />}
           {sciverseDetailSource ? (
             <>
               <button
@@ -1197,8 +1233,8 @@ export function AssistantPanel({
           <AssistantMessageQueue queue={messageQueue} running={busy} />
           <ToolApprovalPanel root={root} conversationId={conversation?.id ?? null} onOpen={id => void openConversation(id)} />
           <UserInputPanel root={root} conversationId={conversation?.id ?? null} onOpen={id => void openConversation(id)} onOpenSource={onOpenSource} />
-          <div hidden={awaitingUserInput}>
-          {longConversation.isLong ? (
+          <div hidden={!researchMode && awaitingUserInput}>
+          {!researchMode && longConversation.isLong ? (
             <div className="mb-2 min-w-0 rounded-md border border-warning-border bg-warning-surface p-2 text-xs leading-5 text-warning">
               <div className="flex min-w-0 gap-2">
                 <Info className="mt-0.5 shrink-0" size={14} aria-hidden="true" />
@@ -1248,13 +1284,20 @@ export function AssistantPanel({
             }}
           />
 
-          <AssistantReadingContextControl context={readingContext} entries={entries} tags={tags} busy={busy} choice={chosenReadingObject}
-            onChange={value => setReadingChoice({ root, value })} />
+          {!researchMode ? <AssistantReadingContextControl context={readingContext} entries={entries} tags={tags} busy={busy} choice={chosenReadingObject}
+            pdfParseAction={pdfParseAction}
+            onChange={value => setReadingChoice({ root, value })} /> : <>
+            <ResearchSetup model={research} onOpenSettings={onOpenResearchSettings ?? onOpenSettings} />
+            {researchChat.error ? <p role="alert" className="mb-2 text-xs text-destructive">{researchChat.error}</p> : null}
+            {usingLocalAgent || selectedProfile && selectedProfile.api_protocol !== 'openai_compatible' ? <p className="mb-2 text-xs text-muted-foreground">请选择已有的 OpenAI 兼容模型以开始深度研究。</p> : null}
+            <p className="mb-2 text-[11px] text-muted-foreground">自动深入调研；仅发送附加资料，按所选模型服务计费。</p>
+          </>}
 
-          <ExecutionRecovery root={root} conversationId={conversation?.id} busy={busy}
-            onResume={(id) => { void send(undefined, id); }} />
+          {!researchMode ? <ExecutionRecovery root={root} conversationId={conversation?.id} busy={busy}
+            onResume={(id) => { void send(undefined, id); }} /> : null}
           <AssistantComposerEditor
-            actions={busy ? <>
+            actions={researchMode ? (research.status?.active && !research.status.active.installation ? <Button size="sm" variant="outline" disabled={research.busy || !research.status.active.id} onClick={() => void research.command({ kind: 'cancel' })}><Square />停止研究</Button>
+              : <Button size="sm" disabled={!root || !selectedProfile || usingLocalAgent || selectedProfile.api_protocol !== 'openai_compatible' || !question.trim() || researchChat.sending || research.busy || !research.status?.ready || Boolean(research.status?.active) || research.status?.pending_save} onClick={() => void send()}><Send />{researchChat.sending ? '正在准备…' : '发送'}</Button>) : busy ? <>
               <Button size="sm" type="button" variant="outline" onClick={cancelRun}>
                 <Square />
                 停止
@@ -1290,8 +1333,9 @@ export function AssistantPanel({
               const previousInlineIds = new Set(
                 composerSnapshot.mentions.map((mention) => mention.id)
               );
+              const nextInlineIds = new Set(contextItems.map(item => item.id));
               const preservedExternalItems = assistantContext.items
-                .filter((item) => !previousInlineIds.has(item.id))
+                .filter((item) => !previousInlineIds.has(item.id) && !nextInlineIds.has(item.id))
                 .map(contextItemToInput);
               setComposerSnapshot(snapshot);
               onComposerDraftChange(

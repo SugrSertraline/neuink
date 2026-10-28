@@ -7,6 +7,7 @@ import { ResearchPaperAction, ResearchPaperActionsProvider } from './ResearchPap
 import { getAssistantBackgroundRuns, setAssistantBackgroundRun, stopAssistantBackgroundRun } from './assistantBackgroundRuns';
 import { ChatMessage } from './ChatMessage';
 import { setAssistantDebug } from '@/shared/lib/assistantDebug';
+import type { PaperLibraryEntry } from '../research/libraryPaperMatch';
 
 vi.mock('@/shared/ipc/researchApi', async original => ({
   ...await original<typeof import('@/shared/ipc/researchApi')>(),
@@ -156,4 +157,57 @@ it('allows a confirmed import to finish after the view closes and releases its b
   await act(async () => finish({ results: [{ id: 'paper', status: 'imported' }] }));
   expect(getAssistantBackgroundRuns()).toHaveLength(0);
   expect(notify).toHaveBeenCalledTimes(1);
+});
+
+const localEntry: PaperLibraryEntry = { id: 'local-entry', title: '本地改过名字的论文', fields: { research_id: paper.id },
+  pdf: { file_name: 'paper.pdf', content_hash: '', imported_at: '', parse: { status: 'not_started', updated_at: '', message: null, task_id: null, endpoint: null } } };
+function localUi(entries: PaperLibraryEntry[], open: (id: string) => void, status: 'loading' | 'ready' | 'error' = 'ready') {
+  return <ToastContext.Provider value={{ notify, dismiss: vi.fn() }}>
+    <ResearchPaperActionsProvider root="root" entries={entries} libraryStatus={status} onOpenEntry={open}><ResearchPaperAction paper={paper} variant="card" /></ResearchPaperActionsProvider>
+  </ToastContext.Provider>;
+}
+
+it('recognizes cached recommendations already in the catalog and opens them without preview or download', () => {
+  const open = vi.fn(), view = render(localUi([localEntry], open));
+  expect(view.getByText('已在本地')).toBeTruthy();
+  expect(view.queryByRole('button', { name: '添加到本地' })).toBeNull();
+  fireEvent.click(view.getByRole('button', { name: '打开论文' }));
+  expect(open).toHaveBeenCalledExactlyOnceWith('local-entry');
+  expect(previewResearchImport).not.toHaveBeenCalled(); expect(runResearchTool).not.toHaveBeenCalled();
+  view.rerender(localUi([{ ...localEntry, pdf: null }], open));
+  expect(view.getByText('已在本地 · 暂无 PDF')).toBeTruthy();
+  fireEvent.click(view.getByRole('button', { name: '打开条目' }));
+  expect(open).toHaveBeenCalledTimes(2);
+  view.rerender(localUi([], open));
+  expect(view.getByRole('button', { name: '添加到本地' }).hasAttribute('disabled')).toBe(false);
+  view.rerender(localUi([localEntry], open));
+  expect(view.getByRole('button', { name: '打开论文' })).toBeTruthy();
+});
+
+it('does not claim absence or allow import before the catalog is ready', () => {
+  const open = vi.fn(), view = render(localUi([], open, 'loading'));
+  expect(view.getByRole('button', { name: '正在检查本地…' }).hasAttribute('disabled')).toBe(true);
+  view.rerender(localUi([], open, 'error'));
+  expect(view.getByRole('button', { name: '本地状态暂不可用' }).hasAttribute('disabled')).toBe(true);
+  view.rerender(localUi([localEntry], open));
+  expect(view.getByText('已在本地')).toBeTruthy(); expect(previewResearchImport).not.toHaveBeenCalled();
+});
+
+it('rechecks presence when the catalog changes during import confirmation', async () => {
+  const open = vi.fn(), view = render(localUi([], open)); await prepare(view);
+  view.rerender(localUi([localEntry], open));
+  expect(view.queryByRole('button', { name: '确认添加' })).toBeNull();
+  expect(view.getByRole('button', { name: '打开论文' })).toBeTruthy();
+  expect(approveResearchImport).not.toHaveBeenCalled(); expect(runResearchTool).not.toHaveBeenCalled();
+});
+
+it('hands completed import presence back to the live catalog so deleting it does not leave a stale badge', async () => {
+  vi.mocked(runResearchTool).mockResolvedValue({ results: [{ id: paper.id, status: 'imported', entry_id: localEntry.id }] });
+  const open = vi.fn(), view = render(localUi([], open)); await prepare(view);
+  fireEvent.click(view.getByRole('button', { name: '确认添加' }));
+  await view.findByRole('button', { name: '已在本地' });
+  view.rerender(localUi([localEntry], open));
+  expect(view.getByRole('button', { name: '打开论文' })).toBeTruthy();
+  view.rerender(localUi([], open));
+  expect(view.getByRole('button', { name: '添加到本地' }).hasAttribute('disabled')).toBe(false);
 });

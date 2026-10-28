@@ -35,7 +35,7 @@ describe('library table width fitting', () => {
   it('fills a wide viewport proportionally beyond manual limits without persisting the expansion', () => {
     const { table, resize, widths } = showTable();
     const originalWidths = widths();
-    resize(3000);
+    resize(originalWidths.reduce((sum, width) => sum + width, 0) * 2);
     expect(widths()).toEqual(originalWidths.map(width => width * 2));
     expect(table.querySelectorAll('[data-pinned]')).toHaveLength(0);
     expect(table.querySelectorAll('col')).toHaveLength(9);
@@ -50,13 +50,14 @@ describe('library table width fitting', () => {
   });
 
   it('uses the scroll viewport excluding its gutter and switches pinning at the fit boundary', () => {
-    const { table, resize } = showTable();
-    Object.defineProperty(table.closest('.entry-library-table-shell'), 'clientWidth', { configurable: true, value: 1515 });
-    resize(1485);
+    const { table, resize, widths } = showTable();
+    const baseWidth = widths().reduce((sum, width) => sum + width, 0);
+    Object.defineProperty(table.closest('.entry-library-table-shell'), 'clientWidth', { configurable: true, value: baseWidth + 15 });
+    resize(baseWidth - 15);
     expect(table.querySelectorAll('[data-pinned]')).toHaveLength(4);
-    resize(1500);
+    resize(baseWidth);
     expect(table.querySelectorAll('[data-pinned]')).toHaveLength(0);
-    resize(1499);
+    resize(baseWidth - 1);
     expect(table.querySelectorAll('[data-pinned]')).toHaveLength(4);
   });
 
@@ -72,7 +73,8 @@ describe('library table width fitting', () => {
 
   it('resizes expanded columns with the pointer at 150% zoom and preserves cancel and keyboard behavior', () => {
     const { resize, widths } = showTable();
-    resize(3000);
+    const viewport = widths().reduce((sum, width) => sum + width, 0) * 2;
+    resize(viewport);
     const header = screen.getByRole('columnheader', { name: '标题' });
     const handle = screen.getByRole('separator', { name: '调整“标题”列宽' });
     Object.defineProperty(header, 'clientWidth', { configurable: true, value: 840 });
@@ -81,7 +83,7 @@ describe('library table width fitting', () => {
       fireEvent.pointerDown(handle, { button: 0, clientX: 100, pointerId });
       fireEvent.pointerMove(window, { clientX: 250, pointerId });
       expect(Math.abs(widths()[0] - 940)).toBeLessThan(1);
-      expect(widths().reduce((sum, width) => sum + width, 0)).toBeCloseTo(3000);
+      expect(widths().reduce((sum, width) => sum + width, 0)).toBeCloseTo(viewport);
     };
     drag(1);
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -89,7 +91,7 @@ describe('library table width fitting', () => {
     expect(window.localStorage.getItem(ENTRY_LIBRARY_COLUMN_WIDTHS_STORAGE_KEY)).toBeNull();
     drag(2);
     fireEvent.pointerUp(window, { clientX: 250, pointerId: 2 });
-    expect(JSON.parse(window.localStorage.getItem(ENTRY_LIBRARY_COLUMN_WIDTHS_STORAGE_KEY)!)).toEqual({ title: 493 });
+    expect(JSON.parse(window.localStorage.getItem(ENTRY_LIBRARY_COLUMN_WIDTHS_STORAGE_KEY)!)).toEqual({ title: 492 });
     const displayed = widths()[0];
     Object.defineProperty(header, 'clientWidth', { configurable: true, value: displayed });
     fireEvent.keyDown(handle, { key: 'ArrowRight' });

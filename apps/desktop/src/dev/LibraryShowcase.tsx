@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { Button } from '@/components/ui/button';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { EntryLibraryView } from '@/modules/reader/components/EntryLibraryView';
-import type { LibraryEntry } from '@/modules/library/components/LibrarySidebar';
+import type { LibraryEntry, LibraryView } from '@/modules/library/components/LibrarySidebar';
 import { WorkspaceNotesProvider } from '@/modules/notes/WorkspaceNotesContext';
 import { buildTagPathById } from '@/modules/library/utils/tagTree';
 import { ToastContext } from '@/shared/hooks/useToast';
@@ -37,7 +37,9 @@ const initialEntries: LibraryEntry[] = Array.from({ length: 24 }, (_, i) => ({
   tags: i % 4 === 0 ? [] : [i % 3 === 0 ? '软件工程/需求对齐/长期软件演化中的需求理解、验证与人机协作：跨论文阅读与证据索引' : '软件工程/需求对齐'],
   createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-12T00:00:00Z',
   pdfFileName: i % 5 === 0 ? null : `research-paper-${i + 1}.pdf`,
-  parseMessage: null, parseEndpoint: null, status: 'Parsed', progress: 100
+  parseMessage: null, parseEndpoint: null,
+  status: i % 5 === 0 ? 'No PDF' : (['Not started', 'Parsed', 'Parsing', 'Failed'] as const)[(i + 1) % 4],
+  progress: i % 5 === 0 ? 0 : i % 4 === 0 ? 100 : i % 4 === 1 ? 45 : 0
 }));
 const noop = () => undefined;
 
@@ -48,6 +50,8 @@ function LibraryShowcase() {
   const [tags, setTags] = useState(initialTags);
   const [entries, setEntries] = useState(initialEntries);
   const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [libraryView, setLibraryView] = useState<LibraryView>('all');
+  const [filterResetKey, setFilterResetKey] = useState(0);
   const [status, setStatus] = useState<'ready' | 'loading' | 'error'>('ready');
   const [empty, setEmpty] = useState(false);
   const [longList, setLongList] = useState(false);
@@ -68,6 +72,7 @@ function LibraryShowcase() {
           <Button size="sm" variant="outline" onClick={() => setEmpty(value => !value)}>{empty ? '显示条目' : '空列表'}</Button>
           <Button size="sm" variant="outline" onClick={() => setLongList(value => !value)}>{longList ? '常规列表' : '600 篇论文'}</Button>
           <Button size="sm" variant="outline" onClick={() => setManyTags(value => !value)}>{manyTags ? '常规标签' : '多标签'}</Button>
+          <Button size="sm" variant="outline" onClick={() => { setLibraryView('unparsed'); setActiveTag(null); }}>模拟左侧未解析筛选</Button>
           <Button size="sm" variant="outline" onClick={() => setStatus(value => value === 'ready' ? 'loading' : value === 'loading' ? 'error' : 'ready')}>{status === 'ready' ? '模拟加载' : status === 'loading' ? '模拟失败' : '恢复正常'}</Button>
           <Button size="sm" variant="outline" onClick={() => setNarrow(value => !value)}>{narrow ? '完整宽度' : '分屏宽度'}</Button>
           {[1, 1.25, 1.5].map(value => <Button key={value} size="sm" variant={scale === value ? 'secondary' : 'ghost'} onClick={() => { document.documentElement.style.zoom = String(value); setScale(value); window.dispatchEvent(new Event('resize')); }}>{value * 100}%</Button>)}
@@ -75,8 +80,12 @@ function LibraryShowcase() {
         <LibraryDesktopPreview enabled={desktop} entries={displayEntries} tags={displayTags} onOpenSearch={() => setSearchOpen(true)}>
         <div className={desktop ? 'h-full min-h-0' : 'min-h-0 flex-1 p-3'}>
           <div className={`h-full min-h-0 overflow-hidden bg-card ${desktop ? '' : 'border'}`} style={{ width: narrow ? 'min(100%, 560px)' : '100%' }}>
-            <EntryLibraryView standalone activeTag={activeTag} entries={empty ? [] : displayEntries} tags={displayTags} status={status} libraryView="all"
-              workspaceRoot={null} filterResetKey={0} isRefreshingParseStatus={false} recentReadingEntryIds={[]} selectedEntryId="sample-1"
+            <EntryLibraryView standalone activeTag={activeTag} entries={empty ? [] : displayEntries} tags={displayTags} status={status} libraryView={libraryView}
+              onSelectView={view => { setLibraryView(view); if (view === 'trash') setActiveTag(null); }}
+              onClearFilters={() => { setActiveTag(null); setLibraryView('all'); setFilterResetKey(value => value + 1); }}
+              onManageTags={() => setMessage('标签管理入口')}
+              onOpenDailyDashboard={() => setMessage('每日看板入口')}
+              workspaceRoot={null} filterResetKey={filterResetKey} isRefreshingParseStatus={false} recentReadingEntryIds={[]} selectedEntryId="sample-1"
               trashItems={[]} trashedEntries={[]} onSelectTag={setActiveTag} onSelectEntry={noop} onOpenEntryExplorer={id => setMessage(`打开详情：${id}`)}
               onOpenEntryInSidePane={id => setMessage(`在右侧打开：${id}`)} onDeleteEntry={noop} onOpenCreateEntryTab={() => setMessage('创建条目入口')}
               onOpenRelations={() => setMessage('关系图入口')}

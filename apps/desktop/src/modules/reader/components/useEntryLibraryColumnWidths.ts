@@ -49,7 +49,7 @@ export const ENTRY_LIBRARY_COLUMN_WIDTH_CONFIG: Record<EntryLibraryColumnId, Col
   file: { defaultWidth: 120, minWidth: 96, maxWidth: 360 },
   parser: { defaultWidth: 120, minWidth: 96, maxWidth: 320 },
   updated: { defaultWidth: 130, minWidth: 108, maxWidth: 320 },
-  actions: { defaultWidth: 90, minWidth: 72, maxWidth: 240 }
+  actions: { defaultWidth: 144, minWidth: 136, maxWidth: 240 }
 };
 
 export function useEntryLibraryColumnWidths({

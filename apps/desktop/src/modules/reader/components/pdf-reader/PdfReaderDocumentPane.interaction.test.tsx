@@ -17,7 +17,7 @@ function Harness({ onZoom, ready = true }: { onZoom: ReturnType<typeof vi.fn>; r
     entry: { id: 'test', title: 'PDF', contents: [], tagIds: [], tags: [], fields: {}, createdAt: '', updatedAt: '',
       status: 'Parsed', progress: 100, pdfFileName: 'test.pdf', parseMessage: null, parseEndpoint: null },
     flashSegmentUid: null, hoveredSegmentUid: null, annotationsBySegmentUid: new Map(), notesBySegmentUid: new Map(), pageWidth: 400,
-    hoverPreviewEnabled: false, hoverPreviewFontSize: 'standard', hoverPreviewSize: 'standard', hoverPreviewShowRegion: false,
+    hoverPreviewEnabled: false, hoverPreviewFontSize: 100, hoverPreviewSize: 100, hoverPreviewShowRegion: false,
     hoverPreviewShowOriginal: false, hoverPreviewShowNote: false, hoverPreviewShowAnnotation: false, inlineAnnotationHoverEnabled: false,
     hoverPreviewShowTranslation: false, sentenceHoverShowOriginal: false, sentenceHoverShowTranslation: false,
     rows: [], pdfAvailable: true, pdfBytesState: { status: 'ready', bytes: new Uint8Array(), error: null, retry: noop },

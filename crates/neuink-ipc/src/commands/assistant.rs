@@ -26,6 +26,7 @@ mod note_apply_content;
 #[cfg(test)]
 mod note_apply_recovery_tests;
 mod note_apply_store;
+pub(crate) mod research_note;
 #[cfg(test)]
 mod note_apply_tests;
 mod tag_recommendations;

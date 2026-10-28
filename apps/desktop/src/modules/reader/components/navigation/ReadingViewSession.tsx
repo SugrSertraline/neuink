@@ -1,12 +1,13 @@
 import { createContext, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { surfaceKey, type WorkspaceSurface } from '@/app/workspaceSurface';
-import type { ReadingPosition } from './ReadingNavigation';
+import type { ReadingPosition, ReadingTarget } from './ReadingNavigation';
+import type { ReadingLinkMode } from '@/shared/lib/readerPreferences';
 import { readingViewStorageKey, readReadingViewState, saveReadingViewState } from './readingViewStorage';
 
-type Peer = { id: string; receive: (position: ReadingPosition) => void; capture?: () => ReadingPosition | null };
+type Peer = { id: string; receive: (position: ReadingPosition) => void; receiveTarget?: (target: ReadingTarget) => void; capture?: () => ReadingPosition | null };
 const groups = new Map<string, Set<Peer>>();
-type Session = { mode: 'original' | 'replace'; setMode: (mode: 'original' | 'replace') => void; active: boolean; group: string; id: string };
+type Session = { mode: 'original' | 'replace'; setMode: (mode: 'original' | 'replace') => void; active: boolean; group: string; id: string; kind: WorkspaceSurface['kind']; linkMode: ReadingLinkMode };
 const Context = createContext<Session | null>(null);
 export const useReadingViewSession = () => useContext(Context);
 export function subscribeReadingView(group: string, peer: Peer) {
@@ -19,14 +20,17 @@ export function subscribeReadingView(group: string, peer: Peer) {
 export function publishReadingView(group: string, id: string, position: ReadingPosition) {
   for (const peer of groups.get(group) ?? []) if (peer.id !== id) peer.receive(position);
 }
-export function ReadingViewSession({ surface, workspaceRoot, active, children }: { surface: WorkspaceSurface; workspaceRoot: string | null; active: boolean; children: ReactNode }) {
+export function publishReadingTarget(group: string, id: string, target: ReadingTarget) {
+  for (const peer of groups.get(group) ?? []) if (peer.id !== id) peer.receiveTarget?.(target);
+}
+export function ReadingViewSession({ surface, workspaceRoot, active, children, linkMode = 'scroll' }: { surface: WorkspaceSurface; workspaceRoot: string | null; active: boolean; children: ReactNode; linkMode?: ReadingLinkMode }) {
   const storageKey = readingViewStorageKey(workspaceRoot, surfaceKey(surface));
   const [mode, updateMode] = useState<Session['mode']>(() => readReadingViewState(storageKey).mode);
   const id = useRef(crypto.randomUUID()).current;
-  const group = JSON.stringify([workspaceRoot, 'entryId' in surface ? surface.entryId : null, surface.kind]);
+  const group = JSON.stringify([workspaceRoot, 'entryId' in surface ? surface.entryId : null, 'reader']);
   const value = useMemo(() => ({ mode, setMode: (next: Session['mode']) => {
     updateMode(next); saveReadingViewState(storageKey, { mode: next });
-  }, active, group, id }), [mode, active, group, id, storageKey]);
+  }, active, group, id, kind: surface.kind, linkMode }), [mode, active, group, id, storageKey, surface.kind, linkMode]);
   // The provider is retained with the tab; neither the document nor other views own its mode.
   if (surface.kind !== 'pdf' && surface.kind !== 'reflow') return <>{children}</>;
   return <Context.Provider value={value}>{children}</Context.Provider>;

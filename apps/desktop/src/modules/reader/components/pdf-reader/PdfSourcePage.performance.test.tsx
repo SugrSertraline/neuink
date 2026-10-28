@@ -27,6 +27,7 @@ import * as pdfRenderQueue from './pdfRenderQueue';
 import type { PageSegments, SegmentRegionItem } from './types';
 import { pdfBlockDrag } from '@/shared/lib/pdfBlockDrag';
 import { groupSegmentsByPage } from './readerUtils';
+import { buildPreviewLayout } from './SegmentRegion';
 
 const originalResizeObserver = globalThis.ResizeObserver;
 
@@ -133,9 +134,10 @@ describe('PdfSourcePage performance boundaries', () => {
     const translation: TranslatedSegment = { error: null, page_idx: 0, segment_type: 'paragraph',
       segment_uid: source.uid, source_hash: 'hash', source_text: sourceText, status: 'translated',
       translated_text: '早期交通模式发生变化。交通流量迅速变化。模型预测未来交通流量。', updated_at: '' };
-    const ui = render(cloneElement(pdfSourcePage(page), { hoverPreviewEnabled: false,
+    const previewProps = { hoverPreviewEnabled: false,
       sentenceHoverEnabled: true, sentenceLinkEnabled: false, sentenceHoverShowOriginal: false,
-      sentenceHoverShowTranslation: true, translationBySegmentUid: new Map([[source.uid, translation]]) }));
+      sentenceHoverShowTranslation: true, translationBySegmentUid: new Map([[source.uid, translation]]) };
+    const ui = render(cloneElement(pdfSourcePage(page), previewProps));
     const hit = ui.getByTestId('pdf-page-hit-layer-0');
     vi.spyOn(hit, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 1000, 1000));
     const layer = document.createElement('div');
@@ -156,6 +158,21 @@ describe('PdfSourcePage performance boundaries', () => {
       const preview = ui.getByRole('region', { name: 'PDF 整句悬停预览' });
       expect(preview.textContent).toContain('模型预测未来交通流量。');
       expect(preview.textContent).not.toContain('早期交通模式发生变化。');
+      for (const percent of [150, 80, 113, 100]) {
+        ui.rerender(cloneElement(pdfSourcePage(page), { ...previewProps, hoverPreviewFontSize: percent,
+          sentenceHoverShowOriginal: true }));
+        const updated = ui.getByRole('region', { name: 'PDF 整句悬停预览' });
+        expect(updated).toBe(preview);
+        const content = updated.firstElementChild as HTMLElement;
+        expect(content.textContent).toContain('The model predicts future traffic.');
+        expect(content.textContent).toContain('模型预测未来交通流量。');
+        expect(parseFloat(content.style.fontSize)).toBeCloseTo(13 * percent / 100);
+        expect(parseFloat(content.style.lineHeight)).toBeCloseTo(21 * percent / 100);
+        const block = buildPreviewLayout({ fontSize: percent, hasFooter: false,
+          position: { x: 100, segmentTop: 30, segmentBottom: 80 }, preferScrollable: false, text: sourceText });
+        expect(content.style.fontSize).toBe(`${block.contentStyle.fontSize}px`);
+        expect(content.style.lineHeight).toBe(block.contentStyle.lineHeight);
+      }
     } finally { delete (Range.prototype as { getClientRects?: () => DOMRectList }).getClientRects; }
   });
 

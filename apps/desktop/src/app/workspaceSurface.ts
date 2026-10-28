@@ -12,9 +12,12 @@ export type WorkspaceSurface = { viewId?: string } & (
   | { kind: 'browser'; id: string; url?: string; title?: string; navigationId?: string; loading?: boolean; openRequestIds?: string[] }
   | { kind: 'note-review'; proposalId: string; label: string; entryId: string; noteId?: string | null }
   | { kind: 'library' }
+  | { kind: 'daily-dashboard' }
+  | { kind: 'empty' }
   | { kind: 'relations' }
   | { kind: 'settings'; target?: SettingsNavigationTarget }
   | { kind: 'create-entry' }
+  | { kind: 'external-import' }
   | { kind: 'mineru-client-guide' }
   | { kind: 'tag-editor' }
   | { kind: 'tag-reading'; tagId: string; label?: string }
@@ -44,6 +47,11 @@ export const initialWorkspaceSurfaceLayout: WorkspaceSurfaceLayout = {
   right: null,
   rightTabs: [],
   pinnedTabKeys: []
+};
+
+/** `empty` is a rendering target, never a tab or a replacement library. */
+export const emptyWorkspaceSurfaceLayout: WorkspaceSurfaceLayout = {
+  focusedPane: 'left', left: { kind: 'empty' }, leftTabs: [], right: null, rightTabs: [], pinnedTabKeys: []
 };
 
 export type WorkspaceSurfaceAction =
@@ -97,7 +105,8 @@ export function workspaceSurfaceReducer(
     case 'focus':
       return action.pane === 'right' && !state.right ? state : { ...state, focusedPane: action.pane };
     case 'open': {
-      const pane = action.pane ?? state.focusedPane;
+      if (action.surface.kind === 'empty') return state;
+      const pane = state.leftTabs.length ? action.pane ?? state.focusedPane : 'left';
       const otherPane = pane === 'left' ? 'right' : 'left';
       const otherTabs = otherPane === 'left' ? state.leftTabs : state.rightTabs;
       const existingInOtherPane = otherTabs.find(
@@ -209,7 +218,7 @@ export function workspaceSurfaceReducer(
       const tabs = action.pane === 'left' ? state.leftTabs : state.rightTabs;
       const surface = tabs.find((tab) => surfaceKey(tab) === action.key);
       if (!surface) return state;
-      const retained = tabs.filter((tab) => surfaceKey(tab) === action.key || tab.kind === 'library' || state.pinnedTabKeys?.includes(surfaceKey(tab)));
+      const retained = tabs.filter((tab) => surfaceKey(tab) === action.key || state.pinnedTabKeys?.includes(surfaceKey(tab)));
       return action.pane === 'left'
         ? { ...state, focusedPane: 'left', left: surface, leftTabs: retained, pinnedTabKeys: retainPinnedKeys(state, retained, state.rightTabs) }
         : { ...state, focusedPane: 'right', right: surface, rightTabs: retained, pinnedTabKeys: retainPinnedKeys(state, state.leftTabs, retained) };
@@ -240,20 +249,20 @@ export function workspaceSurfaceReducer(
   }
 }
 
-/** Empty panes must not manufacture a second singleton library tab after a swap.
- * Reuse the surviving pane and its view identities instead of remounting its contents. */
+/** Collapse empty panes without recreating a library the user has closed.
+ * Reuse surviving view identities instead of remounting readers or editors. */
 function withSurfaceTabs(state: WorkspaceSurfaceLayout, leftTabs: WorkspaceSurface[], rightTabs: WorkspaceSurface[]): WorkspaceSurfaceLayout {
   const activeTab = (tabs: WorkspaceSurface[], active: WorkspaceSurface | null) =>
     (active ? tabs.find(tab => surfaceKey(tab) === surfaceKey(active)) : undefined) ?? tabs[tabs.length - 1];
-  if (!leftTabs.length && rightTabs.some(tab => tab.kind === 'library')) {
+  if (!leftTabs.length && !rightTabs.length) return emptyWorkspaceSurfaceLayout;
+  if (!leftTabs.length) {
     return { ...state, focusedPane: 'left', left: activeTab(rightTabs, state.right), leftTabs: rightTabs,
       right: null, rightTabs: [], pinnedTabKeys: retainPinnedKeys(state, rightTabs, []) };
   }
-  const remainingLeft: WorkspaceSurface[] = leftTabs.length ? leftTabs : [{ kind: 'library' }];
-  return { ...state, left: activeTab(remainingLeft, state.left), leftTabs: remainingLeft,
+  return { ...state, left: activeTab(leftTabs, state.left), leftTabs,
     right: rightTabs.length ? activeTab(rightTabs, state.right) : null, rightTabs,
     focusedPane: rightTabs.length ? state.focusedPane : 'left',
-    pinnedTabKeys: retainPinnedKeys(state, remainingLeft, rightTabs) };
+    pinnedTabKeys: retainPinnedKeys(state, leftTabs, rightTabs) };
 }
 
 /** Reveal cited evidence without replacing or moving the note that requested it. */
@@ -329,7 +338,7 @@ export function surfaceContentKey(surface: WorkspaceSurface) {
     case 'owned-note': return `note:${noteTargetKey(surface.target)}`;
     case 'note': return `note:${surface.entryId}:${surface.noteId}`;
     case 'segment-notes': return `segment-records:${surface.entryId}`;
-    case 'library': case 'relations': case 'settings': case 'create-entry': case 'mineru-client-guide': case 'tag-editor': return surface.kind;
+    case 'empty': case 'daily-dashboard': case 'library': case 'relations': case 'settings': case 'external-import': case 'create-entry': case 'mineru-client-guide': case 'tag-editor': return surface.kind;
     default: return `${surface.kind}:${surface.entryId}`;
   }
 }
@@ -373,11 +382,14 @@ export function workspaceSurfaceLabel(
     : '';
   switch (surface.kind) {
     case 'library': return '条目库';
+    case 'daily-dashboard': return '每日看板';
+    case 'empty': return '工作区';
     case 'browser': return surface.title || '新网页';
     case 'assistant-reply': return '完整回复';
     case 'note-review': return `${surface.label} · 修改审阅`;
     case 'relations': return '关系图';
     case 'settings': return '设置';
+    case 'external-import': return '从其他来源导入';
     case 'create-entry': return '新建条目';
     case 'mineru-client-guide': return 'MinerU 客户端教程';
     case 'tag-editor': return '标签管理';

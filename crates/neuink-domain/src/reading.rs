@@ -17,6 +17,17 @@ pub enum ReadingMode {
     Reflow,
 }
 
+/// One continuous reading period, split at the reader's local midnight.
+/// `ended_at` is the latest saved checkpoint, not an inferred shutdown time.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ReadingSession {
+    pub id: String,
+    pub local_date: String,
+    pub started_at: DateTime<Utc>,
+    pub ended_at: DateTime<Utc>,
+    pub active_ms: u64,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct ReadingState {
@@ -30,6 +41,7 @@ pub struct ReadingState {
     pub session_count: u32,
     pub last_read_at: Option<DateTime<Utc>>,
     pub daily_active_ms: BTreeMap<String, u64>,
+    pub reading_sessions: Vec<ReadingSession>,
 }
 
 impl Default for ReadingState {
@@ -45,6 +57,7 @@ impl Default for ReadingState {
             session_count: 0,
             last_read_at: None,
             daily_active_ms: BTreeMap::new(),
+            reading_sessions: Vec::new(),
         }
     }
 }
@@ -66,4 +79,6 @@ pub struct ReadingStateUpdate {
     pub active_ms_delta: u64,
     pub session_start: bool,
     pub local_date: Option<String>,
+    /// Cumulative checkpoint; retries must not add the same time twice.
+    pub reading_session: Option<ReadingSession>,
 }

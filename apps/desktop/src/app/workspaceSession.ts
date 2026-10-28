@@ -1,6 +1,6 @@
 import type { EntryMeta, TagMeta } from '@/shared/types/domain';
 import { readWorkspaceStorage, workspaceStorageIdentity } from '@/shared/lib/workspaceStorageIdentity';
-import { initialWorkspaceSurfaceLayout, surfaceKey, type WorkspaceSurface, type WorkspaceSurfaceLayout } from './workspaceSurface';
+import { emptyWorkspaceSurfaceLayout, initialWorkspaceSurfaceLayout, surfaceKey, type WorkspaceSurface, type WorkspaceSurfaceLayout } from './workspaceSurface';
 
 const VERSION = 1;
 const MAX_TABS = 80;
@@ -14,7 +14,7 @@ function savedSurface(value: unknown): WorkspaceSurface | null {
   if (!record(value)) return null;
   const view = id(value.viewId) ? { viewId: value.viewId } : {};
   switch (value.kind) {
-    case 'library': case 'relations': case 'mineru-client-guide': case 'tag-editor':
+    case 'external-import': case 'daily-dashboard': case 'library': case 'relations': case 'mineru-client-guide': case 'tag-editor':
       return { kind: value.kind };
     case 'tag-reading': case 'tag-details':
       return id(value.tagId) ? { kind: value.kind, tagId: value.tagId,
@@ -37,6 +37,7 @@ function savedSurface(value: unknown): WorkspaceSurface | null {
       if (!record(target) || !record(target.owner) || !id(target.note_id)) return null;
       const owner = target.owner;
       if (owner.kind === 'entry' && id(owner.entry_id)) return { kind: 'note', entryId: owner.entry_id, noteId: target.note_id, ...view };
+      if (owner.kind === 'daily' && typeof owner.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(owner.date) && target.note_id === 'journal') return { kind: 'owned-note', target: { owner: { kind: 'daily', date: owner.date }, note_id: 'journal' }, ...view };
       if (owner.kind !== 'tag_reading' || !id(owner.tag_id)) return null;
       return { kind: 'owned-note', target: { owner: { kind: 'tag_reading', tag_id: owner.tag_id }, note_id: target.note_id },
         ...(id(value.label) ? { label: value.label } : {}), ...view };
@@ -72,6 +73,7 @@ function normalizeLayout(value: Record<string, unknown>, catalog?: Catalog): Wor
   if (!leftTabs.length && rightTabs.length) {
     leftTabs = rightTabs; rightTabs = []; leftKey = rightKey; rightKey = null;
   }
+  if (!leftTabs.length && value.allowEmpty === true) return emptyWorkspaceSurfaceLayout;
   if (!leftTabs.length) leftTabs = [{ kind: 'library' }];
   const left = leftTabs.find(tab => surfaceKey(tab) === leftKey) ?? leftTabs[leftTabs.length - 1];
   const right = rightTabs.find(tab => surfaceKey(tab) === rightKey) ?? rightTabs[rightTabs.length - 1] ?? null;
@@ -91,10 +93,12 @@ export function readWorkspaceSession(root: string, catalog: Catalog): WorkspaceS
 
 export function saveWorkspaceSession(root: string, layout: WorkspaceSurfaceLayout): boolean {
   try {
-    const snapshot = normalizeLayout({ ...layout, leftKey: surfaceKey(layout.left), rightKey: layout.right ? surfaceKey(layout.right) : null });
+    const snapshot = normalizeLayout({ ...layout, allowEmpty: true,
+      leftKey: surfaceKey(layout.left), rightKey: layout.right ? surfaceKey(layout.right) : null });
     window.localStorage.setItem(storageKey(root), JSON.stringify({ version: VERSION, leftTabs: snapshot.leftTabs,
       rightTabs: snapshot.rightTabs, leftKey: surfaceKey(snapshot.left), rightKey: snapshot.right ? surfaceKey(snapshot.right) : null,
-      focusedPane: snapshot.focusedPane, pinnedTabKeys: snapshot.pinnedTabKeys }));
+      focusedPane: snapshot.focusedPane, pinnedTabKeys: snapshot.pinnedTabKeys,
+      allowEmpty: true }));
     return true;
   } catch { return false; }
 }

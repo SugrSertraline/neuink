@@ -30,6 +30,23 @@ it('shows no task control for an empty list', () => {
   const view = render(<JobStatusDock activeCount={0} jobs={[]} />);
   expect(view.queryByRole('button')).toBeNull();
 });
+it('labels context preparation without claiming that zero translated characters arrived', () => {
+  const job: Job = { id: 'translation', kind: 'translation', status: 'processing', scope: null,
+    created_at: '', updated_at: '', error: null, message: '正在生成论文背景 · 已接收 0 字',
+    progress: { current: 0, total: 398, percent: 0 } };
+  const ui = render(<JobStatusDock jobs={[job]} />);
+  fireEvent.click(ui.getByRole('button', { name: '实时任务：1 个未完成任务' }));
+  expect(ui.getAllByText('正在整理论文背景 · 等待模型正文').length).toBeGreaterThan(0);
+});
+it('shows an actionable failure when the translation model stops before producing text', () => {
+  const job: Job = { id: 'translation', kind: 'translation', status: 'failed', scope: null,
+    created_at: '', updated_at: '', error: 'request timeout', message: 'request timeout',
+    progress: { current: 0, total: 398, percent: 0 } };
+  const ui = render(<JobStatusDock jobs={[job]} />);
+  fireEvent.click(ui.getByRole('button', { name: '实时任务：最近任务有失败' }));
+  fireEvent.click(ui.getByRole('button', { name: '最近已结束 · 1' }));
+  expect(ui.getAllByText('全文翻译失败，已有译文保留。请打开翻译任务重试未完成内容。').length).toBeGreaterThan(0);
+});
 it('protects both the summary and a historical failed download when debug is explicitly enabled', () => {
   const raw = 'Timeout HTTP 503 Authorization: Bearer sk-secret C:\\Users\\Alice\\private.pdf REMOTE_BODY';
   const failed: Job = { id: 'research-import:old', kind: 'pdf_import', status: 'failed', scope: null,

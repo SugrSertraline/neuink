@@ -209,7 +209,7 @@ function ChatMessageComponent({
         />
       ) : null}
       {message.role === 'assistant' && entryMetaProposals.length > 0 ? (
-        <div className="mt-2 grid gap-1.5">
+        <div className="mt-2 grid min-w-0 grid-cols-1 gap-1.5">
           {entryMetaProposals.map((proposal) => (
             <EntryMetaProposalCard
               disabled={proposalsDisabled || streaming}

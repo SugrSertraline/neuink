@@ -57,6 +57,7 @@ import { useWorkspaceResourceActions } from './useWorkspaceResourceActions';
 import { listTagArchives, TAG_ARCHIVES_CHANGED } from '../ipc/tagReadingApi';
 import { createWorkspaceReadScope } from './workspaceReadScope';
 import { onResearchLibraryChanged } from '../ipc/researchApi';
+import { onZoteroLibraryChanged, zoteroCatalogTags } from '../ipc/zoteroApi';
 
 type WorkspaceStatus = 'loading' | 'ready' | 'error';
 
@@ -152,6 +153,19 @@ export function useWorkspace() {
     const stop = onResearchLibraryChanged(root, () => { void refreshEntries(root).catch(failed); }, failed);
     return () => { closed = true; stop(); };
   }, [root, refreshEntries]);
+
+  useEffect(() => {
+    if (!root) return;
+    let closed = false;
+    const failed = () => { if (!closed) setError('Zotero 导入后的条目列表刷新失败，请重新打开资料库。'); };
+    const stop = onZoteroLibraryChanged(root, () => {
+      const current = readScope.begin(root, 'tags');
+      void Promise.all([refreshEntries(root), zoteroCatalogTags(root).then(tags => {
+        if (!closed && current()) setTags(tags);
+      })]).catch(failed);
+    }, failed);
+    return () => { closed = true; stop(); };
+  }, [root, readScope, refreshEntries]);
 
   const applyOpenedWorkspace = useCallback(
     (workspace: {

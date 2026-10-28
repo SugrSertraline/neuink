@@ -72,14 +72,14 @@ describe('resolveActiveActivityPanel', () => {
     ).toBe('assistant');
   });
 
-  it('falls back to library only when its drawer is collapsed on the library surface', () => {
+  it('does not highlight a collapsed side tool, even on the library page', () => {
     expect(
       resolveActiveActivityPanel({
         focusedSurfaceKind: 'library',
         sidebarOpen: false,
         sidePanel: 'assistant'
       })
-    ).toBe('library');
+    ).toBeNull();
     expect(
       resolveActiveActivityPanel({
         focusedSurfaceKind: 'pdf',

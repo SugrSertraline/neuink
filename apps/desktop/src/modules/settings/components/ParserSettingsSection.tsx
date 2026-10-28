@@ -1,5 +1,5 @@
 import { BookOpenText } from 'lucide-react';
-import { useLayoutEffect, useState } from 'react';
+import { useLayoutEffect, useState, type ReactNode } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,8 +15,9 @@ type ParserProps = Pick<SettingsPanelLayoutProps,
   'customParserEndpoint' | 'customParserApiKey' | 'effectiveParserEndpointLabel'
   | 'onParserEndpointChange' | 'onParserApiKeyChange' | 'onOpenMineruClientGuide'>;
 
-export function ParserSettingsSection({ props, navigationTarget }: {
+export function ParserSettingsSection({ props, navigationTarget, children }: {
   props: ParserProps;
+  children?: ReactNode;
   navigationTarget?: SettingsNavigationTarget | null;
 }) {
   // This is presentation state only; switching methods does not change parsing preferences.
@@ -26,7 +27,8 @@ export function ParserSettingsSection({ props, navigationTarget }: {
     else if (navigationTarget?.id === 'parser-service' || navigationTarget?.id === 'parser-auto') setMethod('service');
   }, [navigationTarget?.id, navigationTarget?.nonce]);
 
-  return <SettingsPage tab="parser" title="导入与解析" description="推荐先用 MinerU 客户端导出解析结果 ZIP，再导入 NeuInk。">
+  return <SettingsPage tab="parser" title="导入与解析" description="从本地资料库导入论文，或配置 PDF 解析方式。">
+    {children}
     <Tabs value={method} onValueChange={setMethod} className="min-w-0 gap-4">
       <TabsList aria-label="MinerU 解析方式" className="w-full data-[orientation=horizontal]:h-auto">
         <TabsTrigger value="client" className="h-auto min-w-0 whitespace-normal px-3 py-1.5 text-xs">MinerU 客户端（推荐）</TabsTrigger>
@@ -34,14 +36,14 @@ export function ParserSettingsSection({ props, navigationTarget }: {
       </TabsList>
       <TabsContent forceMount value="client" hidden={method !== 'client'} className="min-w-0">
         <section data-setting-id="parser-zip" tabIndex={-1} className="grid gap-3">
-          <h3 className="text-sm font-semibold">导入 MinerU 客户端 ZIP</h3>
+          <h3 className="text-sm font-semibold">导入 MinerU 客户端结果</h3>
           <p className="text-xs leading-5 text-muted-foreground">
-            在 MinerU 客户端解析 PDF，导出完整结果并压缩为 ZIP，再导入 NeuInk。无需配置解析服务 URL 或 API Key。
+            在 MinerU 客户端解析 PDF 后，可直接导入完整结果目录，或导入 ZIP／RAR 压缩包。无需配置解析服务 URL 或 API Key。
           </p>
           <div className="text-xs leading-5 text-muted-foreground">
-            <p>ZIP 需包含 <code>content_list_v2.json</code> 或兼容的 <code>content_list.json</code>，以及正文引用的图片。</p>
+            <p>结果需包含 <code>content_list_v2.json</code> 或兼容的 <code>content_list.json</code>，以及正文引用的图片。</p>
             <ul className="mt-2 list-disc space-y-1 pl-4">
-              <li>创建新条目：ZIP 中还需包含原 PDF。</li>
+              <li>创建新条目：结果中还需包含原 PDF。</li>
               <li>导入已有 PDF 条目：无需重复附带 PDF。</li>
             </ul>
           </div>

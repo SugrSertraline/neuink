@@ -128,15 +128,23 @@ export function useVisiblePdfPages({
       nearbyObserver.observe(element);
     }
 
-    const handleScroll = () => {
+    let scrollFrame: number | null = null;
+    const updateAfterScroll = () => {
+      scrollFrame = null;
       const pageChanged = updateVisiblePageFromScrollPosition();
       notifyPdfInteraction({
-        abortVisible: pageChanged !== false,
+        // A gap, floating control or unavailable hit-test is not evidence that
+        // the visible page changed; keep its in-flight first paint alive.
+        abortVisible: pageChanged === true,
         preservePreload: true
       });
     };
+    const handleScroll = () => {
+      if (scrollFrame === null) scrollFrame = requestAnimationFrame(updateAfterScroll);
+    };
     root.addEventListener('scroll', handleScroll, { passive: true });
     return () => {
+      if (scrollFrame !== null) cancelAnimationFrame(scrollFrame);
       visibleObserver?.disconnect();
       resize?.disconnect();
       nearbyObserver.disconnect();

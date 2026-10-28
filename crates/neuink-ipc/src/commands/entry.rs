@@ -1,7 +1,5 @@
 use std::{
     collections::BTreeMap,
-    fs,
-    io::Cursor,
     path::{Component, Path, PathBuf},
     process::Command,
 };
@@ -18,6 +16,11 @@ use neuink_workspace::note::NoteDocument;
 use neuink_workspace::TrashItem;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Runtime};
+
+pub(crate) mod mineru_source;
+#[cfg(test)]
+mod mineru_import_tests;
+use mineru_source::{read_mineru_source, source_pdf, validate_single_result};
 
 #[derive(Debug, Deserialize)]
 pub struct CreateEntryRequest {
@@ -966,33 +969,11 @@ pub fn import_mineru_client_result(
     if entry.pdf.is_none() {
         return Err("请先为条目上传对应的 PDF，再导入 MinerU 客户端结果。".to_string());
     }
-    if request
-        .zip_path
-        .extension()
-        .and_then(|value| value.to_str())
-        .map(|value| value.eq_ignore_ascii_case("zip"))
-        != Some(true)
-    {
-        return Err("请选择 MinerU 客户端导出的 ZIP 压缩包；不支持 RAR 或 7Z。".to_string());
-    }
-    let zip_bytes = fs::read(&request.zip_path).map_err(|error| error.to_string())?;
-    let mut archive = zip::ZipArchive::new(Cursor::new(&zip_bytes))
-        .map_err(|error| format!("无法读取 MinerU 客户端 ZIP：{error}"))?;
-    let has_images = (0..archive.len()).any(|index| {
-        archive
-            .by_index(index)
-            .map(|file| {
-                let name = file.name().replace('\\', "/");
-                name.starts_with("images/") || name.contains("/images/")
-            })
-            .unwrap_or(false)
-    });
-    if !has_images {
-        return Err("MinerU 客户端 ZIP 必须包含 images/ 文件夹。".to_string());
-    }
+    let zip_bytes = read_mineru_source(&request.zip_path)?;
+    validate_single_result(&zip_bytes)?;
     let document = normalize_mineru_zip(&zip_bytes).map_err(|error| error.to_string())?;
     if document.segments.is_empty() {
-        return Err("压缩包未包含可导入的 MinerU content_list 结果。".to_string());
+        return Err("所选结果未包含可导入的 MinerU content_list。".to_string());
     }
     workspace
         .write_mineru_output_zip(&request.entry_id, &zip_bytes)
@@ -1016,54 +997,51 @@ pub fn import_mineru_client_result(
 pub fn create_from_mineru_client_result(
     request: CreateFromMineruClientResultRequest,
 ) -> Result<ImportAndParsePdfResponse, String> {
+    let zip_bytes = read_mineru_source(&request.zip_path)?;
+    create_from_mineru_source_bytes(request, zip_bytes)
+}
+
+pub(crate) fn create_from_mineru_source_bytes(
+    request: CreateFromMineruClientResultRequest,
+    zip_bytes: Vec<u8>,
+) -> Result<ImportAndParsePdfResponse, String> {
     let workspace =
-        neuink_workspace::Workspace::open(&request.root).map_err(|error| error.to_string())?;
-    let zip_bytes = fs::read(&request.zip_path).map_err(|error| error.to_string())?;
-    let mut archive = zip::ZipArchive::new(Cursor::new(&zip_bytes))
-        .map_err(|error| format!("无法读取 MinerU 客户端 ZIP：{error}"))?;
-    let names = (0..archive.len())
-        .filter_map(|index| {
-            archive
-                .by_index(index)
-                .ok()
-                .map(|file| file.name().replace('\\', "/"))
-        })
-        .collect::<Vec<_>>();
-    if !names
-        .iter()
-        .any(|name| name.starts_with("images/") || name.contains("/images/"))
-    {
-        return Err("MinerU 客户端 ZIP 必须包含 images/ 文件夹。".to_string());
-    }
-    let origin_pdf = names
-        .iter()
-        .find(|name| name.to_ascii_lowercase().ends_with("_origin.pdf"))
-        .or_else(|| {
-            names
-                .iter()
-                .find(|name| name.to_ascii_lowercase().ends_with(".pdf"))
-        })
-        .ok_or_else(|| "MinerU 客户端 ZIP 未包含 *_origin.pdf。".to_string())?
-        .clone();
+        neuink_workspace::Workspace::open_existing(&request.root).map_err(|error| error.to_string())?;
+    validate_single_result(&zip_bytes)?;
+    let origin_pdf = source_pdf(&zip_bytes)?
+        .ok_or_else(|| "新建条目时，MinerU 结果还需包含原 PDF。".to_string())?;
     let document = normalize_mineru_zip(&zip_bytes).map_err(|error| error.to_string())?;
+    if document.segments.is_empty() {
+        return Err("所选结果未包含可导入的 MinerU content_list。".to_string());
+    }
     let entry = workspace
         .create_entry_with_meta(request.title, request.fields, request.tags)
         .map_err(|error| error.to_string())?;
-    workspace
-        .write_mineru_output_zip(&entry.id, &zip_bytes)
-        .map_err(|error| error.to_string())?;
-    let extracted_pdf = workspace
-        .layout()
-        .entry_mineru_output_dir(&entry.id)
-        .join(origin_pdf);
-    workspace
-        .import_pdf(&entry.id, &extracted_pdf)
-        .map_err(|error| error.to_string())?;
-    workspace
-        .write_segments(&entry.id, &document.segments)
-        .map_err(|error| error.to_string())?;
-    let entry =
-        mark_mineru_client_import_succeeded(&workspace, &entry.id, document.segments.len())?;
+    let imported = (|| -> Result<EntryMeta, String> {
+        workspace
+            .write_mineru_output_zip(&entry.id, &zip_bytes)
+            .map_err(|error| error.to_string())?;
+        let extracted_pdf = workspace
+            .layout()
+            .entry_mineru_output_dir(&entry.id)
+            .join(origin_pdf);
+        workspace
+            .import_pdf(&entry.id, &extracted_pdf)
+            .map_err(|error| error.to_string())?;
+        workspace
+            .write_segments(&entry.id, &document.segments)
+            .map_err(|error| error.to_string())?;
+        mark_mineru_client_import_succeeded(&workspace, &entry.id, document.segments.len())
+    })();
+    let entry = match imported {
+        Ok(entry) => entry,
+        Err(error) => {
+            workspace.delete_entry(&entry.id).map_err(|cleanup| {
+                format!("{error}；清理未完成条目失败：{cleanup}")
+            })?;
+            return Err(error);
+        }
+    };
     Ok(ImportAndParsePdfResponse {
         entry,
         segment_count: document.segments.len(),

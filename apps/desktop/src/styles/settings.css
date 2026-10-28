@@ -44,7 +44,12 @@
 }
 .settings-group { width: 100%; max-width: 720px; padding-block: 16px; }
 .settings-form > .settings-group + .settings-group { border-top: 1px solid var(--border); }
-.settings-service + .settings-service { border-top: 1px solid var(--border); }
+.settings-service { min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
+.settings-service + .settings-service { margin-top: 16px; }
+.settings-local-agents { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+@container settings-content (max-width: 420px) {
+  .settings-local-agents { grid-template-columns: minmax(0, 1fr); }
+}
 .settings-service .settings-row { grid-template-columns: minmax(0,1fr) auto; }
 .settings-row { display: grid; width: 100%; max-width: 720px; grid-template-columns: minmax(0, 420px) auto; align-items: center; justify-content: start; gap: 16px; padding-block: 10px; }
 .settings-row-control { flex-shrink: 0; max-width: 100%; }

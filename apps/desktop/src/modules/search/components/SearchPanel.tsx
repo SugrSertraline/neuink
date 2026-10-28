@@ -122,7 +122,7 @@ export function SearchPanel({ buildStatus = null, root, status, onOpenResult, on
           <CommandInput
             autoFocus
             aria-label="搜索资料"
-            placeholder="搜索标题、Tag、Note、PDF Segment"
+            placeholder="搜索标题、标签、笔记或 PDF 片段"
             value={query}
             onValueChange={setQuery}
           />

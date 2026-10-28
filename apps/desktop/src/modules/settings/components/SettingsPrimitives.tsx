@@ -25,13 +25,13 @@ export function SettingsGroup({ id, title, description, children, action }: { id
 export function SettingsServiceSection({ id, title, description, status, children }: {
   id?: string; title: string; description: string; status: string; children: ReactNode;
 }) {
-  return <section data-setting-id={id} tabIndex={id ? -1 : undefined} className="settings-service">
-    <div className="flex flex-wrap items-center gap-3 py-3">
+  return <section data-setting-id={id} aria-label={title} tabIndex={id ? -1 : undefined} className="settings-service">
+    <div className="flex flex-wrap items-center gap-3 border-b border-border bg-muted/30 px-3 py-2.5">
       <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium">{title}</span>
         <span className="mt-1 block text-xs leading-5 text-muted-foreground">{description}</span></span>
-      <span className="shrink-0 text-xs text-muted-foreground">{status}</span>
+      <span className="shrink-0 rounded border border-border bg-background px-2 py-0.5 text-[11px] text-muted-foreground">{status}</span>
     </div>
-    <div className="min-w-0 pb-3">{children}</div>
+    <div className="min-w-0 p-3">{children}</div>
   </section>;
 }
 

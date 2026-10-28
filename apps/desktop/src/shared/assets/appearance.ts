@@ -5,7 +5,9 @@ import notes from './atelier/notes-v2.png';
 import search from './atelier/search-v2.png';
 import tags from './atelier/tags-v2.png';
 import details from './atelier/details-v1.png';
+import calendar from './atelier/calendar-v1.png';
+import settings from './atelier/settings-v1.png';
 
 // The title bar and native window must always resolve the same brand asset.
 export const appearanceLogos = { standard: '/neuink-logo.svg', atelier: atelierLogo, 'liquid-glass': '/neuink-logo.svg' };
-export const appearanceIcons = { assistant, details, library, notes, search, tags };
+export const appearanceIcons = { assistant, details, library, notes, search, tags, calendar, settings };

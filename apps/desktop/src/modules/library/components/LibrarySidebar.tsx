@@ -1,3 +1,4 @@
+import { AppearanceIcon } from '@/shared/components/AppearanceIcon';
 import {
   AlertTriangle,
   FileText,
@@ -5,6 +6,7 @@ import {
   FilterX,
   History,
   Plus,
+  Download,
   RefreshCw,
   Trash2
 } from 'lucide-react';
@@ -76,6 +78,7 @@ type LibrarySidebarProps = {
   onRenameMarkdownNote: (entryId: string, noteId: string, title: string) => Promise<unknown> | unknown;
   onRenamePdfDisplayName: (entryId: string, fileName: string) => Promise<unknown> | unknown;
   onOpenCreateEntryTab: () => void;
+  onOpenImportTab?: () => void;
   onOpenTagEditorTab: () => void;
   onSelectContent: (contentId: string) => void;
   onOpenTagDetails: (tagId: string) => void;
@@ -124,6 +127,7 @@ export function LibrarySidebar({
   onRenameMarkdownNote,
   onRenamePdfDisplayName,
   onOpenCreateEntryTab,
+  onOpenImportTab,
   onOpenTagEditorTab,
   onSelectContent,
   onOpenTagDetails,
@@ -183,6 +187,8 @@ export function LibrarySidebar({
           <span>{entryExplorerOpen ? '条目详情' : '条目库'}</span>
         </div>
         {!entryExplorerOpen ? (
+          <div className="flex items-center gap-1">
+          {onOpenImportTab && <Button disabled={status !== 'ready'} size="icon-sm" variant="ghost" title="从其他来源导入" aria-label="从其他来源导入" onClick={onOpenImportTab}><AppearanceIcon kind="import"><Download size={15} aria-hidden="true" /></AppearanceIcon></Button>}
           <Button
             disabled={status !== 'ready'}
             size="icon-sm"
@@ -191,8 +197,8 @@ export function LibrarySidebar({
             variant="ghost"
             onClick={onOpenCreateEntryTab}
           >
-            <Plus size={15} aria-hidden="true" />
-          </Button>
+            <AppearanceIcon kind="create"><Plus size={15} aria-hidden="true" /></AppearanceIcon>
+          </Button></div>
         ) : null}
       </div>
 
@@ -241,6 +247,7 @@ export function LibrarySidebar({
             <SidebarRow active={activeView === 'trash'} icon={<Trash2 size={14} />} label={LIBRARY_VIEW_LABELS.trash} value={trashItemCount + deletedTagNoteCount} onClick={() => onSelectView('trash')} />
           </SidebarPanel>
           <SidebarPanel name="解析" label="解析" weight={1.25} open={openSections.parsing} onToggle={() => toggleSection('parsing')}>
+            <SidebarRow active={activeView === 'pdf'} icon={<FileText size={14} />} label={LIBRARY_VIEW_LABELS.pdf} value={entries.filter(entry => Boolean(entry.pdfFileName)).length} onClick={() => onSelectView('pdf')} />
             <SidebarRow active={activeView === 'unparsed'} icon={<FileText size={14} />} label={LIBRARY_VIEW_LABELS.unparsed} value={unparsedCount} onClick={() => onSelectView('unparsed')} />
             <SidebarRow active={activeView === 'parsed'} icon={<FileText size={14} />} label={LIBRARY_VIEW_LABELS.parsed} value={parsedCount} onClick={() => onSelectView('parsed')} />
             <SidebarRow

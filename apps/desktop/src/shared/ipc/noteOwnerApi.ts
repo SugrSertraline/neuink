@@ -3,6 +3,7 @@ import type { NoteDocument, NoteOwner, NoteTarget, SourceLink } from '@/shared/t
 import { createNote, createNoteSourceLink, importNoteAsset, openNoteFile, readNote, revealNoteFile, saveNoteAssetBytes, updateNote } from './workspaceApi';
 import type { ReadingExportCatalog, ReadingExportFormat } from './readingExportApi';
 import { noteMutation, notifyNotesChanged } from './noteCatalogApi';
+import { dailyCommand } from './dailyApi';
 
 export type TagNoteSummary = { note_id: string; title: string; updated_at: string; deleted_at: string | null; revision: string };
 type Asset = { markdown_path: string; file_path: string };
@@ -12,8 +13,10 @@ function tagNote<T>(root: string, tagId: string, action: Record<string, unknown>
 export const listTagNotes = (root: string, tagId: string) => tagNote<TagNoteSummary[]>(root, tagId, { kind: 'list' });
 export const readOwnedNote = (root: string, target: NoteTarget) => target.owner.kind === 'entry'
   ? readNote(root, target.owner.entry_id, target.note_id)
+  : target.owner.kind === 'daily' ? dailyCommand<NoteDocument>(root, { kind: 'read_note', date: target.owner.date })
   : tagNote<NoteDocument>(root, target.owner.tag_id, { kind: 'read', note_id: target.note_id });
 export async function createOwnedNote(root: string, owner: NoteOwner, title: string): Promise<NoteDocument> {
+  if (owner.kind === 'daily') return readOwnedNote(root, { owner, note_id: 'journal' });
   if (owner.kind === 'tag_reading') return noteMutation(root, tagNote(root, owner.tag_id, { kind: 'create', title }));
   const entry = await createNote(root, owner.entry_id, title);
   notifyNotesChanged(root);
@@ -23,6 +26,7 @@ export async function createOwnedNote(root: string, owner: NoteOwner, title: str
 }
 export const saveOwnedNote = (root: string, target: NoteTarget, document: NoteDocument) => noteMutation(root, target.owner.kind === 'entry'
   ? updateNote(root, target.owner.entry_id, target.note_id, document.title, document.markdown, document.links, document.revision)
+  : target.owner.kind === 'daily' ? dailyCommand<NoteDocument>(root, { kind: 'save_note', date: target.owner.date, document })
   : tagNote<NoteDocument>(root, target.owner.tag_id, { kind: 'save', document }));
 export const setTagNoteDeleted = (root: string, tagId: string, noteId: string, deleted: boolean, revision: string) =>
   noteMutation(root, tagNote<void>(root, tagId, { kind: 'set_deleted', note_id: noteId, deleted, expected_revision: revision }));
@@ -30,15 +34,19 @@ export const purgeTagNote = (root: string, tagId: string, noteId: string, revisi
   noteMutation(root, tagNote<void>(root, tagId, { kind: 'purge', note_id: noteId, expected_revision: revision }));
 export const buildOwnedNoteSourceLink = (root: string, target: NoteTarget, sourceEntryId: string, segmentUid: string) => target.owner.kind === 'entry'
   ? createNoteSourceLink(root, target.owner.entry_id, target.note_id, sourceEntryId, segmentUid)
+  : target.owner.kind === 'daily' ? dailyCommand<SourceLink>(root, { kind: 'build_source_link', date: target.owner.date, source_entry_id: sourceEntryId, segment_uid: segmentUid })
   : tagNote<SourceLink>(root, target.owner.tag_id, { kind: 'build_source_link', note_id: target.note_id, source_entry_id: sourceEntryId, segment_uid: segmentUid });
 export const importOwnedNoteAsset = (root: string, owner: NoteOwner, noteId: string, path: string) => owner.kind === 'entry'
   ? importNoteAsset(root, owner.entry_id, noteId, path)
+  : owner.kind === 'daily' ? dailyCommand<Asset>(root, { kind: 'import_asset', date: owner.date, source_path: path })
   : tagNote<Asset>(root, owner.tag_id, { kind: 'import_asset', note_id: noteId, source_path: path });
 export const saveOwnedNoteAssetBytes = (root: string, owner: NoteOwner, noteId: string, mime: string, base64: string, fileName?: string | null) => owner.kind === 'entry'
   ? saveNoteAssetBytes(root, owner.entry_id, noteId, mime, base64, fileName)
+  : owner.kind === 'daily' ? dailyCommand<Asset>(root, { kind: 'save_asset', date: owner.date, mime_type: mime, data_base64: base64 })
   : tagNote<Asset>(root, owner.tag_id, { kind: 'save_asset', note_id: noteId, mime_type: mime, data_base64: base64 });
 export const openOwnedNoteFile = (root: string, owner: NoteOwner, noteId: string, reveal: boolean) => owner.kind === 'entry'
   ? (reveal ? revealNoteFile : openNoteFile)(root, owner.entry_id, noteId)
+  : owner.kind === 'daily' ? dailyCommand<void>(root, { kind: 'note_file', date: owner.date, reveal })
   : tagNote<void>(root, owner.tag_id, { kind: 'file', note_id: noteId, reveal });
 export const inspectTagNoteExport = (root: string, tagId: string, noteId?: string) =>
   tagNote<ReadingExportCatalog>(root, tagId, { kind: 'inspect_export', note_id: noteId ?? null });

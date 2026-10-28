@@ -1,44 +1,66 @@
-import { asSchema } from 'ai';
+import type { AssistantToolTraceEvent } from '@/shared/ipc/assistantApi';
+import { getAssistantContextSnapshot, loadAgentRuntimeSettings } from '@/shared/ipc/assistantApi';
 import { runLocalAgent } from '@/shared/ipc/localAgentApi';
-import { readLocalAgentEnabled } from '@/shared/lib/localAgentSettings';
-import { loadAgentRuntimeSettings, getAssistantContextSnapshot } from '@/shared/ipc/assistantApi';
+import { RESEARCH_READ_TOOLS } from '@/shared/ipc/researchApi';
 import { normalizeAgentRuntimeSettings, readAgentRuntimeSettings } from '@/shared/lib/agentRuntimeSettings';
-import type { AssistantNoteProposal, AssistantEntryMetaProposal, AssistantTagProposal } from '@/shared/types/assistant';
+import { describeAssistantReadFailure } from '@/shared/lib/assistantReadFailure';
+import { readLocalAgentEnabled } from '@/shared/lib/localAgentSettings';
+import type {
+  AssistantEntryMetaProposal,
+  AssistantNoteProposal,
+  AssistantTagProposal
+} from '@/shared/types/assistant';
+import { asSchema } from 'ai';
+import {
+  AgentPersistenceError,
+  AgentStoppedError,
+  AgentToolNotExecutedError,
+  RunBudget
+} from '../agent-core/agent';
+import { createAgentToolFailure, isAgentToolFailure } from '../agent-core/toolFailure';
+import { observeAssistantContext } from '../harness/context';
+import { runDurableHarness } from '../harness/durableHarness';
 import type { RunAssistantHarnessOptions } from '../harness/engine';
 import { modelDrivenBrief, verifyGroundedProposals } from '../harness/engine';
-import type { GroundedAnswer } from '../sdk/qna';
-import { buildPinnedContext, buildSelectedMarkdownContext, buildToolNotes, normalizeCitedSources, uniqueConversationSources } from '../sdk/qna';
-import type { AssistantToolTraceEvent } from '@/shared/ipc/assistantApi';
-import { createAssistantTools, type ToolRuntimeState } from '../sdk/tools';
-import { agentExecutors } from '../sdk/agentDriver';
-import { createUserInputTool, USER_INPUT_INSTRUCTIONS } from '../sdk/userInputTool';
-import { finalizeVerifiedProposals } from '../runtime/verifiedProposal';
-import { SourceLedger } from '../runtime/sourceLedger';
-import { observeAssistantContext } from '../harness/context';
-import { ClaudeStream } from './protocol';
-import { approveClaudeTool } from './approvals';
-import type { LocalAgentSession } from './session';
-import { AgentPersistenceError, AgentStoppedError, AgentToolNotExecutedError, RunBudget } from '../agent-core/agent';
-import { noteSnapshotKey } from '../sdk/toolSupport';
-import { protocolObject } from './protocol';
-import { createAgentToolFailure, isAgentToolFailure } from '../agent-core/toolFailure';
-import { TOOL_FAILURE_INSTRUCTIONS } from '../sdk/toolFailurePolicy';
-import { RpcAgentStream, type AgentStreamCallbacks } from './rpcProtocol';
-import { localAgentWebContext } from './webContext';
-import { matchedExternalCitationUrls, normalizeReturnedExternalCitationLinks, returnedExternalCitationUrls } from '../sdk/citationContract';
-import { RESEARCH_READ_TOOLS } from '@/shared/ipc/researchApi';
-import { describeAssistantReadFailure } from '@/shared/lib/assistantReadFailure';
-import { researchFailureMessage } from '../sdk/researchRecovery';
-import { answerVerification } from '../sdk/answerVerification';
-import { runDurableHarness } from '../harness/durableHarness';
+import { createAgentRun, finishAgentRun } from '../harness/runState';
+import { AssistantVerificationError, verifyHarnessResult } from '../harness/verification';
+import {
+  PAPER_PRESENTATION_INSTRUCTIONS,
+  paperRecords,
+  presentedPaperRecords
+} from '../research/paperPresentation';
 import { bindExecutionIdentity } from '../runtime/durableExecution';
 import { buildDirectExecution, executionModeInstructions } from '../runtime/executionPolicy';
+import { SourceLedger } from '../runtime/sourceLedger';
 import { createCompiledTaskState, transitionTaskState } from '../runtime/taskState';
-import { createAgentRun, finishAgentRun } from '../harness/runState';
-import { verifyHarnessResult, AssistantVerificationError } from '../harness/verification';
-import { PAPER_PRESENTATION_INSTRUCTIONS, paperRecords, presentedPaperRecords } from '../research/paperPresentation';
-import { LocalAgentCheckpoint } from './checkpoint';
+import { finalizeVerifiedProposals } from '../runtime/verifiedProposal';
+import { agentExecutors } from '../sdk/agentDriver';
+import { answerVerification } from '../sdk/answerVerification';
+import {
+  matchedExternalCitationUrls,
+  normalizeReturnedExternalCitationLinks,
+  returnedExternalCitationUrls
+} from '../sdk/citationContract';
 import { parsedEntryReadingNotice } from '../sdk/entryContext';
+import type { GroundedAnswer } from '../sdk/qna';
+import {
+  buildPinnedContext,
+  buildSelectedMarkdownContext,
+  buildToolNotes,
+  normalizeCitedSources,
+  uniqueConversationSources
+} from '../sdk/qna';
+import { researchFailureMessage } from '../sdk/researchRecovery';
+import { TOOL_FAILURE_INSTRUCTIONS } from '../sdk/toolFailurePolicy';
+import { createAssistantTools, type ToolRuntimeState } from '../sdk/tools';
+import { noteSnapshotKey } from '../sdk/toolValues';
+import { createUserInputTool, USER_INPUT_INSTRUCTIONS } from '../sdk/userInputTool';
+import { approveClaudeTool } from './approvals';
+import { LocalAgentCheckpoint } from './checkpoint';
+import { ClaudeStream, protocolObject } from './protocol';
+import { RpcAgentStream, type AgentStreamCallbacks } from './rpcProtocol';
+import type { LocalAgentSession } from './session';
+import { localAgentWebContext } from './webContext';
 
 export async function runLocalAgentHarness(inputOptions: RunAssistantHarnessOptions, session: LocalAgentSession,
   onSession: (session: LocalAgentSession) => void): Promise<GroundedAnswer> {

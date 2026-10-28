@@ -298,19 +298,19 @@ describe('PDF segment preview layout', () => {
 
   it('applies independent font and card size preferences', () => {
     const compact = buildPreviewLayout({
-      fontSize: 'small',
+      fontSize: 85,
       hasFooter: false,
       position: { x: 80, segmentTop: 80, segmentBottom: 80 },
       preferScrollable: true,
-      size: 'compact',
+      size: 82,
       text: 'preview text'
     });
     const large = buildPreviewLayout({
-      fontSize: 'large',
+      fontSize: 120,
       hasFooter: false,
       position: { x: 80, segmentTop: 80, segmentBottom: 80 },
       preferScrollable: true,
-      size: 'large',
+      size: 120,
       text: 'preview text'
     });
 

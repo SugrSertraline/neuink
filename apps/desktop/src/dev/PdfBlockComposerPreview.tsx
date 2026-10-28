@@ -57,10 +57,13 @@ export function PdfBlockComposerPreview({ entry, segment, onOpenSource, external
       {message ? <ChatMessage message={message} streaming={false} onOpenSource={onOpenSource} />
         : <p className="text-xs text-muted-foreground">拖入后，可在“输入状态检查”中预览已发送引用样式。</p>}
     </div>
-    <AssistantExternalContextItems items={externalItems} onRemove={onRemoveExternal} />
-    <AssistantComposerEditor composerDraft={draft} entries={[entry]} tags={[]} disabled={disabled} draftQuestion={null}
+    <AssistantExternalContextItems items={externalItems.filter(item => !draft?.snapshot.mentions.some(mention => mention.id === item.id))} onRemove={onRemoveExternal} />
+    <AssistantComposerEditor composerDraft={draft} contextItems={externalItems} entries={[entry]} tags={[]} disabled={disabled} draftQuestion={null}
       actions={<Button size="sm" disabled={disabled || !draft?.snapshot.text.trim()}>发送</Button>}
       resetKey={0} onDraftQuestionConsumed={() => {}} onSubmit={() => {}}
-      onChange={(snapshot, items, document) => { setDraft({ document, snapshot }); setItems(items); }} />
+      onChange={(snapshot, items, document) => {
+        for (const mention of draft?.snapshot.mentions ?? []) if (!snapshot.mentions.some(next => next.id === mention.id)) onRemoveExternal(mention.id);
+        setDraft({ document, snapshot }); setItems(items);
+      }} />
   </aside></AssistantReplyActionsContext.Provider>;
 }

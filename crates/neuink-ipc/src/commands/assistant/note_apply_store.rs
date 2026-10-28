@@ -117,6 +117,14 @@ pub(super) fn load_verified_proposal(
     task_id: &str,
     proposal_id: &str,
 ) -> Result<VerifiedNoteProposal, String> {
+    if proposal_id.starts_with("research-") && task_id.starts_with("research-") {
+        let workspace = neuink_workspace::Workspace::open_existing(root).map_err(|e| e.to_string())?;
+        if let Some(value) = workspace.read_research_proposal(proposal_id).map_err(|e| e.to_string())? {
+            let proposal: VerifiedNoteProposal = serde_json::from_value(value).map_err(|e| e.to_string())?;
+            if proposal.id != proposal_id || proposal.task_id != task_id { return Err("研究笔记预览身份不一致".into()); }
+            return Ok(proposal);
+        }
+    }
     let layout = WorkspaceLayout::new(root.to_path_buf());
     for path in json_files(&layout.conversations_dir())? {
         let value: serde_json::Value =

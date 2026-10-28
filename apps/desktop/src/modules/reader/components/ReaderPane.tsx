@@ -1,3 +1,4 @@
+import { OtherSourceImportPage } from '@/modules/import/OtherSourceImportPage';
 import { ReadingStateRetention } from './navigation/ReadingStateRetention';
 import { ReadingViewSession } from './navigation/ReadingViewSession';
 import { readingViewStorageKey } from './navigation/readingViewStorage';
@@ -20,6 +21,8 @@ import { useWorkspaceNotes } from '@/modules/notes/WorkspaceNotesContext';
 import { RelationsPage } from '@/modules/relations/RelationsPage';
 import { RelationReturnFrame } from '@/modules/relations/RelationReturnFrame';
 import { WorkspaceSurfaceDeck } from './WorkspaceSurfaceDeck';
+import { EmptyWorkspace } from '@/app/EmptyWorkspace';
+import { DailyDashboard } from '@/modules/daily/DailyDashboard';
 import { OwnedNoteSurfaceView } from '@/modules/notes/components/OwnedNoteSurfaceView';
 import { TagDetailsView } from '@/modules/library/components/TagDetailsView';
 import { ReadingSessionContext, type ReadingNoteBinding } from '../parallel-reading/ReadingSessionContext';
@@ -68,6 +71,7 @@ import { TagEditorPage } from '../../library/components/TagEditorPage';
 import { CreateEntryPanel } from './CreateEntryPanel';
 import { MineruClientImportGuide } from './MineruClientImportGuide';
 import { EntryLibraryView } from './EntryLibraryView';
+import type { PdfParseAction } from '@/modules/library/components/PdfParseButton';
 import type { EntryPdfHandlers } from '@/modules/library/components/EntryPdfActions';
 import { SourceLinksSurface } from './SourceLinksSurface';
 import { isHeavyReaderSurface } from './readerRetention';
@@ -105,6 +109,8 @@ type ReaderPaneProps = EntryPdfHandlers & {
   trashItems: TrashItem[];
   isRefreshingParseStatus: boolean;
   libraryView: LibraryView;
+  onLibraryViewChange: (view: LibraryView) => void;
+  onClearLibraryFilters: () => void;
   libraryFilterResetKey: number;
   recentReadingEntryIds: string[];
   selectedEntryId: string | null;
@@ -115,6 +121,9 @@ type ReaderPaneProps = EntryPdfHandlers & {
   uiScale: UiScale;
   workspaceRoot: string | null;
   onCreateEntry: (request: CreateEntryRequest) => Promise<CreateEntryResult | undefined>;
+  onMineruImported?: () => Promise<void> | void;
+  mineruDrop?: { path: string; nonce: number } | null;
+  onMineruDropConsumed?: () => void;
   onCreateEntryFinished: (result: CreateEntryResult) => void;
   onOpenMineruClientGuide: () => void;
   onCreateMarkdownSourceLink: (
@@ -155,6 +164,7 @@ type ReaderPaneProps = EntryPdfHandlers & {
   onRefreshParseStatus: () => Promise<void> | void;
   onRetryPdfParse: (entryId: string) => Promise<void> | void;
   onStartPdfParse: (entryId: string) => Promise<void> | void;
+  pdfParseAction?: PdfParseAction;
   onRefreshAnnotations: () => Promise<unknown> | unknown;
   onBeforeWorkspaceChange: () => Promise<void>;
   onCreateWorkspaceRoot: (root: string) => Promise<void>;
@@ -229,6 +239,7 @@ export function ReaderPane({
   isRefreshingParseStatus,
   librarySection, onLibrarySectionChange, onOpenTagLibrary, onOpenTagReading,
   libraryView,
+  onLibraryViewChange, onClearLibraryFilters,
   libraryFilterResetKey,
   recentReadingEntryIds,
   selectedEntryId,
@@ -239,6 +250,9 @@ export function ReaderPane({
   uiScale,
   workspaceRoot,
   onCreateEntry,
+  onMineruImported,
+  mineruDrop,
+  onMineruDropConsumed,
   onCreateEntryFinished,
   onOpenMineruClientGuide,
   onCreateMarkdownSourceLink,
@@ -269,6 +283,7 @@ export function ReaderPane({
   onRefreshParseStatus,
   onRetryPdfParse,
   onStartPdfParse,
+  pdfParseAction,
   onRefreshAnnotations,
   onBeforeWorkspaceChange,
   onCreateWorkspaceRoot,
@@ -627,6 +642,8 @@ export function ReaderPane({
   };
   const renderLibraryView = (standalone = false) =>
     <EntryLibraryView
+        pdfParseAction={pdfParseAction}
+        onOpenDailyDashboard={() => onOpenSurface({ kind: 'daily-dashboard' })}
         onOpenRelations={() => onOpenSurface({ kind: 'relations' })}
         activeTag={activeTag}
         section={librarySection} onSectionChange={onLibrarySectionChange}
@@ -639,6 +656,9 @@ export function ReaderPane({
         trashItems={trashItems}
         isRefreshingParseStatus={isRefreshingParseStatus}
         libraryView={libraryView}
+        onSelectView={onLibraryViewChange}
+        onClearFilters={onClearLibraryFilters}
+        onManageTags={() => onOpenSurface({ kind: 'tag-editor' })}
         filterResetKey={libraryFilterResetKey}
         recentReadingEntryIds={recentReadingEntryIds}
         selectedEntryId={selectedEntryId}
@@ -771,14 +791,14 @@ export function ReaderPane({
         tabValue={tabId}
         editorScopeKey={editorScopeOverride ?? surfaceKey(currentSurface)}
         markdownNoteRefreshById={markdownNoteRefreshById}
-        pdfJumpRequest={linkedPdfJump ?? externalPdfJump}
+        pdfJumpRequest={pairing?.relation === 'reader-sync' ? externalPdfJump : linkedPdfJump ?? externalPdfJump}
         pdfReaderReloadKey={pdfReaderReloadByEntryId[parsed.entryId] ?? 0}
         segmentRecordReloadKey={segmentNoteReloadByEntryId[parsed.entryId] ?? 0}
         pairedMarkdownNoteTarget={pairedMarkdownNoteTarget}
         focusedSegmentUid={focusedSegmentUid}
         initialRecordMode={initialRecordMode}
         linkedSegment={linkedSegment}
-        reflowSyncSegment={linkedReflowSegmentByEntryId[openEntry.id] ?? null}
+        reflowSyncSegment={pairing?.relation === 'reader-sync' ? null : linkedReflowSegmentByEntryId[openEntry.id] ?? null}
         splitReaderLinked={pairing?.relation === 'reader-sync'}
         segmentRecordsLinkedReader={linkedReaderKind}
         sharedSegmentNoteDrafts={segmentNoteDraftsByEntryId[openEntry.id] ?? {}}
@@ -838,28 +858,10 @@ export function ReaderPane({
           onActiveSegmentChange?.(segment);
           if (segment) {
             focusLinkedSegment(segment.entryId, segment.segmentUid, 'pdf');
-            if (pairedReflowPane) {
-              setLinkedReflowSegmentByEntryId((current) => ({
-                ...current,
-                [segment.entryId]: { requestKey: nextLinkedRequestKey(), segmentUid: segment.segmentUid,
-                  ...(segment.sentenceIndex === undefined ? {} : { sentenceIndex: segment.sentenceIndex }) }
-              }));
-            }
           }
         }}
-        onReflowSegmentClick={(segmentUid, pageIdx) => {
+        onReflowSegmentClick={(segmentUid) => {
           focusLinkedSegment(openEntry.id, segmentUid, 'reflow');
-          if (pairedPdfPane) {
-            setLinkedPdfJumpByEntryId((current) => ({
-              ...current,
-              [openEntry.id]: {
-                kind: 'segment',
-                pageIdx,
-                requestKey: nextLinkedRequestKey(),
-                segmentUid
-              }
-            }));
-          }
         }}
         onFocusLinkedSegment={(segmentUid, mode) => {
           focusLinkedSegment(openEntry.id, segmentUid, 'segment-notes', mode);
@@ -951,6 +953,8 @@ export function ReaderPane({
       parserEndpoint={parserEndpoint}
       tags={tags}
       onCreateEntry={onCreateEntry}
+      mineruDrop={mineruDrop}
+      onMineruDropConsumed={onMineruDropConsumed}
       onCreateEntryFinished={onCreateEntryFinished}
       onOpenMineruClientGuide={onOpenMineruClientGuide}
     />
@@ -1004,7 +1008,7 @@ export function ReaderPane({
       onManage={() => { onSelectTag(surface.tagId); onOpenSurface({ kind: 'tag-editor' }, pane); }} onTrash={onOpenTrash} />;
     if (surface.kind === 'owned-note') return <OwnedNoteSurfaceView key={`${workspaceRoot}:${noteTargetKey(surface.target)}`} root={workspaceRoot} target={surface.target} tags={tags} label={surface.label}
       onSource={onOpenSourceLink} onSaveEntryNote={onSaveMarkdownNote} onBinding={(key, binding) => setNoteBindings((current) => ({ ...current, [key]: binding }))}
-      onOwner={() => { if (surface.target.owner.kind === 'tag_reading') onOpenTagLibrary(surface.target.owner.tag_id, 'notes'); }} />;
+      onOwner={() => { if (surface.target.owner.kind === 'tag_reading') onOpenTagLibrary(surface.target.owner.tag_id, 'notes'); else if (surface.target.owner.kind === 'daily') onOpenSurface({ kind: 'daily-dashboard' }); }} />;
     if (surface.kind === 'tag-reading') {
       return <TagReadingWorkspaceView key={`${workspaceRoot}:${surface.tagId}`}
         root={workspaceRoot} tagId={surface.tagId} tags={tags} pane={pane}
@@ -1088,6 +1092,12 @@ export function ReaderPane({
       return <ReadingSessionContext.Provider value={note ? { active: surfaceLayout.focusedPane === pane, onReady: () => undefined, note } : null}>{reader}</ReadingSessionContext.Provider>;
     }
     switch (surface.kind) {
+      case 'empty':
+        return <EmptyWorkspace onOpen={target => onOpenSurface(target, pane)} />;
+      case 'daily-dashboard':
+        return <DailyDashboard key={workspaceRoot} root={workspaceRoot} status={status} entries={entries} active={surfaceLayout[pane]?.kind === 'daily-dashboard'}
+          onOpenEntry={onOpenEntryExplorer} onRefreshCatalog={onRefreshParseStatus}
+          onOpenLibrary={() => onOpenSurface({ kind: 'library' })} />;
       case 'relations':
         return <RelationsPage key={workspaceRoot} entries={entries} tags={tags} trashedEntries={trashedEntries}
           active={surfaceLayout[pane]?.kind === 'relations'}
@@ -1112,6 +1122,8 @@ export function ReaderPane({
             {renderSettingsPanel(surface)}
           </Suspense>
         </div>;
+      case 'external-import':
+        return workspaceRoot ? <OtherSourceImportPage key={workspaceRoot} root={workspaceRoot} scope={surfaceKey(surface)} onImported={onMineruImported} onOpenEntry={onOpenEntryExplorer} /> : <p className="p-4 text-sm text-muted-foreground">请先打开资料库。</p>;
       case 'create-entry':
         return <div className="h-full min-h-0 overflow-hidden">{renderCreateEntryPanel()}</div>;
       case 'mineru-client-guide':
@@ -1135,7 +1147,7 @@ export function ReaderPane({
     return (
         <RelationReturnFrame visible={hasRelationsPage && relationOrigins.has(key)} onReturn={() => onOpenSurface({ kind: 'relations' })}>
           <ReadingStateRetention key={workspaceRoot} storageKey={surface.kind === 'pdf' || surface.kind === 'reflow' ? readingViewStorageKey(workspaceRoot, key) : undefined}>
-            <ReadingViewSession surface={surface} workspaceRoot={workspaceRoot} active={activeSurface}>
+            <ReadingViewSession surface={surface} workspaceRoot={workspaceRoot} active={activeSurface} linkMode={readerPreferences.readingLinkMode}>
             {shouldMount ? renderSurface(surface, sibling, pane) : null}
             </ReadingViewSession>
           </ReadingStateRetention>

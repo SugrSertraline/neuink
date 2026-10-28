@@ -7,7 +7,7 @@ const path = require('node:path');
 const { REQUIRED_FILES, DEFAULT_SOURCE, verifyResources, copyResources, copyOptionalResources,
   inspectResources, assertEmbeddingResources, prepareResources, writeAvailabilityManifest } = require('./onboarding-resources.cjs');
 const { resourceArguments } = require('./tauri.cjs');
-const BASE_RESOURCES = ['resources/embedding-models/default/**/*', 'resources/onboarding-availability.json'];
+const BASE_RESOURCES = ['resources/embedding-models/default/**/*', 'resources/unrar-license.txt', 'resources/onboarding-availability.json'];
 
 function fixture(t) {
   const directory = mkdtempSync(path.join(os.tmpdir(), 'neuink-packaging-'));

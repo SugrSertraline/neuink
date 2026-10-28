@@ -3,8 +3,8 @@ import { ChevronLeft, ChevronRight, Bookmark } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { scrollToPage } from './readerUtils';
 
-export function PdfBookControls({ previousPage, nextPage, scrollRef, currentPage, pageCount, resumePageIdx, width }:
-  { previousPage?: number; nextPage?: number; scrollRef: RefObject<HTMLDivElement>; currentPage: number; pageCount: number; resumePageIdx?: number | null; width?: number }) {
+export function PdfBookControls({ previousPage, nextPage, scrollRef, currentPage, pageCount, resumePageIdx, width, onClose }:
+  { previousPage?: number; nextPage?: number; scrollRef: RefObject<HTMLDivElement>; currentPage: number; pageCount: number; resumePageIdx?: number | null; width?: number; onClose?: () => void }) {
   const drag = useRef<{ x: number; page: number; pointerId: number } | null>(null);
   const suppressClick = useRef(false);
   return <div className="pdf-book-controls" aria-label="书页翻阅" style={{ width: width === undefined ? undefined : width + 88 }}>
@@ -36,6 +36,7 @@ export function PdfBookControls({ previousPage, nextPage, scrollRef, currentPage
         }}>
         {side === 'previous' ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
       </Button>)}
+    {onClose && <Button className="pdf-book-close" size="xs" variant="plain" onClick={onClose}>合上书本</Button>}
     <span className="pdf-book-folio" aria-live="polite">{currentPage} / {pageCount}</span>
     {resumePageIdx !== undefined && resumePageIdx !== null && resumePageIdx >= 0 && resumePageIdx < pageCount ?
       <Button className="pdf-reading-ribbon" size="xs" variant="plain" title={`阅读书签：上次读到第 ${resumePageIdx + 1} 页`}

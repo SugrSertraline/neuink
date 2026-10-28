@@ -1,10 +1,10 @@
-import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { SourceSegment } from '@/shared/types/domain';
 import { usePersistReadingSnapshot, useRetainedReadingSnapshot } from './ReadingStateRetention';
-import { useReadingViewSession, publishReadingView, subscribeReadingView } from './ReadingViewSession';
+import { useReadingViewSession, publishReadingView, publishReadingTarget, subscribeReadingView } from './ReadingViewSession';
 
-export type ReadingTarget = { pageIdx: number; segmentUid?: string; rect?: readonly [number, number, number, number]; focus?: boolean };
-export type ReadingPosition = { pageIdx: number; segmentUid?: string; segmentOffset?: number; offset: number; left: number; zoom?: number };
+export type ReadingTarget = { pageIdx: number; segmentUid?: string; sentenceIndex?: number; rect?: readonly [number, number, number, number]; focus?: boolean };
+export type ReadingPosition = { pageIdx: number; segmentUid?: string; segmentOffset?: number; offset: number; left: number; zoom?: number; sourceKind?: 'pdf' | 'reflow' };
 export type ReadingAdapter = {
   capture: () => ReadingPosition | null;
   restore: (position: ReadingPosition) => void;
@@ -16,6 +16,8 @@ type Navigation = {
   back: () => void; forward: () => void;
   remember: () => void;
   beginUserNavigation: () => void;
+  linkTarget: (target: ReadingTarget) => void;
+  linkedTarget: (ReadingTarget & { requestKey: number }) | null;
   navigate: (target: ReadingTarget, options?: { localOnly?: boolean }) => boolean;
   register: (adapter: ReadingAdapter, scroll?: HTMLElement | null) => () => void;
   hasRetainedPosition: boolean;
@@ -42,9 +44,20 @@ export function ReadingNavigationScope({ children, retentionKey }: { children: R
   const cancelPending = useRef<() => void>(() => {});
   const claimNavigation = useRef<(localOnly?: boolean) => void>(() => {});
   const localNavigation = useRef(false);
+  const explicitNavigation = useRef(false);
+  const resetLink = useRef<() => void>(() => {});
+  const previousLinkMode = useRef(view?.linkMode);
+  const [linkedTarget, setLinkedTarget] = useState<(ReadingTarget & { requestKey: number }) | null>(null);
   const [, refresh] = useState(0);
+  useLayoutEffect(() => {
+    if (previousLinkMode.current === view?.linkMode) return;
+    previousLinkMode.current = view?.linkMode;
+    // Switching policy keeps both anchors and cancels delayed peer corrections.
+    resetLink.current();
+  }, [view?.linkMode]);
   const beginUserNavigation = useCallback(() => {
     claimNavigation.current(false);
+    explicitNavigation.current = true;
     needsRestore.current = false;
     cancelPending.current();
   }, []);
@@ -60,6 +73,7 @@ export function ReadingNavigationScope({ children, retentionKey }: { children: R
     if (!adapter.current) return;
     needsRestore.current = false;
     claimNavigation.current();
+    explicitNavigation.current = true;
     cancelPending.current();
     const position = stacks.current[direction].pop();
     const current = adapter.current?.capture();
@@ -76,21 +90,36 @@ export function ReadingNavigationScope({ children, retentionKey }: { children: R
     claimNavigation.current = (localOnly = false) => { following = false; localNavigation.current = localOnly; };
     const identity = viewRef.current;
     const unlink = identity ? subscribeReadingView(identity.group, { id: identity.id,
-      capture: () => viewRef.current?.active && !needsRestore.current && !restoring ? next.capture() : null,
+      capture: () => {
+        const current = viewRef.current;
+        const position = current?.active && current.linkMode === 'scroll' && !needsRestore.current && !restoring ? next.capture() : null;
+        return position ? { ...position, sourceKind: current?.kind as 'pdf' | 'reflow' } : null;
+      },
       receive: position => {
       const current = viewRef.current;
-      if (!current?.active || !scroll || scroll.clientWidth <= 0 || needsRestore.current) return;
+      if (!current?.active || current.linkMode !== 'scroll' || !scroll || scroll.clientWidth <= 0 || needsRestore.current) return;
       following = true;
       needsRestore.current = false;
       const local = next.capture();
-      next.restore({ ...position, zoom: undefined, left: local?.left ?? 0 });
+      const { sourceKind, ...anchor } = position;
+      next.restore({ ...anchor, ...(sourceKind && sourceKind !== current.kind ? { sourceKind } : {}), zoom: undefined, left: local?.left ?? 0 });
+    }, receiveTarget: target => {
+      if (!viewRef.current?.active || !scroll || scroll.clientWidth <= 0) return;
+      cancelPending.current(); needsRestore.current = false;
+      following = true; localNavigation.current = true; explicitNavigation.current = false;
+      if (next.navigate({ ...target, focus: false })) {
+        setLinkedTarget(previous => ({ ...target, requestKey: (previous?.requestKey ?? 0) + 1 }));
+      }
     } }) : () => {};
     const capture = (immediate = false, broadcast = true) => {
       if (restoring || (scroll && scroll.clientWidth <= 0)) return;
       const position = next.capture();
       if (position) { snapshot.position = { ...position }; persistSnapshot?.(immediate); }
       const current = viewRef.current;
-      if (broadcast && position && current?.active && !following && !localNavigation.current) publishReadingView(current.group, current.id, position);
+      if (broadcast && position && current?.active && !following && !localNavigation.current) {
+        if (current.linkMode === 'scroll') publishReadingView(current.group, current.id, { ...position, sourceKind: current.kind as 'pdf' | 'reflow' });
+        else if (explicitNavigation.current) publishReadingTarget(current.group, current.id, { pageIdx: position.pageIdx, segmentUid: position.segmentUid });
+      }
     };
     const onScroll = () => {
       // The virtualizer commits measured rows during the scroll event. Reading
@@ -100,7 +129,8 @@ export function ReadingNavigationScope({ children, retentionKey }: { children: R
     };
     const cancel = () => { cancelAnimationFrame(frame); restoring = false; next.cancelRestore?.(); };
     cancelPending.current = cancel;
-    const onInput = () => { following = false; localNavigation.current = false; needsRestore.current = false; cancel(); };
+    const onInput = () => { following = false; localNavigation.current = false; explicitNavigation.current = false; needsRestore.current = false; setLinkedTarget(null); cancel(); };
+    resetLink.current = () => { cancelAnimationFrame(captureFrame); explicitNavigation.current = false; localNavigation.current = true; setLinkedTarget(null); if (!restoring) cancel(); };
     const onKey = (event: KeyboardEvent) => {
       if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) onInput();
     };
@@ -142,7 +172,7 @@ export function ReadingNavigationScope({ children, retentionKey }: { children: R
       window.removeEventListener('beforeunload', flush);
       document.removeEventListener('visibilitychange', onHidden);
       persistSnapshot?.(true);
-      if (adapter.current === next) { adapter.current = null; cancelPending.current = () => {}; }
+      if (adapter.current === next) { adapter.current = null; cancelPending.current = () => {}; resetLink.current = () => {}; }
     };
   }, []);
   const isJumpHandled = useCallback((key: string) => snapshot.lastJump === key, [snapshot]);
@@ -153,17 +183,30 @@ export function ReadingNavigationScope({ children, retentionKey }: { children: R
     snapshot.lastJump = key; needsRestore.current = false; cancelPending.current();
   }, [snapshot]);
   const navigate = useCallback((target: ReadingTarget, options?: { localOnly?: boolean }) => {
+    setLinkedTarget(null);
     claimNavigation.current(options?.localOnly);
     needsRestore.current = false; cancelPending.current();
     const position = adapter.current?.capture();
     if (!adapter.current?.navigate(target)) return false;
+    const current = viewRef.current;
+    if (!options?.localOnly && current?.active) {
+      publishReadingTarget(current.group, current.id, target);
+      localNavigation.current = true;
+    }
     if (position && !samePosition(stacks.current.back[stacks.current.back.length - 1], position)) {
       stacks.current.back = [...stacks.current.back.slice(-(LIMIT - 1)), position];
     }
     stacks.current.forward = []; refresh(n => n + 1); return true;
   }, []);
+  const linkTarget = useCallback((target: ReadingTarget) => {
+    const current = viewRef.current;
+    if (!current?.active) return;
+    claimNavigation.current(true);
+    explicitNavigation.current = false;
+    publishReadingTarget(current.group, current.id, target);
+  }, []);
   return <Context.Provider value={{ canBack: stacks.current.back.length > 0, canForward: stacks.current.forward.length > 0,
-    back: () => travel('back'), forward: () => travel('forward'), remember, beginUserNavigation, navigate, register,
+    back: () => travel('back'), forward: () => travel('forward'), remember, beginUserNavigation, linkTarget, linkedTarget, navigate, register,
     hasRetainedPosition, isJumpHandled, markJumpHandled }}>
     <div className="contents" onKeyDown={event => {
       if (!event.altKey || event.ctrlKey || event.metaKey || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;

@@ -1,6 +1,11 @@
 pub mod agent_execution;
 pub mod annotation_index;
 pub mod atomic_write;
+pub mod daily;
+pub mod deep_research;
+pub mod daily_note;
+pub mod entertainment;
+pub mod recommendations;
 pub mod entry_meta;
 mod downloaded_pdf;
 pub mod error;
@@ -28,6 +33,7 @@ pub mod tag_reading;
 mod tag_transaction;
 pub mod trash;
 pub mod workspace;
+pub mod zotero;
 
 pub use annotation_index::{
     AnnotationIndexRecord, AnnotationSegmentContext, AnnotationSegmentStatus,

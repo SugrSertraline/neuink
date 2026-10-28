@@ -18,12 +18,12 @@ const OPTIONS: Array<{
 }> = [
   {
     icon: Sparkles,
-    label: 'Hybrid',
+    label: '混合检索',
     mode: 'hybrid'
   },
   {
     icon: Search,
-    label: 'Keyword',
+    label: '关键词',
     mode: 'keyword'
   }
 ];
@@ -36,7 +36,7 @@ export function SearchModeControl({
 }: SearchModeControlProps) {
   return (
     <ToggleGroup
-      aria-label="Search mode"
+      aria-label="检索模式"
       className={cn('rounded-md border bg-muted p-0.5', className)}
       disabled={disabled}
       size="sm"

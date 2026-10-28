@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub enum NoteOwner {
     Entry { entry_id: EntryId },
     TagReading { tag_id: TagId },
+    Daily { date: String },
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

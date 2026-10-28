@@ -7,6 +7,17 @@ import { equalReaderPreferences, persistReaderPreferences, readStoredReaderPrefe
 beforeEach(() => window.localStorage.clear());
 
 describe('reader preferences', () => {
+  it('defaults to scroll linking, persists click linking and rejects invalid modes', () => {
+    const original = readStoredReaderPreferences();
+    expect(original.readingLinkMode).toBe('scroll');
+    const changed = { ...original, readingLinkMode: 'click' as const };
+    expect(equalReaderPreferences(original, changed)).toBe(false);
+    persistReaderPreferences(changed); expect(readStoredReaderPreferences()).toEqual(changed);
+    for (const value of [undefined, 'off', 0]) {
+      localStorage.setItem('neuink.reader.preferences', JSON.stringify({ readingLinkMode: value }));
+      expect(readStoredReaderPreferences().readingLinkMode).toBe('scroll');
+    }
+  });
   it('defaults to PDF opening with missing or invalid stored preferences', () => {
     expect(readStoredReaderPreferences().openEntryPdfByDefault).toBe(true);
     for (const stored of [{ hoverPreviewEnabled: false }, { openEntryPdfByDefault: 'false' }]) {
@@ -133,13 +144,13 @@ describe('reader preferences', () => {
     const preferences = readStoredReaderPreferences();
     persistReaderPreferences({
       ...preferences,
-      pdfHoverPreviewFontSize: 'large',
-      pdfHoverPreviewSize: 'compact'
+      pdfHoverPreviewFontSize: 113,
+      pdfHoverPreviewSize: 97
     });
 
     const stored = readStoredReaderPreferences();
-    expect(stored.pdfHoverPreviewFontSize).toBe('large');
-    expect(stored.pdfHoverPreviewSize).toBe('compact');
+    expect(stored.pdfHoverPreviewFontSize).toBe(113);
+    expect(stored.pdfHoverPreviewSize).toBe(97);
   });
 
   it('rejects invalid PDF hover preview sizes', () => {
@@ -152,8 +163,16 @@ describe('reader preferences', () => {
     );
 
     const stored = readStoredReaderPreferences();
-    expect(stored.pdfHoverPreviewFontSize).toBe('standard');
-    expect(stored.pdfHoverPreviewSize).toBe('standard');
+    expect(stored.pdfHoverPreviewFontSize).toBe(100);
+    expect(stored.pdfHoverPreviewSize).toBe(100);
+  });
+
+  it.each([
+    ['small', 'compact', 85, 82], ['standard', 'standard', 100, 100], ['large', 'large', 120, 120],
+    [NaN, Infinity, 100, 100], [-20, 500, 80, 160], [114.6, 87.2, 115, 87],
+  ])('migrates and bounds stored preview preferences (%s, %s)', (font, card, expectedFont, expectedCard) => {
+    window.localStorage.setItem('neuink.reader.preferences', JSON.stringify({ pdfHoverPreviewFontSize: font, pdfHoverPreviewSize: card }));
+    expect(readStoredReaderPreferences()).toMatchObject({ pdfHoverPreviewFontSize: expectedFont, pdfHoverPreviewSize: expectedCard });
   });
 
   it('defaults reflow appearance to 16px text on a white background', () => {

@@ -1,7 +1,7 @@
 import { workspaceStorageIdentity } from '@/shared/lib/workspaceStorageIdentity';
 import { PaperReferencesProvider } from './navigation/PaperReferences';
 import type { ComponentProps } from 'react';
-import { ReadingNavigationScope, useReadingNavigation } from './navigation/ReadingNavigation';
+import { ReadingNavigationScope, segmentTarget, useReadingNavigation } from './navigation/ReadingNavigation';
 import { ReadingNavigationControls } from './navigation/ReadingNavigationControls';
 import { usePdfReadingNavigation } from './navigation/usePdfReadingNavigation';
 import { readingAssistantContext } from './readingAssistantContext';
@@ -340,6 +340,11 @@ function MineruPdfReaderBody({
     apply: applyRecommendedTags,
     busy: tagSuggestionBusy,
     error: tagSuggestionError,
+    generate: generateRecommendedTags,
+    generatedAt: tagSuggestionGeneratedAt,
+    disabledReason: tagSuggestionDisabledReason,
+    phase: tagSuggestionPhase,
+    showInReader: showTagSuggestionsInReader,
     discard: dismissTagSuggestions,
     open: tagSuggestionsOpen,
     recommendations: recommendedTags,
@@ -758,6 +763,7 @@ function MineruPdfReaderBody({
       mode: noteMode === "annotation" ? "annotation" : "segment",
       sentenceIndex,
     })) return;
+    readingNavigation?.linkTarget({ ...segmentTarget(segment), sentenceIndex });
     if (readerPreferences.segmentNoteOpenGesture === 'single' && !syncOnlyOnSegmentClick) {
       setSegmentOverlayOpen(true);
     }
@@ -1040,6 +1046,11 @@ function MineruPdfReaderBody({
         selectedRecommendedTagPaths={[...selectedSuggestedTagPaths]}
         tagSuggestionBusy={tagSuggestionBusy}
         tagSuggestionError={tagSuggestionError}
+        tagSuggestionDisabledReason={tagSuggestionDisabledReason}
+        tagSuggestionGeneratedAt={tagSuggestionGeneratedAt}
+        tagSuggestionPhase={tagSuggestionPhase}
+        showTagSuggestionsInReader={showTagSuggestionsInReader}
+        onGenerateRecommendedTags={() => void generateRecommendedTags()}
         tagSuggestionsOpen={tagSuggestionsOpen}
         translation={translation}
         translationBusy={translationBusy}

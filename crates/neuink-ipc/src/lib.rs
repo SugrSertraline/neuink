@@ -1,9 +1,18 @@
 pub mod commands;
 pub mod storage;
+pub mod translation_log;
 
 pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     let handler: Box<dyn Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync> =
         Box::new(tauri::generate_handler![
+            commands::zotero::zotero,
+            commands::mineru::mineru,
+            commands::import_preview::read_import_preview,
+            translation_log::log_translation_failure,
+            translation_log::translation_log_directory,
+            commands::daily::daily_workspace,
+            commands::deep_research::deep_research,
+            commands::recommendations::daily_recommendations,
             commands::local_agent::detect_claude_code,
             commands::local_agent::detect_local_agent,
             commands::local_agent::runtime::run_local_agent,
@@ -173,6 +182,9 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
             commands::translation::read_entry_translation,
             commands::translation::run_entry_translation,
             commands::translation::translate_entry_segment,
+            commands::translation::diagnostics::prepare_translation_model_test,
+            commands::translation::diagnostics::test_translation_model,
+            commands::translation::diagnostics::cancel_translation_model_test,
             commands::translation::save_translation_context,
             commands::translation::upsert_translated_segments,
         ]);

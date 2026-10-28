@@ -4,6 +4,7 @@ type Panel = { name: string; open: boolean; weight: number; element: HTMLElement
 type PanelGroup = {
   panels: Panel[];
   weights: Record<string, number>;
+  heights: Record<string, number>;
   register: (panel: Panel) => () => void;
   resize: (name: string, delta: number) => void;
   start: (name: string, event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -14,7 +15,8 @@ export const useSidebarPanelGroup = () => useContext(Context);
 /** Owns only panel proportions and resize gestures; panel bodies keep their scroll and sessions. */
 export function SidebarPanelGroup({ children }: { children: ReactNode }) {
   const [panels, setPanels] = useState<Panel[]>([]);
-  const [weights, setWeights] = useState<Record<string, number>>({});
+  const [layout, setLayout] = useState<{ weights: Record<string, number>; heights: Record<string, number> }>({ weights: {}, heights: {} });
+  const { weights, heights } = layout;
   const groupRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<(() => void) | null>(null);
   const register = useCallback((panel: Panel) => {
@@ -46,7 +48,12 @@ export function SidebarPanelGroup({ children }: { children: ReactNode }) {
   const apply = (snapshot: NonNullable<ReturnType<typeof measure>>, delta: number) => {
     const upperHeight = Math.max(snapshot.minimum, Math.min(snapshot.pairHeight - snapshot.minimum, snapshot.heights[snapshot.upper.name] + delta));
     const heights = { ...snapshot.heights, [snapshot.upper.name]: upperHeight, [snapshot.lower.name]: snapshot.pairHeight - upperHeight };
-    setWeights(current => ({ ...current, ...Object.fromEntries(Object.entries(heights).map(([name, height]) => [name, height / snapshot.total * snapshot.totalWeight])) }));
+    // Freeze the measured stack before resizing: content caps and free space must
+    // not redistribute the other panels while the user moves this separator.
+    setLayout(current => ({
+      heights: { ...current.heights, ...heights },
+      weights: { ...current.weights, ...Object.fromEntries(Object.entries(heights).map(([name, height]) => [name, height / snapshot.total * snapshot.totalWeight])) },
+    }));
   };
   const resize = (name: string, delta: number) => {
     const snapshot = measure(name);
@@ -60,7 +67,7 @@ export function SidebarPanelGroup({ children }: { children: ReactNode }) {
     event.preventDefault();
     const target = event.currentTarget;
     target.focus({ preventScroll: true });
-    const pointerId = event.pointerId, startY = event.clientY, original = weights;
+    const pointerId = event.pointerId, startY = event.clientY, original = layout;
     const cursor = document.body.style.cursor, userSelect = document.body.style.userSelect;
     let moved = false;
     document.body.style.cursor = 'row-resize';
@@ -79,7 +86,7 @@ export function SidebarPanelGroup({ children }: { children: ReactNode }) {
       document.body.style.userSelect = userSelect;
       if (groupElement) delete groupElement.dataset.resizing;
       cancelRef.current = null;
-      if (cancel && moved) setWeights(original);
+      if (cancel && moved) setLayout(original);
     };
     const move = (next: PointerEvent) => {
       if (next.pointerId !== pointerId) return;
@@ -103,7 +110,7 @@ export function SidebarPanelGroup({ children }: { children: ReactNode }) {
     window.addEventListener('blur', cancelled);
     window.addEventListener('resize', cancelled);
   };
-  return <Context.Provider value={{ panels, weights, register, resize, start }}>
+  return <Context.Provider value={{ panels, weights, heights, register, resize, start }}>
     <div ref={groupRef} className="flex min-h-0 flex-1 flex-col overflow-hidden" data-sidebar-panel-group>{children}</div>
   </Context.Provider>;
 }

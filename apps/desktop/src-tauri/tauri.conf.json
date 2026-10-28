@@ -50,6 +50,7 @@
     "targets": "all",
     "resources": [
       "resources/embedding-models/default/**/*",
+      "resources/unrar-license.txt",
       "resources/onboarding-availability.json"
     ],
     "icon": [

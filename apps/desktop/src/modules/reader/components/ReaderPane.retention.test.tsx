@@ -6,6 +6,7 @@ import { ReaderPane } from './ReaderPane';
 import { workspaceSurfaceReducer, type WorkspaceSurfaceLayout } from '@/app/workspaceSurface';
 import type { ReadingNoteBinding } from '../parallel-reading/ReadingSessionContext';
 import { noteTargetKey } from '@/shared/lib/noteOwner';
+import { readStoredReaderPreferences } from '@/shared/lib/readerPreferences';
 
 const binding = vi.hoisted(() => ({ set: null as null | ((key: string, value: ReadingNoteBinding | null) => void) }));
 vi.mock('./EntryWorkspaceView', () => ({ EntryWorkspaceView: ({ editorScopeKey, pdfJumpRequest }: { editorScopeKey: string; pdfJumpRequest: { requestKey: number } | null }) => <div data-testid="reader" data-scope={editorScopeKey} data-jump={pdfJumpRequest?.requestKey}><input defaultValue="草稿" /></div> }));
@@ -20,7 +21,7 @@ it('delivers source navigation to exactly one retained reader copy', async () =>
   const layout: WorkspaceSurfaceLayout = { focusedPane: 'right', left: original, leftTabs: [original, reflow], right: copy, rightTabs: [copy] };
   const props = { entries: [{ id: 'e', title: '论文', contents: [] }], tags: [], trashItems: [], workspaceRoot: null,
     markdownNoteRefreshById: {}, pdfJumpByEntryId: {}, pdfReaderReloadByEntryId: {}, sidePane: { target: null },
-    onFocusSurface: vi.fn(), onOpenSurface: vi.fn() } as unknown as ComponentProps<typeof ReaderPane>;
+    onFocusSurface: vi.fn(), onOpenSurface: vi.fn(), readerPreferences: readStoredReaderPreferences() } as unknown as ComponentProps<typeof ReaderPane>;
   const ui = render(<ReaderPane {...props} surfaceLayout={layout} />);
   await ui.findAllByTestId('reader');
   const pdfJumpByEntryId = { e: { kind: 'page' as const, pageIdx: 3, requestKey: 7, targetSurfaceKey: 'pdf:e:view:copy' } };
@@ -34,7 +35,7 @@ it('never recreates the reader when a paired note binding arrives, changes or di
   let layout: WorkspaceSurfaceLayout = { focusedPane: 'left', left: { kind: 'pdf', entryId: 'e' }, leftTabs: [{ kind: 'pdf', entryId: 'e' }], right: null, rightTabs: [] };
   const props = { entries: [{ id: 'e', title: '论文', contents: [] }], tags: [], trashItems: [], workspaceRoot: null,
     markdownNoteRefreshById: {}, pdfJumpByEntryId: {}, pdfReaderReloadByEntryId: {}, sidePane: { target: null },
-    onFocusSurface: vi.fn(), onOpenSurface: vi.fn() } as unknown as ComponentProps<typeof ReaderPane>;
+    onFocusSurface: vi.fn(), onOpenSurface: vi.fn(), readerPreferences: readStoredReaderPreferences() } as unknown as ComponentProps<typeof ReaderPane>;
   const ui = render(<ReaderPane {...props} surfaceLayout={layout} />);
   const original = await ui.findByTestId('reader'); original.scrollTop = 2500;
   const target = { owner: { kind: 'entry' as const, entry_id: 'e' }, note_id: 'n' };

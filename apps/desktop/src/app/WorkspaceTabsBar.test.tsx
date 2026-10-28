@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
-import { useReducer } from 'react';
+import { useReducer, useState } from 'react';
+import type { ReadingLinkMode } from '@/shared/lib/readerPreferences';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { WorkspaceTabsBar } from './WorkspaceTabsBar';
@@ -25,6 +26,7 @@ beforeAll(() => {
     value: class {
       disconnect() {}
       observe() {}
+      unobserve() {}
     }
   });
   Object.defineProperty(document, 'elementFromPoint', {
@@ -49,6 +51,35 @@ const layout: WorkspaceSurfaceLayout = {
   rightTabs: []
 };
 
+it.each(['pdf', 'reflow'] as const)('cycles the chain button for a same-paper %s pair without selecting or moving tabs', kind => {
+  const select = vi.fn(), move = vi.fn();
+  function LinkedTabs() {
+    const [mode, setMode] = useState<ReadingLinkMode>('scroll');
+    const right = { kind, entryId: 'a', viewId: 'copy' };
+    return <TooltipProvider><WorkspaceTabsBar entries={[]} layout={{ ...layout, right, rightTabs: [right] }}
+      readingLinkMode={mode} onReadingLinkModeChange={setMode} onClose={vi.fn()} onCloseOthers={vi.fn()}
+      onClosePane={vi.fn()} onMove={move} onSelect={select} onSwap={vi.fn()} /></TooltipProvider>;
+  }
+  const ui = render(<LinkedTabs />);
+  const button = ui.getByRole('button', { name: '分屏联动：同步滚动' });
+  button.focus(); fireEvent.click(button);
+  expect(ui.getByRole('button', { name: '分屏联动：点击联动' }).getAttribute('aria-pressed')).toBe('false');
+  expect(document.activeElement).toBe(button);
+  fireEvent.click(button); expect(button.getAttribute('aria-pressed')).toBe('true');
+  expect(select).not.toHaveBeenCalled(); expect(move).not.toHaveBeenCalled();
+});
+
+it('does not offer scroll linking for different papers or note citations', () => {
+  const renderTabs = (right: WorkspaceSurfaceLayout['left']) => <TooltipProvider><WorkspaceTabsBar entries={[]}
+    layout={{ ...layout, right, rightTabs: [right] }} onReadingLinkModeChange={vi.fn()}
+    onClose={vi.fn()} onCloseOthers={vi.fn()} onClosePane={vi.fn()} onMove={vi.fn()} onSelect={vi.fn()} onSwap={vi.fn()} /></TooltipProvider>;
+  const ui = render(renderTabs({ kind: 'pdf', entryId: 'b' }));
+  expect(ui.queryByRole('button', { name: /分屏联动/ })).toBeNull();
+  ui.rerender(renderTabs({ kind: 'note', entryId: 'a', noteId: 'n' }));
+  expect(ui.queryByRole('button', { name: /分屏联动/ })).toBeNull();
+  expect(ui.getByRole('status').getAttribute('aria-label')).toBe('原文与笔记引用联动');
+});
+
 function setup(options: {
   entry?: { id: string; title: string; pdfFileName?: string | null };
   layout?: WorkspaceSurfaceLayout;
@@ -60,13 +91,14 @@ function setup(options: {
   const onCloseToRight = vi.fn();
   const onAddToAssistantContext = vi.fn();
   const onSelect = vi.fn();
+  const onClose = vi.fn();
   const result = render(
     <TooltipProvider>
       <WorkspaceTabsBar
         entries={[options.entry ?? { id: 'a', title: 'Entry A', pdfFileName: 'paper.pdf' }]}
         layout={options.layout ?? layout}
         onAddToAssistantContext={onAddToAssistantContext}
-        onClose={vi.fn()}
+        onClose={onClose}
         onCloseOthers={vi.fn()}
         onCloseToRight={onCloseToRight}
         onClosePane={vi.fn()}
@@ -87,8 +119,15 @@ function setup(options: {
     Object.defineProperty(tab, 'offsetLeft', { configurable: true, value: index * 180 });
     Object.defineProperty(tab, 'offsetWidth', { configurable: true, value: 176 });
   });
-  return { ...result, onAddToAssistantContext, onCloseToRight, onMove, onDuplicate, onSelect, onSetPinned, onSwitchEntryView, tabs };
+  return { ...result, onAddToAssistantContext, onClose, onCloseToRight, onMove, onDuplicate, onSelect, onSetPinned, onSwitchEntryView, tabs };
 }
+
+it.each([{ kind: 'library' as const, label: '条目库' }, { kind: 'daily-dashboard' as const, label: '每日看板' }])('allows closing $label using its ordinary tab control', ({ kind, label }) => {
+  const surface = { kind };
+  const ui = setup({ layout: { left: surface, leftTabs: [surface], right: null, rightTabs: [], focusedPane: 'left' } });
+  fireEvent.click(ui.getByRole('button', { name: `关闭${label}` }));
+  expect(ui.onClose).toHaveBeenLastCalledWith('left', surface);
+});
 
 function setupReducer() {
   const initial: WorkspaceSurfaceLayout = {

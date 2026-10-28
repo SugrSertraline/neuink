@@ -339,6 +339,17 @@
   --app-hover: #eee7da;
   --app-active: #e2d6c4;
   --app-brand: #8b403d;
+  --chart-1: #99613f;
+  --chart-2: #c39556;
+  --chart-3: #527d72;
+  --chart-4: #7b7192;
+  --chart-5: #a58c53;
+  --atelier-chart-highlight: #fffaf0;
+  --atelier-chart-shadow: #573d2b45;
+  --atelier-chart-panel: linear-gradient(155deg, #fffcf4, #eee5d7);
+  --atelier-chart-plot: linear-gradient(180deg, #ede5d8, #faf5e9 65%, #eee5d6);
+  --atelier-chart-well: #ece3d4;
+  --atelier-chart-heat: #745038;
   --atelier-highlight: #ffffff88;
   --atelier-shadow: #46332238;
   --atelier-shadow-soft: #4633221c;

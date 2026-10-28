@@ -1,13 +1,13 @@
 //! Application-owned research tools: no executable packages and no model-controlled paths.
 mod crossref;
-mod free_web;
+pub(super) mod free_web;
 mod import_job;
 mod imports;
 pub(super) mod network;
-mod paper_search;
-mod providers;
-mod settings;
-use serde::{Deserialize, Serialize};
+pub(super) mod paper_search;
+pub(super) mod providers;
+pub(super) mod settings;
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
@@ -17,19 +17,7 @@ use std::{
 };
 use tauri::{AppHandle, Runtime};
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct Paper {
-    pub id: String,
-    pub title: String,
-    pub authors: Vec<String>,
-    pub year: String,
-    pub abstract_text: String,
-    pub doi: String,
-    pub url: String,
-    pub pdf_url: Option<String>,
-    pub provider: String,
-    pub evidence_level: String,
-}
+pub use neuink_domain::recommendations::Paper;
 struct CachedPaper {
     root: PathBuf,
     paper: Paper,
@@ -77,7 +65,7 @@ fn canonical(root: &PathBuf) -> Result<PathBuf, String> {
     neuink_workspace::Workspace::open(root).map_err(|_| "资料库不可用".to_string())?;
     root.canonicalize().map_err(|_| "资料库不可用".into())
 }
-fn remember(root: &PathBuf, papers: &[Paper]) -> Result<(), String> {
+pub(super) fn remember(root: &PathBuf, papers: &[Paper]) -> Result<(), String> {
     let mut c = cache().lock().map_err(|_| "检索缓存不可用")?;
     c.retain(|p| p.at.elapsed() < Duration::from_secs(3600));
     for paper in papers {

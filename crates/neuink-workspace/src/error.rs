@@ -5,6 +5,12 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum WorkspaceError {
     #[error("{0}")]
+    Zotero(String),
+    #[error("{0}")]
+    Daily(String),
+    #[error("invalid reading session: {0}")]
+    InvalidReadingSession(String),
+    #[error("{0}")]
     Onboarding(String),
     #[error("{0}")]
     PdfQueue(String),

@@ -25,11 +25,23 @@ describe('workspace browser popup routing', () => {
   });
 
   it('follows a source moved into the other pane before the request is handled', () => {
-    const moved = workspaceSurfaceReducer(split(), { type: 'move', key: 'browser:source', pane: 'right' });
+    const before = split();
+    before.leftTabs = [...before.leftTabs, { kind: 'library' }];
+    const moved = workspaceSurfaceReducer(before, { type: 'move', key: 'browser:source', pane: 'right' });
     const result = workspaceSurfaceReducer(moved, request());
     expect(result.right).toMatchObject({ kind: 'browser', id: 'child' });
     expect(result.rightTabs.some(tab => tab.kind === 'browser' && tab.id === 'source')).toBe(true);
     expect(result.left).toBe(moved.left);
+  });
+
+  it('follows the surviving browser pane when the last left tab moves and the panes merge', () => {
+    const moved = workspaceSurfaceReducer(split(), { type: 'move', key: 'browser:source', pane: 'right' });
+    expect(moved.right).toBeNull();
+    const result = workspaceSurfaceReducer(moved, request());
+    expect(result.left).toMatchObject({ kind: 'browser', id: 'child' });
+    expect(result.leftTabs.filter(tab => tab.kind === 'browser').map(tab => tab.id)).toEqual(['source', 'other', 'child']);
+    expect(result.right).toBeNull();
+    expect(result.leftTabs.some(tab => tab.kind === 'library')).toBe(false);
   });
 
   it('drops requests from closed or hidden sources and keeps unrelated layout unchanged', () => {

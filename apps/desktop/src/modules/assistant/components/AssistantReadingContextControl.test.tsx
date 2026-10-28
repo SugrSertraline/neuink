@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { AssistantReadingContextControl } from './AssistantReadingContextControl';
 import { resolveAssistantReadingContext, type AssistantReadingChoice, type AssistantReadingContext } from './assistantReadingContext';
 import type { LibraryEntry } from '@/modules/library/components/LibrarySidebar';
 import type { TagMeta } from '@/shared/types/domain';
+import { ToastContext } from '@/shared/hooks/useToast';
 
 beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
@@ -23,10 +24,27 @@ function show(overrides: Partial<AssistantReadingContext> = {}) {
 it('shows a nonblocking notice for queued, failed and canceled PDF parsing', () => {
   for (const status of ['Queued', 'Parsing', 'Failed', 'Canceled'] as const) {
     const ui = show({ entry: { ...entry, status } });
-    expect(screen.getByRole('status').textContent).toContain('仍可让助手按页读取或搜索文字');
+    expect(screen.getByRole('status').textContent).toContain('提问效果可能较差');
     expect((screen.getByRole('button', { name: '更换阅读对象：Paper' }) as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByRole('alert')).toBeNull(); ui.unmount();
   }
+});
+it('offers parsing for the current paper, clears the warning on success, and ignores notes', async () => {
+  const pdfParseAction = { configured: true, onStart: vi.fn(), onConfigure: vi.fn() };
+  const unparsed = { ...entry, status: 'Not started' as const };
+  const control = (reading: AssistantReadingContext) => <AssistantReadingContextControl context={reading}
+    entries={[reading.entry!]} busy={false} choice={null} onChange={vi.fn()} pdfParseAction={pdfParseAction} />;
+  const ui = render(control({ ...context, entry: unparsed }), { wrapper: ({ children }) =>
+    <ToastContext.Provider value={{ notify: vi.fn(() => 'toast'), dismiss: vi.fn() }}>{children}</ToastContext.Provider> });
+  expect(screen.getByText('当前 PDF 未解析')).toBeTruthy();
+  expect(pdfParseAction.onStart).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '开始解析' }));
+  await waitFor(() => expect(pdfParseAction.onStart).toHaveBeenCalledExactlyOnceWith(entry.id));
+  ui.rerender(control({ ...context, entry: { ...entry, status: 'Parsed' } }));
+  expect(screen.queryByText(/提问效果可能较差/)).toBeNull();
+  expect(screen.queryByRole('button', { name: '开始解析' })).toBeNull();
+  ui.rerender(control({ ...context, entry: unparsed, note: { entryId: entry.id, entryTitle: entry.title, noteId: 'note', noteTitle: 'Notes' } }));
+  expect(screen.queryByText(/提问效果可能较差/)).toBeNull();
 });
 it('does not warn on parsed PDFs, missing PDFs or note reading', () => {
   for (const overrides of [{ entry: { ...entry, status: 'Parsed' as const } }, { entry: { ...entry, pdfFileName: null } },

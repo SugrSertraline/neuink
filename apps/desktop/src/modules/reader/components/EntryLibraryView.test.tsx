@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -54,6 +54,10 @@ function renderLibrary(overrides: Partial<ComponentProps<typeof EntryLibraryView
     filterResetKey: 0,
     isRefreshingParseStatus: false,
     libraryView: 'all',
+    onSelectView: vi.fn(),
+    onClearFilters: vi.fn(),
+    onManageTags: vi.fn(),
+    onOpenDailyDashboard: vi.fn(),
     recentReadingEntryIds: [],
     selectedEntryId: null,
     status: 'ready',
@@ -107,6 +111,40 @@ it('distinguishes default row opening from the explicit details command', () => 
   expect(props.onOpenEntryExplorer).toHaveBeenLastCalledWith(entry.id, 'overview');
 });
 
+it('starts parsing from the rightmost cell without opening or dragging the row, and removes queued papers from the unparsed view', async () => {
+  let finish!: () => void;
+  const onStart = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+  const unparsed = { ...entry, status: 'Not started' as const };
+  const { props, rerenderLibrary } = renderLibrary({ libraryView: 'unparsed', entries: [unparsed],
+    pdfParseAction: { configured: true, onStart, onConfigure: vi.fn() } });
+  const row = screen.getByRole('row', { name: /可视分析论文/ });
+  const cells = within(row).getAllByRole('cell');
+  const action = within(cells[cells.length - 1]).getByRole('button', { name: '开始解析' });
+  action.focus(); expect(document.activeElement).toBe(action);
+  fireEvent.pointerDown(action, { pointerId: 1, button: 0, clientX: 20, clientY: 20 });
+  fireEvent.pointerMove(row, { pointerId: 1, clientX: 180, clientY: 20 });
+  fireEvent.click(action); fireEvent.click(action);
+  expect(onStart).toHaveBeenCalledExactlyOnceWith(entry.id);
+  expect((screen.getByRole('button', { name: '正在提交…' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(props.onOpenEntryExplorer).not.toHaveBeenCalled();
+  expect(props.onSelectEntry).not.toHaveBeenCalled();
+  await act(async () => finish());
+  rerenderLibrary({ entries: [{ ...unparsed, status: 'Queued' }] });
+  expect(screen.queryByRole('row', { name: /可视分析论文/ })).toBeNull();
+});
+
+it('shows PDFs of different statuses in the all-PDF view and offers its breadcrumb filter', () => {
+  const { props } = renderLibrary({ libraryView: 'pdf', entries: [entry,
+    { ...entry, id: 'unparsed', title: '未解析论文', status: 'Not started' },
+    { ...entry, id: 'no-pdf', title: '纯笔记', status: 'No PDF', pdfFileName: null }] });
+  expect(screen.getByRole('row', { name: /可视分析论文/ })).toBeTruthy();
+  expect(screen.getByRole('row', { name: /未解析论文/ })).toBeTruthy();
+  expect(screen.queryByRole('row', { name: /纯笔记/ })).toBeNull();
+  fireEvent.keyDown(screen.getByRole('button', { name: '条目范围：全部' }), { key: 'ArrowDown' });
+  fireEvent.click(screen.getByRole('menuitemradio', { name: '全部' }));
+  expect(props.onSelectView).toHaveBeenCalledWith('pdf');
+});
+
 describe('the optional bookshelf uses the existing library contract', () => {
   beforeEach(() => {
     window.localStorage.setItem(APP_APPEARANCE_STORAGE_KEY, 'atelier');
@@ -123,7 +161,7 @@ describe('the optional bookshelf uses the existing library contract', () => {
     expect(screen.getByRole('table', { name: '论文列表' })).toBe(table);
     expect(scroll.scrollTop).toBe(96);
     expect((screen.getByRole('textbox', { name: '搜索条目' }) as HTMLInputElement).value).toBe('可视分析');
-    fireEvent.click(screen.getByRole('radio', { name: '书架' }));
+    fireEvent.click(screen.getByRole('radio', { name: '封面展示' }));
     expect(container.querySelector('[data-slot="table"]')).toBe(table);
     expect(window.localStorage.getItem('neuink.entryLibraryColumns.v1')).toBeNull();
   });
@@ -133,6 +171,7 @@ describe('the optional bookshelf uses the existing library contract', () => {
     fireEvent.click(book);
     fireEvent.keyDown(book, { key: 'Enter' });
     expect(props.onOpenEntryExplorer).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole('radio', { name: '封面展示' }));
     fireEvent.click(screen.getByRole('button', { name: `在右侧打开 ${entry.title}` }));
     expect(props.onOpenEntryInSidePane).toHaveBeenCalledExactlyOnceWith(entry.id);
     expect(props.onOpenEntryExplorer).toHaveBeenCalledTimes(2);
@@ -212,12 +251,70 @@ describe('EntryLibraryView context heading and toolbar', () => {
   });
 
   it.each([
-    ['all', '全部条目'], ['recent', '最近阅读'], ['unparsed', '未解析 PDF'], ['parsed', '已解析 PDF'],
+    ['all', '全部条目'], ['recent', '最近阅读'], ['unparsed', '未解析'], ['parsed', '已解析'],
     ['parsing', '解析中'], ['failed', '解析失败'], ['no_pdf', '无 PDF'], ['trash', '回收站']
   ] as const)('names the %s view consistently with its navigation', (libraryView, title) => {
     renderLibrary({ libraryView });
     expect(screen.getByRole('heading', { level: 1, name: title })).toBeTruthy();
     expect(screen.queryByRole('heading', { name: '条目库' })).toBeNull();
+    const path = within(screen.getByRole('navigation', { name: '条目库浏览路径' }));
+    expect(path.getByRole('button', { name: '显示全部' })).toBeTruthy();
+    expect(path.getByRole('button', { name: `条目范围：${title}` })).toBeTruthy();
+    expect(path.getByRole('button', { name: '标签管理' })).toBeTruthy();
+  });
+
+  it('requests a full reset and retains the search until the guarded parent accepts it', () => {
+    const { props, rerenderLibrary } = renderLibrary({ libraryView: 'unparsed', activeTag: 'hci', tags: libraryTags });
+    const search = screen.getByRole('textbox', { name: '搜索条目' }) as HTMLInputElement;
+    fireEvent.change(search, { target: { value: '可视分析' } });
+    fireEvent.click(screen.getByRole('button', { name: '显示全部' }));
+    expect(props.onClearFilters).toHaveBeenCalledOnce();
+    expect(props.onSelectTag).not.toHaveBeenCalled();
+    expect(props.onSelectView).not.toHaveBeenCalled();
+    expect(search.value).toBe('可视分析');
+    expect(screen.getByRole('button', { name: '条目范围：未解析' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'HCI' })).toBeTruthy();
+    rerenderLibrary({ libraryView: 'all', activeTag: null, filterResetKey: 1 });
+    expect(search.value).toBe('');
+    expect(screen.getByRole('heading', { name: '全部条目' })).toBeTruthy();
+    expect(screen.getByRole('row', { name: /可视分析论文/ })).toBeTruthy();
+  });
+
+  it('changes the parse filter through a keyboard accessible menu without clearing tag or search', async () => {
+    const { props, rerenderLibrary } = renderLibrary({ libraryView: 'unparsed', activeTag: 'hci', tags: libraryTags });
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索条目' }), { target: { value: '可视分析' } });
+    fireEvent.keyDown(screen.getByRole('button', { name: '条目范围：未解析' }), { key: 'Enter' });
+    expect(screen.getByRole('menuitemradio', { name: '未解析' }).getAttribute('aria-checked')).toBe('true');
+    expect(screen.getAllByRole('menuitemradio')).toHaveLength(9);
+    fireEvent.click(screen.getByRole('menuitemradio', { name: '已解析' }));
+    expect(props.onSelectView).toHaveBeenCalledExactlyOnceWith('parsed');
+    expect(props.onSelectTag).not.toHaveBeenCalled();
+    expect(props.onClearFilters).not.toHaveBeenCalled();
+    rerenderLibrary({ libraryView: 'parsed' });
+    expect((screen.getByRole('textbox', { name: '搜索条目' }) as HTMLInputElement).value).toBe('可视分析');
+    expect(screen.getByRole('heading', { name: 'HCI' })).toBeTruthy();
+    expect(screen.getByRole('row', { name: /可视分析论文/ })).toBeTruthy();
+  });
+
+  it('opens tag management and clears only the tag through distinct breadcrumb actions', () => {
+    const { props } = renderLibrary({ libraryView: 'parsed', activeTag: 'hci', tags: libraryTags });
+    const path = within(screen.getByRole('navigation', { name: '条目库浏览路径' }));
+    fireEvent.click(path.getByRole('button', { name: '标签管理' }));
+    expect(props.onManageTags).toHaveBeenCalledOnce();
+    expect(props.onSelectTag).not.toHaveBeenCalled();
+    fireEvent.click(path.getByRole('button', { name: '全部标签' }));
+    expect(props.onSelectTag).toHaveBeenCalledExactlyOnceWith(null);
+    expect(props.onSelectView).not.toHaveBeenCalled();
+    expect(props.onClearFilters).not.toHaveBeenCalled();
+  });
+
+  it.each(['ready', 'loading', 'error'] as const)('keeps the escape from an empty filtered view available while %s', status => {
+    const { props } = renderLibrary({ libraryView: 'unparsed', status, entries: [] });
+    const path = within(screen.getByRole('navigation', { name: '条目库浏览路径' }));
+    expect(path.getByRole('button', { name: '条目范围：未解析' })).toBeTruthy();
+    expect((path.getByRole('button', { name: '标签管理' }) as HTMLButtonElement).disabled).toBe(status !== 'ready');
+    fireEvent.click(path.getByRole('button', { name: '显示全部' }));
+    expect(props.onClearFilters).toHaveBeenCalledOnce();
   });
 
   it('shows the tag name, full path and count without extra tag actions', () => {
@@ -236,11 +333,13 @@ describe('EntryLibraryView context heading and toolbar', () => {
   it('keeps the view filter visible alongside the tag and updates search counts', () => {
     renderLibrary({ libraryView: 'parsed', activeTag: 'research', tags: libraryTags });
     const header = screen.getByLabelText('条目库页眉');
-    expect(header.textContent).toContain('已解析 PDF · 1 个条目 · 含子标签');
+    expect(within(header).getByRole('button', { name: '条目范围：已解析' })).toBeTruthy();
+    expect(header.textContent).toContain('1 个条目 · 含子标签');
     fireEvent.change(screen.getByRole('textbox', { name: '搜索条目' }), { target: { value: '无匹配内容' } });
     expect(header.textContent).toContain('搜索结果：0 个条目');
     fireEvent.click(screen.getByRole('button', { name: '清除搜索' }));
-    expect(header.textContent).toContain('已解析 PDF · 1 个条目');
+    expect(within(header).getByRole('button', { name: '条目范围：已解析' })).toBeTruthy();
+    expect(header.textContent).toContain('1 个条目');
   });
 
   it('defaults tag browsing to descendants and keeps direct scope consistent during search', () => {
@@ -263,13 +362,12 @@ describe('EntryLibraryView context heading and toolbar', () => {
     expect(screen.getByText(entry.title)).toBeTruthy();
   });
 
-  it('keeps reading statistics behind one compact control', async () => {
-    renderLibrary();
+  it('opens the daily dashboard for reading statistics without a second filtered summary', () => {
+    const { props } = renderLibrary();
     expect(screen.queryByText('今日阅读')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '阅读统计' }));
-    expect(await screen.findByLabelText('阅读统计详情')).toBeTruthy();
-    expect(screen.getByText('今日阅读')).toBeTruthy();
-    expect(screen.getByText('累计阅读')).toBeTruthy();
+    expect(props.onOpenDailyDashboard).toHaveBeenCalledOnce();
+    expect(screen.queryByLabelText('阅读统计详情')).toBeNull();
   });
 
   it('opens an ancestor from the compact path menu without changing navigation visibility', () => {
@@ -341,8 +439,8 @@ describe('EntryLibraryView pinned columns', () => {
     expect(table.className).toContain('table-fixed');
     expect(table.className).not.toContain('w-max');
     expect(table.className).not.toContain('min-w-full');
-    expect(table.style.width).toBe('max(100%, 1500px)');
-    expect(table.style.minWidth).toBe('1500px');
+    expect(table.style.width).toBe('max(100%, 1554px)');
+    expect(table.style.minWidth).toBe('1554px');
     expect(table.style.maxWidth).toBe('none');
     expect(table.querySelectorAll('col')).toHaveLength(9);
     expect(table.querySelector('col')?.style.maxWidth).toBe('420px');
@@ -719,6 +817,7 @@ describe('EntryLibraryView tag navigation visibility', () => {
           filterResetKey={0}
           isRefreshingParseStatus={false}
           libraryView="all"
+          onSelectView={vi.fn()} onClearFilters={vi.fn()} onManageTags={vi.fn()} onOpenDailyDashboard={vi.fn()}
           recentReadingEntryIds={[]}
           selectedEntryId={null}
           status="ready"
@@ -781,6 +880,7 @@ describe('EntryLibraryView tag navigation visibility', () => {
           filterResetKey={0}
           isRefreshingParseStatus={false}
           libraryView="all"
+          onSelectView={vi.fn()} onClearFilters={vi.fn()} onManageTags={vi.fn()} onOpenDailyDashboard={vi.fn()}
           recentReadingEntryIds={[]}
           selectedEntryId={null}
           status="ready"

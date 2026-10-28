@@ -23,6 +23,7 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 1420,
     strictPort: true,
+    fs: { allow: [__dirname, path.resolve(__dirname, '../../node_modules')] },
     watch: {
       ignored: ['**/src-tauri/**']
     }

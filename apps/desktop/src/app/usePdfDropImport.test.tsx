@@ -30,7 +30,7 @@ function emit(payload: DropPayload) {
 function options(createEntry = vi.fn(async () => ({ createdWithPdf: true, entryId: 'entry', parseSubmissionFailed: false }))) {
   return {
     workspaceRoot: 'C:\\library', workspaceReady: true, parserEndpoint: 'https://parser.example', parserApiKey: 'test-key',
-    createEntry, notify: vi.fn(() => 'pending'), dismiss: vi.fn()
+    createEntry, onMineruSourceDrop: vi.fn(), notify: vi.fn(() => 'pending'), dismiss: vi.fn()
   };
 }
 
@@ -94,10 +94,22 @@ it('leaves the existing create-entry drop zone alone', async () => {
   expect(view.result.current.dragActive).toBe(false);
   act(() => emit({ type: 'drop', position: { x: 20, y: 20 }, paths: ['result.zip'] }));
   expect(configured.createEntry).not.toHaveBeenCalled();
+  expect(configured.onMineruSourceDrop).not.toHaveBeenCalled();
   act(() => emit({ type: 'drop', position: { x: 20, y: 20 }, paths: ['paper.pdf'] }));
   await waitFor(() => expect(configured.createEntry).toHaveBeenCalledOnce());
   view.unmount();
   zone.remove();
+});
+
+it('opens the MinerU creation flow for a dropped archive or result directory', async () => {
+  const configured = options();
+  const view = renderHook(() => usePdfDropImport(configured));
+  await act(async () => {});
+  act(() => emit({ type: 'drop', position: { x: 10, y: 10 }, paths: ['C:\\results\\paper.rar'] }));
+  act(() => emit({ type: 'drop', position: { x: 10, y: 10 }, paths: ['C:\\results\\paper'] }));
+  expect(configured.onMineruSourceDrop.mock.calls.map(([path]) => path)).toEqual(['C:\\results\\paper.rar', 'C:\\results\\paper']);
+  expect(configured.createEntry).not.toHaveBeenCalled();
+  view.unmount();
 });
 
 it('does not import without a ready workspace or while another batch is pending', async () => {

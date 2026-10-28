@@ -33,11 +33,16 @@ export function useReflowReadingNavigation(scrollRef: RefObject<HTMLDivElement>,
         if (!row || !group) return null;
         const rect = row.getBoundingClientRect();
         return { pageIdx: group.body.page_idx, segmentUid: group.body.uid,
+          segmentOffset: (viewport.top - rect.top) / rect.height,
           offset: (viewport.top - rect.top) / rect.height, left: scroll.scrollLeft };
       },
       restore: position => {
-        const index = position.segmentUid ? groupIndex.get(position.segmentUid) : undefined;
-        if (index === undefined) return;
+        const exactIndex = position.segmentUid ? groupIndex.get(position.segmentUid) : undefined;
+        const index = exactIndex ?? (position.sourceKind === 'pdf' ? groups.findIndex(group => group.body.page_idx === position.pageIdx) : -1);
+        if (index < 0) return;
+        // PDF page margins/figure whitespace have no matching reflow length.
+        // Clamp to the matching block instead of skipping unrelated paragraphs.
+        const offset = position.sourceKind === 'pdf' ? (exactIndex === undefined ? 0 : Math.max(0, Math.min(1, position.segmentOffset ?? 0))) : position.offset;
         virtualizer.scrollToIndex(index, { align: 'start' });
         cancelAnimationFrame(frame);
         const settle = (remaining: number) => {
@@ -48,7 +53,7 @@ export function useReflowReadingNavigation(scrollRef: RefObject<HTMLDivElement>,
               const viewport = scroll.getBoundingClientRect(), rect = row.getBoundingClientRect();
               const scale = scroll.offsetWidth > 0 ? viewport.width / scroll.offsetWidth : 1;
               if (rect.height > 0 && scale > 0) {
-                const delta = (rect.top - viewport.top + position.offset * rect.height) / scale;
+                const delta = (rect.top - viewport.top + offset * rect.height) / scale;
                 virtualizer.scrollToOffset(Math.max(0, scroll.scrollTop + delta));
                 scroll.scrollLeft = position.left;
               }
@@ -92,7 +97,7 @@ export function useReflowReadingNavigation(scrollRef: RefObject<HTMLDivElement>,
     const stopObserving = scrollRef.current ? observeReadingWidth(scrollRef.current, adapter) : undefined;
     return () => { stopObserving?.(); cancelAnimationFrame(frame); unregister?.(); };
   }, [groupIndex, groups, register, scrollRef, virtualizer]);
-  return { flashUid, remember: navigation?.remember, navigate: navigation?.navigate, beginUserNavigation: navigation?.beginUserNavigation,
+  return { flashUid, linkedTarget: navigation?.linkedTarget, remember: navigation?.remember, navigate: navigation?.navigate, beginUserNavigation: navigation?.beginUserNavigation,
     hasRetainedPosition: navigation?.hasRetainedPosition,
     isJumpHandled: navigation?.isJumpHandled, markJumpHandled: navigation?.markJumpHandled };
 }

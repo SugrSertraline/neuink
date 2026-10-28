@@ -66,3 +66,15 @@ it('preserves note keyboard focus for citations while ordinary reader navigation
   act(() => { adapter.navigate({ pageIdx: 4, segmentUid: 'p' }); });
   expect(document.activeElement).toBe(scroll);
 });
+
+it('maps PDF anchors to matching blocks and falls back to the same page, never a different page', () => {
+  const { scroll, adapter, offsets } = fixture();
+  adapter.restore({ sourceKind: 'pdf', pageIdx: 4, segmentUid: 'p', segmentOffset: .5, offset: .9, left: 12 });
+  act(() => vi.runAllTimers()); expect(scroll.scrollTop).toBe(160); expect(scroll.scrollLeft).toBe(12);
+  adapter.restore({ sourceKind: 'pdf', pageIdx: 4, segmentUid: 'p', segmentOffset: 5, offset: .9, left: 12 });
+  act(() => vi.runAllTimers()); expect(scroll.scrollTop).toBe(220);
+  adapter.restore({ sourceKind: 'pdf', pageIdx: 4, offset: .9, left: 12 });
+  act(() => vi.runAllTimers()); expect(scroll.scrollTop).toBe(100);
+  offsets.mockClear(); adapter.restore({ sourceKind: 'pdf', pageIdx: 7, offset: .5, left: 0 });
+  act(() => vi.runAllTimers()); expect(offsets).not.toHaveBeenCalled();
+});
