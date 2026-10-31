@@ -56,6 +56,7 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
             commands::workspace::update_translation_automation_settings,
             commands::entry::create_entry,
             commands::entry::inspect_title_consistency,
+            commands::entry::confirm_title_consistency,
             commands::entry::apply_title_consistency,
             commands::entry::create_from_mineru_client_result,
             commands::entry::create_note,

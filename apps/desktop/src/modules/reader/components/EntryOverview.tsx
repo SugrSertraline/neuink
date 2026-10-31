@@ -116,8 +116,8 @@ export function EntryOverview({
         <section className="entry-overview-summary rounded-lg border bg-card px-5 py-5">
           {appearance === 'atelier' ? <div className="entry-overview-cover"><BookCover id={entry.id} title={entry.title} topic={visibleTagPaths[0]?.split('/').pop() || '研究札记'} mode="overview"/></div> : null}
           <div className="entry-overview-summary-content min-w-0 flex-1">
-          <h1 className="entry-overview-breakable mt-1 text-xl font-semibold leading-8 text-foreground">
-            {entry.title}
+          <h1 className="mt-1 flex min-w-0 items-start gap-1 text-xl font-semibold leading-8 text-foreground">
+            <span className="entry-overview-breakable min-w-0 flex-1">{entry.title}</span>
             {onRefreshEntries ? <EntryTitleConsistency entryId={entry.id} entryTitle={entry.title}
               pdfFileName={entry.pdfFileName} parsed={entry.status === 'Parsed'} root={workspaceRoot ?? null}
               reloadKey={titleCheckReloadKey} onRefreshEntries={onRefreshEntries} /> : null}

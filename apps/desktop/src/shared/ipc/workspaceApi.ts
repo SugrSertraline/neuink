@@ -576,11 +576,19 @@ export type TitleConsistency = {
   pdf_file_name: string;
   evidence: string[];
   source_revision: string;
+  confirmed: boolean;
 };
 
 export function inspectTitleConsistency(root: string, entryId: EntryId) {
   return invoke<TitleConsistency | null>('inspect_title_consistency', {
     request: { root, entry_id: entryId }
+  });
+}
+
+export function confirmTitleConsistency(root: string, entryId: EntryId, inspection: TitleConsistency) {
+  return invoke<void>('confirm_title_consistency', {
+    request: { root, entry_id: entryId, expected_title: inspection.entry_title,
+      expected_pdf_file_name: inspection.pdf_file_name, expected_source_revision: inspection.source_revision }
   });
 }
 

@@ -1,6 +1,8 @@
+use std::{fs, io::ErrorKind};
+
 use chrono::Utc;
 use neuink_domain::{EntryId, EntryMeta, PdfParseStatus, SegmentType, SourceSegment};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{atomic_write_json, Workspace, WorkspaceError};
 
@@ -10,6 +12,15 @@ pub struct TitleConsistency {
     pub pdf_file_name: String,
     pub evidence: Vec<String>,
     pub source_revision: String,
+    pub confirmed: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+struct TitleReviewConfirmation {
+    entry_title: String,
+    pdf_file_name: String,
+    source_revision: String,
+    confirmed_at: chrono::DateTime<Utc>,
 }
 
 impl Workspace {
@@ -26,18 +37,60 @@ impl Workspace {
         }
         let segments = self.read_segments(entry_id)?;
         let evidence = title_evidence(&segments);
-        if evidence.is_empty() {
-            return Ok(None);
-        }
         let source_revision = blake3::hash(&serde_json::to_vec(&segments)?)
             .to_hex()
             .to_string();
+        let confirmation = match fs::read(self.title_review_confirmation_file(entry_id)) {
+            Ok(bytes) => serde_json::from_slice::<TitleReviewConfirmation>(&bytes).ok(),
+            Err(error) if error.kind() == ErrorKind::NotFound => None,
+            Err(error) => return Err(error.into()),
+        };
+        let confirmed = confirmation.is_some_and(|saved| {
+            saved.entry_title == entry.title
+                && saved.pdf_file_name == pdf.file_name
+                && saved.source_revision == source_revision
+        });
         Ok(Some(TitleConsistency {
             entry_title: entry.title,
             pdf_file_name: pdf.file_name.clone(),
             evidence,
             source_revision,
+            confirmed,
         }))
+    }
+
+    pub fn confirm_title_consistency(
+        &self,
+        entry_id: &EntryId,
+        expected_title: &str,
+        expected_pdf_file_name: &str,
+        expected_source_revision: &str,
+    ) -> Result<(), WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
+        let current = self
+            .inspect_title_consistency(entry_id)?
+            .ok_or_else(|| WorkspaceError::EntryRevisionConflict(entry_id.to_string()))?;
+        if current.entry_title != expected_title
+            || current.pdf_file_name != expected_pdf_file_name
+            || current.source_revision != expected_source_revision
+        {
+            return Err(WorkspaceError::EntryRevisionConflict(entry_id.to_string()));
+        }
+        atomic_write_json(
+            self.title_review_confirmation_file(entry_id),
+            &TitleReviewConfirmation {
+                entry_title: current.entry_title,
+                pdf_file_name: current.pdf_file_name,
+                source_revision: current.source_revision,
+                confirmed_at: Utc::now(),
+            },
+        )
+    }
+
+    fn title_review_confirmation_file(&self, entry_id: &EntryId) -> std::path::PathBuf {
+        self.layout()
+            .entry_dir(entry_id)
+            .join("title-review-confirmation.json")
     }
 
     pub fn apply_title_consistency(
@@ -215,6 +268,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(inspection.entry_title, "Upload name");
+        assert!(!inspection.confirmed);
         assert!(!inspection.source_revision.is_empty());
         assert_eq!(inspection.evidence, vec!["A Reliable Paper Title"]);
         assert!(workspace
@@ -278,6 +332,30 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(done.pdf_file_name, "A Reliable Paper Title.pdf");
+        assert!(workspace
+            .confirm_title_consistency(
+                &entry.id,
+                &inspection.entry_title,
+                &inspection.pdf_file_name,
+                &inspection.source_revision,
+            )
+            .is_err());
+        workspace
+            .confirm_title_consistency(
+                &entry.id,
+                &done.entry_title,
+                &done.pdf_file_name,
+                &done.source_revision,
+            )
+            .unwrap();
+        let reopened = Workspace::open(dir.path()).unwrap();
+        assert!(
+            reopened
+                .inspect_title_consistency(&entry.id)
+                .unwrap()
+                .unwrap()
+                .confirmed
+        );
         workspace
             .write_segments(
                 &entry.id,
@@ -289,6 +367,13 @@ mod tests {
                 )],
             )
             .unwrap();
+        assert!(
+            !workspace
+                .inspect_title_consistency(&entry.id)
+                .unwrap()
+                .unwrap()
+                .confirmed
+        );
         assert!(workspace
             .apply_title_consistency(
                 &entry.id,
@@ -300,5 +385,63 @@ mod tests {
                 true
             )
             .is_err());
+    }
+
+    #[test]
+    fn missing_first_page_evidence_still_requires_confirmation() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = Workspace::create(dir.path()).unwrap();
+        let mut entry = workspace.create_entry("Upload name").unwrap();
+        let pdf_path = dir.path().join("upload.pdf");
+        fs::write(&pdf_path, b"%PDF-1.4\n").unwrap();
+        entry = workspace.import_pdf(&entry.id, &pdf_path).unwrap();
+        entry.pdf.as_mut().unwrap().parse.status = PdfParseStatus::Succeeded;
+        atomic_write_json(workspace.layout().entry_meta_file(&entry.id), &entry).unwrap();
+        workspace.write_segments(&entry.id, &[]).unwrap();
+        let inspection = workspace
+            .inspect_title_consistency(&entry.id)
+            .unwrap()
+            .unwrap();
+        assert!(inspection.evidence.is_empty());
+        assert!(!inspection.confirmed);
+        workspace
+            .confirm_title_consistency(
+                &entry.id,
+                &inspection.entry_title,
+                &inspection.pdf_file_name,
+                &inspection.source_revision,
+            )
+            .unwrap();
+        assert!(
+            workspace
+                .inspect_title_consistency(&entry.id)
+                .unwrap()
+                .unwrap()
+                .confirmed
+        );
+        entry.title = "Renamed entry".into();
+        atomic_write_json(workspace.layout().entry_meta_file(&entry.id), &entry).unwrap();
+        let renamed = workspace
+            .inspect_title_consistency(&entry.id)
+            .unwrap()
+            .unwrap();
+        assert!(!renamed.confirmed);
+        workspace
+            .confirm_title_consistency(
+                &entry.id,
+                &renamed.entry_title,
+                &renamed.pdf_file_name,
+                &renamed.source_revision,
+            )
+            .unwrap();
+        entry.pdf.as_mut().unwrap().file_name = "renamed.pdf".into();
+        atomic_write_json(workspace.layout().entry_meta_file(&entry.id), &entry).unwrap();
+        assert!(
+            !workspace
+                .inspect_title_consistency(&entry.id)
+                .unwrap()
+                .unwrap()
+                .confirmed
+        );
     }
 }
