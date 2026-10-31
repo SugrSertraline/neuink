@@ -24,9 +24,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -54,9 +51,7 @@ const TAB_STEP = 180;
 type WorkspaceTabsBarProps = {
   readingLinkMode?: ReadingLinkMode;
   onReadingLinkModeChange?: (mode: ReadingLinkMode) => void;
-  onNewBrowser?: () => void;
-  onNewEntry?: () => void;
-  onImportSource?: (source: 'zotero' | 'mineru') => void;
+  onNewTab?: () => void;
   entries: Array<{ id: string; title: string; pdfFileName?: string | null }>;
   layout: WorkspaceSurfaceLayout;
   onAddToAssistantContext?: (surface: WorkspaceSurface) => void;
@@ -75,9 +70,7 @@ type WorkspaceTabsBarProps = {
 export function WorkspaceTabsBar({
   readingLinkMode = 'scroll',
   onReadingLinkModeChange,
-  onNewBrowser,
-  onNewEntry,
-  onImportSource,
+  onNewTab,
   entries,
   layout,
   onAddToAssistantContext,
@@ -335,27 +328,9 @@ export function WorkspaceTabsBar({
           />
         ) : null}
       </div>
-      {split || onNewBrowser || onNewEntry || onImportSource ? (
+      {split || onNewTab ? (
         <div className="workspace-tabsbar-actions">
-          {onNewBrowser || onNewEntry || onImportSource ? <DropdownMenu>
-            <DropdownMenuTrigger asChild><Button aria-label="新建或导入" title="新建或导入" size="icon-sm" variant="ghost" type="button"><Plus size={16} /></Button></DropdownMenuTrigger>
-            <DropdownMenuContent align="end" aria-label="新建或导入">
-              {(onNewEntry || onNewBrowser) && <DropdownMenuSub>
-                <DropdownMenuSubTrigger>新建</DropdownMenuSubTrigger>
-                <DropdownMenuSubContent>
-                  {onNewEntry && <DropdownMenuItem onSelect={onNewEntry}>论文条目</DropdownMenuItem>}
-                  {onNewBrowser && <DropdownMenuItem onSelect={onNewBrowser}>网页标签</DropdownMenuItem>}
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>}
-              {onImportSource && <DropdownMenuSub>
-                <DropdownMenuSubTrigger>导入</DropdownMenuSubTrigger>
-                <DropdownMenuSubContent>
-                  <DropdownMenuItem onSelect={() => onImportSource('zotero')}>Zotero 文献</DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => onImportSource('mineru')}>MinerU 解析结果</DropdownMenuItem>
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>}
-            </DropdownMenuContent>
-          </DropdownMenu> : null}
+          {onNewTab ? <Button aria-label="新建标签" title="新建标签" size="icon-sm" variant="ghost" type="button" onClick={onNewTab}><Plus size={16} /></Button> : null}
           {pairRelation === 'reader-sync' && onReadingLinkModeChange ? (
             <Tooltip><TooltipTrigger asChild>
               <Button size="xs" variant={readingLinkMode === 'scroll' ? 'secondary' : 'outline'}

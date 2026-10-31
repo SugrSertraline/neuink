@@ -71,6 +71,8 @@ import {
 import { WorkspaceTabsBar } from './WorkspaceTabsBar';
 import { assistantSurfaceContext } from './assistantSurfaceContext';
 import { useBrowserTabRequests } from './useBrowserTabRequests';
+import { planWorkspaceBrowserTab } from './workspaceBrowserTabs';
+import type { NewTabDestination } from './NewTabPage';
 import {
   getWorkspaceSplitMinimums,
   workspaceSplitLeftWidthFromRatio
@@ -276,7 +278,7 @@ export function App() {
   const [workspaceSplitLeftWidth, setWorkspaceSplitLeftWidth] = useState<number | null>(
     readStoredWorkspaceSplitLeftWidth
   );
-  const openNewBrowserTab = useBrowserTabRequests(surfaceLayout, dispatchSurface, reason => notify({
+  useBrowserTabRequests(surfaceLayout, dispatchSurface, reason => notify({
     tone: 'danger', title: reason === 'limit' ? '网页标签已达上限' : '无法打开链接',
     description: reason === 'limit' ? '最多同时打开 8 个网页，请先关闭一个网页标签后重试。' : '只支持有效的外部 HTTP(S) 网页地址。'
   }));
@@ -681,8 +683,21 @@ export function App() {
     dispatchSurface({ type: 'open', surface: { kind: 'create-entry' } });
   };
   const importNavigationNonce = useRef(0);
-  const openImportSourceTab = (source: 'zotero' | 'mineru') => {
-    dispatchSurface({ type: 'open', surface: { kind: 'external-import', source, navigationId: String(++importNavigationNonce.current) } });
+  const replaceNewTab = (id: string, destination: NewTabDestination) => {
+    let surface: WorkspaceSurface;
+    if (destination === 'browser') {
+      const result = planWorkspaceBrowserTab(surfaceLayout, { type: 'openBrowser', id: crypto.randomUUID() });
+      if (result.status !== 'open') {
+        if (result.status === 'limit') notify({ tone: 'danger', title: '网页标签已达上限', description: '最多同时打开 8 个网页，请先关闭一个网页标签后重试。' });
+        return;
+      }
+      surface = result.surface;
+    } else if (destination === 'zotero' || destination === 'mineru') {
+      surface = { kind: 'external-import', source: destination, navigationId: String(++importNavigationNonce.current) };
+    } else {
+      surface = { kind: destination };
+    }
+    dispatchSurface({ type: 'replaceNewTab', key: `new-tab:${id}`, surface });
   };
   const openMineruClientGuideTab = () => {
     dispatchSurface({ type: 'open', surface: { kind: 'mineru-client-guide' } });
@@ -1850,9 +1865,7 @@ export function App() {
         <WorkspaceTabsBar
           readingLinkMode={readerPreferences.readingLinkMode}
           onReadingLinkModeChange={(readingLinkMode) => updateReaderPreferences({ ...readerPreferences, readingLinkMode })}
-          onNewBrowser={openNewBrowserTab}
-          onNewEntry={openCreateEntryTab}
-          onImportSource={openImportSourceTab}
+          onNewTab={() => dispatchSurface({ type: 'open', surface: { kind: 'new-tab', id: crypto.randomUUID() } })}
           entries={entries}
           layout={surfaceLayout}
           onAddToAssistantContext={addWorkspaceSurfaceToAssistantContext}
@@ -2052,6 +2065,7 @@ export function App() {
           key={workspace.root ?? 'no-workspace'}
           surfaceLayout={surfaceLayout}
           onOpenSurface={openWorkspaceSurface}
+          onReplaceNewTab={replaceNewTab}
           onOpenTagReading={openTagReading}
           onFocusSurface={(pane) => dispatchSurface({ type: 'focus', pane })}
           activeTag={activeTag}

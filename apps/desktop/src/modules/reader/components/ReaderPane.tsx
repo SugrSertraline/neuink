@@ -22,6 +22,7 @@ import { RelationsPage } from '@/modules/relations/RelationsPage';
 import { RelationReturnFrame } from '@/modules/relations/RelationReturnFrame';
 import { WorkspaceSurfaceDeck } from './WorkspaceSurfaceDeck';
 import { EmptyWorkspace } from '@/app/EmptyWorkspace';
+import { NewTabPage, type NewTabDestination } from '@/app/NewTabPage';
 import { DailyDashboard } from '@/modules/daily/DailyDashboard';
 import { OwnedNoteSurfaceView } from '@/modules/notes/components/OwnedNoteSurfaceView';
 import { TagDetailsView } from '@/modules/library/components/TagDetailsView';
@@ -97,6 +98,7 @@ type ReaderPaneProps = EntryPdfHandlers & {
   onRestoreTagArchive: (archiveId: string) => Promise<number>;
   surfaceLayout: WorkspaceSurfaceLayout;
   onOpenSurface: (surface: WorkspaceSurface, pane?: WorkspacePaneId) => void;
+  onReplaceNewTab: (id: string, destination: NewTabDestination) => void;
   onFocusSurface: (pane: WorkspacePaneId) => void;
   activeTag: string | null;
   annotationRecords: AnnotationCatalogRecord[];
@@ -227,6 +229,7 @@ export function ReaderPane({
   onRestoreTagArchive,
   surfaceLayout,
   onOpenSurface,
+  onReplaceNewTab,
   onFocusSurface,
   activeTag,
   annotationRecords,
@@ -1097,6 +1100,8 @@ export function ReaderPane({
     switch (surface.kind) {
       case 'empty':
         return <EmptyWorkspace onOpen={target => onOpenSurface(target, pane)} />;
+      case 'new-tab':
+        return <NewTabPage onChoose={destination => onReplaceNewTab(surface.id, destination)} />;
       case 'daily-dashboard':
         return <DailyDashboard key={workspaceRoot} root={workspaceRoot} status={status} entries={entries} active={surfaceLayout[pane]?.kind === 'daily-dashboard'}
           onOpenEntry={onOpenEntryExplorer} onRefreshCatalog={onRefreshParseStatus}
