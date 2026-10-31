@@ -1806,14 +1806,21 @@ export function App() {
       {pdfDropImport.dragActive ? (
         <div
           aria-live="polite"
-          className="pointer-events-none fixed inset-3 grid place-items-center border-2 border-dashed border-primary"
+          className="pointer-events-none fixed inset-0 grid place-items-center bg-foreground/40 p-3 backdrop-blur-[2px]"
           role="status"
           style={{ zIndex: 'var(--z-reader-preview)' }}
         >
-          <div className="border border-border bg-popover px-4 py-3 text-sm font-medium text-popover-foreground shadow-sm">
-            {workspace.status === 'ready'
-              ? '松开以导入 PDF 或 MinerU 结果目录、ZIP、RAR'
-              : '请先打开资料库，再拖入文件'}
+          <div className="grid size-full place-items-center rounded-lg border-2 border-dashed border-primary bg-background/10">
+            <div className="mx-4 max-w-md rounded-lg border border-border bg-popover px-6 py-5 text-center text-popover-foreground shadow-lg">
+              <p className="text-base font-semibold">
+                {workspace.status === 'ready' ? '松开鼠标，开始导入' : '请先打开资料库'}
+              </p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {workspace.status === 'ready'
+                  ? '支持 PDF 文件、MinerU 结果目录，以及 ZIP / RAR 压缩包'
+                  : '打开资料库后，再拖入 PDF、MinerU 结果目录或 ZIP / RAR。'}
+              </p>
+            </div>
           </div>
         </div>
       ) : null}
