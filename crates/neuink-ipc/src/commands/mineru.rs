@@ -45,6 +45,8 @@ pub enum MineruRequest {
         root: PathBuf,
         snapshot_id: String,
         item_id: String,
+        #[serde(default)]
+        confirmed_duplicate_hash: Option<String>,
     },
 }
 
@@ -217,6 +219,7 @@ fn execute<R: Runtime>(app: &AppHandle<R>, request: MineruRequest) -> Result<Val
             root,
             snapshot_id,
             item_id,
+            confirmed_duplicate_hash,
         } => {
             let item = preview_item(app, &root, &snapshot_id, &item_id)?;
             if !item.has_pdf {
@@ -230,10 +233,12 @@ fn execute<R: Runtime>(app: &AppHandle<R>, request: MineruRequest) -> Result<Val
             let workspace = Workspace::open_existing(&root).map_err(|_| "NeuInk 资料库不可用。")?;
             if let Some(duplicate) = workspace.find_pdf_duplicate(&pdf_hash)
                 .map_err(|error| error.to_string())? {
-                if duplicate.in_trash {
-                    return Err(format!("相同内容的 PDF 已在回收站：“{}”。请先恢复已有条目。", duplicate.title));
+                if confirmed_duplicate_hash.as_deref() != Some(pdf_hash.as_str()) {
+                    if duplicate.in_trash {
+                        return Err(format!("相同内容的 PDF 已在回收站：“{}”。请先恢复已有条目。", duplicate.title));
+                    }
+                    return Ok(json!({"status": "skipped", "entry_id": duplicate.entry_id, "title": duplicate.title}));
                 }
-                return Ok(json!({"status": "skipped", "entry_id": duplicate.entry_id, "title": duplicate.title}));
             }
             let imported = create_from_mineru_source_bytes(
                 CreateFromMineruClientResultRequest {
@@ -242,6 +247,7 @@ fn execute<R: Runtime>(app: &AppHandle<R>, request: MineruRequest) -> Result<Val
                     fields: Default::default(),
                     tags: Vec::new(),
                     zip_path: source,
+                    confirmed_duplicate_hash,
                 },
                 zip_bytes,
             )?;

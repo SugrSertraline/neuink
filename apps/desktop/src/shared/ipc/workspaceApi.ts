@@ -836,19 +836,21 @@ export async function queuePdfParse(
   root: string,
   entryId: EntryId,
   pdfPath: string,
-  enqueue = true
+  enqueue = true,
+  confirmedDuplicateHash?: string
 ): Promise<EntryMeta> {
   return invoke<EntryMeta>('queue_pdf_parse', {
     request: {
       root,
       entry_id: entryId,
       pdf_path: pdfPath,
-      enqueue
+      enqueue,
+      confirmed_duplicate_hash: confirmedDuplicateHash ?? null
     }
   });
 }
 
-export type PdfDuplicate = { entryId: string; title: string; inTrash: boolean };
+export type PdfDuplicate = { entryId: string; title: string; fileName: string; contentHash: string; inTrash: boolean };
 
 export async function checkPdfDuplicate(root: string, path: string, source: 'pdf' | 'mineru'): Promise<PdfDuplicate | null> {
   return invoke<PdfDuplicate | null>('check_pdf_duplicate', { request: { root, path, source } });
@@ -865,10 +867,10 @@ export async function importMineruClientResult(
 }
 
 export async function createFromMineruClientResult(
-  root: string, title: string, fields: Record<string, string>, tags: string[], zipPath: string
+  root: string, title: string, fields: Record<string, string>, tags: string[], zipPath: string, confirmedDuplicateHash?: string
 ): Promise<ImportAndParsePdfResponse> {
   return invoke<ImportAndParsePdfResponse>('create_from_mineru_client_result', {
-    request: { root, title, fields, tags, zip_path: zipPath }
+    request: { root, title, fields, tags, zip_path: zipPath, confirmed_duplicate_hash: confirmedDuplicateHash ?? null }
   });
 }
 

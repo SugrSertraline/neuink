@@ -1,4 +1,5 @@
 import { checkPdfDuplicate, type PdfDuplicate } from '@/shared/ipc/workspaceApi';
+import { createContext, useContext } from 'react';
 
 export class DuplicatePdfError extends Error {
   constructor(public readonly duplicate: PdfDuplicate) {
@@ -8,6 +9,18 @@ export class DuplicatePdfError extends Error {
     this.name = 'DuplicatePdfError';
   }
 }
+
+export class PdfDuplicateCancelledError extends Error {
+  constructor(public readonly duplicate: PdfDuplicate) {
+    super('已取消添加重复的 PDF。');
+    this.name = 'PdfDuplicateCancelledError';
+  }
+}
+
+export type PdfDuplicateReview = { candidateTitle: string; sourcePath: string; duplicate: PdfDuplicate };
+export type ConfirmPdfDuplicate = (review: PdfDuplicateReview) => Promise<boolean>;
+export const PdfDuplicateReviewContext = createContext<ConfirmPdfDuplicate | undefined>(undefined);
+export const useConfirmPdfDuplicate = () => useContext(PdfDuplicateReviewContext);
 
 export async function ensurePdfIsNew(root: string, path: string, source: 'pdf' | 'mineru') {
   const duplicate = await checkPdfDuplicate(root, path, source);

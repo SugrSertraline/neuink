@@ -1,5 +1,6 @@
 //! Publish complete Zotero entries from same-volume staging; never edit Zotero.
 use crate::{atomic_write, atomic_write_json, Workspace, WorkspaceError};
+use crate::pdf_duplicate::PdfDuplicate;
 use neuink_domain::{EntryId, EntryMeta, TagMeta};
 use neuink_zotero::{Library, Paper};
 use serde::{Deserialize, Serialize};
@@ -22,6 +23,8 @@ pub struct ZoteroImportResult {
     pub title: String,
     pub status: &'static str,
     pub has_pdf: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duplicate: Option<PdfDuplicate>,
 }
 
 impl Workspace {
@@ -53,6 +56,16 @@ impl Workspace {
         library: &Library,
         paper: &Paper,
         attachment_key: Option<&str>,
+    ) -> Result<ZoteroImportResult, WorkspaceError> {
+        self.import_zotero_paper_with_confirmation(library, paper, attachment_key, None)
+    }
+
+    pub fn import_zotero_paper_with_confirmation(
+        &self,
+        library: &Library,
+        paper: &Paper,
+        attachment_key: Option<&str>,
+        confirmed_duplicate_hash: Option<&str>,
     ) -> Result<ZoteroImportResult, WorkspaceError> {
         let _lock = IMPORT_LOCK
             .lock()
@@ -123,23 +136,16 @@ impl Workspace {
         if let Some(hash) = &hash {
             // Exact file identity is safe; equal titles or DOIs alone are not.
             let _guard = self.begin_tag_safe_mutation()?;
-            if let Some(entry) = self
-                .list_entries()?
-                .into_iter()
-                .find(|entry| entry.pdf.as_ref().is_some_and(|p| &p.content_hash == hash))
-            {
-                let mut sources = self.zotero_sources(&entry.id)?;
-                sources.push(source);
-                atomic_write_json(
-                    self.layout().entry_dir(&entry.id).join(SOURCE_FILE),
-                    &sources,
-                )?;
-                return Ok(result(entry, "skipped"));
-            }
             if let Some(duplicate) = self.find_pdf_duplicate(hash)? {
-                return Err(WorkspaceError::PdfContentDuplicate(format!(
-                    "{}（回收站，请先恢复已有条目）", duplicate.title
-                )));
+                if confirmed_duplicate_hash != Some(hash.as_str()) {
+                    return Ok(ZoteroImportResult {
+                        entry_id: EntryId::from_string(&duplicate.entry_id),
+                        title: duplicate.title.clone(),
+                        status: "duplicate",
+                        has_pdf: true,
+                        duplicate: Some(duplicate),
+                    });
+                }
             }
         }
         fs::create_dir_all(self.layout().cache_dir())?;
@@ -207,6 +213,7 @@ fn result(entry: EntryMeta, status: &'static str) -> ZoteroImportResult {
         title: entry.title,
         has_pdf: entry.pdf.is_some(),
         status,
+        duplicate: None,
     }
 }
 

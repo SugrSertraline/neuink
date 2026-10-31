@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { TagMeta } from '@/shared/types/domain';
+import type { PdfDuplicate } from '@/shared/ipc/workspaceApi';
 
 export type ZoteroSettings = { data_directory: string | null; linked_attachment_directory: string | null };
 export type ZoteroAttachment = { key: string; file_name: string; available: boolean; reason: string | null };
@@ -13,13 +14,13 @@ export type ZoteroSnapshot = {
   library: { source_id: string; data_directory: string; collections: { id: string; name: string; path: string; parent_id: string | null }[]; papers: ZoteroPaper[] };
   existing: Record<string, string>;
 };
-export type ZoteroImportResult = { entry_id: string; title: string; status: 'imported' | 'skipped'; has_pdf: boolean };
+export type ZoteroImportResult = { entry_id: string; title: string; status: 'imported' | 'skipped' | 'duplicate'; has_pdf: boolean; duplicate?: PdfDuplicate };
 export const getZoteroSettings = () => invoke<ZoteroSettings>('zotero', { request: { action: 'settings' } });
 export const saveZoteroSettings = (settings: ZoteroSettings) => invoke<ZoteroSettings>('zotero', { request: { action: 'save_settings', ...settings } });
 export const discoverZotero = () => invoke<ZoteroSettings[]>('zotero', { request: { action: 'discover' } });
 export const scanZotero = (root: string) => invoke<ZoteroSnapshot>('zotero', { request: { action: 'scan', root } });
-export const importZoteroPaper = (root: string, snapshot_id: string, paper_id: string, attachment_key: string | null) =>
-  invoke<ZoteroImportResult>('zotero', { request: { action: 'import', root, snapshot_id, paper_id, attachment_key } });
+export const importZoteroPaper = (root: string, snapshot_id: string, paper_id: string, attachment_key: string | null, confirmed_duplicate_hash?: string) =>
+  invoke<ZoteroImportResult>('zotero', { request: { action: 'import', root, snapshot_id, paper_id, attachment_key, confirmed_duplicate_hash } });
 export const zoteroCatalogTags = (root: string) => invoke<TagMeta[]>('zotero', { request: { action: 'catalog_tags', root } });
 
 export function onZoteroSettingsChanged(callback: () => void) {

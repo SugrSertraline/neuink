@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import type { CreateEntryRequest, CreateEntryResult } from '@/shared/hooks/useWorkspace';
 import type { ToastContextValue } from '@/shared/hooks/useToast';
-import { DuplicatePdfError } from '@/shared/lib/pdfDuplicate';
+import { DuplicatePdfError, PdfDuplicateCancelledError } from '@/shared/lib/pdfDuplicate';
 
 type NativeDropPosition = { x: number; y: number };
 
@@ -115,7 +115,7 @@ export function usePdfDropImport(options: PdfDropImportOptions) {
             if (!result?.createdWithPdf) throw new Error('PDF 未附加到条目');
             succeeded += 1;
           } catch (error) {
-            if (error instanceof DuplicatePdfError) {
+            if (error instanceof DuplicatePdfError || error instanceof PdfDuplicateCancelledError) {
               duplicates.push(`${file.title} → ${error.duplicate.title}${error.duplicate.inTrash ? '（回收站）' : ''}`);
               completed += 1;
               if (!closed) setProgress({ ...identity, completed, total: files.length });

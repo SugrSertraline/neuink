@@ -45,6 +45,7 @@ export function MineruImportDialog({ root, onClose, onImported, onOpenEntry, onS
   const imported = Object.values(model.outcomes).filter(outcome => outcome.result?.status === 'imported').length;
   const skipped = Object.values(model.outcomes).filter(outcome => outcome.result?.status === 'skipped').length;
   const failed = Object.values(model.outcomes).filter(outcome => outcome.error).length;
+  const cancelled = Object.values(model.outcomes).filter(outcome => outcome.cancelled).length;
   const close = () => { if (!model.busy) onClose(); };
   const openResultLocation = async (path: string) => {
     setOpenError('');
@@ -83,6 +84,7 @@ export function MineruImportDialog({ root, onClose, onImported, onOpenEntry, onS
                   </div></TableCell>
                 <TableCell className="whitespace-normal align-top py-2">{outcome?.result ? <div className="grid justify-items-start gap-1"><span className="text-success">{outcome.result.status === 'imported' ? '已导入' : '已在本地'}</span>
                   {onOpenEntry && <Button size="xs" variant="outline" disabled={model.busy} onClick={() => { close(); onOpenEntry(outcome.result!.entry_id); }}>打开</Button>}</div>
+                  : outcome?.cancelled ? <span className="text-muted-foreground">已取消，可重新导入</span>
                   : outcome?.error ? <p role="alert" className="break-words text-destructive">{outcome.error}</p>
                   : <span className="text-muted-foreground">{item.has_pdf ? '可导入' : '缺少原 PDF'}</span>}</TableCell>
               </TableRow>;
@@ -94,7 +96,7 @@ export function MineruImportDialog({ root, onClose, onImported, onOpenEntry, onS
       <ImportPanelFooter>
         {model.progress.total > 0 && <div role="status" className="grid gap-1 text-xs"><p className="truncate" title={model.progress.current}>{model.busy ? model.progress.stopped ? '正在停止，等待当前论文保存…' : `正在导入：${model.progress.current}` : model.progress.stopped ? '导入已停止，已完成的论文保留。' : '本批导入已结束。'}</p>
           <progress aria-label="MinerU 导入进度" className="h-1 w-full accent-primary" max={model.progress.total} value={model.progress.completed} />
-          <p className="text-muted-foreground">本次处理 {model.progress.completed}/{model.progress.total} · 新增 {imported} · 已存在 {skipped} · 待重试 {failed}</p></div>}
+          <p className="text-muted-foreground">本次处理 {model.progress.completed}/{model.progress.total} · 新增 {imported} · 已存在 {skipped} · 已取消 {cancelled} · 待重试 {failed}</p></div>}
         <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-xs text-muted-foreground">已选 {model.selected.size} 项{model.selected.size > selectedVisible ? '（包含筛选外结果）' : ''}</span>
           <div className="flex items-center gap-2">{model.busy ? <Button variant="outline" disabled={model.progress.stopped} onClick={model.cancel}>停止导入</Button> : <>
             {!embedded && <Button variant="outline" onClick={close}>关闭</Button>}<Button disabled={model.loading || source.busy || !model.selected.size} onClick={() => void model.start()}>{failed ? '重试／导入所选' : '导入所选'}</Button>

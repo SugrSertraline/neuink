@@ -26,6 +26,7 @@ fn creates_entry_from_result_directory() {
         fields: BTreeMap::new(),
         tags: Vec::new(),
         zip_path: source,
+        confirmed_duplicate_hash: None,
     })
     .unwrap();
     assert_eq!(result.segment_count, 1);
@@ -50,6 +51,7 @@ fn invalid_result_does_not_create_entry() {
         fields: BTreeMap::new(),
         tags: Vec::new(),
         zip_path: source,
+        confirmed_duplicate_hash: None,
     });
     assert!(result.is_err());
     assert!(workspace.list_entries().unwrap().is_empty());
@@ -104,8 +106,9 @@ fn detects_renamed_pdf_and_refuses_duplicate_mineru_creation() {
     assert_eq!(duplicate.entry_id, entry.id.to_string());
     let empty = workspace.create_entry("Not imported").unwrap();
     let rejected = queue_pdf_parse(QueuePdfParseRequest {
-        root: workspace_root.clone(), entry_id: empty.id.clone(), pdf_path: original,
+        root: workspace_root.clone(), entry_id: empty.id.clone(), pdf_path: original.clone(),
         enqueue: false,
+        confirmed_duplicate_hash: None,
     });
     assert!(rejected.unwrap_err().contains("Existing"));
     assert!(workspace.read_entry(&empty.id).unwrap().pdf.is_none());
@@ -115,9 +118,22 @@ fn detects_renamed_pdf_and_refuses_duplicate_mineru_creation() {
     fs::write(source.join("paper_origin.pdf"), b"%PDF-1.4\nidentical bytes").unwrap();
     fs::write(source.join("paper_content_list.json"), br#"[{"type":"text","text":"Hello","page_idx":0,"bbox":[1,2,3,4]}]"#).unwrap();
     let result = create_from_mineru_client_result(CreateFromMineruClientResultRequest {
-        root: workspace_root, title: "Duplicate".into(), fields: BTreeMap::new(),
-        tags: Vec::new(), zip_path: source,
+        root: workspace_root.clone(), title: "Duplicate".into(), fields: BTreeMap::new(),
+        tags: Vec::new(), zip_path: source.clone(),
+        confirmed_duplicate_hash: None,
     });
     assert!(result.unwrap_err().contains("Existing"));
     assert_eq!(workspace.list_entries().unwrap().len(), 2);
+    let attached = queue_pdf_parse(QueuePdfParseRequest {
+        root: workspace_root.clone(), entry_id: empty.id, pdf_path: original,
+        enqueue: false, confirmed_duplicate_hash: Some(duplicate.content_hash.clone()),
+    }).unwrap();
+    assert!(attached.pdf.is_some());
+    let imported = create_from_mineru_client_result(CreateFromMineruClientResultRequest {
+        root: workspace_root, title: "Deliberate copy".into(), fields: BTreeMap::new(),
+        tags: Vec::new(), zip_path: source,
+        confirmed_duplicate_hash: Some(duplicate.content_hash),
+    }).unwrap();
+    assert_eq!(imported.entry.title, "Deliberate copy");
+    assert_eq!(workspace.list_entries().unwrap().len(), 3);
 }

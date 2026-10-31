@@ -12,8 +12,8 @@ export const saveMineruSettings = (settings: MineruSettings) => invoke<MineruSet
 export const discoverMineru = (searchId: string) => invoke<MineruCandidate[]>('mineru', { request: { action: 'discover', search_id: searchId } });
 export const cancelMineruSearch = (searchId: string) => invoke<void>('mineru', { request: { action: 'cancel_search', search_id: searchId } });
 export const scanMineru = (root: string, searchId: string) => invoke<MineruSnapshot>('mineru', { request: { action: 'scan', root, search_id: searchId } });
-export const importMineruItem = (root: string, snapshot_id: string, item_id: string) =>
-  invoke<MineruImportResult>('mineru', { request: { action: 'import', root, snapshot_id, item_id } });
+export const importMineruItem = (root: string, snapshot_id: string, item_id: string, confirmed_duplicate_hash?: string) =>
+  invoke<MineruImportResult>('mineru', { request: { action: 'import', root, snapshot_id, item_id, confirmed_duplicate_hash } });
 
 export function onMineruSettingsChanged(callback: () => void) {
   if (!('__TAURI_INTERNALS__' in window)) return () => undefined;

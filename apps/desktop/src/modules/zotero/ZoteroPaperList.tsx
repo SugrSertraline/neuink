@@ -35,6 +35,7 @@ export function ZoteroPaperList({ papers, model, onOpenEntry, onPreview }: {
         </TableCell>
         <TableCell className="whitespace-normal align-top py-2">
           {existing ? <div className="grid justify-items-start gap-1"><span className="text-success">{result?.result?.status === 'imported' ? '已导入' : '已在本地'}</span>{onOpenEntry && <Button size="xs" variant="outline" disabled={model.busy} onClick={() => onOpenEntry(existing)}>打开</Button>}</div>
+            : result?.cancelled ? <span className="text-muted-foreground">已取消，可重新导入</span>
             : result?.error ? <p role="alert" className="break-words text-destructive">{result.error}</p>
             : <span className="text-muted-foreground">{file ? '可导入 PDF' : '仅文献信息'}</span>}
         </TableCell>

@@ -39,6 +39,7 @@ export function ZoteroImportDialog({ root, onClose, onOpenEntry, onSwitchSource,
   const successes = Object.values(model.outcomes).filter(r => r.result?.status === 'imported').length;
   const skipped = Object.values(model.outcomes).filter(r => r.result?.status === 'skipped').length;
   const failures = Object.values(model.outcomes).filter(r => r.error).length;
+  const cancelled = Object.values(model.outcomes).filter(r => r.cancelled).length;
   const close = () => { if (!model.busy) onClose(); };
   return <ImportPanelFrame embedded={embedded} busy={model.busy} onClose={close} title="从 Zotero 导入" description="选择文献，复制本地 PDF 和基本信息。笔记与批注暂不迁移。">
     {onSwitchSource && <ImportSourceSwitch source="zotero" onChange={onSwitchSource} disabled={model.busy} />}
@@ -68,7 +69,7 @@ export function ZoteroImportDialog({ root, onClose, onOpenEntry, onSwitchSource,
         {model.progress.total > 0 && <div role="status" className="grid gap-1 text-xs">
           <p className="truncate" title={model.progress.current}>{model.busy ? model.progress.stopped ? '正在停止，等待当前论文保存…' : `正在导入：${model.progress.current}` : model.progress.stopped ? '导入已停止，已完成的论文保留。' : '本批导入已结束。'}</p>
           <progress aria-label="Zotero 导入进度" className="h-1 w-full accent-primary" max={model.progress.total} value={model.progress.completed} />
-          <p className="text-muted-foreground">本次处理 {model.progress.completed}/{model.progress.total} · 累计新增 {successes} · 已存在 {skipped} · 待重试 {failures}</p>
+          <p className="text-muted-foreground">本次处理 {model.progress.completed}/{model.progress.total} · 累计新增 {successes} · 已存在 {skipped} · 已取消 {cancelled} · 待重试 {failures}</p>
         </div>}
         <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-xs text-muted-foreground">已选 {model.selected.size} 篇{model.selected.size > selectedVisible ? '（包含筛选外条目）' : ''}</span>
           <div className="flex items-center gap-2">{model.busy ? <Button variant="outline" disabled={model.progress.stopped} onClick={model.cancel}>停止导入</Button> : <>

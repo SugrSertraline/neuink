@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ZoteroSnapshot } from '@/shared/ipc/zoteroApi';
+import { PdfDuplicateReviewContext } from '@/shared/lib/pdfDuplicate';
 import { ZoteroImportDialog } from './ZoteroImportDialog';
 
 const api = vi.hoisted(() => ({ getZoteroSettings: vi.fn(), saveZoteroSettings: vi.fn(), discoverZotero: vi.fn(), scanZotero: vi.fn(), importZoteroPaper: vi.fn(), onZoteroSettingsChanged: vi.fn(() => () => undefined) }));
@@ -33,6 +34,19 @@ async function openList() {
 }
 
 describe('Zotero selection import', () => {
+  it('shows a duplicate for review and imports a second copy only after confirmation', async () => {
+    const duplicate = { entryId: 'existing', title: 'Original paper', fileName: 'original.pdf', contentHash: 'same-hash', inTrash: false };
+    const confirm = vi.fn().mockResolvedValue(true);
+    api.importZoteroPaper.mockResolvedValueOnce({ entry_id: 'existing', title: 'Original paper', status: 'duplicate', has_pdf: true, duplicate })
+      .mockResolvedValueOnce({ entry_id: 'new-entry', title: 'Alpha paper', status: 'imported', has_pdf: true });
+    render(<PdfDuplicateReviewContext.Provider value={confirm}><ZoteroImportDialog root="workspace" onClose={vi.fn()} /></PdfDuplicateReviewContext.Provider>);
+    await screen.findByText('Alpha paper');
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 Alpha paper' }));
+    fireEvent.click(screen.getByRole('button', { name: '导入所选' }));
+    await screen.findByText('本批导入已结束。');
+    expect(confirm).toHaveBeenCalledWith({ candidateTitle: 'Alpha paper', sourcePath: 'Alpha.pdf', duplicate });
+    expect(api.importZoteroPaper.mock.calls[1]).toEqual(['workspace', 'snapshot', 'alpha', 'PDF1', 'same-hash']);
+  });
   it('loads automatically, excludes existing entries and imports only explicit selections', async () => {
     render(<ZoteroImportDialog root="workspace" onClose={vi.fn()} />);
     await screen.findByText('Alpha paper');

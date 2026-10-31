@@ -46,7 +46,7 @@ import {
   type AnnotationCatalogRecord
 } from '../ipc/workspaceApi';
 import { readAutoParseOnPdfImport } from '../lib/parserSettings';
-import { ensurePdfIsNew } from '../lib/pdfDuplicate';
+import { DuplicatePdfError, PdfDuplicateCancelledError, ensurePdfIsNew, type ConfirmPdfDuplicate } from '../lib/pdfDuplicate';
 import type {
   Annotation,
   AnnotationId,
@@ -64,6 +64,7 @@ import type { CreateEntryRequest, CreateEntryResult } from './useWorkspace';
 type StateSetter<T> = Dispatch<SetStateAction<T>>;
 
 type UseWorkspaceResourceActionsOptions = {
+  confirmPdfDuplicate?: ConfirmPdfDuplicate;
   entries: EntryMeta[];
   refreshAnnotationCatalog: (workspaceRoot?: string | null) => Promise<AnnotationCatalogRecord[]>;
   refreshEntries: (workspaceRoot?: string | null) => Promise<void>;
@@ -81,6 +82,7 @@ type UseWorkspaceResourceActionsOptions = {
 };
 
 export function useWorkspaceResourceActions({
+  confirmPdfDuplicate,
   entries,
   refreshAnnotationCatalog,
   refreshEntries,
@@ -98,6 +100,19 @@ export function useWorkspaceResourceActions({
 }: UseWorkspaceResourceActionsOptions) {
   const currentRoot = useRef(root);
   currentRoot.current = root;
+  const checkPdfDuplicateWithReview = useCallback(async (path: string, source: 'pdf' | 'mineru', candidateTitle: string) => {
+    if (!root) throw new Error('请先打开资料库');
+    try {
+      await ensurePdfIsNew(root, path, source);
+      return undefined;
+    } catch (caught) {
+      if (!(caught instanceof DuplicatePdfError) || !confirmPdfDuplicate) throw caught;
+      const confirmed = await confirmPdfDuplicate({ candidateTitle, sourcePath: path, duplicate: caught.duplicate });
+      if (!confirmed) throw new PdfDuplicateCancelledError(caught.duplicate);
+      if (currentRoot.current !== root) throw new Error('资料库已切换，请重新选择 PDF。');
+      return caught.duplicate.contentHash;
+    }
+  }, [confirmPdfDuplicate, root]);
   const updateWorkspaceTagDescription = useCallback(async (id: string, value: string, expected: string) => {
     if (!root) throw new Error('请先打开资料库');
     const saved = await updateTagDescription(root, id, value, expected);
@@ -215,8 +230,9 @@ export function useWorkspaceResourceActions({
       }
       const fields = cleanFields(request.fields ?? {});
 
-      if (request.pdfPath) await ensurePdfIsNew(root, request.pdfPath, 'pdf');
-      if (request.mineruZipPath) await ensurePdfIsNew(root, request.mineruZipPath, 'mineru');
+      const confirmedDuplicateHash = request.mineruZipPath
+        ? await checkPdfDuplicateWithReview(request.mineruZipPath, 'mineru', title)
+        : request.pdfPath ? await checkPdfDuplicateWithReview(request.pdfPath, 'pdf', title) : undefined;
 
       let createdEntryId: string | null = null;
       try {
@@ -232,7 +248,7 @@ export function useWorkspaceResourceActions({
         setTags(nextTags);
 
         if (request.mineruZipPath) {
-          const imported = await createFromMineruClientResult(root, title, fields, tagIds, request.mineruZipPath);
+          const imported = await createFromMineruClientResult(root, title, fields, tagIds, request.mineruZipPath, confirmedDuplicateHash);
           setEntries((current) => [imported.entry, ...current.filter((entry) => entry.id !== imported.entry.id)]);
           setSelectedEntryId(imported.entry.id);
           return { createdWithPdf: true, entryId: imported.entry.id, importedMineruClientResult: true, parseSubmissionFailed: false, parseMessage: imported.entry.pdf?.parse.message ?? null };
@@ -245,7 +261,7 @@ export function useWorkspaceResourceActions({
         setError(null);
 
         if (request.pdfPath) {
-          const queued = await queuePdfParse(root, created.id, request.pdfPath, readAutoParseOnPdfImport());
+          const queued = await queuePdfParse(root, created.id, request.pdfPath, readAutoParseOnPdfImport(), confirmedDuplicateHash);
           setEntries((current) => [
             queued,
             ...current.filter((entry) => entry.id !== queued.id)
@@ -277,7 +293,7 @@ export function useWorkspaceResourceActions({
         throw caught;
       }
     },
-    [ensureTagPath, refreshEntries, root, submitQueuedParse, tags]
+    [checkPdfDuplicateWithReview, ensureTagPath, refreshEntries, root, submitQueuedParse, tags]
   );
 
   const importPdfForEntry = useCallback(
@@ -286,8 +302,9 @@ export function useWorkspaceResourceActions({
         return;
       }
       try {
-        await ensurePdfIsNew(root, pdfPath, 'pdf');
-        const queued = await queuePdfParse(root, entryId, pdfPath, readAutoParseOnPdfImport());
+        const candidateTitle = entries.find(entry => entry.id === entryId)?.title ?? '当前条目';
+        const confirmedDuplicateHash = await checkPdfDuplicateWithReview(pdfPath, 'pdf', candidateTitle);
+        const queued = await queuePdfParse(root, entryId, pdfPath, readAutoParseOnPdfImport(), confirmedDuplicateHash);
         setEntries((current) =>
           current.map((entry) => (entry.id === queued.id ? queued : entry))
         );
@@ -296,12 +313,13 @@ export function useWorkspaceResourceActions({
         }
         setError(null);
       } catch (caught) {
+        if (caught instanceof PdfDuplicateCancelledError) throw caught;
         setError(caught instanceof Error ? caught.message : String(caught));
         await refreshEntries(root);
         throw caught;
       }
     },
-    [refreshEntries, root, submitQueuedParse]
+    [checkPdfDuplicateWithReview, entries, refreshEntries, root, submitQueuedParse]
   );
 
   const importPdfForSelectedEntry = useCallback(

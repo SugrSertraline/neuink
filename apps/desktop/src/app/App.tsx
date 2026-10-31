@@ -109,6 +109,8 @@ import { JobStatusDock } from '../shared/components/JobStatusDock';
 import { TitleBar } from '../shared/components/TitleBar';
 import { useToast } from '../shared/hooks/useToast';
 import { usePdfDropImport } from './usePdfDropImport';
+import { usePdfDuplicateReview } from './usePdfDuplicateReview';
+import { PdfDuplicateCancelledError, PdfDuplicateReviewContext } from '@/shared/lib/pdfDuplicate';
 import { noteCatalogRefreshKey } from './noteCatalogRefreshKey';
 import { useWorkspace } from '../shared/hooks/useWorkspace';
 import { useWorkspaceJobs } from '../shared/hooks/useWorkspaceJobs';
@@ -247,7 +249,8 @@ function isHttpEndpoint(value: string) {
 }
 
 export function App() {
-  const workspace = useWorkspace();
+  const duplicateReview = usePdfDuplicateReview();
+  const workspace = useWorkspace(duplicateReview.confirm);
   const onboardingRootRef = useRef(workspace.root);
   onboardingRootRef.current = workspace.root;
   const { dismiss, notify } = useToast();
@@ -1019,12 +1022,11 @@ export function App() {
   };
 
   const attachPdfToEntry = async (entryId: string, pdfPath: string) => {
-    await workspace.importPdfForEntry(
-      entryId,
-      pdfPath,
-      getEffectiveParserEndpoint(mineruEndpoint),
-      parserApiKey
-    );
+    try {
+      await workspace.importPdfForEntry(entryId, pdfPath, getEffectiveParserEndpoint(mineruEndpoint), parserApiKey);
+    } catch (caught) {
+      if (!(caught instanceof PdfDuplicateCancelledError)) throw caught;
+    }
   };
 
   const createPdfVersion = async (entryId: string, pdfPath: string) => {
@@ -1039,8 +1041,11 @@ export function App() {
       },
       getEffectiveParserEndpoint(mineruEndpoint),
       parserApiKey
-    );
-    if (!created) throw new Error('创建新版 PDF 条目失败。');
+    ).catch(caught => {
+      if (caught instanceof PdfDuplicateCancelledError) return undefined;
+      throw caught;
+    });
+    if (!created) return;
     workspace.setSelectedEntryId(created.entryId);
     notify({
       title: '已创建新版 PDF 条目',
@@ -1311,6 +1316,11 @@ export function App() {
               : 'created_metadata_only' as const
         };
       } catch (error) {
+        if (error instanceof PdfDuplicateCancelledError) {
+          const message = `已取消添加。相同内容的 PDF 已在“${error.duplicate.title}”。`;
+          updateSciverseJob('succeeded', `${source.title}：${message}`);
+          return { entryId: error.duplicate.entryId, message, status: 'already_exists' as const };
+        }
         const message = formatAssistantError(error, { debug: readAssistantDebug(), fallback: ASSISTANT_IMPORT_INCOMPLETE });
         notify({
           durationMs: 6000,
@@ -1782,8 +1792,10 @@ export function App() {
   }, [requestCloseSurfaceTab, surfaceLayout]);
 
   return (
+    <PdfDuplicateReviewContext.Provider value={duplicateReview.confirm}>
     <div className="app gap-0">
       <TitleBar onOpenSearch={() => setSearchDialogOpen(true)} />
+      {duplicateReview.dialog}
       {pdfDropImport.dragActive ? (
         <div
           aria-live="polite"
@@ -2289,5 +2301,6 @@ export function App() {
         <button type="button">辅助栏</button>
       </footer>
     </div>
+    </PdfDuplicateReviewContext.Provider>
   );
 }

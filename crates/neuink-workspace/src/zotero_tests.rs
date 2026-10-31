@@ -63,7 +63,7 @@ fn imports_complete_entry_and_repeated_import_preserves_user_edits() {
 }
 
 #[test]
-fn identical_existing_pdf_is_reused_and_source_is_remembered() {
+fn identical_existing_pdf_requires_confirmation_before_new_entry() {
     let (_dir, ws, library) = fixture();
     let entry = ws.create_entry("Existing paper").unwrap();
     ws.import_pdf(
@@ -75,12 +75,18 @@ fn identical_existing_pdf_is_reused_and_source_is_remembered() {
         .import_zotero_paper(&library, &library.papers[0], Some("PDF00001"))
         .unwrap();
     assert_eq!(imported.entry_id, entry.id);
-    assert_eq!(imported.status, "skipped");
+    assert_eq!(imported.status, "duplicate");
+    assert!(imported.duplicate.is_some());
     assert_eq!(ws.list_entries().unwrap().len(), 1);
-    assert!(ws
+    assert!(!ws
         .zotero_matches("source")
         .unwrap()
         .contains_key("1:TEST0001"));
+    let hash = imported.duplicate.unwrap().content_hash;
+    let added = ws.import_zotero_paper_with_confirmation(&library, &library.papers[0], Some("PDF00001"), Some(&hash)).unwrap();
+    assert_eq!(added.status, "imported");
+    assert_ne!(added.entry_id, entry.id);
+    assert_eq!(ws.list_entries().unwrap().len(), 2);
 }
 
 #[test]
@@ -89,9 +95,9 @@ fn pdf_in_trash_is_reported_instead_of_imported_again() {
     let entry = ws.create_entry("Trashed paper").unwrap();
     ws.import_pdf(&entry.id, library.papers[0].attachments[0].path.clone().unwrap()).unwrap();
     ws.delete_entry(&entry.id).unwrap();
-    let error = ws.import_zotero_paper(&library, &library.papers[0], Some("PDF00001"))
-        .unwrap_err().to_string();
-    assert!(error.contains("回收站"));
+    let duplicate = ws.import_zotero_paper(&library, &library.papers[0], Some("PDF00001")).unwrap();
+    assert_eq!(duplicate.status, "duplicate");
+    assert!(duplicate.duplicate.unwrap().in_trash);
     assert!(ws.list_entries().unwrap().is_empty());
 }
 

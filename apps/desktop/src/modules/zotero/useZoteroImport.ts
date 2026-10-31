@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { importZoteroPaper, scanZotero, type ZoteroImportResult, type ZoteroSnapshot } from '@/shared/ipc/zoteroApi';
+import { useConfirmPdfDuplicate } from '@/shared/lib/pdfDuplicate';
 import { runLocalBackgroundJob } from '@/shared/lib/localBackgroundJobs';
 import { registerSegmentEditorCloseHandler, setSegmentEditorDirty } from '@/modules/reader/components/segmentEditorDirtyRegistry';
 
-export type ImportOutcome = { result?: ZoteroImportResult; error?: string };
+export type ImportOutcome = { result?: ZoteroImportResult; error?: string; cancelled?: boolean };
 export function useZoteroImport(root: string, scope = 'library') {
+  const confirmPdfDuplicate = useConfirmPdfDuplicate();
   const owner = useId();
   const [snapshot, setSnapshot] = useState<ZoteroSnapshot | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -62,8 +64,21 @@ export function useZoteroImport(root: string, scope = 'library') {
         for (const [index, id] of ids.entries()) {
           if (canceled.current || !mounted.current) break;
           setProgress(p => ({ ...p, current: snapshot.library.papers.find(p => p.id === id)?.title ?? '' }));
-          let outcome: ImportOutcome;
-          try { outcome = { result: await importZoteroPaper(root, savedSnapshot, id, attachmentSelection[id] ?? null) }; }
+          let outcome: ImportOutcome = {};
+          try {
+            const attachmentKey = attachmentSelection[id] ?? null;
+            const paper = snapshot.library.papers.find(p => p.id === id);
+            let result = await importZoteroPaper(root, savedSnapshot, id, attachmentKey);
+            if (result.status === 'duplicate' && result.duplicate && confirmPdfDuplicate) {
+              const sourcePath = paper?.attachments.find(a => a.key === attachmentKey)?.file_name ?? 'Zotero PDF';
+              const confirmed = await confirmPdfDuplicate({ candidateTitle: paper?.title ?? result.title, sourcePath, duplicate: result.duplicate });
+              if (confirmed && !canceled.current && mounted.current) result = await importZoteroPaper(root, savedSnapshot, id, attachmentKey, result.duplicate.contentHash);
+              else { outcome = { cancelled: true }; }
+            } else if (result.status === 'duplicate') {
+              outcome = { error: '该 PDF 与已有论文重复，请查看已有条目。' };
+            }
+            if (!outcome.error && !outcome.cancelled) outcome = { result };
+          }
           catch (e) { failed = true; outcome = { error: typeof e === 'string' ? e : '导入失败，请重试。' }; }
           report({ current: index + 1, total: ids.length, percent: Math.round((index + 1) / ids.length * 100) });
           if (!mounted.current) break;

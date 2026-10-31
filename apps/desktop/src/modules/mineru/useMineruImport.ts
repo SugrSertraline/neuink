@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { cancelMineruSearch, importMineruItem, scanMineru, type MineruImportResult, type MineruSnapshot } from '@/shared/ipc/mineruApi';
+import { checkPdfDuplicate } from '@/shared/ipc/workspaceApi';
+import { useConfirmPdfDuplicate } from '@/shared/lib/pdfDuplicate';
 import { runLocalBackgroundJob } from '@/shared/lib/localBackgroundJobs';
 
 import { registerSegmentEditorCloseHandler, setSegmentEditorDirty } from '@/modules/reader/components/segmentEditorDirtyRegistry';
 
-type ImportOutcome = { result?: MineruImportResult; error?: string };
+type ImportOutcome = { result?: MineruImportResult; error?: string; cancelled?: boolean };
 let nextScanId = 0;
 
 export function useMineruImport(root: string, onImported?: () => Promise<void> | void, scope = 'library') {
+  const confirmPdfDuplicate = useConfirmPdfDuplicate();
   const owner = useId();
   const [snapshot, setSnapshot] = useState<MineruSnapshot | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -79,7 +82,24 @@ export function useMineruImport(root: string, onImported?: () => Promise<void> |
           setProgress(previous => ({ ...previous, current: item.title }));
           let outcome: ImportOutcome;
           try {
-            const result = await importMineruItem(root, snapshot.snapshot_id, item.id);
+            let confirmedHash: string | undefined;
+            const duplicate = confirmPdfDuplicate ? await checkPdfDuplicate(root, item.path, 'mineru') : null;
+            if (duplicate && confirmPdfDuplicate) {
+              const confirmed = await confirmPdfDuplicate({ candidateTitle: item.title, sourcePath: item.path, duplicate });
+              if (!confirmed || canceled.current || !mounted.current) {
+                outcome = { cancelled: true };
+                report({ current: index + 1, total: items.length, percent: Math.round((index + 1) / items.length * 100) });
+                if (mounted.current) {
+                  setOutcomes(previous => ({ ...previous, [item.id]: outcome }));
+                  setProgress(previous => ({ ...previous, completed: index + 1 }));
+                }
+                continue;
+              }
+              confirmedHash = duplicate.contentHash;
+            }
+            const result = confirmedHash
+              ? await importMineruItem(root, snapshot.snapshot_id, item.id, confirmedHash)
+              : await importMineruItem(root, snapshot.snapshot_id, item.id);
             outcome = { result };
             if (result.status === 'imported') {
               try { await imported.current?.(); }

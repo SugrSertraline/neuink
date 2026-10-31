@@ -32,6 +32,8 @@ pub enum ZoteroRequest {
         snapshot_id: String,
         paper_id: String,
         attachment_key: Option<String>,
+        #[serde(default)]
+        confirmed_duplicate_hash: Option<String>,
     },
 }
 
@@ -147,6 +149,7 @@ fn execute<R: Runtime>(app: &AppHandle<R>, request: ZoteroRequest) -> Result<Val
             snapshot_id,
             paper_id,
             attachment_key,
+            confirmed_duplicate_hash,
         } => {
             let library = {
                 let cache = snapshots()
@@ -169,7 +172,7 @@ fn execute<R: Runtime>(app: &AppHandle<R>, request: ZoteroRequest) -> Result<Val
                 .ok_or("论文不在本次读取结果中，请刷新列表。")?;
             let workspace = Workspace::open_existing(&root).map_err(|_| "NeuInk 资料库不可用。")?;
             let result = workspace
-                .import_zotero_paper(&library, paper, attachment_key.as_deref())
+                .import_zotero_paper_with_confirmation(&library, paper, attachment_key.as_deref(), confirmed_duplicate_hash.as_deref())
                 .map_err(|e| {
                     if let neuink_workspace::WorkspaceError::Zotero(message) = e {
                         message

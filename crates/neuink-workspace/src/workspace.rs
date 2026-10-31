@@ -278,6 +278,15 @@ impl Workspace {
         entry_id: &EntryId,
         src_path: impl Into<PathBuf>,
     ) -> Result<EntryMeta, WorkspaceError> {
+        self.import_pdf_with_confirmation(entry_id, src_path, None)
+    }
+
+    pub fn import_pdf_with_confirmation(
+        &self,
+        entry_id: &EntryId,
+        src_path: impl Into<PathBuf>,
+        confirmed_hash: Option<&str>,
+    ) -> Result<EntryMeta, WorkspaceError> {
         let _guard = self.begin_tag_safe_mutation()?;
         let src_path = src_path.into();
         let mut entry = self.read_entry_meta(entry_id)?;
@@ -287,8 +296,10 @@ impl Workspace {
 
         let bytes = fs::read(&src_path)?;
         let content_hash = blake3::hash(&bytes).to_hex().to_string();
-        if let Some(duplicate) = self.find_pdf_duplicate(&content_hash)? {
-            return Err(WorkspaceError::PdfContentDuplicate(duplicate.title));
+        if confirmed_hash != Some(content_hash.as_str()) {
+            if let Some(duplicate) = self.find_pdf_duplicate(&content_hash)? {
+                return Err(WorkspaceError::PdfContentDuplicate(duplicate.title));
+            }
         }
         atomic_write(self.layout.entry_pdf_file(entry_id), &bytes)?;
         entry.pdf = Some(PdfAsset {

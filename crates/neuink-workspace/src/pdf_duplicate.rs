@@ -9,6 +9,8 @@ use crate::{Workspace, WorkspaceError};
 pub struct PdfDuplicate {
     pub entry_id: String,
     pub title: String,
+    pub file_name: String,
+    pub content_hash: String,
     pub in_trash: bool,
 }
 
@@ -34,11 +36,15 @@ impl Workspace {
                 .as_ref()
                 .is_some_and(|pdf| pdf.content_hash == hash)
         }) {
-            return Ok(Some(PdfDuplicate {
-                entry_id: entry.id.to_string(),
-                title: entry.title,
-                in_trash: false,
-            }));
+            if let Some(pdf) = entry.pdf {
+                return Ok(Some(PdfDuplicate {
+                    entry_id: entry.id.to_string(),
+                    title: entry.title,
+                    file_name: pdf.file_name,
+                    content_hash: pdf.content_hash,
+                    in_trash: false,
+                }));
+            }
         }
         if let Some(entry) = self.list_trashed_entries()?.into_iter().find(|entry| {
             entry
@@ -46,11 +52,15 @@ impl Workspace {
                 .as_ref()
                 .is_some_and(|pdf| pdf.content_hash == hash)
         }) {
-            return Ok(Some(PdfDuplicate {
-                entry_id: entry.id.to_string(),
-                title: entry.title,
-                in_trash: true,
-            }));
+            if let Some(pdf) = entry.pdf {
+                return Ok(Some(PdfDuplicate {
+                    entry_id: entry.id.to_string(),
+                    title: entry.title,
+                    file_name: pdf.file_name,
+                    content_hash: pdf.content_hash,
+                    in_trash: true,
+                }));
+            }
         }
         Ok(None)
     }
@@ -89,5 +99,24 @@ mod tests {
                 .unwrap()
                 .in_trash
         );
+    }
+
+    #[test]
+    fn explicit_confirmation_only_applies_to_the_same_pdf_bytes() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = Workspace::create(temp.path().join("workspace")).unwrap();
+        let first = temp.path().join("first.pdf");
+        let second = temp.path().join("second.pdf");
+        std::fs::write(&first, b"%PDF-1.7\nfirst").unwrap();
+        std::fs::write(&second, b"%PDF-1.7\nfirst").unwrap();
+        let original = workspace.create_entry("Original").unwrap();
+        workspace.import_pdf(&original.id, &first).unwrap();
+        let duplicate = workspace.create_entry("Another").unwrap();
+        assert!(matches!(workspace.import_pdf_with_confirmation(&duplicate.id, &second, Some("wrong hash")),
+            Err(WorkspaceError::PdfContentDuplicate(_))));
+        let hash = hash_pdf_file(&second).unwrap();
+        let saved = workspace.import_pdf_with_confirmation(&duplicate.id, &second, Some(&hash)).unwrap();
+        assert_eq!(saved.pdf.unwrap().content_hash, hash);
+        assert_eq!(workspace.list_entries().unwrap().len(), 2);
     }
 }
