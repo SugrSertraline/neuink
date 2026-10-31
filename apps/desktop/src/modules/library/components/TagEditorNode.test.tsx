@@ -11,10 +11,14 @@ describe('TagEditorNode', () => {
     const onSelect = vi.fn();
     const onOpen = vi.fn();
     const onToggle = vi.fn();
+    const onCreateChild = vi.fn();
+    const onRename = vi.fn();
+    const onDelete = vi.fn();
     const node = { children: [{ children: [], count: 0, depth: 1, id: 'child', name: '子标签', parentId: 'research', path: '研究/子标签' }],
       count: 2, depth: 0, id: 'research', name: '研究', parentId: null, path: '研究' };
     const view = render(<TagEditorNode node={node} active={false} selected={true} expanded={true} busy={false}
-      onSelect={onSelect} onOpen={onOpen} onToggle={onToggle} />);
+      onSelect={onSelect} onOpen={onOpen} onToggle={onToggle}
+      onCreateChild={onCreateChild} onRename={onRename} onDelete={onDelete} />);
 
     const tag = view.getByRole('button', { name: '选择标签 研究' });
     fireEvent.click(tag, { detail: 1 });
@@ -28,5 +32,11 @@ describe('TagEditorNode', () => {
     expect(disclosure.getAttribute('aria-expanded')).toBe('true');
     fireEvent.click(disclosure);
     expect(onToggle).toHaveBeenCalledTimes(1);
+    expect(disclosure.parentElement?.lastElementChild).toBe(disclosure);
+
+    fireEvent.contextMenu(tag, { clientX: 70, clientY: 80 });
+    expect(view.getByRole('menuitem', { name: '添加子标签' })).toBeTruthy();
+    fireEvent.click(view.getByRole('menuitem', { name: '重命名' }));
+    expect(onRename).toHaveBeenCalledTimes(1);
   });
 });

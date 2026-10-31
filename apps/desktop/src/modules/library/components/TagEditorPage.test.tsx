@@ -1,11 +1,23 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TagMeta } from '@/shared/types/domain';
 import { TagEditorPage } from './TagEditorPage';
 
-afterEach(cleanup);
+class Pointer extends MouseEvent {
+  pointerId: number;
+  pointerType: string;
+  isPrimary: boolean;
+  constructor(type: string, init: PointerEventInit = {}) {
+    super(type, init);
+    this.pointerId = init.pointerId ?? 1;
+    this.pointerType = init.pointerType ?? 'mouse';
+    this.isPrimary = init.isPrimary ?? true;
+  }
+}
+beforeEach(() => vi.stubGlobal('PointerEvent', Pointer));
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 const tags: TagMeta[] = [
   { id: 'root', name: '研究', parent_id: null, created_at: '', updated_at: '' },
@@ -57,5 +69,37 @@ describe('TagEditorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', '保存失败');
     expect(screen.getByRole('textbox', { name: '重命名标签' })).toHaveProperty('value', '保留草稿');
+  });
+
+  it('pans from blank canvas, leaves node clicks alone, and resets the view', () => {
+    showEditor();
+    const graph = screen.getByLabelText('标签树图');
+    Object.assign(graph, { setPointerCapture: vi.fn(), hasPointerCapture: vi.fn(() => true), releasePointerCapture: vi.fn() });
+    const stage = graph.querySelector<HTMLElement>('[data-tag-editor-stage]')!;
+    fireEvent.pointerDown(graph, { pointerId: 7, button: 0, clientX: 100, clientY: 100, pointerType: 'mouse' });
+    fireEvent.pointerMove(graph, { pointerId: 7, clientX: 60, clientY: 80 });
+    expect(stage.style.transform).toBe('translate3d(-40px, -20px, 0)');
+    fireEvent.pointerUp(graph, { pointerId: 7 });
+
+    fireEvent.pointerDown(within(graph).getByRole('button', { name: '选择标签 研究' }),
+      { pointerId: 8, button: 0, clientX: 50, clientY: 50, pointerType: 'mouse' });
+    fireEvent.pointerMove(graph, { pointerId: 8, clientX: 10, clientY: 10 });
+    expect(stage.style.transform).toBe('translate3d(-40px, -20px, 0)');
+    fireEvent.pointerDown(graph, { pointerId: 9, button: 0, clientX: 100, clientY: 100, pointerType: 'touch' });
+    fireEvent.pointerMove(graph, { pointerId: 9, clientX: 130, clientY: 130 });
+    expect(stage.style.transform).toBe('translate3d(-40px, -20px, 0)');
+    fireEvent.pointerDown(graph, { pointerId: 10, button: 0, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(graph, { pointerId: 10, clientX: 120, clientY: 130 });
+    fireEvent.keyDown(graph, { key: 'Escape' });
+    expect(stage.style.transform).toBe('translate3d(-40px, -20px, 0)');
+    fireEvent.click(screen.getByRole('button', { name: '视图居中' }));
+    expect(stage.style.transform).toBe('translate3d(0px, 0px, 0)');
+  });
+
+  it('edits the tag that was right-clicked', () => {
+    showEditor();
+    fireEvent.contextMenu(screen.getByRole('button', { name: '选择标签 研究/视觉' }), { clientX: 80, clientY: 90 });
+    fireEvent.click(screen.getByRole('menuitem', { name: '重命名' }));
+    expect(screen.getByRole('textbox', { name: '重命名标签' })).toHaveProperty('value', '视觉');
   });
 });

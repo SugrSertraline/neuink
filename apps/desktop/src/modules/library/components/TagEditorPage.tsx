@@ -1,13 +1,15 @@
-import { FolderPlus, Minus, Plus, Tags } from 'lucide-react';
+import { FolderPlus, LocateFixed, Minus, Plus, Tags } from 'lucide-react';
 import { type FormEvent, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { TabsContent } from '@/components/ui/tabs';
+import { cn } from '@/lib/utils';
 import type { TagMeta } from '@/shared/types/domain';
 import { layoutTagEditorTree, TAG_NODE_HEIGHT } from '../utils/tagEditorLayout';
 import { buildTagTree, flattenTagTree, type TagCountEntry, type TagNode } from '../utils/tagTree';
 import { DeleteTagDialog } from './DeleteTagDialog';
 import { TagEditorNode } from './TagEditorNode';
+import { useTagEditorPan } from './useTagEditorPan';
 
 type TagEditorPageProps = {
   onOpenTrash?: () => void;
@@ -32,6 +34,7 @@ export function TagEditorPage({ onOpenTrash, activeTag, entries, tags, onCreateT
   const [draft, setDraft] = useState('');
   const [newTagPath, setNewTagPath] = useState('');
   const [error, setError] = useState('');
+  const pan = useTagEditorPan();
   const roots = useMemo(() => buildTagTree(tags, entries), [tags, entries]);
   const allNodes = useMemo(() => flattenTagTree(roots), [roots]);
   const layout = useMemo(() => layoutTagEditorTree(roots, collapsedIds), [roots, collapsedIds]);
@@ -73,17 +76,21 @@ export function TagEditorPage({ onOpenTrash, activeTag, entries, tags, onCreateT
       setSelectedId(deleteTarget.parentId); setMode(null); setDeleteTarget(null);
     });
   };
+  const beginEdit = (node: TagNode, nextMode: 'rename' | 'create') => {
+    setSelectedId(node.id); setMode(nextMode); setDraft(nextMode === 'rename' ? node.name : ''); setError('');
+  };
 
   const content = <div className="@container/tag-editor flex h-full min-h-0 flex-col bg-background">
     <header className="shrink-0 border-b border-border bg-card px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
         <Tags size={17} className="text-primary" aria-hidden="true" /><h1 className="text-base font-semibold">标签管理</h1>
         <span className="mr-auto text-xs tabular-nums text-muted-foreground">{allNodes.length} 个标签</span>
+        <Button size="sm" variant="ghost" onClick={pan.resetView}><LocateFixed size={14} aria-hidden="true" />视图居中</Button>
         <Button size="sm" variant="ghost" disabled={!collapsedIds.size} onClick={() => setCollapsedIds(new Set())}>展开全部</Button>
         <Button size="sm" variant="ghost" disabled={!branchIds.length} onClick={() => { setCollapsedIds(new Set(branchIds)); setSelectedId(null); setMode(null); }}><Minus size={14} aria-hidden="true" />收起全部</Button>
         {onOpenTrash && <Button size="sm" variant="outline" onClick={onOpenTrash}>回收站</Button>}
       </div>
-      <p className="mt-1 text-xs text-muted-foreground">单击节点选择标签，双击打开条目；使用箭头展开分支，在右侧编辑选中的标签。</p>
+      <p className="mt-1 text-xs text-muted-foreground">单击选择，双击打开；右键查看操作。拖动空白画布可移动树图，滚轮与方向键仍可滚动。</p>
       <form className="mt-3 flex max-w-xl items-center gap-2" onSubmit={createPath}>
         <Input aria-label="新标签路径" disabled={busy} placeholder="新建标签，例如：研究/计算机视觉/检测" value={newTagPath} onChange={event => setNewTagPath(event.target.value)} />
         <Button type="submit" size="sm" disabled={busy || !newTagPath.trim()}><Plus size={14} aria-hidden="true" />新建</Button>
@@ -91,16 +98,23 @@ export function TagEditorPage({ onOpenTrash, activeTag, entries, tags, onCreateT
       {error && <p role="alert" className="mt-2 text-xs text-destructive">{error}</p>}
     </header>
     <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_16rem] @max-[720px]/tag-editor:grid-cols-1 @max-[720px]/tag-editor:grid-rows-[minmax(12rem,1fr)_auto]">
-      <div aria-label="标签树图" className="min-h-0 min-w-0 overflow-auto overscroll-contain bg-background">
-        {roots.length ? <div className="relative" style={{ width: layout.width, height: layout.height }}>
+      <div aria-label="标签树图" tabIndex={0} ref={pan.viewportRef}
+        className={cn('min-h-0 min-w-0 overflow-auto overscroll-contain bg-background outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring cursor-grab', pan.dragging && 'cursor-grabbing select-none')}
+        onPointerDown={pan.onPointerDown} onPointerMove={pan.onPointerMove} onPointerUp={pan.onPointerUp}
+        onPointerCancel={pan.onPointerCancel} onLostPointerCapture={pan.onLostPointerCapture} onKeyDown={pan.onKeyDown}>
+        <div className="flex min-h-full min-w-full">
+        {roots.length ? <div ref={pan.stageRef} data-tag-editor-stage className="relative m-auto shrink-0" style={{ width: layout.width, height: layout.height }}>
           <svg className="pointer-events-none absolute inset-0 text-border" width={layout.width} height={layout.height} aria-hidden="true">
             {layout.links.map(link => <path key={`${link.from}:${link.to}`} d={link.path} fill="none" stroke="currentColor" strokeWidth="1.5" />)}
           </svg>
           {layout.nodes.map(({ node, x, y, expanded }) => <div key={node.id} className="absolute" style={{ left: x, top: y - TAG_NODE_HEIGHT / 2 }}>
             <TagEditorNode node={node} active={activeTag === node.id} selected={selected?.id === node.id} expanded={expanded} busy={busy}
-              onToggle={() => toggle(node)} onSelect={() => { setSelectedId(node.id); setMode(null); setError(''); }} onOpen={() => onSelectTag(node.id)} />
+              onToggle={() => toggle(node)} onSelect={() => { setSelectedId(node.id); setMode(null); setError(''); }} onOpen={() => onSelectTag(node.id)}
+              onCreateChild={() => beginEdit(node, 'create')} onRename={() => beginEdit(node, 'rename')}
+              onDelete={() => { setSelectedId(node.id); setMode(null); setDeleteTarget(node); }} />
           </div>)}
-        </div> : <p className="p-6 text-sm text-muted-foreground">暂无标签。可在上方新建一个标签或标签路径。</p>}
+        </div> : <p className="m-auto p-6 text-sm text-muted-foreground">暂无标签。可在上方新建一个标签或标签路径。</p>}
+        </div>
       </div>
       <aside aria-label="标签编辑" className="min-h-0 overflow-y-auto border-l border-border bg-card p-4 @max-[720px]/tag-editor:max-h-60 @max-[720px]/tag-editor:border-l-0 @max-[720px]/tag-editor:border-t">
         {selected ? <>
@@ -116,8 +130,8 @@ export function TagEditorPage({ onOpenTrash, activeTag, entries, tags, onCreateT
               <Button size="sm" type="button" variant="ghost" disabled={busy} onClick={() => setMode(null)}>取消</Button></div>
           </form> : <div className="mt-4 space-y-1 border-t border-border pt-3">
             <Button className="w-full justify-start" size="sm" variant="ghost" onClick={() => onSelectTag(selected.id)}>打开条目</Button>
-            <Button className="w-full justify-start" size="sm" variant="ghost" disabled={busy} onClick={() => { setMode('create'); setDraft(''); }}><FolderPlus size={14} aria-hidden="true" />添加子标签</Button>
-            <Button className="w-full justify-start" size="sm" variant="ghost" disabled={busy} onClick={() => { setMode('rename'); setDraft(selected.name); }}>重命名</Button>
+            <Button className="w-full justify-start" size="sm" variant="ghost" disabled={busy} onClick={() => beginEdit(selected, 'create')}><FolderPlus size={14} aria-hidden="true" />添加子标签</Button>
+            <Button className="w-full justify-start" size="sm" variant="ghost" disabled={busy} onClick={() => beginEdit(selected, 'rename')}>重命名</Button>
             <Button className="w-full justify-start text-destructive" size="sm" variant="ghost" disabled={busy} onClick={() => setDeleteTarget(selected)}>移入回收站</Button>
           </div>}
         </> : <p className="text-xs text-muted-foreground">选择一个标签后可编辑名称或添加子标签。</p>}
