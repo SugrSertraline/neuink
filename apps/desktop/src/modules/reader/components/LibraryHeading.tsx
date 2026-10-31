@@ -1,4 +1,4 @@
-import { ChevronRight, MoreHorizontal } from 'lucide-react';
+import { ChevronRight, MoreHorizontal, Tags } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -49,7 +49,7 @@ export function LibraryHeading({ title, summary, tag, ancestors, hasTagContext, 
       <p className="min-w-0 truncate text-xs tabular-nums text-muted-foreground" title={summary}>{summary}</p>
     </div>
     <div aria-label="条目库操作" className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-1.5">
-      <Button size="default" variant="ghost" className="text-xs text-muted-foreground" onClick={onManageTags} disabled={disabled}>标签管理</Button>
+      <Button size="default" variant="ghost" className="text-xs text-muted-foreground" onClick={onManageTags} disabled={disabled}><Tags size={14} aria-hidden="true" />标签管理</Button>
       {actions}
     </div>
     </div>
