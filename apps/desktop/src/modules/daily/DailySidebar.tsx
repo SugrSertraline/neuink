@@ -1,12 +1,20 @@
-import { useEffect, useMemo } from 'react';
-import { ArrowUpRight, RefreshCw } from 'lucide-react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { ArrowUpRight, RefreshCw, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useLibraryReadingStates } from '@/modules/reader/useLibraryReadingStates';
 import type { LibraryEntry } from '@/modules/library/components/LibrarySidebar';
 import { useDaily } from './DailyContext';
 import { useRecommendations } from './RecommendationContext';
 import { buildDailyAdvice, type DailySuggestion } from './dailyAdvice';
 import { useDailyAdvice } from './useDailyAdvice';
+import { DailyFoodPicker } from './DailyFoodPicker';
+import { DailySidebarSettings } from './DailySidebarSettings';
+import { dailyFortune, ZODIAC_SIGNS, type DailySidebarPreferences } from './dailyLifestyle';
+import { useDailySidebarPreferences } from './useDailySidebarPreferences';
+
+const DailyCalendar = lazy(() => import('./DailyCalendar'));
 
 export function DailySidebar({ active = false, entries = [], status = 'ready', onOpenEntry, onOpenRecommendations, onReflect }: {
   active?: boolean; entries?: LibraryEntry[]; status?: 'ready' | 'loading' | 'error';
@@ -14,11 +22,15 @@ export function DailySidebar({ active = false, entries = [], status = 'ready', o
   onReflect?: (entry: LibraryEntry) => void; onSettings?: () => void;
 }) {
   const daily = useDaily()!, recommendations = useRecommendations();
-  const reading = useLibraryReadingStates(daily.root, active && status === 'ready');
+  const { preferences, update, saveError } = useDailySidebarPreferences();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const showAdvice = !preferences.hidden.includes('advice');
+  const reading = useLibraryReadingStates(daily.root, active && status === 'ready' && showAdvice);
   const input = useMemo(() => buildDailyAdvice(entries, reading.states, daily.today), [entries, reading.states, daily.today]);
   const ready = Boolean(daily.root && status === 'ready' && !reading.loading && !reading.error);
-  const advice = useDailyAdvice(active, ready, input);
+  const advice = useDailyAdvice(active && showAdvice, ready, input);
   useEffect(() => { if (active) recommendations?.ensureToday(); }, [active, recommendations?.ensureToday]);
+  useEffect(() => { if (!active) setSettingsOpen(false); }, [active]);
   const suggestions = advice.phase === 'ready' ? advice.result!.suggestions : input.candidates.slice(0, 3);
   const [first, ...others] = suggestions;
   const dateLabel = new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' }).format(new Date(`${daily.today}T12:00:00`));
@@ -53,15 +65,50 @@ export function DailySidebar({ active = false, entries = [], status = 'ready', o
       </div>;
   return <aside className="app-sidebar daily-sidebar flex min-h-0 flex-col" aria-label="每日智能建议">
     <div className="side-head flex h-9 shrink-0 items-center gap-2"><span className="mr-auto font-semibold">每日推荐</span>
-      <Button size="icon-xs" variant="plain" aria-label="刷新每日建议" title={advice.error || '刷新每日建议'} aria-busy={advice.phase === 'loading'} disabled={!ready || advice.phase === 'loading'} onClick={advice.refresh}>
+      {showAdvice && <Button size="icon-xs" variant="plain" aria-label="刷新每日建议" title={advice.error || '刷新每日建议'} aria-busy={advice.phase === 'loading'} disabled={!ready || advice.phase === 'loading'} onClick={advice.refresh}>
         <RefreshCw aria-hidden="true" className={advice.phase === 'loading' ? 'motion-safe:animate-spin' : ''} />
-      </Button>
+      </Button>}
+      <Popover open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <PopoverTrigger asChild><Button size="icon-xs" variant="plain" aria-label="每日推荐显示设置" title="每日推荐显示设置"><Settings2 aria-hidden="true" /></Button></PopoverTrigger>
+        <PopoverContent align="end" viewportAligned className="max-h-[min(75vh,36rem)] w-[min(23rem,calc(100vw-2rem))] overflow-y-auto overscroll-contain" aria-label="每日推荐显示设置">
+          <DailySidebarSettings preferences={preferences} update={update} />
+          {saveError && <p role="alert" className="text-xs text-destructive">{saveError}</p>}
+        </PopoverContent>
+      </Popover>
     </div>
     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4 pt-3">
       <time dateTime={daily.today} className="text-xs text-muted-foreground">{dateLabel}</time>
-      {readingAdvice}
+      {preferences.order.filter(section => !preferences.hidden.includes(section)).map(section => {
+        if (section === 'calendar') return <Suspense key={section} fallback={<p role="status" className="mt-3 text-xs text-muted-foreground">正在读取节令…</p>}>
+          {active && <DailyCalendar date={daily.today} />}
+        </Suspense>;
+        if (section === 'meal') return <DailyFoodPicker key={section} active={active} date={daily.today} preferences={preferences} update={update} onSettings={() => setSettingsOpen(true)} />;
+        if (section === 'horoscope') return <DailyHoroscope key={section} date={daily.today} preferences={preferences} update={update} />;
+        return <div key={section}>{readingAdvice}</div>;
+      })}
+      {preferences.hidden.length === preferences.order.length && <p className="mt-4 text-xs text-muted-foreground">当前没有显示内容，可在右上角设置中开启。</p>}
     </div>
   </aside>;
+}
+
+function DailyHoroscope({ date, preferences, update }: {
+  date: string; preferences: DailySidebarPreferences;
+  update: (change: (previous: DailySidebarPreferences) => DailySidebarPreferences) => void;
+}) {
+  const fortune = preferences.zodiac ? dailyFortune(date, preferences.zodiac) : null;
+  return <section aria-label="星座运势" className="space-y-2 border-b border-border py-3 text-xs">
+    <div className="flex items-center justify-between gap-2"><h3 className="font-medium">星座运势</h3><span className="text-[10px] text-muted-foreground">本地趣味签</span></div>
+    <Select value={preferences.zodiac} onValueChange={zodiac => update(previous => ({ ...previous, zodiac }))}>
+      <SelectTrigger size="sm" className="w-full" aria-label="选择星座"><SelectValue placeholder="选择星座" /></SelectTrigger>
+      <SelectContent>{ZODIAC_SIGNS.map(sign => <SelectItem key={sign} value={sign}>{sign}</SelectItem>)}</SelectContent>
+    </Select>
+    {fortune ? <div className="space-y-1.5 break-words leading-relaxed">
+      <p className="font-medium text-primary">今日关键词 · {fortune.keyword}</p>
+      <p><span className="text-muted-foreground">学习：</span>{fortune.study}</p>
+      <p><span className="text-muted-foreground">生活：</span>{fortune.life}</p>
+    </div> : <p className="text-muted-foreground">选择星座后查看今天的趣味建议。</p>}
+    <p className="text-[10px] text-muted-foreground">按日期生成，仅供娱乐参考。</p>
+  </section>;
 }
 
 function suggestionKindLabel(kind: DailySuggestion['kind']) {
