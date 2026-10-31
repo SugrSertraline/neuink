@@ -19,7 +19,7 @@ export function EntryTitleConsistency({ entryId, entryTitle, pdfFileName, parsed
   const [inspection, setInspection] = useState<TitleConsistency | null>(null);
   const [review, setReview] = useState<TitleReview | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ stage: 'check' | 'save' | 'refresh'; message: string } | null>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [changeEntry, setChangeEntry] = useState(false);
@@ -42,7 +42,7 @@ export function EntryTitleConsistency({ entryId, entryTitle, pdfFileName, parsed
       setReview(nextReview);
       setChangeEntry(Boolean(nextReview?.entryMismatch));
       setChangePdf(Boolean(nextReview?.pdfMismatch));
-    }).catch(caught => { if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught)); })
+    }).catch(caught => { if (!cancelled) setError({ stage: 'check', message: caught instanceof Error ? caught.message : String(caught) }); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [root, entryId, entryTitle, pdfFileName, parsed, reloadKey, retry]);
@@ -55,13 +55,19 @@ export function EntryTitleConsistency({ entryId, entryTitle, pdfFileName, parsed
     if (!root || !inspection || !review || busy || !(changeEntry || changePdf)) return;
     setBusy(true);
     setError(null);
+    let saved = false;
     try {
       await applyTitleConsistency(root, entryId, inspection, review.suggestedTitle, changeEntry, changePdf);
+      saved = true;
       await onRefreshEntries();
       setOpen(false);
       setRetry(value => value + 1);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      if (saved) {
+        setInspection(null);
+        setReview(null);
+      }
+      setError({ stage: saved ? 'refresh' : 'save', message: caught instanceof Error ? caught.message : String(caught) });
     } finally {
       setBusy(false);
     }
@@ -91,7 +97,7 @@ export function EntryTitleConsistency({ entryId, entryTitle, pdfFileName, parsed
           </label>
           <p className="text-xs text-muted-foreground">模型可能判断错误；修改显示名称不会改动原始 PDF 文件内容。</p>
         </div> : null}
-        {error ? <p role="alert" className="text-sm text-destructive">核对或保存失败：{error}</p> : null}
+        {error ? <p role="alert" className="text-sm text-destructive">{error.stage === 'check' ? '标题核对失败' : error.stage === 'save' ? '保存失败' : '标题已保存，但列表刷新失败'}：{error.message}</p> : null}
         </DialogBody>
         <DialogFooter>
           <Button type="button" variant="outline" disabled={busy} onClick={() => { setOpen(false); setRetry(value => value + 1); }}>稍后处理</Button>

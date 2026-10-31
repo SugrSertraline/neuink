@@ -37,7 +37,17 @@ it('uses the configured assistant model with bounded parsed-page evidence', asyn
   const result = await reviewTitleConsistency(inspection, true);
   expect(result?.suggestedTitle).toBe('A Reliable Paper Title');
   expect(runJsonModelTask).toHaveBeenCalledWith(expect.objectContaining({
-    name: 'paper_title_check', settings: expect.objectContaining({ model: 'chosen-model', max_output_tokens: 700 }),
+    name: 'paper_title_check', settings: expect.objectContaining({ model: 'chosen-model', max_output_tokens: 2000 }),
     prompt: expect.stringContaining('A Reliable Paper Title')
+  }));
+});
+
+it('allows enough output by default when the assistant profile has no token limit', async () => {
+  vi.mocked(getLlmSettings).mockResolvedValue({ assistant_profile: { id: 'model-2', model: 'reasoning-model',
+    base_url: 'https://model.example' }, profiles: [] } as never);
+  vi.mocked(runJsonModelTask).mockResolvedValue({ status: 'uncertain', paper_title: '' });
+  await reviewTitleConsistency(inspection, true);
+  expect(runJsonModelTask).toHaveBeenCalledWith(expect.objectContaining({
+    settings: expect.objectContaining({ max_output_tokens: 4096 })
   }));
 });
