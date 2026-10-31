@@ -46,6 +46,7 @@ import {
   type AnnotationCatalogRecord
 } from '../ipc/workspaceApi';
 import { readAutoParseOnPdfImport } from '../lib/parserSettings';
+import { ensurePdfIsNew } from '../lib/pdfDuplicate';
 import type {
   Annotation,
   AnnotationId,
@@ -214,6 +215,9 @@ export function useWorkspaceResourceActions({
       }
       const fields = cleanFields(request.fields ?? {});
 
+      if (request.pdfPath) await ensurePdfIsNew(root, request.pdfPath, 'pdf');
+      if (request.mineruZipPath) await ensurePdfIsNew(root, request.mineruZipPath, 'mineru');
+
       let createdEntryId: string | null = null;
       try {
         let nextTags = tags;
@@ -282,6 +286,7 @@ export function useWorkspaceResourceActions({
         return;
       }
       try {
+        await ensurePdfIsNew(root, pdfPath, 'pdf');
         const queued = await queuePdfParse(root, entryId, pdfPath, readAutoParseOnPdfImport());
         setEntries((current) =>
           current.map((entry) => (entry.id === queued.id ? queued : entry))
@@ -293,6 +298,7 @@ export function useWorkspaceResourceActions({
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : String(caught));
         await refreshEntries(root);
+        throw caught;
       }
     },
     [refreshEntries, root, submitQueuedParse]

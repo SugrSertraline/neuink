@@ -84,6 +84,18 @@ fn identical_existing_pdf_is_reused_and_source_is_remembered() {
 }
 
 #[test]
+fn pdf_in_trash_is_reported_instead_of_imported_again() {
+    let (_dir, ws, library) = fixture();
+    let entry = ws.create_entry("Trashed paper").unwrap();
+    ws.import_pdf(&entry.id, library.papers[0].attachments[0].path.clone().unwrap()).unwrap();
+    ws.delete_entry(&entry.id).unwrap();
+    let error = ws.import_zotero_paper(&library, &library.papers[0], Some("PDF00001"))
+        .unwrap_err().to_string();
+    assert!(error.contains("回收站"));
+    assert!(ws.list_entries().unwrap().is_empty());
+}
+
+#[test]
 fn changed_missing_or_invalid_pdf_does_not_publish_partial_entries() {
     let (_dir, ws, mut library) = fixture();
     let source = library.papers[0].attachments[0].path.clone().unwrap();

@@ -848,6 +848,12 @@ export async function queuePdfParse(
   });
 }
 
+export type PdfDuplicate = { entryId: string; title: string; inTrash: boolean };
+
+export async function checkPdfDuplicate(root: string, path: string, source: 'pdf' | 'mineru'): Promise<PdfDuplicate | null> {
+  return invoke<PdfDuplicate | null>('check_pdf_duplicate', { request: { root, path, source } });
+}
+
 export async function importMineruClientResult(
   root: string,
   entryId: EntryId,

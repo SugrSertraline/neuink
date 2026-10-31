@@ -286,6 +286,10 @@ impl Workspace {
         }
 
         let bytes = fs::read(&src_path)?;
+        let content_hash = blake3::hash(&bytes).to_hex().to_string();
+        if let Some(duplicate) = self.find_pdf_duplicate(&content_hash)? {
+            return Err(WorkspaceError::PdfContentDuplicate(duplicate.title));
+        }
         atomic_write(self.layout.entry_pdf_file(entry_id), &bytes)?;
         entry.pdf = Some(PdfAsset {
             file_name: src_path
@@ -293,7 +297,7 @@ impl Workspace {
                 .and_then(|name| name.to_str())
                 .unwrap_or("paper.pdf")
                 .to_string(),
-            content_hash: blake3::hash(&bytes).to_hex().to_string(),
+            content_hash,
             imported_at: Utc::now(),
             parse: PdfParseState::not_started(),
         });

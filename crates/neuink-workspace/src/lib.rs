@@ -20,6 +20,7 @@ mod note_catalog_tests;
 pub mod onboarding;
 pub mod paragraph_translation;
 pub mod pdf_parse_queue;
+pub mod pdf_duplicate;
 #[cfg(test)]
 mod pdf_parse_queue_tests;
 pub mod pdf_text;

@@ -3,6 +3,7 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { droppedPdfFiles, usePdfDropImport } from './usePdfDropImport';
+import { DuplicatePdfError } from '@/shared/lib/pdfDuplicate';
 
 type DropPayload =
   | { type: 'enter' | 'over' | 'leave'; position: { x: number; y: number } }
@@ -80,6 +81,23 @@ it('imports dropped PDFs sequentially and reports partial failure', async () => 
   view.unmount();
   await act(async () => {});
   expect(mock.unlisten).toHaveBeenCalledOnce();
+});
+
+it('skips equal-content PDFs in a drop batch and names the existing entry', async () => {
+  const createEntry = vi.fn()
+    .mockResolvedValueOnce({ createdWithPdf: true, entryId: 'existing' })
+    .mockRejectedValueOnce(new DuplicatePdfError({ entryId: 'existing', title: '已有论文', inTrash: false }));
+  const configured = options(createEntry);
+  const view = renderHook(() => usePdfDropImport(configured));
+  await act(async () => {});
+  act(() => emit({ type: 'drop', position: { x: 10, y: 10 }, paths: ['first.pdf', 'renamed.pdf'] }));
+  await waitFor(() => expect(view.result.current.progress).toBeNull());
+  expect(createEntry).toHaveBeenCalledTimes(2);
+  expect(configured.notify).toHaveBeenLastCalledWith(expect.objectContaining({
+    title: '发现本地已有 PDF',
+    description: expect.stringContaining('内容重复 1 个：renamed → 已有论文')
+  }));
+  view.unmount();
 });
 
 it('leaves the existing create-entry drop zone alone', async () => {

@@ -136,6 +136,11 @@ impl Workspace {
                 )?;
                 return Ok(result(entry, "skipped"));
             }
+            if let Some(duplicate) = self.find_pdf_duplicate(hash)? {
+                return Err(WorkspaceError::PdfContentDuplicate(format!(
+                    "{}（回收站，请先恢复已有条目）", duplicate.title
+                )));
+            }
         }
         fs::create_dir_all(self.layout().cache_dir())?;
         let staging = tempfile::Builder::new()

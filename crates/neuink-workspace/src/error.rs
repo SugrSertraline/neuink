@@ -54,6 +54,8 @@ pub enum WorkspaceError {
     InvalidTagParent(String),
     #[error("entry already has a PDF: {0}")]
     PdfAlreadyExists(String),
+    #[error("相同内容的 PDF 已在本地：{0}")]
+    PdfContentDuplicate(String),
     #[error("entry has no PDF: {0}")]
     PdfMissing(String),
     #[error("invalid PDF display name: {0}")]

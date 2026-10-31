@@ -30,6 +30,10 @@ impl Workspace {
             )
             .into());
         }
+        let hash = blake3::hash(bytes).to_hex().to_string();
+        if let Some(duplicate) = self.find_pdf_duplicate(&hash)? {
+            return Err(WorkspaceError::PdfContentDuplicate(duplicate.title));
+        }
         let path = self.layout().entry_pdf_file(&entry.id);
         // A crash between the file and metadata writes is recoverable: leave the
         // file for manual recovery instead of silently overwriting it on retry.
@@ -49,7 +53,7 @@ impl Workspace {
         }
         entry.pdf = Some(PdfAsset {
             file_name: "paper.pdf".into(),
-            content_hash: blake3::hash(bytes).to_hex().to_string(),
+            content_hash: hash,
             imported_at: Utc::now(),
             parse: PdfParseState::not_started(),
         });
@@ -117,5 +121,18 @@ mod tests {
             .is_err());
         assert!(!workspace.layout().entry_dir(&entry.id).exists());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn rejects_content_already_saved_under_another_title() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = Workspace::create(dir.path()).unwrap();
+        let bytes = b"%PDF-1.7\ncomplete\n%%EOF\n";
+        let existing = workspace.create_entry("Original").unwrap();
+        workspace.attach_downloaded_pdf(&existing, bytes, None).unwrap();
+        let other = workspace.create_entry("Another title").unwrap();
+        assert!(matches!(workspace.attach_downloaded_pdf(&other, bytes, None),
+            Err(WorkspaceError::PdfContentDuplicate(title)) if title == "Original"));
+        assert!(workspace.read_entry(&other.id).unwrap().pdf.is_none());
     }
 }

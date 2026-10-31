@@ -228,20 +228,12 @@ fn execute<R: Runtime>(app: &AppHandle<R>, request: MineruRequest) -> Result<Val
             let pdf_name = source_pdf(&zip_bytes)?.ok_or("结果中的原 PDF 已丢失，请刷新列表。")?;
             let pdf_hash = source_pdf_hash(&zip_bytes, &pdf_name)?;
             let workspace = Workspace::open_existing(&root).map_err(|_| "NeuInk 资料库不可用。")?;
-            if let Some(entry) = workspace
-                .list_entries()
-                .map_err(|error| error.to_string())?
-                .into_iter()
-                .find(|entry| {
-                    entry
-                        .pdf
-                        .as_ref()
-                        .is_some_and(|pdf| pdf.content_hash == pdf_hash)
-                })
-            {
-                return Ok(
-                    json!({"status": "skipped", "entry_id": entry.id, "title": entry.title}),
-                );
+            if let Some(duplicate) = workspace.find_pdf_duplicate(&pdf_hash)
+                .map_err(|error| error.to_string())? {
+                if duplicate.in_trash {
+                    return Err(format!("相同内容的 PDF 已在回收站：“{}”。请先恢复已有条目。", duplicate.title));
+                }
+                return Ok(json!({"status": "skipped", "entry_id": duplicate.entry_id, "title": duplicate.title}));
             }
             let imported = create_from_mineru_source_bytes(
                 CreateFromMineruClientResultRequest {

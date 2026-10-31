@@ -20,7 +20,8 @@ use tauri::{AppHandle, Runtime};
 pub(crate) mod mineru_source;
 #[cfg(test)]
 mod mineru_import_tests;
-use mineru_source::{read_mineru_source, source_pdf, validate_single_result};
+use mineru_source::{read_mineru_source, source_pdf, source_pdf_hash, validate_single_result};
+use neuink_workspace::pdf_duplicate::{hash_pdf_file, PdfDuplicate};
 
 #[derive(Debug, Deserialize)]
 pub struct CreateEntryRequest {
@@ -232,6 +233,44 @@ pub struct QueuePdfParseRequest {
     pub pdf_path: PathBuf,
     #[serde(default)]
     pub enqueue: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PdfDuplicateSource {
+    Pdf,
+    Mineru,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CheckPdfDuplicateRequest {
+    pub root: PathBuf,
+    pub path: PathBuf,
+    pub source: PdfDuplicateSource,
+}
+
+#[tauri::command]
+pub fn check_pdf_duplicate(request: CheckPdfDuplicateRequest) -> Result<Option<PdfDuplicate>, String> {
+    let workspace = neuink_workspace::Workspace::open_existing(&request.root)
+        .map_err(|error| error.to_string())?;
+    let hash = match request.source {
+        PdfDuplicateSource::Pdf => hash_pdf_file(&request.path).map_err(|error| error.to_string())?,
+        PdfDuplicateSource::Mineru => {
+            let bytes = read_mineru_source(&request.path)?;
+            let name = source_pdf(&bytes)?
+                .ok_or_else(|| "新建条目时，MinerU 结果还需包含原 PDF。".to_string())?;
+            source_pdf_hash(&bytes, &name)?
+        }
+    };
+    workspace.find_pdf_duplicate(&hash).map_err(|error| error.to_string())
+}
+
+fn reject_duplicate_pdf(workspace: &neuink_workspace::Workspace, hash: &str) -> Result<(), String> {
+    if let Some(found) = workspace.find_pdf_duplicate(hash).map_err(|error| error.to_string())? {
+        let location = if found.in_trash { "回收站" } else { "条目库" };
+        return Err(format!("相同内容的 PDF 已在{location}：“{}”。未重复保存。", found.title));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -977,6 +1016,8 @@ pub async fn import_and_parse_pdf(
 
     let workspace =
         neuink_workspace::Workspace::open(request.root).map_err(|error| error.to_string())?;
+    let hash = hash_pdf_file(&request.pdf_path).map_err(|error| error.to_string())?;
+    reject_duplicate_pdf(&workspace, &hash)?;
     workspace
         .import_pdf(&request.entry_id, &request.pdf_path)
         .map_err(|error| error.to_string())?;
@@ -994,6 +1035,8 @@ pub async fn import_and_parse_pdf(
 pub fn queue_pdf_parse(request: QueuePdfParseRequest) -> Result<EntryMeta, String> {
     let workspace =
         neuink_workspace::Workspace::open(request.root).map_err(|error| error.to_string())?;
+    let hash = hash_pdf_file(&request.pdf_path).map_err(|error| error.to_string())?;
+    reject_duplicate_pdf(&workspace, &hash)?;
     workspace
         .import_pdf(&request.entry_id, &request.pdf_path)
         .map_err(|error| error.to_string())?;
@@ -1067,6 +1110,8 @@ pub(crate) fn create_from_mineru_source_bytes(
     validate_single_result(&zip_bytes)?;
     let origin_pdf = source_pdf(&zip_bytes)?
         .ok_or_else(|| "新建条目时，MinerU 结果还需包含原 PDF。".to_string())?;
+    let pdf_hash = source_pdf_hash(&zip_bytes, &origin_pdf)?;
+    reject_duplicate_pdf(&workspace, &pdf_hash)?;
     let document = normalize_mineru_zip(&zip_bytes).map_err(|error| error.to_string())?;
     if document.segments.is_empty() {
         return Err("所选结果未包含可导入的 MinerU content_list。".to_string());

@@ -117,6 +117,9 @@ pub(super) async fn fetch_saved_entry(
                     WorkspaceError::PdfAlreadyExists(_) => {
                         "此条目已存在 PDF，未覆盖文件。请刷新详情。".into()
                     }
+                    WorkspaceError::PdfContentDuplicate(title) => {
+                        format!("相同内容的 PDF 已在本地：“{title}”。请打开已有条目。")
+                    }
                     WorkspaceError::EntryRevisionConflict(_) => {
                         "下载期间条目信息发生变化，请重试。".into()
                     }
