@@ -2,12 +2,15 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { DailySidebar } from './DailySidebar';
-const state = vi.hoisted(() => ({ root: null as string | null, loading: false, error: null as string | null, refresh: vi.fn(), recommendations: vi.fn() }));
+const state = vi.hoisted(() => ({ root: null as string | null, loading: false, error: null as string | null, refresh: vi.fn(), recommendations: vi.fn(),
+  horoscopePhase: 'ready' as 'ready' | 'loading' | 'error', horoscopeRefresh: vi.fn() }));
 vi.mock('./DailyContext', () => ({ useDaily: () => ({ root: state.root, today: '2026-10-27' }) }));
 vi.mock('./RecommendationContext', () => ({ useRecommendations: () => ({ ensureToday: state.recommendations }) }));
 vi.mock('./useDailyAdvice', () => ({ useDailyAdvice: () => ({ phase: 'idle', refresh: state.refresh }) }));
+vi.mock('./useDailyHoroscope', () => ({ useDailyHoroscope: () => ({ phase: state.horoscopePhase, refresh: state.horoscopeRefresh,
+  data: { summary: '今日联网概览', work: '适合整理笔记', suitable: '宜阅读', avoid: '忌拖延' } }) }));
 vi.mock('@/modules/reader/useLibraryReadingStates', () => ({ useLibraryReadingStates: () => ({ states: {}, loading: state.loading, error: state.error, refresh: state.refresh }) }));
-beforeEach(() => { localStorage.clear(); state.root = null; state.loading = false; state.error = null; vi.clearAllMocks(); HTMLElement.prototype.scrollIntoView = vi.fn(); });
+beforeEach(() => { localStorage.clear(); state.root = null; state.loading = false; state.error = null; state.horoscopePhase = 'ready'; vi.clearAllMocks(); HTMLElement.prototype.scrollIntoView = vi.fn(); });
 afterEach(cleanup);
 it('shows lifestyle sections without a workspace while reading advice asks for one', async () => {
   render(<DailySidebar active />);
@@ -50,12 +53,22 @@ it('shows the saved sign without asking again and opens its settings page', () =
   localStorage.setItem('neuink.daily.sidebar.v1', JSON.stringify({ zodiac: '天秤座' }));
   const openSettings = vi.fn();
   render(<DailySidebar active onSettings={openSettings} />);
-  expect(screen.getByText(/今日关键词/)).toBeTruthy();
+  expect(screen.getByText('今日联网概览')).toBeTruthy();
   expect(screen.getByText('天秤座')).toBeTruthy();
   expect(screen.queryByRole('combobox', { name: '选择星座' })).toBeNull();
-  expect(screen.getByText('按日期生成，仅供娱乐参考。')).toBeTruthy();
+  expect(screen.getByText('来源：爱云 API · 仅供娱乐参考。')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '更改星座' }));
   expect(openSettings).toHaveBeenCalledOnce();
+});
+it('shows loading and retry states for online horoscope', () => {
+  localStorage.setItem('neuink.daily.sidebar.v1', JSON.stringify({ zodiac: '天秤座' }));
+  state.horoscopePhase = 'loading';
+  const ui = render(<DailySidebar active />);
+  expect(screen.getByText('正在获取今日运势…')).toBeTruthy();
+  state.horoscopePhase = 'error'; ui.rerender(<DailySidebar active />);
+  expect(screen.getByText('联网运势暂不可用。')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '重试' }));
+  expect(state.horoscopeRefresh).toHaveBeenCalledOnce();
 });
 
 it('opens a menu dialog, adds and edits items, then saves choices', () => {

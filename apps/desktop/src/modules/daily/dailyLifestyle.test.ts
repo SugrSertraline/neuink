@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { chooseMeal, cleanMealList, dailyFortune, normalizeDailySidebar, ZODIAC_SIGNS } from './dailyLifestyle';
+import { chooseMeal, cleanMealList, normalizeDailySidebar } from './dailyLifestyle';
 import { FOOD_CATEGORIES, FOOD_PRESETS } from './foodCatalog';
 
 it('normalizes malformed saved preferences without losing supported sections or restoring intentionally empty menus', () => {
@@ -15,14 +15,6 @@ it('cleans custom menus, removes duplicates and bounds item and list lengths', (
 it('chooses only from the menu, avoids immediate repeats and handles one or zero choices', () => {
   for (const random of [0, .3, .6, .999, 1]) expect(['饭', '饺子']).toContain(chooseMeal(['面', '饭', '饺子'], '面', random));
   expect(chooseMeal(['面'], '面')).toBe('面'); expect(chooseMeal([], '')).toBe('');
-});
-it('keeps a daily sign stable across reloads and produces defined phrases for every sign', () => {
-  for (const sign of ZODIAC_SIGNS) {
-    const a = dailyFortune('2026-10-27', sign);
-    expect(a).toEqual(dailyFortune('2026-10-27', sign));
-    expect(Object.values(a).every(value => typeof value === 'string' && value.length > 0)).toBe(true);
-  }
-  expect(dailyFortune('2026-10-27', '白羊座')).not.toEqual(dailyFortune('2026-10-28', '白羊座'));
 });
 it('migrates the old default menu but preserves custom menus, empty categories and old daily results', () => {
   const lastMeal = { date: '2026-10-27', name: '寿司' };

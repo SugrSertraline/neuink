@@ -76,17 +76,6 @@ export function updateFoodMenu(preferences: DailySidebarPreferences, category: F
   return category === 'meal' ? { ...preferences, meals: menu }
     : { ...preferences, foodMenus: { ...preferences.foodMenus, [category]: menu } };
 }
-export function dailyFortune(date: string, zodiac: string) {
-  let seed = 2166136261;
-  for (const letter of `${date}:${zodiac}`) seed = Math.imul(seed ^ letter.charCodeAt(0), 16777619) >>> 0;
-  // Daily entertainment from a local phrase collection, not an external forecast.
-  const choose = (values: string[], salt: number) => values[(((seed >>> salt) ^ seed) >>> 0) % values.length];
-  return {
-    keyword: choose(['慢慢来', '好奇心', '小确幸', '做减法', '新发现', '轻装前行', '专注当下', '换个角度'], 3),
-    study: choose(['先解决一个小问题，给今天一个轻松的开头。', '把脑中的想法写下来，可能会看到新的关联。', '试着换一种解释方式，给熟悉的问题找个新角度。', '留一点时间回看旧笔记，也许会重新发现被忽略的线索。', '选择一件值得认真做的事，给它一段完整的时间。', '遇到难点先记下来，休息一下再回来看看。'], 7),
-    life: choose(['给自己安排一顿喜欢的饭。', '和熟悉的人聊聊最近的小发现。', '整理一下桌面，为新的想法腾一点空间。', '尝试一条不同的散步路线。', '给今天留一小段不赶时间的空白。', '把一个好点子分享给愿意听的人。'], 11),
-  };
-}
 export function chooseMeal(meals: string[], previous: string, random = Math.random()) {
   const pool = meals.length > 1 ? meals.filter(item => item !== previous) : meals;
   return pool[Math.min(pool.length - 1, Math.floor(Math.max(0, Math.min(1, random)) * pool.length))] ?? '';

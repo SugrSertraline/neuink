@@ -11,7 +11,8 @@ import { useDailyAdvice } from './useDailyAdvice';
 import { DailyFoodPicker } from './DailyFoodPicker';
 import { FoodMenuDialog } from './FoodMenuDialog';
 import { DailySidebarSettings } from './DailySidebarSettings';
-import { dailyFortune, type DailySidebarPreferences } from './dailyLifestyle';
+import { type DailySidebarPreferences } from './dailyLifestyle';
+import { useDailyHoroscope } from './useDailyHoroscope';
 import { useDailySidebarPreferences } from './useDailySidebarPreferences';
 
 const DailyCalendar = lazy(() => import('./DailyCalendar'));
@@ -84,7 +85,7 @@ export function DailySidebar({ active = false, entries = [], status = 'ready', o
           {active && <DailyCalendar date={daily.today} />}
         </Suspense>;
         if (section === 'meal') return <DailyFoodPicker key={section} active={active} date={daily.today} preferences={preferences} update={update} onSettings={() => setMenuOpen(true)} />;
-        if (section === 'horoscope') return <DailyHoroscope key={section} date={daily.today} preferences={preferences} onSettings={onSettings} />;
+        if (section === 'horoscope') return <DailyHoroscope key={section} active={active} date={daily.today} preferences={preferences} onSettings={onSettings} />;
         return <div key={section}>{readingAdvice}</div>;
       })}
       {preferences.hidden.length === preferences.order.length && <p className="mt-4 text-xs text-muted-foreground">当前没有显示内容，可在右上角设置中开启。</p>}
@@ -93,19 +94,26 @@ export function DailySidebar({ active = false, entries = [], status = 'ready', o
   </aside>;
 }
 
-function DailyHoroscope({ date, preferences, onSettings }: {
-  date: string; preferences: DailySidebarPreferences; onSettings?: () => void;
+function DailyHoroscope({ active, date, preferences, onSettings }: {
+  active: boolean; date: string; preferences: DailySidebarPreferences; onSettings?: () => void;
 }) {
-  const fortune = preferences.zodiac ? dailyFortune(date, preferences.zodiac) : null;
+  const fortune = useDailyHoroscope(active, date, preferences.zodiac);
   return <section aria-label="星座运势" className="space-y-2 border-b border-border py-3 text-xs">
-    <div className="flex items-center justify-between gap-2"><h3 className="font-medium">星座运势</h3><span className="text-[10px] text-muted-foreground">{preferences.zodiac || '本地趣味签'}</span></div>
-    {fortune ? <div className="space-y-1.5 break-words leading-relaxed">
-      <p className="font-medium text-primary">今日关键词 · {fortune.keyword}</p>
-      <p><span className="text-muted-foreground">学习：</span>{fortune.study}</p>
-      <p><span className="text-muted-foreground">生活：</span>{fortune.life}</p>
-    </div> : <p className="text-muted-foreground">在设置中选好星座后，每天会自动显示对应的趣味建议。</p>}
-    {onSettings && <Button size="xs" variant="link" className="h-auto px-0" onClick={onSettings}>{fortune ? '更改星座' : '去设置星座'}</Button>}
-    <p className="text-[10px] text-muted-foreground">按日期生成，仅供娱乐参考。</p>
+    <div className="flex items-center justify-between gap-2"><h3 className="font-medium">星座运势</h3><span className="text-[10px] text-muted-foreground">{preferences.zodiac || '联网查询'}</span></div>
+    {!preferences.zodiac ? <p className="text-muted-foreground">在设置中选好星座后，查看每天的联网运势。</p>
+      : fortune.phase === 'ready' && fortune.data ? <div className="space-y-1.5 break-words leading-relaxed">
+        <p>{fortune.data.summary}</p>
+        <p><span className="text-muted-foreground">学习工作：</span>{fortune.data.work}</p>
+        {fortune.data.suitable && <p><span className="text-muted-foreground">宜：</span>{fortune.data.suitable}</p>}
+        {fortune.data.avoid && <p><span className="text-muted-foreground">忌：</span>{fortune.data.avoid}</p>}
+      </div> : fortune.phase === 'error' ? <div role="alert" className="text-muted-foreground">联网运势暂不可用。
+        <Button size="xs" variant="link" className="h-auto px-1" onClick={fortune.refresh}>重试</Button></div>
+      : <p role="status" className="text-muted-foreground">正在获取今日运势…</p>}
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      {onSettings && <Button size="xs" variant="link" className="h-auto px-0" onClick={onSettings}>{preferences.zodiac ? '更改星座' : '去设置星座'}</Button>}
+      {fortune.phase === 'ready' && <Button size="xs" variant="link" className="h-auto px-0" onClick={fortune.refresh}>刷新运势</Button>}
+    </div>
+    <p className="text-[10px] text-muted-foreground">来源：爱云 API · 仅供娱乐参考。</p>
   </section>;
 }
 
