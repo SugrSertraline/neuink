@@ -7,11 +7,11 @@ import './dailyLifestyle.css';
 export function MealSlotWidget({ active, date, meals, selected, onPick, onSettings, kind = 'meal', controls, scope = 'meal' }: {
   active: boolean; date: string; meals: string[]; selected: string;
   onPick: (meal: string) => void; onSettings: () => void;
-  kind?: 'meal' | 'drink' | 'dining'; controls?: ReactNode; scope?: string;
+  kind?: 'meal' | 'drink'; controls?: ReactNode; scope?: string;
 }) {
-  const title = kind === 'drink' ? '今天喝什么' : kind === 'dining' ? '今天怎么吃' : '今天吃什么';
-  const resultLabel = kind === 'drink' ? '今天就喝' : kind === 'dining' ? '今天就选' : '今天就吃';
-  const buttonLabel = kind === 'drink' ? '帮我选一杯' : kind === 'dining' ? '帮我决定' : '帮我选一顿';
+  const title = kind === 'drink' ? '今天喝什么' : '今天吃什么';
+  const resultLabel = kind === 'drink' ? '今天就喝' : '今天就吃';
+  const buttonLabel = kind === 'drink' ? '帮我选一杯' : '帮我选一顿';
   const track = useRef<HTMLDivElement>(null);
   const [pendingSpin, setSpin] = useState<{ rows: string[]; target: string; meals: string[]; date: string; scope: string } | null>(null);
   const spin = pendingSpin?.meals === meals && pendingSpin.date === date && pendingSpin.scope === scope ? pendingSpin : null;

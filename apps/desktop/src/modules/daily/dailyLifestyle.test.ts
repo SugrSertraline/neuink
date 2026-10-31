@@ -29,17 +29,34 @@ it('migrates the old default menu but preserves custom menus, empty categories a
   const migrated = normalizeDailySidebar({ meals: FOOD_PRESETS.meal.slice(0, 12), lastMeal });
   expect(migrated.meals).toEqual(FOOD_PRESETS.meal);
   expect(migrated.foodChoices.meal).toEqual(lastMeal);
-  const custom = normalizeDailySidebar({ meals: ['一食堂'], foodMenus: { soda: [], tea: [' 柠檬水 ', '柠檬水'] }, foodCategory: 'bad', foodChoices: { soda: { date: null, name: 1 } } });
-  expect(custom.meals).toEqual(['一食堂']); expect(custom.foodMenus.soda).toEqual([]);
-  expect(custom.foodMenus.tea).toEqual(['柠檬水']); expect(custom.foodCategory).toBe('meal');
-  expect(custom.foodChoices.soda).toBeUndefined();
+  const custom = normalizeDailySidebar({ meals: ['一食堂'], foodMenus: { drink: [] }, foodCategory: 'bad' });
+  expect(custom.meals).toEqual(['一食堂']); expect(custom.foodMenus.drink).toEqual([]);
+  expect(custom.foodCategory).toBe('meal');
 });
-it('provides distinct food, dining and drink pools with bounded unique candidates', () => {
+it('provides distinct food and merged drink pools with bounded unique candidates', () => {
   for (const { id } of FOOD_CATEGORIES) {
     expect(FOOD_PRESETS[id].length).toBeGreaterThan(1);
-    expect(cleanMealList(FOOD_PRESETS[id])).toEqual(FOOD_PRESETS[id]);
+    expect(cleanMealList(FOOD_PRESETS[id], id === 'drink' ? 150 : 50)).toEqual(FOOD_PRESETS[id]);
   }
-  expect(FOOD_PRESETS.soda).toEqual(expect.arrayContaining(['雪碧', '可口可乐']));
-  expect(FOOD_PRESETS.tea).toContain('蜜雪冰城柠檬水');
-  expect(FOOD_PRESETS.dining).toEqual(expect.arrayContaining(['食堂吃饭', '点一份外卖']));
+  expect(FOOD_PRESETS.drink).toEqual(expect.arrayContaining(['雪碧', '可口可乐', '蜜雪冰城柠檬水', '拿铁']));
+  expect(FOOD_CATEGORIES.map(item => item.id)).toEqual(['meal', 'snack', 'feast', 'drink']);
+});
+it('migrates three old drink menus and the selected drink without restoring removed items later', () => {
+  const migrated = normalizeDailySidebar({ foodCategory: 'tea', foodMenus: { soda: ['可乐', '柠檬水'], tea: ['柠檬水', '奶茶'], coffee: ['拿铁'], dining: ['食堂吃饭'] },
+    foodChoices: { tea: { date: '2026-10-27', name: '奶茶' } } });
+  expect(migrated.foodCategory).toBe('drink');
+  expect(migrated.foodMenus.drink).toEqual(['可乐', '柠檬水', '奶茶', '拿铁']);
+  expect(migrated.foodChoices.drink?.name).toBe('奶茶');
+  expect(migrated.legacyDiningMenu).toEqual(['食堂吃饭']);
+  const saved = normalizeDailySidebar(JSON.parse(JSON.stringify({ ...migrated, foodMenus: { drink: ['奶茶'] } })));
+  expect(saved.foodMenus.drink).toEqual(['奶茶']);
+});
+it('keeps all distinct custom drinks from three full legacy menus', () => {
+  const legacy = normalizeDailySidebar({ foodMenus: {
+    soda: Array.from({ length: 50 }, (_, i) => `汽水${i}`),
+    tea: Array.from({ length: 50 }, (_, i) => `茶饮${i}`),
+    coffee: Array.from({ length: 50 }, (_, i) => `咖啡${i}`),
+  }, foodChoices: { soda: { date: '2026-10-26', name: '汽水1' }, tea: { date: '2026-10-27', name: '茶饮1' } } });
+  expect(legacy.foodMenus.drink).toHaveLength(150);
+  expect(legacy.foodChoices.drink?.name).toBe('茶饮1');
 });

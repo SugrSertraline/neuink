@@ -61,10 +61,9 @@ it('shows the saved sign without asking again and opens its settings page', () =
 it('opens a menu dialog, adds and edits items, then saves choices', () => {
   render(<DailySidebar active />);
   fireEvent.click(screen.getByRole('button', { name: '编辑菜单' }));
-  expect(screen.getByRole('dialog', { name: '编辑今天吃什么菜单' })).toBeTruthy();
-  fireEvent.change(screen.getByRole('textbox', { name: '搜索菜单选项' }), { target: { value: '寿司' } });
+  expect(screen.getByRole('dialog', { name: '编辑吃喝菜单' })).toBeTruthy();
+  expect(screen.queryByRole('textbox', { name: '搜索菜单选项' })).toBeNull();
   expect(screen.getByRole('button', { name: '编辑寿司' })).toBeTruthy();
-  fireEvent.change(screen.getByRole('textbox', { name: '搜索菜单选项' }), { target: { value: '' } });
   fireEvent.change(screen.getByRole('textbox', { name: '新增菜单选项' }), { target: { value: '一食堂' } });
   fireEvent.click(screen.getByRole('button', { name: '添加' }));
   fireEvent.click(screen.getByRole('button', { name: '编辑一食堂' }));
@@ -76,7 +75,7 @@ it('opens a menu dialog, adds and edits items, then saves choices', () => {
   fireEvent.click(screen.getByRole('button', { name: '保存菜单' }));
   expect(JSON.parse(localStorage.getItem('neuink.daily.sidebar.v1')!).meals).toContain('二食堂');
   expect(JSON.parse(localStorage.getItem('neuink.daily.sidebar.v1')!).meals).toContain('三食堂');
-  expect(screen.queryByRole('dialog', { name: '编辑今天吃什么菜单' })).toBeNull();
+  expect(screen.queryByRole('dialog', { name: '编辑吃喝菜单' })).toBeNull();
 });
 it('discards menu changes when cancelled and rejects duplicate items', () => {
   render(<DailySidebar active />);

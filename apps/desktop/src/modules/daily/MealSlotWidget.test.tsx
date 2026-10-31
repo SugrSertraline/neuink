@@ -39,7 +39,7 @@ it('cancels an in-flight choice when switching category without remounting its c
   const p = props(), ui = render(<MealSlotWidget {...p} controls={<button>分类</button>} />);
   const control = ui.getByRole('button', { name: '分类' });
   fireEvent.click(ui.getByRole('button', { name: '转一转，决定今天吃什么' }));
-  ui.rerender(<MealSlotWidget {...p} scope="soda" kind="drink" meals={['雪碧', '可乐']} controls={<button>分类</button>} />);
+  ui.rerender(<MealSlotWidget {...p} scope="drink" kind="drink" meals={['雪碧', '可乐']} controls={<button>分类</button>} />);
   await act(async () => finish());
   expect(p.onPick).not.toHaveBeenCalled(); expect(cancel).toHaveBeenCalled();
   expect(ui.getByRole('button', { name: '分类' })).toBe(control);
