@@ -42,6 +42,7 @@ const ALL_SETTINGS_CATALOG: SettingDefinition[] = [
   { id: 'appearance-color', tab: 'appearance', title: '强调色', description: '选中、焦点与主要操作使用的颜色预设。', keywords: '主题 颜色 配色 蓝色 绿色 紫色' },
   { id: 'appearance-scale', tab: 'appearance', title: '界面缩放', description: '调整标题栏、侧栏、阅读区和弹窗的大小。', keywords: '字体太小 字体大小 放大 缩小 DPI 比例' },
   { id: 'appearance-transparency', tab: 'appearance', title: '降低透明度', description: '切换玻璃通透效果与实色显示。', keywords: '主题 玻璃 模糊 透明 辅助 实色 折射 通透' },
+  { id: 'appearance-zodiac', tab: 'appearance', title: '每日推荐', description: '设置用于每日趣味签的星座。', keywords: '星座 运势 每日推荐 生日 趣味签' },
   { id: 'reader-open-pdf', tab: 'reader', title: '有 PDF 时直接打开 PDF', description: '打开条目时优先阅读 PDF；关闭后或没有 PDF 时显示条目概览。', keywords: '默认打开PDF 默认打开 PDF 打开条目 直接阅读 阅读方式 概览 详情' },
   { id: 'reader-preview', tab: 'reader', title: 'PDF 悬停预览', description: '悬停时查看对应片段。', keywords: '阅读 鼠标 预览 浮层 卡片' },
   { id: 'reader-sentence-hover', tab: 'reader', title: 'PDF 逐句悬停', description: '悬停查看当前句，点击联动重排译文。', keywords: '阅读 句子 逐句 hover 翻译 联动' },

@@ -1919,7 +1919,7 @@ export function App() {
             requestAnimationFrame(() => { const section = document.getElementById('daily-recommendations'); if (section?.getClientRects().length) { section.scrollIntoView({ block: 'start' }); section.focus({ preventScroll: true }); } });
           }}
           onReflect={entry => addAssistantContext({ kind: 'entry', entryId: entry.id, entryTitle: entry.title }, { draftQuestion: `帮我复盘今天阅读的《${entry.title}》：先提出三个帮助我检验理解的问题，再根据我的回答讨论关键假设和待验证之处。` })}
-          onSettings={openSettingsTab} /></SidebarPanelSlot>
+          onSettings={() => openSetting('appearance-zodiac')} /></SidebarPanelSlot>
         {sidebarOpen && librarySidebarMode === 'note-details' && sidebarNote ? (
           <TagNoteDetailsSidebar key={workspace.root} target={sidebarNote.target} title={sidebarNote.label}
             entries={entries} tags={workspace.tags} status={workspace.status} error={workspace.error} layout={surfaceLayout}

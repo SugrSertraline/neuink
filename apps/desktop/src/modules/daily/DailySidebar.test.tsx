@@ -46,21 +46,63 @@ it('reorders the sidebar sections and keeps the order locally', () => {
   expect(horoscope.compareDocumentPosition(meal) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
-it('shows a stable local fortune after choosing a sign', async () => {
-  render(<DailySidebar active />);
-  fireEvent.keyDown(screen.getByRole('combobox', { name: '选择星座' }), { key: 'ArrowDown' });
-  fireEvent.click(await screen.findByRole('option', { name: '天秤座' }));
+it('shows the saved sign without asking again and opens its settings page', () => {
+  localStorage.setItem('neuink.daily.sidebar.v1', JSON.stringify({ zodiac: '天秤座' }));
+  const openSettings = vi.fn();
+  render(<DailySidebar active onSettings={openSettings} />);
   expect(screen.getByText(/今日关键词/)).toBeTruthy();
+  expect(screen.getByText('天秤座')).toBeTruthy();
+  expect(screen.queryByRole('combobox', { name: '选择星座' })).toBeNull();
   expect(screen.getByText('按日期生成，仅供娱乐参考。')).toBeTruthy();
-  expect(JSON.parse(localStorage.getItem('neuink.daily.sidebar.v1')!).zodiac).toBe('天秤座');
+  fireEvent.click(screen.getByRole('button', { name: '更改星座' }));
+  expect(openSettings).toHaveBeenCalledOnce();
 });
 
-it('opens the menu editor from the food picker and saves custom choices', () => {
+it('opens a menu dialog, adds and edits items, then saves choices', () => {
   render(<DailySidebar active />);
   fireEvent.click(screen.getByRole('button', { name: '编辑菜单' }));
-  fireEvent.change(screen.getByLabelText('我的菜单'), { target: { value: '一食堂\n二食堂' } });
+  expect(screen.getByRole('dialog', { name: '编辑今天吃什么菜单' })).toBeTruthy();
+  fireEvent.change(screen.getByRole('textbox', { name: '搜索菜单选项' }), { target: { value: '寿司' } });
+  expect(screen.getByRole('button', { name: '编辑寿司' })).toBeTruthy();
+  fireEvent.change(screen.getByRole('textbox', { name: '搜索菜单选项' }), { target: { value: '' } });
+  fireEvent.change(screen.getByRole('textbox', { name: '新增菜单选项' }), { target: { value: '一食堂' } });
+  fireEvent.click(screen.getByRole('button', { name: '添加' }));
+  fireEvent.click(screen.getByRole('button', { name: '编辑一食堂' }));
+  fireEvent.change(screen.getByRole('textbox', { name: '修改一食堂' }), { target: { value: '二食堂' } });
+  fireEvent.click(screen.getByRole('button', { name: '确定' }));
+  fireEvent.click(screen.getByRole('button', { name: '删除二食堂' }));
+  fireEvent.click(screen.getByRole('button', { name: '撤销删除' }));
+  fireEvent.change(screen.getByRole('textbox', { name: '新增菜单选项' }), { target: { value: '三食堂' } });
   fireEvent.click(screen.getByRole('button', { name: '保存菜单' }));
-  expect(JSON.parse(localStorage.getItem('neuink.daily.sidebar.v1')!).meals).toEqual(['一食堂', '二食堂']);
+  expect(JSON.parse(localStorage.getItem('neuink.daily.sidebar.v1')!).meals).toContain('二食堂');
+  expect(JSON.parse(localStorage.getItem('neuink.daily.sidebar.v1')!).meals).toContain('三食堂');
+  expect(screen.queryByRole('dialog', { name: '编辑今天吃什么菜单' })).toBeNull();
+});
+it('discards menu changes when cancelled and rejects duplicate items', () => {
+  render(<DailySidebar active />);
+  fireEvent.click(screen.getByRole('button', { name: '编辑菜单' }));
+  fireEvent.change(screen.getByRole('textbox', { name: '新增菜单选项' }), { target: { value: '寿司' } });
+  fireEvent.click(screen.getByRole('button', { name: '添加' }));
+  expect(screen.getByRole('alert').textContent).toContain('已在当前分类');
+  fireEvent.click(screen.getByRole('button', { name: '删除寿司' }));
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
+  expect(localStorage.getItem('neuink.daily.sidebar.v1')).toBeNull();
+});
+it('saves a different menu category and makes it active in the picker', async () => {
+  render(<DailySidebar active />);
+  fireEvent.click(screen.getByRole('button', { name: '编辑菜单' }));
+  fireEvent.change(screen.getByRole('textbox', { name: '新增菜单选项' }), { target: { value: '临时面' } });
+  fireEvent.keyDown(screen.getByRole('combobox', { name: '菜单分类' }), { key: 'ArrowDown' });
+  fireEvent.click(await screen.findByRole('option', { name: '小吃夜宵' }));
+  fireEvent.click(screen.getByRole('button', { name: '删除煎饼果子' }));
+  fireEvent.change(screen.getByRole('textbox', { name: '新增菜单选项' }), { target: { value: '夜宵粥' } });
+  fireEvent.click(screen.getByRole('button', { name: '添加' }));
+  fireEvent.click(screen.getByRole('button', { name: '保存菜单' }));
+  const saved = JSON.parse(localStorage.getItem('neuink.daily.sidebar.v1')!);
+  expect(saved.foodMenus.snack).toContain('夜宵粥');
+  expect(saved.foodMenus.snack).not.toContain('煎饼果子');
+  expect(saved.meals).toContain('临时面');
+  expect(saved.foodCategory).toBe('snack');
 });
 it('opens recommended papers and allows refreshing advice', () => {
   state.root = 'test'; const open = vi.fn();
