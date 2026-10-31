@@ -27,6 +27,13 @@ describe('window-local background task projection', () => {
     })).rejects.toMatchObject({ name: 'AbortError' });
     expect(registry.getLocalBackgroundJobs()[0]).toMatchObject({ status: 'canceled', error: null, progress: { current: 1, total: 3 } });
   });
+  it('records a declined duplicate PDF as cancellation', async () => {
+    const registry = await import('./localBackgroundJobs');
+    const error = new Error('已取消添加重复的 PDF');
+    error.name = 'PdfDuplicateCancelledError';
+    await expect(registry.runLocalBackgroundJob(options, async () => { throw error; })).rejects.toBe(error);
+    expect(registry.getLocalBackgroundJobs()[0]).toMatchObject({ status: 'canceled', error: null, message: '已取消添加重复的 PDF' });
+  });
   it('tracks real lifetime with stable snapshots, scoped identity and no guessed percentage', async () => {
     const registry = await import('./localBackgroundJobs');
     const task = deferred<string>();

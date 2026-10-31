@@ -11,6 +11,16 @@ impl Workspace {
         bytes: &[u8],
         source_url: Option<&str>,
     ) -> Result<EntryMeta, WorkspaceError> {
+        self.attach_downloaded_pdf_with_confirmation(expected, bytes, source_url, None)
+    }
+
+    pub fn attach_downloaded_pdf_with_confirmation(
+        &self,
+        expected: &EntryMeta,
+        bytes: &[u8],
+        source_url: Option<&str>,
+        confirmed_hash: Option<&str>,
+    ) -> Result<EntryMeta, WorkspaceError> {
         let _guard = self.begin_tag_safe_mutation()?;
         let mut entry = self.read_entry(&expected.id)?;
         if entry.pdf.is_some() {
@@ -31,8 +41,10 @@ impl Workspace {
             .into());
         }
         let hash = blake3::hash(bytes).to_hex().to_string();
-        if let Some(duplicate) = self.find_pdf_duplicate(&hash)? {
-            return Err(WorkspaceError::PdfContentDuplicate(duplicate.title));
+        if confirmed_hash != Some(hash.as_str()) {
+            if let Some(duplicate) = self.find_pdf_duplicate(&hash)? {
+                return Err(WorkspaceError::PdfContentDuplicate(duplicate.title));
+            }
         }
         let path = self.layout().entry_pdf_file(&entry.id);
         // A crash between the file and metadata writes is recoverable: leave the
@@ -134,5 +146,10 @@ mod tests {
         assert!(matches!(workspace.attach_downloaded_pdf(&other, bytes, None),
             Err(WorkspaceError::PdfContentDuplicate(title)) if title == "Original"));
         assert!(workspace.read_entry(&other.id).unwrap().pdf.is_none());
+        assert!(matches!(workspace.attach_downloaded_pdf_with_confirmation(&other, bytes, None, Some("wrong-hash")),
+            Err(WorkspaceError::PdfContentDuplicate(title)) if title == "Original"));
+        let hash = blake3::hash(bytes).to_hex().to_string();
+        workspace.attach_downloaded_pdf_with_confirmation(&other, bytes, None, Some(&hash)).unwrap();
+        assert!(workspace.read_entry(&other.id).unwrap().pdf.is_some());
     }
 }

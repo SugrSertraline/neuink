@@ -1016,7 +1016,14 @@ export function App() {
     const root = workspace.root;
     const entry = workspace.entries.find(item => item.id === entryId);
     if (!root || !entry) throw new Error('当前条目不可用，请重新打开后重试。');
-    await fetchEntryPdf(root, entryId, entry.title);
+    try {
+      await fetchEntryPdf(root, entryId, entry.title, async review => {
+        const confirmed = await duplicateReview.confirm(review);
+        return confirmed && onboardingRootRef.current === root;
+      });
+    } catch (caught) {
+      if (!(caught instanceof PdfDuplicateCancelledError)) throw caught;
+    }
     await workspace.refreshEntries(root);
     notify({ title: 'PDF 已保存', description: '可以打开 PDF 阅读，需要重排内容时再开始解析。', tone: 'success' });
   };

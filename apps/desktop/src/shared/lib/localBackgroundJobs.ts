@@ -56,8 +56,9 @@ export async function runLocalBackgroundJob<T>(options: LocalJobOptions, execute
   } catch (error) {
     // Only an allowlisted category/status survives in the task registry. The
     // owning UI still receives its original exception and applies its own policy.
-    const canceled = error instanceof DOMException && error.name === 'AbortError';
-    job = { ...job, status: canceled ? 'canceled' : 'failed', message: canceled ? '操作已停止，已完成的内容保留' : options.failureMessage, error: canceled ? null : assistantErrorDiagnostic(error) };
+    const duplicateCanceled = error instanceof Error && error.name === 'PdfDuplicateCancelledError';
+    const canceled = (error instanceof DOMException && error.name === 'AbortError') || duplicateCanceled;
+    job = { ...job, status: canceled ? 'canceled' : 'failed', message: duplicateCanceled ? '已取消添加重复的 PDF' : canceled ? '操作已停止，已完成的内容保留' : options.failureMessage, error: canceled ? null : assistantErrorDiagnostic(error) };
     throw error;
   } finally {
     publish({ ...job, updated_at: new Date().toISOString() });
