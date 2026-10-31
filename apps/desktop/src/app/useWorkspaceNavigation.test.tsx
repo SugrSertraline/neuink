@@ -110,3 +110,15 @@ it('keeps one visible sidebar when switching panels and preserves the hidden ass
   }
   expect((ui.getByRole('textbox', { name: '对话草稿' }) as HTMLInputElement).value).toBe('尚未发送的提问');
 });
+
+
+it('restores the ideation sidebar when selecting its tab, after honoring cross-pane edit guards', () => {
+  const onSelectPage = vi.fn(), dispatch = vi.fn(), onBlockedMove = vi.fn();
+  const layout: WorkspaceSurfaceLayout = { ...initial, left: { kind: 'ideation' }, leftTabs: [{ kind: 'ideation' }] };
+  const { result } = renderHook(() => useWorkspaceNavigation({ layout, dispatch, prepareSplit: vi.fn(), onBlockedMove, onSelectPage }));
+  act(() => { result.current({ kind: 'ideation' }, 'left'); });
+  expect(onSelectPage).toHaveBeenCalledWith('ideation');
+  onSelectPage.mockClear(); vi.mocked(hasUnsavedSurface).mockReturnValue(true);
+  act(() => { expect(result.current({ kind: 'ideation' }, 'right')).toBe(false); });
+  expect(onBlockedMove).toHaveBeenCalled(); expect(onSelectPage).not.toHaveBeenCalled();
+});

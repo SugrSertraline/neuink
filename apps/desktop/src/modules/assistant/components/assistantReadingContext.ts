@@ -38,6 +38,11 @@ export function resolveAssistantReadingContext({ choice, entries, tags = [], ite
         noteId: null, segmentUid: null, capturedAt: activeSurface.capturedAt, pane: activeSurface.pane }
     };
   }
+  if (!choice && activeSurface.kind === 'ideation') return {
+    entry: null, tag: null, note: null, segment: null, surface: { kind: 'ideation', surfaceKey: 'ideation', entryId: null, noteId: null, segmentUid: null, capturedAt: activeSurface.capturedAt, pane: activeSurface.pane }, bound: false, unavailable: false,
+    label: '不关联内容',
+    notice: '构思引用功能尚未开放。',
+  };
   const fixedEntry = choice && 'entryId' in choice ? choice : null;
   const selection = [...items].reverse().find(item => item.kind === 'segment' && item.id.startsWith('selection:'));
   const targetId = fixedEntry?.entryId ?? selection?.entryId;

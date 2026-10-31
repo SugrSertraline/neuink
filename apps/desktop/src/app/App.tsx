@@ -69,6 +69,8 @@ import {
   type SidePanel
 } from './activityBarState';
 import { WorkspaceTabsBar } from './WorkspaceTabsBar';
+import { IdeationProvider } from '@/modules/ideation/IdeationContext';
+import { IdeationSidebar } from '@/modules/ideation/IdeationSidebar';
 import { assistantSurfaceContext } from './assistantSurfaceContext';
 import { useBrowserTabRequests } from './useBrowserTabRequests';
 import {
@@ -1837,6 +1839,7 @@ export function App() {
         workspace.tags, entries, trashedEntries, markdownNoteRefreshById
       )}>
       <DailyProvider key={workspace.root} root={workspace.root} openNote={(target, title) => openWorkspaceSurface(noteSurface(target, title))} openSource={openMarkdownSourceLink}>
+      <IdeationProvider root={workspace.root} entries={entries} libraryReady={workspace.status === 'ready'} onShowSidebar={() => { setSidePanel('ideation'); setSidebarOpen(true); }}>
       <main
         data-guide="reader-workspace"
         ref={observeSidebarContainer}
@@ -1887,11 +1890,18 @@ export function App() {
           onSelect={(pane, surface) => openWorkspaceSurface(surface, pane)}
         />
         <ActivityNavigation focusedKind={focusedSurface.kind} activePanel={activeActivityPanel} noteDetails={Boolean(sidebarNote)}
+          onOpenIdeation={() => {
+            if (focusedSurface.kind === 'ideation' && sidebarOpen && sidePanel === 'ideation') { setSidebarOpen(false); return; }
+            if (openWorkspaceSurface({ kind: 'ideation' })) { setSidePanel('ideation'); setSidebarOpen(true); }
+          }}
           onOpenPage={openActivityPage}
           onOpenRight={page => openActivityPage(page, 'right')}
           onSelectTool={selectSidePanel}
           onCloseSidebar={() => setSidebarOpen(false)} />
         <WorkspaceSidebar open={sidebarOpen}>
+        <SidebarPanelSlot active={sidebarOpen && sidePanel === 'ideation'}>
+          {workspace.root && <IdeationSidebar key={workspace.root} root={workspace.root} entries={entries} onOpenEntry={openEntryTab} onOpenSource={openMarkdownSourceLink} />}
+        </SidebarPanelSlot>
         <SidebarPanelSlot active={sidebarOpen && sidePanel === 'daily-dashboard'}><DailySidebar
           active={sidebarOpen && sidePanel === 'daily-dashboard'} entries={entries} status={workspace.status}
           onOpenEntry={openEntryTab}
@@ -2185,6 +2195,7 @@ export function App() {
           status={workspace.status}
         />
       </main>
+      </IdeationProvider>
       </DailyProvider>
       </WorkspaceNotesProvider>
       </NoteReviewProvider>

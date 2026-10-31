@@ -13,6 +13,7 @@ export type WorkspaceSurface = { viewId?: string } & (
   | { kind: 'note-review'; proposalId: string; label: string; entryId: string; noteId?: string | null }
   | { kind: 'library' }
   | { kind: 'daily-dashboard' }
+  | { kind: 'ideation' }
   | { kind: 'empty' }
   | { kind: 'relations' }
   | { kind: 'settings'; target?: SettingsNavigationTarget }
@@ -338,7 +339,7 @@ export function surfaceContentKey(surface: WorkspaceSurface) {
     case 'owned-note': return `note:${noteTargetKey(surface.target)}`;
     case 'note': return `note:${surface.entryId}:${surface.noteId}`;
     case 'segment-notes': return `segment-records:${surface.entryId}`;
-    case 'empty': case 'daily-dashboard': case 'library': case 'relations': case 'settings': case 'external-import': case 'create-entry': case 'mineru-client-guide': case 'tag-editor': return surface.kind;
+    case 'empty': case 'daily-dashboard': case 'ideation': case 'library': case 'relations': case 'settings': case 'external-import': case 'create-entry': case 'mineru-client-guide': case 'tag-editor': return surface.kind;
     default: return `${surface.kind}:${surface.entryId}`;
   }
 }
@@ -383,6 +384,7 @@ export function workspaceSurfaceLabel(
   switch (surface.kind) {
     case 'library': return '条目库';
     case 'daily-dashboard': return '每日看板';
+    case 'ideation': return '研究构思';
     case 'empty': return '工作区';
     case 'browser': return surface.title || '新网页';
     case 'assistant-reply': return '完整回复';

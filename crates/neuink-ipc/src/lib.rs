@@ -11,6 +11,7 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
             translation_log::log_translation_failure,
             translation_log::translation_log_directory,
             commands::daily::daily_workspace,
+            commands::ideation::ideation_workspace,
             commands::deep_research::deep_research,
             commands::recommendations::daily_recommendations,
             commands::local_agent::detect_claude_code,

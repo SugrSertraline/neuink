@@ -23,6 +23,7 @@ import { RelationReturnFrame } from '@/modules/relations/RelationReturnFrame';
 import { WorkspaceSurfaceDeck } from './WorkspaceSurfaceDeck';
 import { EmptyWorkspace } from '@/app/EmptyWorkspace';
 import { DailyDashboard } from '@/modules/daily/DailyDashboard';
+import { IdeationWorkspace } from '@/modules/ideation/IdeationWorkspace';
 import { OwnedNoteSurfaceView } from '@/modules/notes/components/OwnedNoteSurfaceView';
 import { TagDetailsView } from '@/modules/library/components/TagDetailsView';
 import { ReadingSessionContext, type ReadingNoteBinding } from '../parallel-reading/ReadingSessionContext';
@@ -1101,6 +1102,9 @@ export function ReaderPane({
         return <DailyDashboard key={workspaceRoot} root={workspaceRoot} status={status} entries={entries} active={surfaceLayout[pane]?.kind === 'daily-dashboard'}
           onOpenEntry={onOpenEntryExplorer} onRefreshCatalog={onRefreshParseStatus}
           onOpenLibrary={() => onOpenSurface({ kind: 'library' })} />;
+      case 'ideation':
+        return workspaceRoot ? <IdeationWorkspace key={workspaceRoot} root={workspaceRoot} entries={entries}
+          onOpenEntry={onOpenEntryExplorer} onOpenSource={onOpenSourceLink} /> : <p className="p-4 text-sm text-muted-foreground">请先打开资料库。</p>;
       case 'relations':
         return <RelationsPage key={workspaceRoot} entries={entries} tags={tags} trashedEntries={trashedEntries}
           active={surfaceLayout[pane]?.kind === 'relations'}

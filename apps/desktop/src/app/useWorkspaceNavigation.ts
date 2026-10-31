@@ -8,7 +8,7 @@ export function useWorkspaceNavigation({ layout, dispatch, prepareSplit, onBlock
   dispatch: (action: WorkspaceSurfaceAction) => void;
   prepareSplit: (surface: WorkspaceSurface) => void;
   onBlockedMove: () => void;
-  onSelectPage: (page: 'library' | 'daily-dashboard') => void;
+  onSelectPage: (page: 'library' | 'daily-dashboard' | 'ideation') => void;
 }) {
   return useCallback((surface: WorkspaceSurface, pane?: WorkspacePaneId) => {
     const actions = workspaceSurfaceOpenActions(layout, surface, pane);
@@ -19,7 +19,7 @@ export function useWorkspaceNavigation({ layout, dispatch, prepareSplit, onBlock
     }
     if (pane === 'right' && !layout.right) prepareSplit(surface);
     actions.forEach(action => dispatch(action));
-    if (surface.kind === 'library' || surface.kind === 'daily-dashboard') onSelectPage(surface.kind);
+    if (surface.kind === 'library' || surface.kind === 'daily-dashboard' || surface.kind === 'ideation') onSelectPage(surface.kind);
     return true;
   }, [layout, dispatch, prepareSplit, onBlockedMove, onSelectPage]);
 }

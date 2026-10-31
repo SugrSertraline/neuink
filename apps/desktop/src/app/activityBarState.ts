@@ -1,11 +1,11 @@
 import type { WorkspaceSurface } from './workspaceSurface';
 
-export type SidePanel = 'assistant' | 'library' | 'details' | 'search' | 'same-tag' | 'daily-dashboard';
+export type SidePanel = 'assistant' | 'library' | 'details' | 'search' | 'same-tag' | 'daily-dashboard' | 'ideation';
 
 /** The rail has one selection; workspace tabs identify the current document separately. */
-export function resolveActivityNavigationItem(focusedKind: WorkspaceSurface['kind'], activePanel: SidePanel | null): SidePanel | 'daily-dashboard' | null {
+export function resolveActivityNavigationItem(focusedKind: WorkspaceSurface['kind'], activePanel: SidePanel | null): SidePanel | 'daily-dashboard' | 'ideation' | null {
   if (activePanel) return activePanel;
-  return focusedKind === 'library' || focusedKind === 'daily-dashboard' ? focusedKind : null;
+  return focusedKind === 'library' || focusedKind === 'daily-dashboard' || focusedKind === 'ideation' ? focusedKind : null;
 }
 
 /** Reading focus selects the detail target, never the user's selected side tool. */

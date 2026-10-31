@@ -3,6 +3,7 @@ pub mod annotation_index;
 pub mod atomic_write;
 pub mod daily;
 pub mod deep_research;
+pub mod ideation;
 pub mod daily_note;
 pub mod entertainment;
 pub mod recommendations;

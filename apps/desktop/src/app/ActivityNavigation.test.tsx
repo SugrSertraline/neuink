@@ -12,6 +12,15 @@ beforeEach(() => vi.stubGlobal('ResizeObserver', class { observe() {} unobserve(
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const callbacks = () => ({ onOpenPage: vi.fn(), onOpenRight: vi.fn(), onSelectTool: vi.fn(), onCloseSidebar: vi.fn() });
 
+it('opens research ideation from the activity rail', () => {
+  const open = vi.fn();
+  render(<TooltipProvider><ActivityNavigation {...callbacks()} focusedKind="ideation" activePanel={null} noteDetails={false} onOpenIdeation={open} /></TooltipProvider>);
+  const entry = screen.getByRole('button', { name: '研究构思' });
+  expect(entry.classList.contains('active')).toBe(true);
+  fireEvent.click(entry);
+  expect(open).toHaveBeenCalledOnce();
+});
+
 it('shares one persistent highlight across all six destinations and gives the visible sidebar priority', () => {
   const props = { ...callbacks(), noteDetails: false };
   const view = render(<TooltipProvider><ActivityNavigation {...props} focusedKind="daily-dashboard" activePanel="assistant" /></TooltipProvider>);

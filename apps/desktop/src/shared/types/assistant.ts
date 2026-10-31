@@ -411,6 +411,7 @@ export type AssistantActiveSurfaceSnapshot = {
     | 'entry-overview'
     | 'entry-trash'
     | 'daily-dashboard'
+    | 'ideation'
     | 'empty'
     | 'library'
     | 'relations'

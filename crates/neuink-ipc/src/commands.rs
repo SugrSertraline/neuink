@@ -7,6 +7,7 @@ pub mod browser;
 mod browser_isolation;
 pub mod conversation;
 pub mod deep_research;
+pub mod ideation;
 pub mod embedding;
 pub mod embedding_resources;
 pub mod entry;
