@@ -28,7 +28,7 @@ export function DailySidebar({ active = false, entries = [], status = 'ready', o
   const reading = useLibraryReadingStates(daily.root, active && status === 'ready' && showAdvice);
   const input = useMemo(() => buildDailyAdvice(entries, reading.states, daily.today), [entries, reading.states, daily.today]);
   const ready = Boolean(daily.root && status === 'ready' && !reading.loading && !reading.error);
-  const advice = useDailyAdvice(active && showAdvice, ready, input);
+  const advice = useDailyAdvice(active && showAdvice, ready, input, daily.root);
   useEffect(() => { if (active) recommendations?.ensureToday(); }, [active, recommendations?.ensureToday]);
   useEffect(() => { if (!active) setSettingsOpen(false); }, [active]);
   const suggestions = advice.phase === 'ready' ? advice.result!.suggestions : input.candidates.slice(0, 3);
