@@ -155,6 +155,7 @@ type MineruPdfReaderProps = {
     noteId: string,
   ) => Promise<NoteDocument>;
   onReadPdfReader: (entryId: string) => Promise<PdfReaderResponse>;
+  onRefreshEntries?: () => Promise<void>;
   onRetryPdfParse: (entryId: string) => Promise<void> | void;
   onStartPdfParse: (entryId: string) => Promise<void> | void;
   onCloseSidePane: () => void;
@@ -248,6 +249,7 @@ function MineruPdfReaderBody({
   onImportMarkdownNoteSegmentAsset,
   onReadMarkdownNote,
   onReadPdfReader,
+  onRefreshEntries,
   onRetryPdfParse,
   onStartPdfParse,
   onCloseSidePane,
@@ -1036,6 +1038,9 @@ function MineruPdfReaderBody({
     <PaperReferencesProvider segments={segments} entryId={entry.id} workspaceRoot={workspaceRoot} pdfDocument={pdfState.status === "ready" ? pdfState.document : null} hoverEnabled={readerPreferences.paperReferenceHoverEnabled && !readingSession?.resizing}>
     <ReaderSurfaceFrame className="pdf-reader-surface bg-muted/30" toolbar={
       <ReaderToolbar
+        workspaceRoot={workspaceRoot}
+        titleCheckReloadKey={reloadKey}
+        onRefreshEntries={onRefreshEntries}
         navigation={<ReadingNavigationControls segments={segments} entryId={entry.id} workspaceRoot={workspaceRoot} />}
         currentPage={currentPageIdx + 1}
         effectivePageDisplayMode={effectivePageDisplayMode}

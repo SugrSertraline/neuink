@@ -328,6 +328,40 @@ pub fn update_entry_meta(request: UpdateEntryMetaRequest) -> Result<EntryMeta, S
         .map_err(|error| error.to_string())
 }
 
+#[derive(Debug, Deserialize)]
+pub struct TitleConsistencyRequest {
+    pub root: PathBuf,
+    pub entry_id: EntryId,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ApplyTitleConsistencyRequest {
+    pub root: PathBuf,
+    pub entry_id: EntryId,
+    pub expected_title: String,
+    pub expected_pdf_file_name: String,
+    pub expected_source_revision: String,
+    pub suggested_title: String,
+    pub update_entry_title: bool,
+    pub update_pdf_file_name: bool,
+}
+
+#[tauri::command]
+pub fn inspect_title_consistency(
+    request: TitleConsistencyRequest,
+) -> Result<Option<neuink_workspace::title_consistency::TitleConsistency>, String> {
+    let workspace = neuink_workspace::Workspace::open(request.root).map_err(|error| error.to_string())?;
+    workspace.inspect_title_consistency(&request.entry_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn apply_title_consistency(request: ApplyTitleConsistencyRequest) -> Result<EntryMeta, String> {
+    let workspace = neuink_workspace::Workspace::open(request.root).map_err(|error| error.to_string())?;
+    workspace.apply_title_consistency(&request.entry_id, &request.expected_title,
+        &request.expected_pdf_file_name, &request.expected_source_revision, &request.suggested_title,
+        request.update_entry_title, request.update_pdf_file_name).map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 pub fn apply_entry_tag_paths(
     request: ApplyEntryTagPathsRequest,

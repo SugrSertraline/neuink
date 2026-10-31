@@ -260,7 +260,7 @@ describe('EntryLibraryView context heading and toolbar', () => {
     const path = within(screen.getByRole('navigation', { name: '条目库浏览路径' }));
     expect(path.getByRole('button', { name: '显示全部' })).toBeTruthy();
     expect(path.getByRole('button', { name: `条目范围：${title}` })).toBeTruthy();
-    expect(path.getByRole('button', { name: '标签管理' })).toBeTruthy();
+    expect(within(screen.getByLabelText('条目库操作')).getByRole('button', { name: '标签管理' })).toBeTruthy();
   });
 
   it('requests a full reset and retains the search until the guarded parent accepts it', () => {
@@ -299,7 +299,7 @@ describe('EntryLibraryView context heading and toolbar', () => {
   it('opens tag management and clears only the tag through distinct breadcrumb actions', () => {
     const { props } = renderLibrary({ libraryView: 'parsed', activeTag: 'hci', tags: libraryTags });
     const path = within(screen.getByRole('navigation', { name: '条目库浏览路径' }));
-    fireEvent.click(path.getByRole('button', { name: '标签管理' }));
+    fireEvent.click(within(screen.getByLabelText('条目库操作')).getByRole('button', { name: '标签管理' }));
     expect(props.onManageTags).toHaveBeenCalledOnce();
     expect(props.onSelectTag).not.toHaveBeenCalled();
     fireEvent.click(path.getByRole('button', { name: '全部标签' }));
@@ -312,7 +312,7 @@ describe('EntryLibraryView context heading and toolbar', () => {
     const { props } = renderLibrary({ libraryView: 'unparsed', status, entries: [] });
     const path = within(screen.getByRole('navigation', { name: '条目库浏览路径' }));
     expect(path.getByRole('button', { name: '条目范围：未解析' })).toBeTruthy();
-    expect((path.getByRole('button', { name: '标签管理' }) as HTMLButtonElement).disabled).toBe(status !== 'ready');
+    expect((within(screen.getByLabelText('条目库操作')).getByRole('button', { name: '标签管理' }) as HTMLButtonElement).disabled).toBe(status !== 'ready');
     fireEvent.click(path.getByRole('button', { name: '显示全部' }));
     expect(props.onClearFilters).toHaveBeenCalledOnce();
   });

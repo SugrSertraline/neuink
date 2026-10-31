@@ -14,6 +14,7 @@ export async function runJsonModelTask(options: {
   system: string;
   prompt: string;
   abortSignal?: AbortSignal;
+  timeoutMs?: number;
 }) {
   options.abortSignal?.throwIfAborted();
   options.budget?.turn();
@@ -25,8 +26,8 @@ export async function runJsonModelTask(options: {
     system: options.system,
     prompt: options.prompt,
     abortSignal: options.abortSignal
-      ? AbortSignal.any([options.abortSignal, AbortSignal.timeout(120_000)])
-      : AbortSignal.timeout(120_000),
+      ? AbortSignal.any([options.abortSignal, AbortSignal.timeout(options.timeoutMs ?? 120_000)])
+      : AbortSignal.timeout(options.timeoutMs ?? 120_000),
     maxRetries: 0
   });
   options.abortSignal?.throwIfAborted();

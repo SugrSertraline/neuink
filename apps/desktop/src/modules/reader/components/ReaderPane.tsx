@@ -184,6 +184,7 @@ type ReaderPaneProps = EntryPdfHandlers & {
     entryId: string,
     request: { fields: Record<string, string>; tagPaths: string[]; title: string }
   ) => Promise<unknown> | unknown;
+  onRefreshEntries: () => Promise<void>;
   onExportTranslationNote: (entryId: string, title: string, markdown: string) => Promise<void>;
   onSaveSegmentNote: (entryId: string, segmentUid: string, text: string) => Promise<SegmentBlockNote[]>;
   onDeleteSegmentNote: (entryId: string, segmentUid: string) => Promise<SegmentBlockNote[]>;
@@ -297,6 +298,7 @@ export function ReaderPane({
   onActiveSegmentChange,
   onApplyEntryTagPaths,
   onUpdateEntry,
+  onRefreshEntries,
   onFetchPdf,
   onAttachPdf,
   onCreatePdfVersion,
@@ -821,6 +823,7 @@ export function ReaderPane({
         }
         onApplyEntryTagPaths={onApplyEntryTagPaths}
         onUpdateEntry={onUpdateEntry}
+        onRefreshEntries={onRefreshEntries}
         onFetchPdf={onFetchPdf} onAttachPdf={onAttachPdf}
         onCreatePdfVersion={onCreatePdfVersion}
         onImportMineruClientResult={onImportMineruClientResult}

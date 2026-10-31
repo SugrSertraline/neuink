@@ -2,6 +2,7 @@ import type { SettingsPanelLayoutProps } from './SettingsPanelLayout';
 import { SettingsPage, SettingsGroup, SettingSwitch, SettingCheckbox } from './SettingsPrimitives';
 import { TaskModelSetting } from './TaskModelSetting';
 import { SelectionTranslationSettings } from './SelectionTranslationSettings';
+import { TranslationSourcesSettings } from './TranslationSourcesSettings';
 
 const TRANSLATION_TYPES = [
   ['paragraph', '段落'], ['heading', '标题'], ['table', '表格'], ['math', '公式'], ['figure', '图片'], ['code', '代码'],
@@ -11,13 +12,17 @@ const TRANSLATION_TYPES = [
 export function TranslationSettingsSection({ props }: { props: SettingsPanelLayoutProps }) {
   const p = props.readerPreferences;
   const automation = props.translationAutomation;
-  return <SettingsPage tab="translation" title="翻译" description="配置选中文字、整篇与片段翻译。">
+  return <SettingsPage tab="translation" title="翻译" description="5 类翻译可独立选择模型，也可共用统一默认模型。">
+    <SettingsGroup title="统一默认模型" description="所有选择“统一默认模型”的翻译类型共用此连接。">
+      <TaskModelSetting props={props} task="translation" />
+    </SettingsGroup>
+    <TranslationSourcesSettings active={props.activeSettingsTab === 'translation'} profiles={props.settings.profiles}
+      defaultProfileId={props.draftTranslationProfileId} unavailable={props.modelsUnavailable} />
     <SelectionTranslationSettings active={props.activeSettingsTab === 'translation'}>
       <SettingSwitch id="translation-selection" label="选中文字后自动翻译" description="本机阅读偏好 · 关闭后仍可手动点击“翻译”。" checked={p.autoTranslateTextSelection}
         onCheckedChange={autoTranslateTextSelection => props.onReaderPreferencesChange({ ...p, autoTranslateTextSelection })} />
     </SelectionTranslationSettings>
-    <SettingsGroup title="整篇与片段翻译" description="使用下方模型翻译整篇 PDF 和阅读器中的段落／片段；选中文字的专用服务独立配置。">
-      <TaskModelSetting props={props} task="translation" />
+    <SettingsGroup title="自动翻译" description="使用“整篇与批量来源”指定的模型，遵循下面的内容范围。">
       <SettingSwitch id="translation-auto" label="解析后自动翻译 PDF" description="应用偏好 · PDF 解析成功后自动启动英译中。" checked={automation.auto_translate_pdf} disabled={props.workspaceSettingsUnavailable}
         onCheckedChange={auto_translate_pdf => props.onTranslationAutomationChange({ ...automation, auto_translate_pdf })} />
     </SettingsGroup>

@@ -40,6 +40,8 @@ npm run desktop:release:portable
 
 Windows 免安装版将资料库及设置保存在 `Neuink.exe` 旁的 `data` 文件夹；更新时须保留原 `data`。模型与 MinerU 服务仍由使用者配置；同机启动会使用已有设置。`--skip-build` 只适合重新组装已核验的 release 产物，不应代替新版本构建。
 
+本机工作目录位于 `D:\NeuInk`，日常使用的便携版位于其 `portable` 子目录。验证过的新版本可以直接更新到 `portable`，先退出程序并备份，再替换程序和资源文件，始终保留 `portable/data` 中的个人资料与设置。开发版 `dev:d-data` 默认读取同一目录下的资料，不再需要单独映射旧安装路径。本机更新不等于公开发布；公开发行仍遵守 `main` 分支门禁。
+
 ## 2. Embedding 资源
 
 默认模型目录：

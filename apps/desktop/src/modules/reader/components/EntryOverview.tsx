@@ -29,10 +29,13 @@ import { EntryContentHeader } from './EntryContentHeader';
 import { ReaderSection, ReaderSurfaceBody } from './ReaderSurfacePrimitives';
 import { ReadingExportDialog } from '../export/ReadingExportDialog';
 import { ReaderSurfaceFrame } from './ReaderSurfaceFrame';
+import { EntryTitleConsistency } from './EntryTitleConsistency';
 
 export function EntryOverview({
   entry,
   onUpdateEntry,
+  onRefreshEntries,
+  titleCheckReloadKey = 0,
   sourceBacklinksBySegmentUid,
   tags,
   workspaceRoot,
@@ -50,6 +53,8 @@ export function EntryOverview({
     entryId: string,
     request: { fields: Record<string, string>; tagPaths: string[]; title: string }
   ) => Promise<unknown> | unknown;
+  onRefreshEntries?: () => Promise<void>;
+  titleCheckReloadKey?: number;
   sourceBacklinksBySegmentUid: SourceBacklinksBySegmentUid;
   tags: TagMeta[];
   workspaceRoot?: string | null;
@@ -113,6 +118,9 @@ export function EntryOverview({
           <div className="entry-overview-summary-content min-w-0 flex-1">
           <h1 className="entry-overview-breakable mt-1 text-xl font-semibold leading-8 text-foreground">
             {entry.title}
+            {onRefreshEntries ? <EntryTitleConsistency entryId={entry.id} entryTitle={entry.title}
+              pdfFileName={entry.pdfFileName} parsed={entry.status === 'Parsed'} root={workspaceRoot ?? null}
+              reloadKey={titleCheckReloadKey} onRefreshEntries={onRefreshEntries} /> : null}
           </h1>
           <div className="mt-3">
             {description ? (

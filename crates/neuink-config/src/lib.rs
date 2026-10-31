@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+mod translation_routing;
+pub use translation_routing::{TranslationKind, TranslationRoutingSettings, TranslationSource};
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct AppSettings {
     #[serde(default)]
@@ -16,6 +19,8 @@ pub struct AppSettings {
     pub translation_llm_profile_id: Option<String>,
     #[serde(default)]
     pub translation_automation: TranslationAutomationSettings,
+    #[serde(default)]
+    pub translation_routing: TranslationRoutingSettings,
     #[serde(default, deserialize_with = "read_selection_translation")]
     pub selection_translation: SelectionTranslationSettings,
     #[serde(default)]

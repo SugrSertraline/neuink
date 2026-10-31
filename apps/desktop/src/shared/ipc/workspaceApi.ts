@@ -571,6 +571,29 @@ export async function renamePdfDisplayName(
   });
 }
 
+export type TitleConsistency = {
+  entry_title: string;
+  pdf_file_name: string;
+  evidence: string[];
+  source_revision: string;
+};
+
+export function inspectTitleConsistency(root: string, entryId: EntryId) {
+  return invoke<TitleConsistency | null>('inspect_title_consistency', {
+    request: { root, entry_id: entryId }
+  });
+}
+
+export function applyTitleConsistency(root: string, entryId: EntryId, inspection: TitleConsistency, suggestedTitle: string,
+  updateEntryTitle: boolean, updatePdfFileName: boolean) {
+  return invoke<EntryMeta>('apply_title_consistency', {
+    request: { root, entry_id: entryId, expected_title: inspection.entry_title,
+      expected_pdf_file_name: inspection.pdf_file_name, expected_source_revision: inspection.source_revision,
+      suggested_title: suggestedTitle,
+      update_entry_title: updateEntryTitle, update_pdf_file_name: updatePdfFileName }
+  });
+}
+
 export async function saveNoteAssetBytes(
   root: string,
   entryId: EntryId,

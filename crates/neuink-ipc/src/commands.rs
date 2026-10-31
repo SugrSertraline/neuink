@@ -32,6 +32,7 @@ pub mod tag_reading;
 #[cfg(test)]
 mod tag_tests;
 pub mod translation;
+pub mod translation_routing;
 pub mod workspace;
 pub mod daily;
 pub mod recommendations;

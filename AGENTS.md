@@ -11,7 +11,8 @@
 
 ## Local testing preference
 
-- The user wants everyday testing to launch the native development app with `npm --workspace apps/desktop run dev:d-data`, using the existing `D:\NeuInk\data` directory. Do not rebuild or replace `D:\NeuInk\Neuink.exe` after each feature unless explicitly requested.
+- The working repository is `D:\NeuInk`; the local portable app and authoritative user data live in `D:\NeuInk\portable`. Everyday development can launch the native app with `npm --workspace apps/desktop run dev:d-data`, which uses `portable/data` by default.
+- After a new local version has been validated for daily use, deploy its program and resources directly to `portable`, preserving `portable/data`; do not create another working copy or remap the data path. This standing local update preference does not authorize merging into `main` or publishing a release.
 - On this Windows workstation, the desktop shortcut `Neuink 开发测试.lnk` runs `apps/desktop/scripts/start-dev-windows.ps1`. It starts the same development workflow in the background and records startup output in `target/desktop-dev/launcher.log`.
 - Close the portable app before starting development against the same data; do not run both simultaneously. Preserve the user's real papers, notes and settings. This is a local development preference, not authorization to merge into `main` or publish a release.
 

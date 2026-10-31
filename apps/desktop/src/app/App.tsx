@@ -2160,6 +2160,7 @@ export function App() {
           onActiveSegmentChange={setActiveAssistantSegment}
           onApplyEntryTagPaths={workspace.applyEntryTagPaths}
           onUpdateEntry={workspace.updateWorkspaceEntry}
+          onRefreshEntries={() => workspace.refreshEntries()}
           onFetchPdf={fetchPdfForEntry}
           onAttachPdf={attachPdfToEntry}
           onCreatePdfVersion={createPdfVersion}

@@ -328,18 +328,18 @@ export function EntryLibraryView({
                 <TabsTrigger value="papers" className="px-2 text-xs">论文</TabsTrigger>
                 <TabsTrigger value="notes" className="px-2 text-xs" disabled={!onOpenTagNote}>标签笔记{noteCount === null ? '' : ` ${noteCount}`}</TabsTrigger>
               </TabsList> : null}
-              {onOpenRelations ? <Button size="default" variant="outline" aria-label="关系图" title="关系图" className="@max-[700px]/library-heading:w-8 @max-[700px]/library-heading:px-0" onClick={onOpenRelations}><Network size={14} aria-hidden="true" /><span className="@max-[700px]/library-heading:hidden">关系图</span></Button> : null}
-              <Button aria-label="阅读统计" title="在每日看板查看全资料库阅读统计" variant="outline"
-                className="@max-[700px]/library-heading:w-8 @max-[700px]/library-heading:px-0"
+              {onOpenRelations ? <Button size="default" variant="ghost" aria-label="关系图" title="关系图" className="text-xs @max-[900px]/library-heading:w-8 @max-[900px]/library-heading:px-0" onClick={onOpenRelations}><Network size={14} aria-hidden="true" /><span className="@max-[900px]/library-heading:hidden">关系图</span></Button> : null}
+              <Button aria-label="阅读统计" title="在每日看板查看全资料库阅读统计" variant="ghost"
+                className="text-xs @max-[900px]/library-heading:w-8 @max-[900px]/library-heading:px-0"
                 onClick={onOpenDailyDashboard}>
                 <CalendarDays size={14} aria-hidden="true" />
-                <span className="@max-[700px]/library-heading:hidden">阅读统计</span>
+                <span className="@max-[900px]/library-heading:hidden">阅读统计</span>
               </Button>
               <div hidden={section !== 'papers'}>
-                <Button size="default" aria-label="创建条目" title="创建条目" className="@max-[700px]/library-heading:w-8 @max-[700px]/library-heading:px-0" onClick={onOpenCreateEntryTab}><FilePlus2 size={14} aria-hidden="true" /><span className="@max-[700px]/library-heading:hidden">创建条目</span></Button>
+                <Button size="default" aria-label="创建条目" title="创建条目" className="text-xs" onClick={onOpenCreateEntryTab}><FilePlus2 size={14} aria-hidden="true" /><span>创建条目</span></Button>
               </div>
               {activeTagMeta && onOpenTagNote ? <div hidden={section !== 'notes'}>
-                <CreateTagNoteButton key={`${workspaceRoot}:${activeTagMeta.id}`} tagId={activeTagMeta.id} tagLabel={folderBreadcrumb.map(tag => tag.name).join(' / ')} scope={`library/tag:${activeTagMeta.id}`} disabled={status !== 'ready'} onOpen={onOpenTagNote} className="@max-[700px]/library-heading:w-8 @max-[700px]/library-heading:px-0" />
+                <CreateTagNoteButton key={`${workspaceRoot}:${activeTagMeta.id}`} tagId={activeTagMeta.id} tagLabel={folderBreadcrumb.map(tag => tag.name).join(' / ')} scope={`library/tag:${activeTagMeta.id}`} disabled={status !== 'ready'} onOpen={onOpenTagNote} />
               </div> : null}
             </>} />
           <TabsContent forceMount value="papers" aria-hidden={section !== 'papers' || undefined} className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden">

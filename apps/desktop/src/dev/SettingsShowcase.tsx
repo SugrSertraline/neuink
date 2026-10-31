@@ -14,6 +14,7 @@ import { readStoredReaderPreferences } from '@/shared/lib/readerPreferences';
 import { APP_THEME_PRESETS, type AppThemePresetId } from '@/shared/lib/themePresets';
 import type { UiScale } from '@/shared/lib/uiScale';
 import type { LlmSettingsState } from '@/shared/ipc/assistantApi';
+import { DEFAULT_TRANSLATION_ROUTING } from '@/shared/ipc/translationRoutingApi';
 import '../styles/globals.css';
 
 const params = new URLSearchParams(location.search);
@@ -28,11 +29,17 @@ if (state === 'empty') llm = { ...llm, profiles: [], assistant_profile_id: null,
 let workspace = { data_root: 'E:\\Neuink\\data', root: 'settings-showcase', default_root: 'settings-showcase', recent_workspaces: [], translation_automation: { auto_translate_pdf: false, segment_types: ['paragraph', 'heading'] } };
 let research = { papers_enabled: true, web_enabled: true, use_tavily: false, has_web_key: false };
 let sciverse = { enabled: false, base_url: 'https://api.sciverse.space', has_api_token: false, token_source: 'none' };
+let translationRouting = structuredClone(DEFAULT_TRANSLATION_ROUTING);
 // Every IPC is intercepted. This page cannot read or write an actual library.
 mockIPC(async (command, payload) => {
   if (state === 'loading' && command.startsWith('get_')) return new Promise(() => undefined);
   if (state === 'error' && (command.startsWith('get_') || command.startsWith('save_') || command.startsWith('update_'))) throw new Error('示例：暂时无法读取或保存配置');
   if (command === 'get_llm_settings') return structuredClone(llm);
+  if (command === 'get_translation_routing') return structuredClone(translationRouting);
+  if (command === 'save_translation_routing') {
+    translationRouting = (payload as { request: typeof translationRouting }).request;
+    return structuredClone(translationRouting);
+  }
   if (command === 'get_workspace_settings') return structuredClone(workspace);
   if (command === 'load_agent_runtime_settings') return structuredClone(DEFAULT_AGENT_RUNTIME_SETTINGS);
   if (command === 'save_agent_runtime_settings') return null;

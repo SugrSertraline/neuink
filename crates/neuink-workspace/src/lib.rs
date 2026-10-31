@@ -30,6 +30,7 @@ pub mod tag_archive;
 pub mod tag_details;
 pub mod tag_note;
 pub mod tag_reading;
+pub mod title_consistency;
 mod tag_transaction;
 pub mod trash;
 pub mod workspace;

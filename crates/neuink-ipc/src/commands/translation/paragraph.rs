@@ -136,7 +136,7 @@ pub async fn translate_paragraph<R: Runtime>(
     app: AppHandle<R>,
     request: ParagraphRequest,
 ) -> Result<ParagraphTranslation, String> {
-    let profile = read_translation_profile(&app)?.ok_or("请先在设置中配置翻译模型。")?;
+    let profile = read_translation_profile(&app, neuink_config::TranslationKind::Paragraph)?.ok_or("请先在设置中配置翻译模型。")?;
     let workspace = Workspace::open(request.root.clone()).map_err(|error| error.to_string())?;
     let segment = workspace
         .read_segments(&request.entry_id)

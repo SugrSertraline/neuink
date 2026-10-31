@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+vi.mock('@/shared/ipc/translationRoutingApi', async original => { const mod = await original<typeof import('@/shared/ipc/translationRoutingApi')>(); return { ...mod, getTranslationRouting: vi.fn(async () => mod.DEFAULT_TRANSLATION_ROUTING), saveTranslationRouting: vi.fn(async (value: import('@/shared/ipc/translationRoutingApi').TranslationRouting) => value) }; });
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -177,12 +178,12 @@ describe('settings information architecture and navigation', () => {
     expect(within(page as HTMLElement).getAllByRole('heading', { level: 3 }).map(heading => heading.textContent)).toEqual(['默认模型', '模型连接']);
     expect(screen.queryByRole('heading', { name: '模型高级参数' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '设置选中文字与整体翻译 →' }));
-    expect(screen.getByRole('combobox', { name: '整体翻译模型' })).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: '统一默认翻译模型' })).toBeTruthy();
     const selectionGroup = screen.getByRole('heading', { name: '选中文字翻译' }).closest('section')!;
-    const wholeGroup = screen.getByRole('heading', { name: '整篇与片段翻译' }).closest('section')!;
+    const wholeGroup = screen.getByRole('heading', { name: '自动翻译' }).closest('section')!;
     expect(selectionGroup.contains(screen.getByRole('switch', { name: '选中文字后自动翻译' }))).toBe(true);
     expect(wholeGroup.contains(screen.getByRole('switch', { name: '解析后自动翻译 PDF' }))).toBe(true);
-    expect(wholeGroup.contains(screen.getByRole('combobox', { name: '整体翻译模型' }))).toBe(true);
+    expect(screen.getByRole('heading', { name: '按翻译类型选择来源' })).toBeTruthy();
     view.rerender(<Harness target={{ id: 'tools-services', nonce: 2 }} />);
     const service = view.container.querySelector<HTMLElement>('[data-setting-id="tools-services"]')!;
     await waitFor(() => expect(service.contains(document.activeElement) || service === document.activeElement).toBe(true));
