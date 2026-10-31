@@ -1126,7 +1126,7 @@ export function ReaderPane({
           </Suspense>
         </div>;
       case 'external-import':
-        return workspaceRoot ? <OtherSourceImportPage key={workspaceRoot} root={workspaceRoot} scope={surfaceKey(surface)} onImported={onMineruImported} onOpenEntry={onOpenEntryExplorer} /> : <p className="p-4 text-sm text-muted-foreground">请先打开资料库。</p>;
+        return workspaceRoot ? <OtherSourceImportPage key={workspaceRoot} root={workspaceRoot} scope={surfaceKey(surface)} requestedSource={surface.source} sourceRequestId={surface.navigationId} onImported={onMineruImported} onOpenEntry={onOpenEntryExplorer} /> : <p className="p-4 text-sm text-muted-foreground">请先打开资料库。</p>;
       case 'create-entry':
         return <div className="h-full min-h-0 overflow-hidden">{renderCreateEntryPanel()}</div>;
       case 'mineru-client-guide':

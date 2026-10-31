@@ -17,7 +17,7 @@ export type WorkspaceSurface = { viewId?: string } & (
   | { kind: 'relations' }
   | { kind: 'settings'; target?: SettingsNavigationTarget }
   | { kind: 'create-entry' }
-  | { kind: 'external-import' }
+  | { kind: 'external-import'; source?: 'zotero' | 'mineru'; navigationId?: string }
   | { kind: 'mineru-client-guide' }
   | { kind: 'tag-editor' }
   | { kind: 'tag-reading'; tagId: string; label?: string }

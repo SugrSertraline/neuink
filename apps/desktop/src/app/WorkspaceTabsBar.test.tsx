@@ -43,6 +43,24 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
+it('offers new and import submenus from the tab bar plus button', async () => {
+  const onNewEntry = vi.fn(), onNewBrowser = vi.fn(), onImportSource = vi.fn();
+  const view = render(<TooltipProvider><WorkspaceTabsBar entries={[]} layout={layout}
+    onNewEntry={onNewEntry} onNewBrowser={onNewBrowser} onImportSource={onImportSource}
+    onClose={vi.fn()} onCloseOthers={vi.fn()} onClosePane={vi.fn()}
+    onMove={vi.fn()} onSelect={vi.fn()} onSwap={vi.fn()} /></TooltipProvider>);
+  const open = () => fireEvent.keyDown(view.getByRole('button', { name: '新建或导入' }), { key: 'Enter' });
+  open();
+  fireEvent.keyDown(await view.findByRole('menuitem', { name: '新建' }), { key: 'ArrowRight' });
+  fireEvent.click(await view.findByRole('menuitem', { name: '论文条目' }));
+  expect(onNewEntry).toHaveBeenCalledTimes(1);
+  open();
+  fireEvent.keyDown(await view.findByRole('menuitem', { name: '导入' }), { key: 'ArrowRight' });
+  fireEvent.click(await view.findByRole('menuitem', { name: 'MinerU 解析结果' }));
+  expect(onImportSource).toHaveBeenCalledWith('mineru');
+  expect(onNewBrowser).not.toHaveBeenCalled();
+});
+
 const layout: WorkspaceSurfaceLayout = {
   focusedPane: 'left',
   left: { kind: 'pdf', entryId: 'a' },

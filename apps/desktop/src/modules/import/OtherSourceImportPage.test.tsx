@@ -61,3 +61,13 @@ it('previews without importing or changing the selected rows', async () => {
   fireEvent.click(screen.getByRole('button', { name: '关闭预览' }));
   await waitFor(() => expect(screen.queryByRole('complementary')).toBeNull());
 });
+
+it('opens the requested source and follows a later menu request without losing the other panel', async () => {
+  const view = render(<OtherSourceImportPage root="workspace" requestedSource="mineru" sourceRequestId="1" />);
+  await screen.findByText('Local paper');
+  expect(screen.getByRole('tab', { name: 'MinerU' }).getAttribute('aria-selected')).toBe('true');
+  view.rerender(<OtherSourceImportPage root="workspace" requestedSource="zotero" sourceRequestId="2" />);
+  await screen.findByText('此资料库没有可导入的文献。');
+  expect(screen.getByRole('tab', { name: 'Zotero' }).getAttribute('aria-selected')).toBe('true');
+  expect(api.scanMineru).toHaveBeenCalledTimes(1);
+});

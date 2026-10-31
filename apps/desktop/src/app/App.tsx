@@ -680,6 +680,10 @@ export function App() {
   const openCreateEntryTab = () => {
     dispatchSurface({ type: 'open', surface: { kind: 'create-entry' } });
   };
+  const importNavigationNonce = useRef(0);
+  const openImportSourceTab = (source: 'zotero' | 'mineru') => {
+    dispatchSurface({ type: 'open', surface: { kind: 'external-import', source, navigationId: String(++importNavigationNonce.current) } });
+  };
   const openMineruClientGuideTab = () => {
     dispatchSurface({ type: 'open', surface: { kind: 'mineru-client-guide' } });
   };
@@ -1847,6 +1851,8 @@ export function App() {
           readingLinkMode={readerPreferences.readingLinkMode}
           onReadingLinkModeChange={(readingLinkMode) => updateReaderPreferences({ ...readerPreferences, readingLinkMode })}
           onNewBrowser={openNewBrowserTab}
+          onNewEntry={openCreateEntryTab}
+          onImportSource={openImportSourceTab}
           entries={entries}
           layout={surfaceLayout}
           onAddToAssistantContext={addWorkspaceSurfaceToAssistantContext}
