@@ -150,8 +150,11 @@ import {
 } from './assistantContextTargets';
 import { AssistantHarnessError, runAssistantHarness } from '../harness/engine';
 import { planAssistantContext } from '../harness/contextPlanner';
-import { lastMemoryCheckpointIndex } from '../runtime/conversationTranscript';
+import { lastMemoryCheckpointIndex, renderConversationContext } from '../runtime/conversationTranscript';
 import { COMPACTION_TRIGGER_RATIO, CONTEXT_WARNING_RATIO, estimateTokensFromChars, estimateTokensFromText, modelContextTokens } from '../sdk/contextBudget';
+import { resolveLlmApiProtocol } from '@/shared/ipc/assistantApi';
+import { latestContextUsage } from '../runtime/modelTranscript';
+import { estimateMessagesTokens, usageCalibration } from '../sdk/contextUsage';
 
 type AssistantPanelProps = {
   activeEntry: LibraryEntry | null;
@@ -334,6 +337,7 @@ export function buildAssistantMessageParts({
   contextPlan,
   entryMetaProposals = [],
   memory,
+  modelTranscript,
   noteProposals = [],
   reasoning,
   tagProposals = [],
@@ -349,6 +353,7 @@ export function buildAssistantMessageParts({
   contextPlan?: AssistantContextPlan | null;
   entryMetaProposals?: AssistantEntryMetaProposal[];
   memory?: AssistantConversationMemory | null;
+  modelTranscript?: import('@/shared/types/modelTranscript').AssistantModelTranscript;
   noteProposals?: AssistantNoteProposal[];
   reasoning?: string;
   tagProposals?: AssistantTagProposal[];
@@ -358,6 +363,7 @@ export function buildAssistantMessageParts({
   toolEvents?: AssistantToolTraceEvent[];
 }): AssistantMessagePart[] {
   const parts: AssistantMessagePart[] = [];
+  if (modelTranscript) parts.push({ type: 'model-transcript', transcript: modelTranscript });
 
   if (agentRun) {
     parts.push({
@@ -486,18 +492,19 @@ export function analyzeConversationLength(
   selectedProfile: LlmProfile | null
 ) {
   const materialMessages = messages.filter((message) => !message.message_id.startsWith('client-'));
-  const contextMessages = conversationContextWindow(materialMessages);
+  const model = selectedProfile ? {
+    profileId: selectedProfile.id, model: selectedProfile.model, protocol: resolveLlmApiProtocol(selectedProfile.api_protocol)
+  } : undefined;
+  const contextMessages = renderConversationContext(materialMessages, model);
   const charCount = contextMessages.reduce(
-    (total, message) => total + estimateMessageChars(message),
+    (total, message) => total + (typeof message.content === 'string' ? message.content.length
+      : message.content.reduce((sum, part) => sum + ('text' in part ? part.text.length : JSON.stringify(part).length), 0)),
     0
   );
-  // Token counts come from the language-aware estimator, not `chars / 3.2`: on a mostly Chinese
-  // conversation that divisor reports a fifth of the real usage, so the ring would sit near zero
-  // while the window is nearly full and the automatic compaction trigger would never fire.
-  const estimatedTokens = contextMessages.reduce(
-    (total, message) => total + estimateMessageTokens(message),
-    0
-  );
+  // Measure the same model-visible projection as the driver, then calibrate with this model's
+  // reported input usage. UI state and duplicate evidence ledgers are not request content.
+  const measured = model ? latestContextUsage(materialMessages, model) : undefined;
+  const estimatedTokens = Math.ceil((estimateMessagesTokens(contextMessages) + (measured?.overheadTokens ?? 0)) * usageCalibration(measured));
   const modelTokens = modelContextTokens(selectedProfile?.max_context_length);
   const usageRatio = estimatedTokens / modelTokens;
   const memoryActive = materialMessages.some((message) =>

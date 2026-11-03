@@ -900,7 +900,7 @@ export function AssistantPanel({
       setConversation(current => current?.id === updated.id ? updated : current);
       setConversations(await listConversations(root));
       notify({
-        description: '较早的对话已整理为摘要，原始记录仍保留在本机。',
+        description: '全部当前上下文已整理为摘要，原始记录仍保留在本机。',
         title: '已压缩对话上下文',
         tone: 'success'
       });

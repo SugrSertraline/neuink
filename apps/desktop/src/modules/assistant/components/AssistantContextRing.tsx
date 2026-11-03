@@ -35,8 +35,8 @@ export function AssistantContextRing({
       ? 'text-warning'
       : 'text-muted-foreground';
   const label = compacting
-    ? '正在压缩较早的对话'
-    : `${summary}，${disabledReason ?? '点击压缩较早的对话'}`;
+    ? '正在压缩全部当前上下文'
+    : `${summary}，${disabledReason ?? '点击压缩全部当前上下文'}`;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -56,8 +56,8 @@ export function AssistantContextRing({
       </TooltipTrigger>
       <TooltipContent>
         {compacting
-          ? '正在压缩较早的对话…'
-          : disabledReason ?? `${summary} · ${usageRatio >= COMPACTION_TRIGGER_RATIO ? '已到自动压缩阈值' : '点击压缩较早的对话'}`}
+          ? '正在压缩全部当前上下文…'
+          : disabledReason ?? `${summary} · ${usageRatio >= COMPACTION_TRIGGER_RATIO ? '自动压缩将保留最近消息；点击可压缩全部当前上下文' : '点击压缩全部当前上下文'}`}
       </TooltipContent>
     </Tooltip>
   );

@@ -1,182 +1,145 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ModelMessage } from 'ai';
 import type { LlmProfile } from '@/shared/ipc/assistantApi';
-import { contextCut, createContextProjector, type ProjectionState } from './contextProjection';
+import { createContextProjector, contextCut, type ProjectionState } from './contextProjection';
 import { runTextModelTask } from './modelTasks';
 import { AgentLocalLimitError, AgentStoppedError, RunBudget } from '../agent-core';
+import { estimateMessagesTokens } from './contextUsage';
 vi.mock('./modelTasks', () => ({ runTextModelTask: vi.fn() }));
-const summaryOutput = {
-  text: 'Read source [S1], no writes applied.',
-  finishReason: 'stop' as const
-};
-// An 8k window keeps the trigger at 7_200 tokens, so the fixtures below can cross it in a unit test.
+
 const settings = { max_context_length: 8_000 } as LlmProfile;
-const messages: ModelMessage[] = [
-  { role: 'user', content: 'Compare the papers and preserve citations.' },
-  { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'c1', toolName: 'read', input: {} }] },
-  { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'c1', toolName: 'read', output: { type: 'text', value: 'Evidence [S1] '.repeat(3000) } }] },
-  { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'c2', toolName: 'read', input: {} }] },
-  { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'c2', toolName: 'read', output: { type: 'text', value: 'Recent evidence [S2]' } }] }
-];
-/** A follow-up tool batch large enough to push the cut past the first boundary. */
-const grown: ModelMessage[] = [
-  ...messages,
-  { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'c3', toolName: 'read', input: {} }] },
-  { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'c3', toolName: 'read', output: { type: 'text', value: 'Evidence [S3] '.repeat(300) } }] },
-  { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'c4', toolName: 'read', input: {} }] },
-  { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'c4', toolName: 'read', output: { type: 'text', value: 'Recent evidence [S4]' } }] }
-];
-const checkpoint = (summary: string) => ({
-  decisions: [], entities: [], last_user_goal: null, open_items: [], summary, user_preferences: []
+const memory = (summary = 'Earlier knowledge.') => ({
+  decisions: ['Earlier decision'], entities: [], last_user_goal: 'Keep the original goal',
+  open_items: ['Unresolved question'], summary, user_preferences: ['Use Chinese']
 });
-const restored = (extra: Partial<ProjectionState>) => ({
-  version: 2 as const, firstKeptIndex: 3, memory: checkpoint('Earlier findings [S1] stand.'), markers: ['[S1]'], ...extra
-});
-// `clearAllMocks` keeps implementations, so a test that stubs a failure would leak into the
-// next one. Reset and restore the happy path every time instead.
+const history: ModelMessage[] = [
+  { role: 'user', content: 'EARLIEST_REQUEST_SENTINEL' },
+  ...Array.from({ length: 39 }, (_, index) => ({
+    role: index % 2 ? 'user' as const : 'assistant' as const,
+    content: 'turn-' + index + ' ' + 'a'.repeat(1_000)
+  })),
+  { role: 'user', content: 'LATEST_REQUEST_SENTINEL' }
+];
+const tools: ModelMessage[] = [
+  { role: 'user', content: 'EXACT_CURRENT_GOAL' },
+  { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'a', toolName: 'read', input: {} }] },
+  { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'a', toolName: 'read', output: { type: 'text', value: 'EARLY_TOOL_RESULT [S1] '.repeat(2_000) } }] },
+  { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'b', toolName: 'read', input: {} }] },
+  { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'b', toolName: 'read', output: { type: 'text', value: 'LATEST_TOOL_RESULT [S2]' } }] }
+];
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.mocked(runTextModelTask).mockResolvedValue(summaryOutput);
+  vi.mocked(runTextModelTask).mockResolvedValue({ text: 'Earlier findings [S1] and original goal.', finishReason: 'stop' });
 });
-describe('context projection', () => {
-  it('does not spend the final response budget on another model summary', async () => {
-    const budget = new RunBudget(3);
-    budget.turns = 3;
-    const projected = await createContextProjector(settings, budget).project(messages, 5000);
-    expect(runTextModelTask).not.toHaveBeenCalled();
-    expect(JSON.stringify(projected)).toContain('NOT a complete summary');
-    expect(projected.slice(-2)).toEqual(messages.slice(-2));
-    expect(budget.turns).toBe(3);
+
+describe('automatic prefix compaction', () => {
+  it('selects the newest suffix backwards instead of scanning forwards or double-counting the latest message', () => {
+    const messages: ModelMessage[] = Array.from({ length: 6 }, () => ({ role: 'user', content: 'a'.repeat(2_000) }));
+    expect(contextCut(messages, 1_010)).toBe(4);
   });
-  it('also skips model compaction when the individual agent is finalizing', async () => {
-    await createContextProjector(settings).project(messages, 5000, undefined, false);
-    expect(runTextModelTask).not.toHaveBeenCalled();
+  it('preserves the newest complete tool batch and exact current goal without mutating canonical messages', async () => {
+    const before = JSON.stringify(tools);
+    const result = await createContextProjector(settings, undefined, { requestIndex: 0 }).project(tools, 5_000);
+    expect(result.slice(-2)).toEqual(tools.slice(-2));
+    expect(JSON.stringify(result)).toContain('EXACT_CURRENT_GOAL');
+    expect(JSON.stringify(result)).toContain('[S1]');
+    expect(JSON.stringify(tools)).toBe(before);
+    const supplied = vi.mocked(runTextModelTask).mock.calls.map(([call]) => call.system).join('\n');
+    expect(supplied).toContain('EARLY_TOOL_RESULT');
   });
-  it('retains tool-call/result pairs and never mutates canonical evidence', async () => {
-    const before = JSON.stringify(messages);
-    expect(contextCut(messages, 5000)).toBe(3);
-    const projected = await createContextProjector(settings).project(messages, 5000);
-    expect(projected.slice(-2)).toEqual(messages.slice(-2));
-    expect(JSON.stringify(projected)).toContain('[S1]');
-    expect(JSON.stringify(messages)).toBe(before);
+  it('passes the existing checkpoint and every dropped turn to the summarizer', async () => {
+    let state: ProjectionState | undefined;
+    const messages: ModelMessage[] = [{ role: 'user', content: 'Existing memory placeholder' }, ...history];
+    const result = await createContextProjector(settings, undefined, {
+      initialMemory: memory('PERSIST_OLD_MEMORY_SENTINEL'), requestIndex: messages.length - 1,
+      onState: value => { state = value; }
+    }).project(messages, 5_000);
+    const supplied = vi.mocked(runTextModelTask).mock.calls.map(([call]) => call.system).join('\n');
+    expect(supplied).toContain('PERSIST_OLD_MEMORY_SENTINEL');
+    expect(supplied).toContain('Use Chinese');
+    expect(supplied).toContain('EARLIEST_REQUEST_SENTINEL');
+    expect(supplied).not.toContain('LATEST_REQUEST_SENTINEL');
+    for (const message of messages.slice(1, state!.firstKeptIndex)) {
+      if (typeof message.content === 'string') expect(supplied).toContain(message.content.split(' ')[0]);
+    }
+    expect(JSON.stringify(result)).toContain('LATEST_REQUEST_SENTINEL');
   });
-  it('renders readable turns instead of raw message JSON for the summarizer', async () => {
-    // A huge tool result used to push every user turn out of a tail-sliced JSON string, so the
-    // summarizer received only repeated evidence and no conversation.
-    await createContextProjector(settings).project(messages, 5000);
-    const system = vi.mocked(runTextModelTask).mock.calls[0][0].system;
-    expect(system).toContain('User: Compare the papers and preserve citations.');
-    expect(system).toContain('Tool result (read): Evidence [S1]');
-    expect(system).not.toContain('"role":"user"');
-  });
-  it('summarizes only the newly dropped slice once a boundary exists', async () => {
+  it('does not recount already compacted original messages when provider usage is absent', async () => {
     const projector = createContextProjector(settings);
-    await projector.project(messages, 5000);
-    expect(runTextModelTask).toHaveBeenCalledOnce();
-    await projector.project(grown, 5000);
-    expect(runTextModelTask).toHaveBeenCalledTimes(2);
-    expect(runTextModelTask).toHaveBeenLastCalledWith(expect.objectContaining({
-      prompt: expect.stringMatching(/^\s*$/),
-      system: expect.stringContaining('Read source [S1]')
-    }));
-    // Nothing new was dropped, so the same transcript must not buy another summary.
-    await projector.project(grown, 5000);
-    expect(runTextModelTask).toHaveBeenCalledTimes(2);
+    await projector.project(tools, 5_000);
+    const count = vi.mocked(runTextModelTask).mock.calls.length;
+    projector.recordUsage(undefined, tools.length);
+    const grown: ModelMessage[] = [...tools,
+      { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'c', toolName: 'read', input: {} }] },
+      { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'c', toolName: 'read', output: { type: 'text', value: 'more '.repeat(700) } }] }
+    ];
+    const projected = await projector.project(grown, 5_000);
+    expect(estimateMessagesTokens(projected)).toBeLessThan(7_200);
+    expect(runTextModelTask).toHaveBeenCalledTimes(count);
   });
-  it('reproduces the same projection after a restore instead of paying for a new summary', async () => {
-    let captured: ProjectionState | undefined;
-    const first = await createContextProjector(settings, undefined, { onState: (state) => { captured = state; } }).project(messages, 5000);
-    expect(runTextModelTask).toHaveBeenCalledOnce();
-    const again = await createContextProjector(settings, undefined, { restored: captured }).project(messages, 5000);
-    expect(runTextModelTask).toHaveBeenCalledOnce();
-    expect(again).toEqual(first);
+  it('restores the same boundary and recent messages without purchasing another summary', async () => {
+    const first = createContextProjector(settings, undefined, { requestIndex: 0 });
+    const projected = await first.project(tools, 5_000);
+    const count = vi.mocked(runTextModelTask).mock.calls.length;
+    const again = await createContextProjector(settings, undefined, {
+      restored: JSON.parse(JSON.stringify(first.snapshot())), requestIndex: 0
+    }).project(tools, 5_000);
+    expect(again).toEqual(projected);
+    expect(runTextModelTask).toHaveBeenCalledTimes(count);
   });
-  it('discards a corrupt boundary and recomputes rather than failing the run', async () => {
-    const tooFar = await createContextProjector(settings, undefined, {
-      restored: restored({ firstKeptIndex: 999, markers: [] })
-    }).project(messages, 5000);
-    expect(runTextModelTask).toHaveBeenCalledOnce();
-    expect(JSON.stringify(tooFar)).toContain('Read source [S1]');
-    const orphaned = await createContextProjector(settings, undefined, {
-      restored: restored({ firstKeptIndex: 2, markers: [] })
-    }).project(messages, 5000);
-    expect(JSON.stringify(orphaned)).toContain('Read source [S1]');
-    // A payload in the retired shape is dropped the same way, not trusted as a summary.
-    const legacy = await createContextProjector(settings, undefined, {
-      restored: { version: 1, firstKeptIndex: 3, summary: 'stale', markers: [] }
-    }).project(messages, 5000);
-    expect(JSON.stringify(legacy)).toContain('Read source [S1]');
-  });
-  it('never moves the boundary backwards', async () => {
-    const states: ProjectionState[] = [];
-    const projector = createContextProjector(settings, undefined, { onState: (state) => states.push(state) });
-    await projector.project(grown, 5000);
-    const advanced = states[states.length - 1].firstKeptIndex;
-    expect(advanced).toBeGreaterThan(3);
-    // A roomier budget yields a smaller cut, which must not reopen already-compacted history.
-    await projector.project(grown, 20000);
-    expect(states[states.length - 1].firstKeptIndex).toBe(advanced);
-    expect(runTextModelTask).toHaveBeenCalledOnce();
-  });
-  it('fails without deleting an oversized request or incomplete tool batch', async () => {
-    const oversized = [{ role: 'user' as const, content: 'x'.repeat(40_000) }];
-    await expect(createContextProjector(settings).project(oversized, 3000)).rejects.toMatchObject({ reason: 'context_capacity' });
-    await expect(createContextProjector(settings).project(oversized, 3000)).rejects.toBeInstanceOf(AgentLocalLimitError);
+  it('never replaces old memory with a raw-tail fallback when summarization is unavailable', async () => {
+    const projector = createContextProjector(settings, undefined, { initialMemory: memory('keep me') });
+    await expect(projector.project(history, 5_000, undefined, false)).rejects.toBeInstanceOf(AgentLocalLimitError);
+    expect(projector.snapshot()).toBeUndefined();
     expect(runTextModelTask).not.toHaveBeenCalled();
   });
-  it('does not label an invalid compaction result as a recoverable local capacity limit', async () => {
-    vi.mocked(runTextModelTask).mockResolvedValue({ text: '', finishReason: 'stop' });
-    const caught = await createContextProjector(settings).project(messages, 5000).catch(error => error);
-    expect(caught).toBeInstanceOf(AgentStoppedError);
-    expect(caught).not.toBeInstanceOf(AgentLocalLimitError);
+  it('can compact on the final synthesis turn without consuming a task turn', async () => {
+    const budget = new RunBudget(1);
+    budget.turns = 1;
+    await createContextProjector(settings, budget).project(tools, 5_000);
+    expect(runTextModelTask).toHaveBeenCalled();
+    expect(vi.mocked(runTextModelTask).mock.calls.every(([call]) => call.chargeTurn === false)).toBe(true);
+    expect(budget.turns).toBe(1);
   });
-  it('never persists a summary the model was cut off while writing', async () => {
-    // A 'length' stop means the text is half a sentence. It is retried, and if it stays
-    // truncated nothing is written — a boundary pointing at a partial summary would be worse.
-    vi.mocked(runTextModelTask).mockResolvedValue({
-      text: 'Goals: compare the pa',
-      finishReason: 'length'
-    });
+  it('publishes nothing if any summary chunk is invalid or cancelled', async () => {
     const states: ProjectionState[] = [];
-    const projector = createContextProjector(settings, undefined, { onState: (state) => states.push(state) });
-    await expect(projector.project(messages, 5000)).rejects.toBeInstanceOf(AgentStoppedError);
+    vi.mocked(runTextModelTask).mockResolvedValue({ text: 'incomplete', finishReason: 'length' });
+    await expect(createContextProjector(settings, undefined, { onState: state => states.push(state) })
+      .project(tools, 5_000)).rejects.toBeInstanceOf(AgentStoppedError);
     expect(states).toEqual([]);
   });
+  it('fails without dropping an oversized current message or a tool batch that cannot fit', async () => {
+    await expect(createContextProjector(settings).project([{ role: 'user', content: 'x'.repeat(40_000) }], 5_000))
+      .rejects.toMatchObject({ reason: 'context_capacity' });
+    expect(runTextModelTask).not.toHaveBeenCalled();
+  });
+  it('discards retired projection formats and recomputes from the canonical transcript', async () => {
+    const projector = createContextProjector(settings, undefined, { restored: { version: 2, firstKeptIndex: 3, memory: memory('OLD_BROKEN_STATE') } });
+    const result = await projector.project(tools, 5_000);
+    expect(projector.snapshot()?.version).toBe(3);
+    expect(JSON.stringify(result)).not.toContain('OLD_BROKEN_STATE');
+    expect(runTextModelTask).toHaveBeenCalled();
+  });
 });
-describe('usage anchor', () => {
-  it('does not compact while the provider-reported usage says there is room', async () => {
+
+describe('provider usage calibration', () => {
+  it('uses reported usage and calibrated growth rather than an intentionally high character estimate', async () => {
     const projector = createContextProjector(settings);
-    projector.recordUsage(1_000, messages.length);
-    expect(await projector.project(messages, 5000)).toHaveLength(messages.length);
+    const baseline: ModelMessage[] = [{ role: 'user', content: 'a'.repeat(400) }];
+    await projector.project(baseline, 5_000, undefined, true, 100);
+    projector.recordUsage(100, baseline.length);
+    const grown: ModelMessage[] = [...baseline, { role: 'user', content: '中'.repeat(7_000) }];
+    await projector.project(grown, 5_000, undefined, true, 100);
     expect(runTextModelTask).not.toHaveBeenCalled();
   });
-  it('compacts once the anchored usage crosses the trigger', async () => {
+  it('compacts when actual input usage crosses the threshold', async () => {
+    const messages: ModelMessage[] = Array.from({ length: 10 }, (_, index) => ({
+      role: index % 2 ? 'assistant' : 'user', content: 'a'.repeat(1_500)
+    }));
     const projector = createContextProjector(settings);
-    projector.recordUsage(9_000, messages.length);
-    const projected = await projector.project(messages, 5000);
-    expect(runTextModelTask).toHaveBeenCalledOnce();
-    expect(projected.length).toBeLessThan(messages.length);
-  });
-  it('clears the anchor on unusable usage and falls back to estimating everything', async () => {
-    const projector = createContextProjector(settings);
-    projector.recordUsage(1_000, messages.length);
-    await projector.project(messages, 5000);
-    expect(runTextModelTask).not.toHaveBeenCalled();
-    projector.recordUsage(undefined, messages.length);
-    await projector.project(messages, 5000);
-    expect(runTextModelTask).toHaveBeenCalledOnce();
-  });
-  it('honours a restored anchor so a restart does not re-summarize', async () => {
-    const projector = createContextProjector(settings, undefined, { restored: restored({ inputTokens: 900, requestLength: grown.length }) });
-    const projected = await projector.project(grown, 5000);
-    expect(runTextModelTask).not.toHaveBeenCalled();
-    expect(projected).toHaveLength(grown.length - 3 + 1);
-  });
-  it('drops an anchor that measures a longer transcript than the one restored', async () => {
-    // requestLength beyond these messages would freeze the estimate below the trigger and
-    // silently stop compaction forever, so the anchor is discarded and the context re-estimated.
-    const projector = createContextProjector(settings, undefined, { restored: restored({ inputTokens: 900, requestLength: 99 }) });
-    await projector.project(grown, 5000);
-    expect(runTextModelTask).toHaveBeenCalledOnce();
+    await projector.project(messages, 5_000);
+    projector.recordUsage(7_300, messages.length);
+    await projector.project(messages, 5_000);
+    expect(runTextModelTask).toHaveBeenCalled();
   });
 });

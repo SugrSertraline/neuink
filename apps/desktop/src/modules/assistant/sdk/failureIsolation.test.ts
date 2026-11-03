@@ -169,9 +169,8 @@ describe('ordinary failures stay inside the tool boundary', () => {
   });
   it('lets the parent summarize when the child has insufficient local context capacity', async () => {
     const provider = model([{ call: childCall }, { text: '子任务上下文不足，没有取得足够证据。' }]);
-    // The driver now sizes instructions against the shared character budget (a 128k window here),
-    // so the prompt has to exceed that budget rather than the old hand-rolled 64k one.
-    const input = options(); input.runtimeSettings.subagents[0].systemPrompt = 'Worker instructions. '.repeat(20_000);
+    // Instructions alone exceed 90% of the 128k token window. Character length is not capacity.
+    const input = options(); input.runtimeSettings.subagents[0].systemPrompt = 'Worker instructions. '.repeat(30_000);
     const result = await answerWithGroundedAgent(input);
     expect(result.agentLoopState?.status).toBe('completed');
     expect(provider.doStreamCalls).toHaveLength(2);

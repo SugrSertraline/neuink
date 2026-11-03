@@ -2,11 +2,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateText } from 'ai';
 import type { LlmProfile } from '@/shared/ipc/assistantApi';
 import { RunBudget } from '../agent-core';
-import { runJsonModelTask } from './modelTasks';
+import { runJsonModelTask, runTextModelTask } from './modelTasks';
 vi.mock('ai', () => ({ generateText: vi.fn(), Output: { json: vi.fn() } }));
 vi.mock('./provider', () => ({ createNeuinkModel: vi.fn(), generationSettings: () => ({}) }));
 beforeEach(() => vi.clearAllMocks());
 describe('request-wide model budget', () => {
+  it('allows compaction on the final task turn while enforcing its token ceiling', async () => {
+    const budget = new RunBudget(1, 48, 2, 100);
+    budget.turns = 1;
+    vi.mocked(generateText).mockResolvedValue({ text: 'summary', finishReason: 'stop', usage: { inputTokens: 60, outputTokens: 40 } } as never);
+    await runTextModelTask({ budget, settings: {} as LlmProfile, system: 'summarize', prompt: 'data', chargeTurn: false });
+    expect(budget.turns).toBe(1);
+    await expect(runTextModelTask({ budget, settings: {} as LlmProfile, system: 'summarize', prompt: 'data', chargeTurn: false }))
+      .rejects.toThrow('token budget exhausted');
+    expect(generateText).toHaveBeenCalledOnce();
+  });
   it('counts fixed model tasks, reserves before I/O, and records reported tokens', async () => {
     const budget = new RunBudget(1);
     const persist = vi.fn(async () => {});

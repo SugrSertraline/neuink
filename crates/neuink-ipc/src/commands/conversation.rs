@@ -645,6 +645,81 @@ mod tests {
     }
 
     #[test]
+    fn conversation_round_trips_full_model_tool_messages() {
+        let root = test_workspace_root();
+        Workspace::create(&root).expect("create workspace");
+        let conversation = create_conversation(CreateConversationRequest {
+            root: root.clone(),
+            title: "Model transcript".into(),
+            scope_snapshot: ScopeSnapshot::default(),
+        })
+        .expect("create conversation");
+        let part = json!({
+            "type": "model-transcript",
+            "transcript": {
+                "version": 1, "runId": "execution-1", "capturedAt": "2026-10-27T12:00:00Z",
+                "profileId": "profile", "model": "model", "protocol": "anthropic", "sources": [],
+                "messages": [
+                    {"role": "assistant", "content": [
+                        {"type": "reasoning", "text": "Read the paper", "providerOptions": {"anthropic": {"signature": "signature"}}},
+                        {"type": "tool-call", "toolCallId": "call-1", "toolName": "read_note", "input": {"note_id": "note"}}
+                    ]},
+                    {"role": "tool", "content": [
+                        {"type": "tool-result", "toolCallId": "call-1", "toolName": "read_note", "output": {"type": "json", "value": {"markdown": "完整工具结果", "revision": "revision-1"}}}
+                    ]}
+                ]
+            }
+        });
+        let memory_part = json!({
+            "type": "memory", "memory": {
+                "summary": "Only earlier messages were summarized", "retained_context": {
+                    "version": 1, "profileId": "profile", "model": "model", "protocol": "anthropic",
+                    "messages": part["transcript"]["messages"].clone()
+                }
+            }
+        });
+        let saved = append_conversation_messages(AppendConversationMessagesRequest {
+            root: root.clone(),
+            conversation_id: conversation.id.clone(),
+            messages: vec![ConversationMessageInput {
+                role: ConversationRole::Assistant,
+                content: "Visible answer".into(),
+                source_links: Vec::new(),
+                tool_events: Vec::new(),
+                note_proposals: Vec::new(),
+                parts: vec![part.clone(), memory_part.clone()],
+            }],
+        })
+        .expect("save real model transcript");
+        let loaded = load_conversation(ConversationRequest {
+            root: root.clone(),
+            conversation_id: conversation.id.clone(),
+        })
+        .expect("reload transcript from disk");
+        assert_eq!(loaded.messages[0].parts, vec![part.clone(), memory_part]);
+        let mut failed_part = part;
+        failed_part["transcript"]["outcome"] = json!("cancelled");
+        update_conversation_message(UpdateConversationMessageRequest {
+            root: root.clone(),
+            conversation_id: conversation.id.clone(),
+            message_id: saved.messages[0].message_id.clone(),
+            content: Some("Stopped".into()),
+            source_links: None,
+            tool_events: None,
+            note_proposals: None,
+            parts: Some(vec![failed_part.clone()]),
+        })
+        .expect("save interrupted transcript");
+        let loaded = load_conversation(ConversationRequest {
+            root: root.clone(),
+            conversation_id: conversation.id,
+        })
+        .expect("reload interrupted transcript");
+        assert_eq!(loaded.messages[0].parts, vec![failed_part]);
+        fs::remove_dir_all(root).expect("remove test workspace");
+    }
+
+    #[test]
     fn execution_checkpoints_follow_real_conversation_lifecycle() {
         use crate::commands::assistant::{
             list_agent_executions, read_agent_execution, save_agent_execution,

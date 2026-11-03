@@ -21,7 +21,7 @@ export async function runJsonModelTask(options: {
   onFinish?: (finishReason: string | undefined) => void;
 }) {
   options.abortSignal?.throwIfAborted();
-  if (options.chargeTurn === false) options.budget?.assertCanTurn();
+  if (options.chargeTurn === false) options.budget?.assertTokenBudget();
   else options.budget?.turn();
   await options.budget?.persist?.();
   const result = await generateText({
@@ -55,7 +55,7 @@ export async function runTextModelTask(options: {
   chargeTurn?: boolean;
 }) {
   options.abortSignal?.throwIfAborted();
-  if (options.chargeTurn === false) options.budget?.assertCanTurn();
+  if (options.chargeTurn === false) options.budget?.assertTokenBudget();
   else options.budget?.turn();
   await options.budget?.persist?.();
   const result = await generateText({

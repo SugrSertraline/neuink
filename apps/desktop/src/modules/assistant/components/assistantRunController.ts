@@ -5,6 +5,7 @@ import { AgentStoppedError } from '../agent-core/agent';
 import { requestUserInput } from '../runtime/userInput';
 import { runLocalAgentHarness } from '../local-agent/runner';
 import { visibleAssistantAnswer } from '../sdk/assistantAnswerMarkup';
+import type { AssistantModelTranscript } from '@/shared/types/modelTranscript';
 import { selectionLocalProvider, createLocalSession, conversationLocalSession } from '../local-agent/session';
 import type {
   Dispatch,
@@ -191,6 +192,7 @@ export async function runAssistantPanelTask({
   let streamedAnswer = "";
   let streamedReasoning = "";
   let assistantToolEvents: AssistantToolTraceEvent[] = [];
+  let assistantModelTranscript: AssistantModelTranscript | undefined;
   let assistantNoteProposals: AssistantNoteProposal[] = [];
   let streamRenderTimer: number | null = null;
   let draftPersistPromise: Promise<void> = Promise.resolve();
@@ -252,7 +254,10 @@ export async function runAssistantPanelTask({
     ]);
     setStreamingMessageId(assistantMessageId);
 
-    const seededConversation = await appendConversationMessages(
+    const resumedAssistant = resumeExecutionId ? currentConversation.messages.find(message =>
+      message.parts?.some(part => part.type === 'model-transcript' && part.transcript.runId === resumeExecutionId
+        && part.transcript.outcome !== 'completed')) : undefined;
+    const seededConversation = resumedAssistant ? currentConversation : await appendConversationMessages(
       root,
       currentConversation.id,
       [
@@ -273,7 +278,7 @@ export async function runAssistantPanelTask({
         },
       ],
     );
-    persistedAssistantMessageId =
+    persistedAssistantMessageId = resumedAssistant?.message_id ??
       [...seededConversation.messages]
         .reverse()
         .find((message) => message.role === "assistant")?.message_id ?? null;
@@ -300,6 +305,7 @@ export async function runAssistantPanelTask({
       const draftReasoning = streamedReasoning;
       const draftToolEvents = assistantToolEvents;
       const draftNoteProposals = assistantNoteProposals;
+      const draftTranscript = assistantModelTranscript;
       draftPersistPromise = draftPersistPromise
         .catch(() => undefined)
         .then(async () => {
@@ -315,6 +321,7 @@ export async function runAssistantPanelTask({
               note_proposals: draftNoteProposals,
               parts: buildAssistantMessageParts({
                 content: draftContent,
+                modelTranscript: draftTranscript,
                 noteProposals: draftNoteProposals,
                 reasoning: draftReasoning,
                 toolEvents: draftToolEvents,
@@ -344,6 +351,7 @@ export async function runAssistantPanelTask({
       const visibleAnswer = visibleAssistantAnswer(streamedAnswer);
       const draftParts = buildAssistantMessageParts({
         content: visibleAnswer,
+        modelTranscript: assistantModelTranscript,
         noteProposals: assistantNoteProposals,
         reasoning: streamedReasoning,
         toolEvents: assistantToolEvents,
@@ -394,6 +402,11 @@ export async function runAssistantPanelTask({
       persistAssistantDraft(true);
     }) : runAssistantHarness;
     const grounded = await execute({
+      onModelTranscript: transcript => {
+        if (!acceptingEvents) return;
+        assistantModelTranscript = transcript;
+        persistAssistantDraft(true);
+      },
       resumeExecutionId,
       applicationActions,
       requestUserInput: async (request, signal) => {
@@ -539,6 +552,7 @@ export async function runAssistantPanelTask({
     const assistantParts = buildAssistantMessageParts({
       agentRun: grounded.agentRun,
       content: grounded.answer,
+      modelTranscript: grounded.modelTranscript ?? assistantModelTranscript,
       entryMetaProposals: finalEntryMetaProposals,
       memory: grounded.conversationMemory ?? null,
       noteProposals: finalNoteProposals,
@@ -664,6 +678,8 @@ export async function runAssistantPanelTask({
       const fallbackParts = buildAssistantMessageParts({
         agentRun: failedAgentRun,
         content: fallbackContent,
+        modelTranscript: assistantModelTranscript
+          ? { ...assistantModelTranscript, outcome: stopped ? 'cancelled' : 'failed' } : undefined,
         reasoning: streamedReasoning,
         taskState:
           caught instanceof AssistantHarnessError ? caught.taskState : undefined,

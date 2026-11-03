@@ -23,8 +23,11 @@ export class RunBudget {
   persist?: () => Promise<void>;
   constructor(readonly maxTurns = 24, readonly maxToolCalls = 48, readonly maxDepth = 2, readonly maxReportedTokens = 512_000) {}
   assertCanTurn() {
-    if (this.inputTokens + this.outputTokens >= this.maxReportedTokens) throw new AgentStoppedError('Request token budget exhausted.');
+    this.assertTokenBudget();
     if (this.turns >= this.maxTurns) throw new AgentStoppedError('Agent tree model-turn budget exhausted.');
+  }
+  assertTokenBudget() {
+    if (this.inputTokens + this.outputTokens >= this.maxReportedTokens) throw new AgentStoppedError('Request token budget exhausted.');
   }
   turn() {
     this.assertCanTurn();

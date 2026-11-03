@@ -48,7 +48,7 @@ beforeEach(() => {
 });
 
 describe('the one compaction implementation', () => {
-  it('serves the manual, end-of-run and in-loop triggers from the same instructions', async () => {
+  it('uses the same instructions for manual full-context and automatic prefix summaries', async () => {
     // The requirement is literally that both triggers run the same compaction code. This asserts
     // it the only way that cannot drift: the manual/end-of-run path (updateConversationMemory) and
     // the loop's usage-triggered projection must call the model with one identical instruction
@@ -64,7 +64,7 @@ describe('the one compaction implementation', () => {
     await createContextProjector(settings).project(transcript, 5000);
 
     const calls = vi.mocked(runTextModelTask).mock.calls.map(([task]) => task);
-    expect(calls).toHaveLength(2);
+    expect(calls.length).toBeGreaterThanOrEqual(2);
     expect(calls.every(call => call.prompt.trim() === '')).toBe(true);
     expect(calls.every(call => call.system.startsWith('You compress a conversation'))).toBe(true);
     expect(calls.every(call => call.system.includes('Previous checkpoint:'))).toBe(true);
@@ -115,8 +115,23 @@ describe('the one compaction implementation', () => {
     abort.abort();
     vi.mocked(runTextModelTask).mockRejectedValue(new AgentStoppedError('stopped'));
     await expect(summarizeConversation({ ...compactionCall, abortSignal: abort.signal, previous: null }))
-      .rejects.toBeInstanceOf(AgentStoppedError);
-    expect(runTextModelTask).toHaveBeenCalledOnce();
+      .rejects.toMatchObject({ name: 'AbortError' });
+    expect(runTextModelTask).not.toHaveBeenCalled();
+  });
+
+  it('retries a completed but overlong summary instead of silently slicing off its ending', async () => {
+    vi.mocked(runTextModelTask).mockResolvedValueOnce({ text: 'a'.repeat(4_000) + 'IMPORTANT_END', finishReason: 'stop' })
+      .mockResolvedValueOnce({ text: 'A shorter brief preserving IMPORTANT_END.', finishReason: 'stop' });
+    const result = await summarizeConversation({ ...compactionCall, previous: null });
+    expect(result.summary).toContain('IMPORTANT_END');
+    expect(vi.mocked(runTextModelTask).mock.calls[1][0].system).toContain('exceeds 4000 characters');
+  });
+
+  it('rejects persistently overlong summaries and supplies old structured preferences to the model', async () => {
+    vi.mocked(runTextModelTask).mockResolvedValue({ text: 'a'.repeat(4_001), finishReason: 'stop' });
+    await expect(summarizeConversation({ ...compactionCall, previous: { ...previous, user_preferences: ['EARLIER_PREFERENCE'] } }))
+      .rejects.toThrow('上下文摘要无效');
+    expect(vi.mocked(runTextModelTask).mock.calls[0][0].system).toContain('EARLIER_PREFERENCE');
   });
 
   it('keeps the stored checkpoint shape while the brief is natural language', async () => {

@@ -146,6 +146,7 @@ type TagProposalHandler = (proposal: AssistantTagProposal) => void;
 type CreateEntryHandler = (title: string) => Promise<AssistantEntryMetaTarget>;
 
 type CreateAssistantToolsOptions = {
+  historicalSourceMarkers?: ReadonlySet<number>;
   execution?: DurableExecution;
   actorId?: string;
   restoredState?: ToolRuntimeState;
@@ -217,6 +218,7 @@ type ToolEvidence = {
 };
 
 export async function createAssistantTools({
+  historicalSourceMarkers,
   execution,
   actorId = 'main',
   restoredState,
@@ -669,7 +671,9 @@ export async function createAssistantTools({
             entry_titles: [...scope.entry_titles, ...createdEntries.map(entry => entry.title)] },
           sourceByMarker
         });
-        if (sourceByMarker.size > 0 && proposal.markdown.trim() && proposal.sources.length === 0) {
+        const hasCurrentEvidence = [...sourceByMarker.keys()].some(marker => !historicalSourceMarkers?.has(marker))
+          || events.some(event => event.status === 'done' && event.sources?.length);
+        if (hasCurrentEvidence && proposal.markdown.trim() && proposal.sources.length === 0) {
           throw new ToolPreconditionError('inline_citations_required');
         }
         onNoteProposal(proposal);

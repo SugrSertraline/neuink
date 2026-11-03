@@ -45,11 +45,7 @@ import { verifyHarnessResult } from './verification';
 import { observeAssistantContext } from './context';
 import { buildDirectExecution } from '../runtime/executionPolicy';
 import { routeAssistantRequest, routeSummary, type RequestRoute } from '../runtime/requestRouter';
-import {
-  latestConversationMemory,
-  shouldUpdateConversationMemory,
-  updateConversationMemory
-} from './conversationMemory';
+import { latestConversationMemory } from './conversationMemory';
 import {
   AssistantHarnessError,
   createAgentRun,
@@ -95,6 +91,7 @@ export type RunAssistantHarnessOptions = {
   onNoteProposal?: (proposal: AssistantNoteProposal) => void;
   onToolEvent?: (event: AssistantToolTraceEvent) => void;
   onReasoningDelta?: (delta: string) => void;
+  onModelTranscript?: (transcript: import('@/shared/types/modelTranscript').AssistantModelTranscript) => void | Promise<void>;
   preferredAgentId?: string | null;
   profiles?: LlmProfile[];
   question: string;
@@ -245,6 +242,7 @@ async function executeAssistantHarness(options: RunAssistantHarnessOptions): Pro
     abortSignal?.throwIfAborted();
     const delegatedCalls = new Set<string>();
     const grounded = await answerWithGroundedAgent({
+      onModelTranscript: options.onModelTranscript,
       budget: options.budget,
       execution: options.execution,
       applicationActions: options.applicationActions,
@@ -350,60 +348,6 @@ async function executeAssistantHarness(options: RunAssistantHarnessOptions): Pro
       agentLoopState: grounded.agentLoopState
     };
     activeTaskState = nextTaskState;
-    if (shouldUpdateConversationMemory(conversationHistory, question, grounded.answer)) {
-      upsertRunNode(agentRun, {
-        agentId: 'conversation-memory',
-        id: `${runId}-memory`,
-        kind: 'planner',
-        status: 'running',
-        title: 'Update semantic memory checkpoint'
-      });
-      const memoryProfile = settings;
-      emitHarnessEvent(onToolEvent, {
-        id: `${runId}-memory`, status: 'running', toolName: 'agent.memory',
-        summary: '对话达到记忆整理阈值，正在保存摘要。'
-      });
-      try {
-        grounded.conversationMemory = await updateConversationMemory({
-          budget: options.budget,
-          abortSignal,
-          answer: grounded.answer,
-          history: conversationHistory,
-          pendingProposalCount: proposalIds.length,
-          question,
-          settings: memoryProfile,
-          sourceCount: grounded.sources.length
-        });
-        emitHarnessEvent(onToolEvent, {
-          id: `${runId}-memory`, status: 'done', toolName: 'agent.memory', summary: '对话摘要已整理。'
-        });
-        upsertRunNode(agentRun, {
-          agentId: 'conversation-memory',
-          id: `${runId}-memory`,
-          kind: 'planner',
-          outputSummary: `summary=${grounded.conversationMemory.summary.slice(0, 180)}`,
-          status: 'succeeded',
-          title: 'Update semantic memory checkpoint'
-        });
-      } catch (memoryError) {
-        throwIfAborted(abortSignal);
-        upsertRunNode(agentRun, {
-          agentId: 'conversation-memory',
-          error: errorMessage(memoryError),
-          id: `${runId}-memory`,
-          kind: 'planner',
-          status: 'failed',
-          title: 'Update semantic memory checkpoint'
-        });
-        emitHarnessEvent(onToolEvent, {
-          error: errorMessage(memoryError),
-          id: `${runId}-memory`,
-          status: 'error',
-          summary: 'The semantic memory checkpoint was not updated; the durable transcript remains available.',
-          toolName: 'agent.memory'
-        });
-      }
-    }
     upsertRunNode(agentRun, {
       agentId: activeExecution.agent.id,
       id: `${runId}-loop`,

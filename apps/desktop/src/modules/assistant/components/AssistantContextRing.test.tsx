@@ -50,7 +50,7 @@ describe('context ring', () => {
     expect(onCompact).not.toHaveBeenCalled();
     cleanup();
     const compacting = ring({ compacting: true, onCompact });
-    fireEvent.click(compacting.getByRole('button', { name: '正在压缩较早的对话' }));
+    fireEvent.click(compacting.getByRole('button', { name: '正在压缩全部当前上下文' }));
     expect(onCompact).not.toHaveBeenCalled();
   });
 });

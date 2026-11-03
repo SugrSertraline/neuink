@@ -20,10 +20,38 @@ const message = (
 const checkpoint = message('assistant', '', [{ memory, type: 'memory' }]);
 
 describe('conversation usage estimate', () => {
+  it('calibrates the displayed window with real usage from the selected model', () => {
+    const selected = { ...profile, id: 'profile', model: 'model' } as LlmProfile;
+    const history = [message('user', '中'.repeat(1_000)), message('assistant', 'Answer', [{ type: 'model-transcript', transcript: {
+      version: 1, runId: 'run', capturedAt: '', profileId: 'profile', model: 'model', protocol: 'openai_compatible', sources: [],
+      messages: [{ role: 'assistant', content: 'Answer' }],
+      contextUsage: { version: 1, inputTokens: 1_000, estimatedInputTokens: 2_000, overheadTokens: 100, messageTokens: 1_900 }
+    } }])];
+    const usage = analyzeConversationLength(history, selected);
+    expect(usage.estimatedTokens).toBeLessThan(1_000);
+    expect(usage.estimatedTokens).toBeGreaterThan(750);
+    expect(analyzeConversationLength(history, { ...selected, id: 'other-model' }).estimatedTokens).toBeGreaterThan(1_500);
+  });
+  it('counts actual model results once and does not count UI evidence ledgers as replayed messages', () => {
+    const prose = [message('user', 'Question'), message('assistant', 'Answer')];
+    const decorated = structuredClone(prose);
+    decorated[1].parts = [{ type: 'task-state', task: { evidenceLedger: { evidence: [{ quote: '中'.repeat(80_000) }] } } } as never];
+    expect(analyzeConversationLength(decorated, profile).estimatedTokens).toBe(analyzeConversationLength(prose, profile).estimatedTokens);
+    decorated[1].parts.push({ type: 'model-transcript', transcript: {
+      version: 1, runId: 'run', capturedAt: '', profileId: '', model: '', protocol: '', sources: [], messages: [
+        { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'c', toolName: 'read', input: {} }] },
+        { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'c', toolName: 'read', output: { type: 'text', value: '中'.repeat(1_000) } }] },
+        { role: 'assistant', content: 'Answer' }
+      ]
+    } });
+    const tokens = analyzeConversationLength(decorated, profile).estimatedTokens;
+    expect(tokens).toBeGreaterThan(1_500);
+    expect(tokens).toBeLessThan(2_000);
+  });
   it('counts Chinese text at the provider rate instead of a quarter of it', () => {
     // 1000 ideographs are roughly 1500 tokens; chars / 4 would report 250 and never warn.
     const usage = analyzeConversationLength([message('user', '中'.repeat(1_000))], profile);
-    expect(usage.estimatedTokens).toBe(1_500);
+    expect(usage.estimatedTokens).toBe(1_504);
     expect(usage.modelKiloTokens).toBe(128);
     expect(usage.nearingAutoCompaction).toBe(false);
   });

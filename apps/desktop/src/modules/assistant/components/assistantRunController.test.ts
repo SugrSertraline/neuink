@@ -58,6 +58,44 @@ beforeEach(() => {
 afterEach(() => { setAssistantBackgroundRun(null); vi.useRealTimers(); });
 
 describe('assistant production controller persistence boundaries', () => {
+  it.each(['completed', 'failed', 'cancelled'] as const)('persists full tool messages when the task is %s', async outcome => {
+    const input = options();
+    const transcript = {
+      version: 1 as const, runId: 'execution-history', capturedAt: '', profileId: 'test', model: 'test',
+      protocol: 'openai_compatible', sources: [], messages: [
+        { role: 'assistant' as const, content: [{ type: 'tool-call' as const, toolCallId: 'read', toolName: 'read_note', input: {} }] },
+        { role: 'tool' as const, content: [{ type: 'tool-result' as const, toolCallId: 'read', toolName: 'read_note',
+          output: { type: 'json' as const, value: { markdown: 'FULL_PERSISTED_RESULT' } } }] }
+      ]
+    };
+    vi.mocked(runAssistantHarness).mockImplementation(async callbacks => {
+      await callbacks.onModelTranscript?.(transcript);
+      if (outcome === 'cancelled') input.runAbortControllerRef.current!.abort();
+      if (outcome !== 'completed') throw new Error('interrupted');
+      return { answer: 'Done', sources: [], modelTranscript: { ...transcript, outcome } };
+    });
+    await runAssistantPanelTask(input);
+    const part = lastMessage().parts?.find(part => part.type === 'model-transcript');
+    expect(part).toMatchObject({ type: 'model-transcript', transcript: { outcome } });
+    expect(JSON.stringify(part)).toContain('FULL_PERSISTED_RESULT');
+  });
+
+  it('updates the original assistant message on checkpoint resume instead of duplicating the run', async () => {
+    const transcript = { version: 1 as const, runId: 'execution-resume', capturedAt: '', profileId: 'test', model: 'test',
+      protocol: 'openai_compatible', sources: [], messages: [] };
+    disk.messages = [
+      { message_id: 'original-user', role: 'user', content: 'hello', created_at: '', source_links: [] },
+      { message_id: 'original-assistant', role: 'assistant', content: '', created_at: '', source_links: [],
+        parts: [{ type: 'model-transcript', transcript }] }
+    ];
+    vi.mocked(runAssistantHarness).mockResolvedValue({ answer: 'Resumed', sources: [], modelTranscript: transcript });
+    await runAssistantPanelTask({ ...options(), conversation: structuredClone(disk), resumeExecutionId: 'execution-resume' });
+    expect(appendConversationMessages).not.toHaveBeenCalled();
+    expect(disk.messages).toHaveLength(2);
+    expect(lastMessage().message_id).toBe('original-assistant');
+    expect(lastMessage().content).toBe('Resumed');
+  });
+
   it.each(['completed', 'canceled'] as const)('saves local thinking separately from the answer when %s', async status => {
     const input = options(); input.selectedProfile = CLAUDE_PROFILE;
     vi.mocked(runLocalAgentHarness).mockImplementation(async callbacks => {

@@ -6,7 +6,7 @@ import type {
   ConversationMessage
 } from '@/shared/ipc/assistantApi';
 import { appendConversationMessages } from '@/shared/ipc/assistantApi';
-import { shouldUpdateConversationMemory, updateConversationMemory } from '../harness/conversationMemory';
+import { updateConversationMemory } from '../harness/conversationMemory';
 import {
   canCompactConversation,
   compactConversation,
@@ -68,11 +68,10 @@ describe('manual compaction inputs', () => {
 describe('compaction eligibility', () => {
   it('resets what the next automatic checkpoint would have to cover', () => {
     const history = [message('user', 'A'.repeat(5_000)), message('assistant', 'B'.repeat(5_000))];
-    expect(shouldUpdateConversationMemory(history, 'q', 'a')).toBe(true);
+    expect(canCompactConversation(history)).toBe(true);
     // The appended payload is what IPC fills in an id, a timestamp and source links for.
     const compacted = [...history, { ...compactionCheckpointMessage(memory), created_at: '', message_id: 'checkpoint', source_links: [] }];
     expect(canCompactConversation(compacted)).toBe(false);
-    expect(shouldUpdateConversationMemory(compacted, 'q', 'a')).toBe(false);
   });
 
   it('needs real turns after the newest checkpoint', () => {
@@ -89,6 +88,12 @@ describe('compaction eligibility', () => {
       message('assistant', '', { parts: [{ memory, type: 'memory' }] }),
       message('user', 'New question')
     ])).toBe(true);
+  });
+
+  it('allows manually compacting an automatically retained tail even without a newer chat message', () => {
+    const automatic = { ...memory, retained_context: { version: 1 as const, profileId: '', model: '', protocol: '',
+      messages: [{ role: 'user' as const, content: 'Recent uncompressed request' }] } };
+    expect(canCompactConversation([message('assistant', '', { parts: [{ type: 'memory', memory: automatic }] })])).toBe(true);
   });
 });
 

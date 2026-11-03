@@ -2,15 +2,16 @@ import type { AssistantConversationMemory, LlmProfile } from '@/shared/ipc/assis
 
 import { AgentStoppedError, type RunBudget } from '../agent-core';
 import { runTextModelTask } from './modelTasks';
+import { estimateTokensFromText, modelContextTokens } from './contextBudget';
 
 /** Everything the summarizer itself produces. The counters that only a caller can know are
  *  stamped on afterwards, so the summary text stays identical wherever it is produced. */
 export type ConversationSummary = Omit<
   AssistantConversationMemory,
-  'message_count' | 'pending_proposal_count' | 'source_count' | 'updated_at'
+  'message_count' | 'pending_proposal_count' | 'source_count' | 'updated_at' | 'retained_context'
 >;
 
-/** Stay within the ceiling `contextProjection.restoreSummary` accepts, so a checkpoint survives
+/** Stay within the ceiling `contextProjection` accepts, so a checkpoint survives
  *  a restart instead of being discarded and recomputed. */
 const MAX_SUMMARY_CHARS = 4_000;
 
@@ -18,9 +19,9 @@ const MAX_SUMMARY_CHARS = 4_000;
  * The one compaction prompt.
  *
  * There is exactly one implementation of compaction in this module. The UI's manual compact,
- * the loop's usage-triggered projection and the end-of-run memory update all summarize through
+ * and the loop's usage-triggered projection summarize through
  * `summarizeConversation`; they differ only in what they pass as `dropped` and in where they
- * store the result. Keeping the prompt and the truncation guard here is what stops the triggers
+ * store the result. Keeping the prompt and validation here is what stops the triggers
  * from drifting into two different definitions of "summarized".
  */
 const SUMMARY_SYSTEM = [
@@ -35,11 +36,54 @@ const SUMMARY_SYSTEM = [
   '- Record definitions already given so they are not repeated.',
   '- Record stable preferences such as language, depth and style.',
   '- Treat tool calls as bookkeeping; summarize a tool result only when it answered the user.',
+  '- Preserve earlier checkpoint facts, user preferences, unresolved goals and source identifiers unless the user superseded them.',
+  '- Preserve stable source markers. Per-answer UI citation numbers are aliases, not new sources.',
+  '- Keep the brief under 1600 characters. Consolidate repetition, but do not discard earlier questions just because newer turns exist.',
   '- Never invent facts, and never claim that a source was read or a note was written unless the transcript says so.',
   'Return the Markdown brief only, without a code fence.'
 ].join('\n');
 
-export async function summarizeConversation({
+type SummaryOptions = {
+  abortSignal?: AbortSignal;
+  budget?: RunBudget;
+  chargeTurn?: boolean;
+  dropped: string;
+  previous: ConversationSummary | null;
+  settings: LlmProfile;
+};
+
+/** Process every character in order. No checkpoint is published until ALL chunks succeed. */
+export async function summarizeConversation(options: SummaryOptions): Promise<ConversationSummary> {
+  let previous = options.previous;
+  let remaining = options.dropped;
+  do {
+    options.abortSignal?.throwIfAborted();
+    const available = Math.floor(modelContextTokens(options.settings.max_context_length) * 0.7)
+      - estimateTokensFromText(SUMMARY_SYSTEM + formatConversationMemory(previous)) - 300;
+    if (available < 200) throw new AgentStoppedError('已有记忆超过摘要上下文容量，未修改原记忆或历史。');
+    const end = summaryChunkEnd(remaining, available);
+    previous = await summarizeChunk({ ...options, previous, dropped: remaining.slice(0, end) });
+    remaining = remaining.slice(end);
+  } while (remaining.length);
+  return previous!;
+}
+
+function summaryChunkEnd(text: string, tokenBudget: number): number {
+  if (estimateTokensFromText(text) <= tokenBudget) return text.length;
+  let low = 1, high = text.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (estimateTokensFromText(text.slice(0, middle)) <= tokenBudget) low = middle;
+    else high = middle - 1;
+  }
+  let end = low;
+  if (end > 0 && /[\uD800-\uDBFF]/.test(text[end - 1])) end--;
+  const newline = text.lastIndexOf('\n', end);
+  if (newline > end * 0.6) end = newline + 1;
+  return Math.max(1, end);
+}
+
+async function summarizeChunk({
   abortSignal,
   budget,
   chargeTurn,
@@ -58,7 +102,7 @@ export async function summarizeConversation({
   previous: ConversationSummary | null;
   settings: LlmProfile;
 }): Promise<ConversationSummary> {
-  const previousSummary = previous?.summary?.trim() || 'none';
+  const previousSummary = previous ? formatConversationMemory(previous) : 'none';
   let feedback = '';
   let lastError = 'unknown error';
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -84,6 +128,7 @@ export async function summarizeConversation({
       if (finishReason === 'length') throw new Error('the summary was cut off before it finished');
       const summary = text.trim();
       if (!summary) throw new Error('the summary was empty');
+      if (summary.length > MAX_SUMMARY_CHARS) throw new Error('the summary exceeds 4000 characters; shorten it without cutting off the ending');
       // The structured lists stay empty: this checkpoint is one natural-language brief. The
       // fields remain in the stored shape so existing checkpoints and renderers keep working.
       return {
@@ -91,7 +136,7 @@ export async function summarizeConversation({
         entities: [],
         last_user_goal: null,
         open_items: [],
-        summary: summary.slice(0, MAX_SUMMARY_CHARS),
+        summary,
         user_preferences: []
       };
     } catch (error) {

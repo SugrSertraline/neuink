@@ -11,11 +11,9 @@ import { lastMemoryCheckpointIndex } from '../runtime/conversationTranscript';
 import { buildAssistantMessageParts, uniqueSourceLinks } from './assistantPanelState';
 
 /**
- * Manual compaction: the same checkpoint the loop writes when it crosses the trigger ratio,
- * requested by the user instead of by the budget. Both go through `updateConversationMemory`
- * and therefore through the one summarizer in `sdk/conversationSummary`. The conversation keeps
- * every original message — the newest message carrying a `memory` part becomes the boundary that
- * `renderConversationTranscript` and `shouldUpdateConversationMemory` both count from.
+ * Manual compaction summarizes all current context through the shared summarizer, including
+ * any recent suffix an automatic checkpoint retained. Original messages stay on disk; only
+ * the next model request replaces them with the new checkpoint.
  */
 export async function compactConversation({
   abortSignal,
@@ -41,9 +39,12 @@ export async function compactConversation({
 /** A checkpoint with nothing after it would only summarize a summary, so require real turns
  *  since the newest one. */
 export function canCompactConversation(history: readonly ConversationMessage[]) {
+  const part = history[lastMemoryCheckpointIndex(history)]?.parts?.find(part => part.type === 'memory');
+  if (part?.type === 'memory' && part.memory.retained_context?.messages.length) return true;
   return history
     .slice(lastMemoryCheckpointIndex(history) + 1)
-    .some(message => message.content.trim().length > 0);
+    .some(message => message.content.trim().length > 0 || message.parts?.some(part =>
+      part.type === 'model-transcript' && part.transcript.messages.length > 0));
 }
 
 /** Nothing here is inferred: the newest real request and outcome, the sources the transcript
