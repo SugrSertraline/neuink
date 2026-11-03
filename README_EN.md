@@ -27,6 +27,48 @@ The [isolated interaction preview](apps/desktop/ideation-showcase.html) uses sam
 
 Bundled research-inspiration references retain the [Microsoft ResearchStudio attribution](apps/desktop/src/modules/ideation/patterns/researchstudio/README.md) and [MIT license](apps/desktop/src/modules/ideation/patterns/researchstudio/LICENSE). These patterns are inspiration, not factual claims about a user's papers.
 
+### Cards, boards and relationships
+
+| Object | Purpose | How to assess it |
+| --- | --- | --- |
+| Paper card | Capture a paper's background, problem, method, component, assumptions, constraints, results or limitations. | Follow available source evidence back to the paper; unsupported content still needs review. |
+| Personal card | Record your own research question, explanation or proposed direction. | Maintained by the user, not automatically a claim made by the paper. |
+| Inspiration-pattern card | Suggest methods and combinations for developing ideas. | Keep reference patterns distinct from facts about your materials and retain their attribution. |
+| Ideation board | Place selected cards into a research-question workspace and retain its layout and viewport. | Manage multiple ideas independently and reuse materials across questions. |
+| Link or branch | Express a relationship, possible next step or connection requiring validation. | Distinguish user-created links from model suggestions; a link alone does not establish causality or novelty. |
+
+### From papers to an idea discussion
+
+1. Prepare the relevant papers and available source text, create an idea in the research-ideation view, and describe its question or goal.
+2. Browse the card library by source, type or keyword. Create a card manually or use the configured assistant model to extract paper cards.
+3. Review generated drafts, source passages and suggested relationships before choosing what to retain. Check unsupported content instead of treating model output as fact.
+4. Drag cards onto the current board or use its add action. Pan, zoom, fit the view, and use automatic arrangement or manual positioning.
+5. Select a node, choose suitable follow-up cards, add your own questions and edit relationships. These branches are idea paths, unrelated to Git branches such as alpha and beta.
+6. When you want a discussion, attach the current idea as context to the existing assistant and initiate a question. Keep the research question, relationships and evidence distinct; idea content is not automatically promoted to system instructions.
+
+### What requires a model
+
+Browsing saved cards, creating boards, manual editing, dragging, linking, zooming and saving layouts do not require generation. Paper-card extraction and assistant discussions use the selected assistant model, which receives the relevant paper or idea context. Generated drafts require review; having a draft does not mean it has been accepted into the board.
+
+This branch does not promise automatic judgments of academic novelty, proof of research claims or execution of experiments. Evidence links support checking rather than replacing source reading. Model drafts, personal ideas and reference patterns have different origins and should be assessed accordingly.
+
+### Local interaction preview
+
+After switching a source checkout to alpha and safely preserving any previous working-tree edits, install dependencies and start the frontend:
+
+```powershell
+npm ci
+npm --workspace apps/desktop run dev:frontend
+```
+
+Open `/ideation-showcase.html` under the address printed by the development server; the default is `http://127.0.0.1:1420/ideation-showcase.html`. The preview uses synthetic papers, cards and mocked IPC to exercise the canvas and sidebar. It does not connect to a real workspace or call models, and its sample state is not persistent research output.
+
+Real persistence and source access require the native application. The workspace module stores ideation state and per-paper card drafts, while boards retain independent layouts. Prior browser checks and automated tests do not establish completed native Tauri or real-model acceptance testing.
+
+### How exploration reaches a release
+
+Exploratory features evolve on alpha, enter beta after code and interaction review, and reach users through an approved main release. Alpha retains the card feature without automatically importing every beta reading-detail or source-management change. When reporting an issue, include the branch, commit, reproduction steps, and whether it occurred in the isolated preview or native app.
+
 ---
 
 <p align="center">
