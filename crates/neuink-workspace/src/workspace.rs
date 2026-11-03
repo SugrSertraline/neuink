@@ -135,6 +135,7 @@ impl Workspace {
         if !entry_dir.exists() {
             return Err(WorkspaceError::EntryMissing(entry_id.to_string()));
         }
+        if crate::entry_sources::is_source_managed_dir(&entry_dir)? { return Err(WorkspaceError::SourceManagedEntry); }
         let trashed_entry_dir = self.layout.trashed_entry_dir(entry_id);
         if trashed_entry_dir.exists() {
             return Err(WorkspaceError::EntryAlreadyExists(entry_id.to_string()));
@@ -169,6 +170,7 @@ impl Workspace {
         if !trashed_entry_dir.exists() {
             return Err(WorkspaceError::EntryMissing(entry_id.to_string()));
         }
+        if crate::entry_sources::is_source_managed_dir(&trashed_entry_dir)? { return Err(WorkspaceError::SourceManagedEntry); }
         fs::remove_dir_all(trashed_entry_dir)?;
         Ok(())
     }

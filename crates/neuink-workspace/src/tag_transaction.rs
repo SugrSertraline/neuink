@@ -39,6 +39,7 @@ impl Workspace {
             .lock()
             .map_err(|_| WorkspaceError::TagReading("资料库写入锁不可用，请重启后重试".into()))?;
         self.recover_tag_transaction()?;
+        self.recover_source_note_import()?;
         Ok(guard)
     }
 

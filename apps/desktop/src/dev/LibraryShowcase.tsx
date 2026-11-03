@@ -81,6 +81,9 @@ function LibraryShowcase() {
         <div className={desktop ? 'h-full min-h-0' : 'min-h-0 flex-1 p-3'}>
           <div className={`h-full min-h-0 overflow-hidden bg-card ${desktop ? '' : 'border'}`} style={{ width: narrow ? 'min(100%, 560px)' : '100%' }}>
             <EntryLibraryView standalone activeTag={activeTag} entries={empty ? [] : displayEntries} tags={displayTags} status={status} libraryView={libraryView}
+              pdfParseAction={{ configured: true, onConfigure: noop, onStart: id => {
+                setEntries(current => current.map(entry => entry.id === id ? { ...entry, status: 'Queued' } : entry));
+              } }}
               onSelectView={view => { setLibraryView(view); if (view === 'trash') setActiveTag(null); }}
               onClearFilters={() => { setActiveTag(null); setLibraryView('all'); setFilterResetKey(value => value + 1); }}
               onManageTags={() => setMessage('标签管理入口')}

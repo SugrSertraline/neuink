@@ -18,6 +18,19 @@ function deferred<T>() {
 beforeEach(() => vi.resetModules());
 
 describe('window-local background task projection', () => {
+  it('projects pause and resume without creating another job or losing progress', async () => {
+    const registry = await import('./localBackgroundJobs');
+    await registry.runLocalBackgroundJob(options, async report => {
+      const id = registry.getLocalBackgroundJobs()[0].id;
+      const progress = { current: 2, total: 5, percent: 40 };
+      report(progress, { status: 'paused', message: '阅读详略已暂停' });
+      expect(registry.getLocalBackgroundJobs()[0]).toMatchObject({ id, status: 'paused', progress });
+      report(progress, { status: 'processing', message: '正在生成阅读详略' });
+      expect(registry.getLocalBackgroundJobs()).toHaveLength(1);
+      expect(registry.getLocalBackgroundJobs()[0]).toMatchObject({ id, status: 'processing', progress });
+    });
+    expect(registry.getLocalBackgroundJobs()[0].status).toBe('succeeded');
+  });
   it('reports measured batch progress and distinguishes cancellation from failure', async () => {
     const registry = await import('./localBackgroundJobs');
     await expect(registry.runLocalBackgroundJob(options, async report => {

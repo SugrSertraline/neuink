@@ -21,6 +21,8 @@ pub enum TrashItemKind {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TrashItem {
+    #[serde(default)]
+    pub source_managed: bool,
     pub trash_id: String,
     pub entry_id: EntryId,
     pub entry_title: String,
@@ -83,6 +85,7 @@ impl Workspace {
             .map(|state| state.deleted_at)
             .unwrap_or(entry.updated_at);
             items.push(TrashItem {
+                source_managed: crate::entry_sources::is_source_managed_dir(&entry_dir)?,
                 trash_id: format!("entry:{}", entry.id.as_str()),
                 entry_id: entry.id.clone(),
                 entry_title: entry.title.clone(),
@@ -299,6 +302,7 @@ impl Workspace {
         for content in &entry.contents {
             let ContentItem::Note { note_id, title } = content;
             items.push(TrashItem {
+                source_managed: false,
                 trash_id: format!(
                     "entry:{}:markdown_note:{}",
                     entry.id.as_str(),
@@ -352,6 +356,7 @@ impl Workspace {
             .into_iter()
             .map(|record| match record.payload {
                 StoredTrashPayload::MarkdownNote { note_id, title, .. } => TrashItem {
+                    source_managed: false,
                     trash_id: record.trash_id,
                     entry_id: entry_id.clone(),
                     entry_title: entry_title.to_string(),
@@ -394,6 +399,7 @@ impl Workspace {
         stored_trash_item: bool,
     ) -> TrashItem {
         TrashItem {
+            source_managed: false,
             trash_id: format!("segment_note:{}", note.segment_uid.as_str()),
             entry_id: entry.id.clone(),
             entry_title: entry.title.clone(),
@@ -419,6 +425,7 @@ impl Workspace {
     ) -> TrashItem {
         let is_highlight = annotation.kind == "highlight";
         TrashItem {
+            source_managed: false,
             trash_id: format!("annotation:{}", annotation.annotation_id.as_str()),
             entry_id: entry.id.clone(),
             entry_title: entry.title.clone(),

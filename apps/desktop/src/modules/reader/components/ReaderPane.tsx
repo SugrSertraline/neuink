@@ -1,4 +1,6 @@
 import { OtherSourceImportPage } from '@/modules/import/OtherSourceImportPage';
+import type { LibrarySourceSync } from '@/modules/import/useLibrarySourceSync';
+import type { LibrarySourceCatalog } from '@/modules/library/useLibrarySourceCatalog';
 import { ReadingStateRetention } from './navigation/ReadingStateRetention';
 import { ReadingViewSession } from './navigation/ReadingViewSession';
 import { readingViewStorageKey } from './navigation/readingViewStorage';
@@ -124,6 +126,8 @@ type ReaderPaneProps = EntryPdfHandlers & {
   workspaceRoot: string | null;
   onCreateEntry: (request: CreateEntryRequest) => Promise<CreateEntryResult | undefined>;
   onMineruImported?: () => Promise<void> | void;
+  librarySourceSync?: LibrarySourceSync;
+  librarySourceCatalog?: LibrarySourceCatalog;
   mineruDrop?: { path: string; nonce: number } | null;
   onMineruDropConsumed?: () => void;
   onCreateEntryFinished: (result: CreateEntryResult) => void;
@@ -255,6 +259,8 @@ export function ReaderPane({
   workspaceRoot,
   onCreateEntry,
   onMineruImported,
+  librarySourceSync,
+  librarySourceCatalog,
   mineruDrop,
   onMineruDropConsumed,
   onCreateEntryFinished,
@@ -647,8 +653,11 @@ export function ReaderPane({
   };
   const renderLibraryView = (standalone = false) =>
     <EntryLibraryView
+        onApplyEntryTagPaths={onApplyEntryTagPaths}
         pdfParseAction={pdfParseAction}
         onOpenDailyDashboard={() => onOpenSurface({ kind: 'daily-dashboard' })}
+        librarySourceSync={librarySourceSync}
+        librarySourceCatalog={librarySourceCatalog}
         onOpenRelations={() => onOpenSurface({ kind: 'relations' })}
         activeTag={activeTag}
         section={librarySection} onSectionChange={onLibrarySectionChange}
@@ -1131,7 +1140,7 @@ export function ReaderPane({
           </Suspense>
         </div>;
       case 'external-import':
-        return workspaceRoot ? <OtherSourceImportPage key={workspaceRoot} root={workspaceRoot} scope={surfaceKey(surface)} requestedSource={surface.source} sourceRequestId={surface.navigationId} onImported={onMineruImported} onOpenEntry={onOpenEntryExplorer} /> : <p className="p-4 text-sm text-muted-foreground">请先打开资料库。</p>;
+        return workspaceRoot ? <OtherSourceImportPage key={workspaceRoot} root={workspaceRoot} scope={surfaceKey(surface)} requestedSource={surface.source} sourceRequestId={surface.navigationId} enabledSources={librarySourceSync?.enabledSources} onImported={onMineruImported} onOpenEntry={onOpenEntryExplorer} /> : <p className="p-4 text-sm text-muted-foreground">请先打开资料库。</p>;
       case 'create-entry':
         return <div className="h-full min-h-0 overflow-hidden">{renderCreateEntryPanel()}</div>;
       case 'mineru-client-guide':

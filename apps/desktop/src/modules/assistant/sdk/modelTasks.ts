@@ -2,6 +2,7 @@ import type { LlmProfile } from '@/shared/ipc/assistantApi';
 import { generateText, Output } from 'ai';
 import { createNeuinkModel, generationSettings } from './provider';
 import type { RunBudget } from '../agent-core';
+import { modelTaskOutputTokens } from './contextBudget';
 
 export const MEMORY_PROMPT = 'Update a factual semantic checkpoint from the prior checkpoint and conversation. Preserve goals, decisions, unresolved work, referenced entities, and stable preferences. Do not invent facts.';
 
@@ -17,10 +18,16 @@ export async function runJsonModelTask(options: {
   timeoutMs?: number;
 }) {
   options.abortSignal?.throwIfAborted();
+  const parameters = generationSettings(options.settings);
+  const maxOutputTokens = modelTaskOutputTokens({
+    maxContextLength: options.settings.max_context_length, maxOutputTokens: parameters.maxOutputTokens,
+    system: options.system, prompt: options.prompt
+  });
   options.budget?.turn();
   await options.budget?.persist?.();
   const result = await generateText({
-    ...generationSettings(options.settings),
+    ...parameters,
+    maxOutputTokens,
     model: createNeuinkModel(options.settings),
     output: Output.json({ name: options.name, description: options.description }),
     system: options.system,

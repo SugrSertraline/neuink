@@ -10,6 +10,21 @@ import { ReflowComponentControls } from './ReflowComponentControls';
 describe('ReflowComponentControls', () => {
   afterEach(() => cleanup());
 
+  it('notifies the reader when switching both into and out of sentence layout', () => {
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const onChange = vi.fn(), onView = vi.fn();
+    const preferences = readStoredReaderPreferences();
+    const view = render(<ReflowComponentControls preferences={preferences} onChange={onChange} onTranslationViewChange={onView} />);
+    fireEvent.click(screen.getByRole('button', { name: '重排组件设置' }));
+    fireEvent.keyDown(screen.getByRole('combobox', { name: '正文翻译排列' }), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('option', { name: '逐句对照' }));
+    expect(onView).toHaveBeenLastCalledWith('sentences');
+    view.rerender(<ReflowComponentControls preferences={onChange.mock.calls[0][0]} onChange={onChange} onTranslationViewChange={onView} />);
+    fireEvent.keyDown(screen.getByRole('combobox', { name: '正文翻译排列' }), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('option', { name: '整段对照' }));
+    expect(onView).toHaveBeenLastCalledWith('paragraph');
+  });
+
   it('updates one component without replacing the other component settings', () => {
     const preferences = readStoredReaderPreferences();
     const onChange = vi.fn();

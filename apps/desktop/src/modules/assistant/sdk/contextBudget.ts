@@ -23,6 +23,30 @@ export function estimateTokensFromChars(charCount: number) {
   return Math.max(1, Math.ceil(charCount / CHARS_PER_TOKEN));
 }
 
+export class ModelContextLimitError extends Error {
+  constructor() {
+    super('本次输入预计超过模型设置的上下文长度，请检查上下文配置或减少输入内容。');
+    this.name = 'ModelContextLimitError';
+  }
+}
+
+/** Approximate preflight, not a provider tokenizer. CJK text needs more room than Latin text. */
+export function modelTaskOutputTokens({ maxContextLength, maxOutputTokens, system, prompt }: {
+  maxContextLength?: number | null;
+  maxOutputTokens?: number;
+  system: string;
+  prompt: string;
+}): number | undefined {
+  if (!maxContextLength || !Number.isSafeInteger(maxContextLength) || maxContextLength < 1) return maxOutputTokens;
+  const text = system + '\n' + prompt;
+  const cjk = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu;
+  const inputTokens = estimateTokensFromChars(text.replace(cjk, '').length) + (text.match(cjk) ?? []).length * 2;
+  // Reserve framing/JSON-mode overhead without turning the context window into an output limit.
+  const available = maxContextLength - inputTokens - 512;
+  if (available < 1) throw new ModelContextLimitError();
+  return maxOutputTokens == null ? undefined : Math.min(maxOutputTokens, available);
+}
+
 function reservedContextTokens(modelTokens: number) {
   return Math.max(8_000, Math.min(64_000, Math.floor(modelTokens * 0.12)));
 }

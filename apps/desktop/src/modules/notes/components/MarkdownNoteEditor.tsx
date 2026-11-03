@@ -19,7 +19,9 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 import { useToast } from '@/shared/hooks/useToast';
+import { getZoteroNoteOrigin, type ZoteroNoteOrigin } from '@/shared/ipc/zoteroApi';
 import { NoteReviewBanner } from '@/modules/assistant/review/NoteReviewBanner';
 import { ReadingExportDialog } from '@/modules/reader/export/ReadingExportDialog';
 import type { NoteDocument, NoteOwner, SourceLink } from '@/shared/types/domain';
@@ -53,6 +55,7 @@ import {
 } from './useMarkdownNoteImages';
 import { useMarkdownNoteFileActions } from './useMarkdownNoteFileActions';
 import { useMarkdownNoteSession } from './useMarkdownNoteSession';
+import { ZoteroNoteSaveDialog } from './ZoteroNoteSaveDialog';
 import { useMarkdownSourceLinks } from './useMarkdownSourceLinks';
 import {
   TableContextMenu,
@@ -122,6 +125,8 @@ export function MarkdownNoteEditor({
 }: MarkdownNoteEditorProps) {
   const { notify } = useToast();
   const [exportOpen, setExportOpen] = useState(false);
+  const [zoteroOrigin, setZoteroOrigin] = useState<ZoteroNoteOrigin | null>(null);
+  const [zoteroSaveOpen, setZoteroSaveOpen] = useState(false);
   const [noteLinks, setNoteLinks] = useState<SourceLink[]>([]);
   const [insertMenu, setInsertMenu] = useState<InsertMenuState | null>(null);
   const suppressEditorUpdateRef = useRef(false);
@@ -342,6 +347,19 @@ export function MarkdownNoteEditor({
   });
   markEditorDirtyRef.current = markEditorDirty;
   useEffect(() => {
+    setZoteroOrigin(null);
+    setZoteroSaveOpen(false);
+  }, [workspaceRoot, entryId, noteId]);
+  useEffect(() => {
+    if (!workspaceRoot) { setZoteroOrigin(null); return; }
+    if (saving || loading) return;
+    let cancelled = false;
+    void getZoteroNoteOrigin(workspaceRoot, entryId, noteId)
+      .then(origin => { if (!cancelled) setZoteroOrigin(origin); })
+      .catch(() => { if (!cancelled) setZoteroOrigin(null); });
+    return () => { cancelled = true; };
+  }, [workspaceRoot, entryId, noteId, saving, loading, refreshKey, zoteroSaveOpen]);
+  useEffect(() => {
     onWritableChange?.(canEdit && !loading && !loadFailed);
     return () => onWritableChange?.(false);
   }, [canEdit, loading, loadFailed, onWritableChange]);
@@ -537,12 +555,17 @@ export function MarkdownNoteEditor({
     onNoteImageInsertedRef.current?.(noteImageToInsert.id);
   }, [canEdit, editor, loadFailed, loading, noteImageToInsert, notify, runInsertionOnce]);
 
+  const manualSave = () => {
+    if (zoteroOrigin && workspaceRoot) {
+      setZoteroSaveOpen(true);
+    } else void save();
+  };
   const saveFromFocusedEditor = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
       event.preventDefault();
       event.stopPropagation();
       if (!loading && !loadFailed && canEdit && !saving) {
-        void save();
+        manualSave();
       }
     }
   };
@@ -599,6 +622,7 @@ export function MarkdownNoteEditor({
           loading={loading}
           saving={saving}
           sourceCount={noteLinks.length}
+          zoteroSource={Boolean(zoteroOrigin)}
           title={title}
           titleEditing={titleEditing}
           workspaceAvailable={Boolean(workspaceRoot)}
@@ -609,15 +633,18 @@ export function MarkdownNoteEditor({
           onRedo={() => editor?.chain().focus().redo().run()}
           onReload={reload}
           onRevealFile={() => void revealMarkdownFile()}
-          onSave={() => void save()}
+          onSave={manualSave}
           onSaveAs={() => void saveMarkdownAs()}
           onExport={() => noteOwner?.kind === 'daily' ? void saveMarkdownAs() : setExportOpen(true)}
           onStartTitleEdit={startTitleEditing}
           onTakeOver={takeOverEditing}
           onUndo={() => editor?.chain().focus().undo().run()}
         />
+        {zoteroOrigin ? <p role="status" className="border-b border-border px-3 py-1 text-xs text-muted-foreground">Zotero 来源笔记 · {dirty || zoteroOrigin.local_modified ? '本地改稿，尚未写回 Zotero；保存到本地不会触发来源更新提醒。' : '本地副本；Zotero 来源发生变化时才会提示更新。'} 通过保存菜单可比较并确认写回。</p> : null}
         </div>
         <ReadingExportDialog entryId={entryId} tagId={noteOwner?.kind === 'tag_reading' ? noteOwner.tag_id : undefined} entryTitle={entryTitle ?? fallbackTitle} workspaceRoot={workspaceRoot} noteId={noteId} open={exportOpen} onOpenChange={setExportOpen} />
+        {zoteroOrigin && workspaceRoot && <ZoteroNoteSaveDialog key={`${workspaceRoot}:${entryId}:${noteId}`} open={zoteroSaveOpen} onOpenChange={setZoteroSaveOpen}
+          root={workspaceRoot} entryId={entryId} noteId={noteId} origin={zoteroOrigin} getHtml={() => editor?.getHTML() ?? null} onSaveLocal={() => save({ quiet: true })} />}
         {conflict ? (
           <MarkdownNoteConflictPanel
             conflict={conflict}

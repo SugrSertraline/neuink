@@ -1,19 +1,23 @@
 import { FolderClosed, Hash } from 'lucide-react';
+import { useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { DisclosureIcon } from '@/components/ui/disclosure-icon';
 import { cn } from '@/lib/utils';
 import type { TagNode } from '../utils/tagTree';
 
-export function TagEditorNode({ node, active, selected, expanded, busy, onToggle, onSelect, onOpen, onCreateChild, onRename, onDelete }: {
+export function TagEditorNode({ node, active, selected, expanded, busy, onToggle, onSelect, onOpen, onCreateChild, onRename, onDelete, onFocusEditor }: {
   node: TagNode; active: boolean; selected: boolean; expanded: boolean; busy: boolean;
   onToggle: () => void; onSelect: () => void; onOpen: () => void;
   onCreateChild: () => void; onRename: () => void; onDelete: () => void;
+  onFocusEditor?: () => void;
 }) {
-  return <ContextMenu><ContextMenuTrigger asChild><div data-tag-editor-node onContextMenu={onSelect}
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const focusAfterMenu = useRef<'node' | 'editor' | 'destination'>('node');
+  return <ContextMenu onOpenChange={open => { if (open) focusAfterMenu.current = 'node'; }}><ContextMenuTrigger asChild><div data-tag-editor-node data-allow-context-menu="true" onContextMenu={event => { event.stopPropagation(); onSelect(); }}
     className={cn('flex h-[58px] w-[218px] cursor-default items-center gap-1 rounded-lg border bg-card p-1.5 shadow-sm transition-colors',
     selected ? 'border-primary bg-primary/5 ring-1 ring-primary/20' : 'border-border hover:border-primary/35')}>
-    <button aria-label={`选择标签 ${node.path}`} aria-current={active ? 'location' : undefined} aria-pressed={selected}
+    <button ref={buttonRef} aria-label={`选择标签 ${node.path}`} aria-current={active ? 'location' : undefined} aria-pressed={selected}
       title={`${node.path} · ${node.count} 个条目\n双击打开条目库`}
       className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
       onClick={event => { if (event.detail === 0) onOpen(); else onSelect(); }} onDoubleClick={onOpen} type="button">
@@ -25,15 +29,20 @@ export function TagEditorNode({ node, active, selected, expanded, busy, onToggle
       title={expanded ? '收起子标签' : '展开子标签'} onClick={onToggle}><DisclosureIcon open={expanded} /></Button>
       : <span className="grid size-6 shrink-0 place-items-center text-muted-foreground"><Hash size={13} aria-hidden="true" /></span>}
   </div></ContextMenuTrigger>
-    <ContextMenuContent viewportAligned className="w-52 max-w-[calc(100vw-1rem)]">
+    <ContextMenuContent viewportAligned className="w-52 max-w-[calc(100vw-1rem)]" data-allow-context-menu="true" onPointerDown={event => event.stopPropagation()}
+      onCloseAutoFocus={event => {
+        event.preventDefault();
+        if (focusAfterMenu.current === 'editor') onFocusEditor?.();
+        else if (focusAfterMenu.current === 'node') buttonRef.current?.focus({ preventScroll: true });
+      }}>
       <ContextMenuLabel className="truncate" title={node.path}>{node.name}</ContextMenuLabel>
-      <ContextMenuItem disabled={busy} onSelect={onOpen}>打开条目</ContextMenuItem>
+      <ContextMenuItem disabled={busy} onSelect={() => { focusAfterMenu.current = 'destination'; onOpen(); }}>打开条目</ContextMenuItem>
       {node.children.length ? <ContextMenuItem disabled={busy} onSelect={onToggle}>{expanded ? '收起子标签' : '展开子标签'}</ContextMenuItem> : null}
       <ContextMenuSeparator />
-      <ContextMenuItem disabled={busy} onSelect={onCreateChild}>添加子标签</ContextMenuItem>
-      <ContextMenuItem disabled={busy} onSelect={onRename}>重命名</ContextMenuItem>
+      <ContextMenuItem disabled={busy} onSelect={() => { focusAfterMenu.current = 'editor'; onCreateChild(); }}>添加子标签</ContextMenuItem>
+      <ContextMenuItem disabled={busy} onSelect={() => { focusAfterMenu.current = 'editor'; onRename(); }}>重命名</ContextMenuItem>
       <ContextMenuSeparator />
-      <ContextMenuItem disabled={busy} variant="destructive" onSelect={onDelete}>移入回收站</ContextMenuItem>
+      <ContextMenuItem disabled={busy} variant="destructive" onSelect={() => { focusAfterMenu.current = 'destination'; onDelete(); }}>移入回收站</ContextMenuItem>
     </ContextMenuContent>
   </ContextMenu>;
 }

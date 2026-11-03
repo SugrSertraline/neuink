@@ -352,6 +352,32 @@ pub fn list_entries(request: ListEntriesRequest) -> Result<Vec<EntryMeta>, Strin
 }
 
 #[tauri::command]
+pub fn list_entry_sources(request: ListEntriesRequest) -> Result<std::collections::HashMap<String, neuink_workspace::entry_sources::EntrySourceInfo>, String> {
+    let workspace = neuink_workspace::Workspace::open_existing(request.root).map_err(|error| error.to_string())?;
+    workspace.entry_source_kinds().map_err(|error| error.to_string())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetEntrySourceHiddenRequest { pub root: PathBuf, pub entry_id: EntryId, pub hidden: bool }
+
+#[tauri::command]
+pub fn set_entry_source_hidden(request: SetEntrySourceHiddenRequest) -> Result<(), String> {
+    let workspace = neuink_workspace::Workspace::open_existing(request.root).map_err(|error| error.to_string())?;
+    workspace.set_source_entry_hidden(&request.entry_id, request.hidden).map_err(|error| error.to_string())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CopySourceToLocalRequest { pub root: PathBuf, pub entry_id: EntryId, #[serde(default)] pub force_new: bool }
+
+#[tauri::command]
+pub async fn copy_source_to_local(request: CopySourceToLocalRequest) -> Result<neuink_workspace::local_copy::LocalCopyResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let workspace = neuink_workspace::Workspace::open_existing(request.root).map_err(|error| error.to_string())?;
+        workspace.copy_source_to_local(&request.entry_id, request.force_new).map_err(|error| error.to_string())
+    }).await.map_err(|_| "导入本地副本的任务被中断，请检查条目库后重试。".to_owned())?
+}
+
+#[tauri::command]
 pub fn list_trashed_entries(request: ListTrashedEntriesRequest) -> Result<Vec<EntryMeta>, String> {
     let workspace =
         neuink_workspace::Workspace::open(request.root).map_err(|error| error.to_string())?;
@@ -1112,6 +1138,9 @@ pub(crate) fn create_from_mineru_source_bytes(
     request: CreateFromMineruClientResultRequest,
     zip_bytes: Vec<u8>,
 ) -> Result<ImportAndParsePdfResponse, String> {
+    let source_id = request.zip_path.canonicalize().ok()
+        .map(|path| blake3::hash(path.to_string_lossy().as_bytes()).to_hex().to_string());
+    let source_hash = blake3::hash(&zip_bytes).to_hex().to_string();
     let workspace =
         neuink_workspace::Workspace::open_existing(&request.root).map_err(|error| error.to_string())?;
     validate_single_result(&zip_bytes)?;
@@ -1140,7 +1169,11 @@ pub(crate) fn create_from_mineru_source_bytes(
         workspace
             .write_segments(&entry.id, &document.segments)
             .map_err(|error| error.to_string())?;
-        mark_mineru_client_import_succeeded(&workspace, &entry.id, document.segments.len())
+        let complete = mark_mineru_client_import_succeeded(&workspace, &entry.id, document.segments.len())?;
+        if let Some(item_id) = source_id.clone() {
+            workspace.record_mineru_source(&entry.id, item_id, source_hash.clone()).map_err(|error| error.to_string())?;
+        }
+        Ok(complete)
     })();
     let entry = match imported {
         Ok(entry) => entry,

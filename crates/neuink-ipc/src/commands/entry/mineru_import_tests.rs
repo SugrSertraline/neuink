@@ -20,6 +20,7 @@ fn creates_entry_from_result_directory() {
     )
     .unwrap();
     fs::write(source.join("paper_origin.pdf"), b"%PDF-1.4\n").unwrap();
+    let source_id = blake3::hash(source.canonicalize().unwrap().to_string_lossy().as_bytes()).to_hex().to_string();
     let result = create_from_mineru_client_result(CreateFromMineruClientResultRequest {
         root: workspace_root,
         title: "Paper".into(),
@@ -35,6 +36,7 @@ fn creates_entry_from_result_directory() {
         "Hello MinerU"
     );
     assert!(result.entry.pdf.is_some());
+    assert_eq!(workspace.mineru_matches().unwrap()[&source_id], result.entry.id);
 }
 
 #[test]

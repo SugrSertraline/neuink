@@ -55,11 +55,14 @@ export function useMineruImport(root: string, onImported?: () => Promise<void> |
     const id = ++generation.current;
     const searchId = `mineru-scan-${Date.now()}-${++nextScanId}`;
     scan.current = searchId;
-    setLoading(true); setError(''); setSnapshot(null); setSelected(new Set()); setOutcomes({});
-    setProgress({ completed: 0, total: 0, current: '', stopped: false });
+    setLoading(true); setError('');
     try {
       const next = await scanMineru(root, searchId);
-      if (mounted.current && generation.current === id) setSnapshot(next);
+      if (mounted.current && generation.current === id) {
+        setSnapshot(next);
+        const ids = new Set(next.items.map(item => item.id));
+        setSelected(previous => new Set([...previous].filter(itemId => ids.has(itemId) && !next.existing?.[itemId])));
+      }
     } catch (caught) {
       if (mounted.current && generation.current === id) setError(typeof caught === 'string' ? caught : '读取 MinerU 结果失败，请重试。');
     } finally {
@@ -69,7 +72,7 @@ export function useMineruImport(root: string, onImported?: () => Promise<void> |
   }, [root, cancelScan]);
   const start = async () => {
     if (pending.current || !snapshot || !selected.size) return;
-    const items = snapshot.items.filter(item => selected.has(item.id) && item.has_pdf && !outcomes[item.id]?.result);
+    const items = snapshot.items.filter(item => selected.has(item.id) && item.has_pdf && !snapshot.existing?.[item.id] && !outcomes[item.id]?.result);
     if (!items.length) return;
     pending.current = true; canceled.current = false; setBusy(true); setError('');
     setProgress({ completed: 0, total: items.length, current: '', stopped: false });

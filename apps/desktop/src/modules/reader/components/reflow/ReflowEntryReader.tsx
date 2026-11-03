@@ -11,18 +11,10 @@ import { ListRestart, Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { translateEntrySegment, type PdfReaderResponse } from '@/shared/ipc/workspaceApi';
 import { useToast } from '@/shared/hooks/useToast';
-import { reflowDisplayOptions, withReflowDisplayOptions, type ReaderPreferences, type ReflowOriginalDisplay } from '@/shared/lib/readerPreferences';
+import { reflowDisplayOptions, withReflowDisplayOptions, type ReaderPreferences } from '@/shared/lib/readerPreferences';
 import { formatSourceLinkClipboardMarker } from '@/shared/lib/sourceLinkClipboard';
 import type { AssistantContextAddOptions, AssistantContextInput } from '@/shared/types/assistant';
 import type { Annotation, AnnotationId, AnnotationImportance, AnnotationTextSelection, SegmentBlockNote, SourceLink, SourceSegment } from '@/shared/types/domain';
@@ -49,6 +41,7 @@ import { SegmentNoteEditor } from '../pdf-reader/SegmentNoteEditor';
 import { FloatingSegmentPanel } from '../pdf-reader/FloatingSegmentPanel';
 import { HoverPreviewControls } from '../pdf-reader/ReaderToolbar';
 import { ReflowToolbar } from './ReflowToolbar';
+import { ReflowLanguageControls } from './ReflowLanguageControls';
 import { usePdfBytes } from '../pdf-reader/usePdfBytes';
 import { usePdfDocument } from '../pdf-reader/usePdfDocument';
 import { usePdfReaderData } from '../pdf-reader/usePdfReaderData';
@@ -57,6 +50,11 @@ import { ReflowReader } from './ReflowReader';
 import { ReflowAppearanceControls } from './ReflowAppearanceControls';
 import { ReflowComponentControls } from './ReflowComponentControls';
 import { useGuardedSegmentAction } from '../useGuardedSegmentAction';
+import { useFoldReader } from '../../folding/useFoldReader';
+import { FoldReaderProvider } from '../../folding/FoldReaderContext';
+import { FoldControls } from '../../folding/FoldControls';
+import { FoldTaskDialog } from '../../folding/FoldTaskDialog';
+import { effectiveFoldOriginal, foldLevelAfterOriginalChange, initialFoldLevel } from '../../folding/foldDisplay';
 import { TranslationTaskDialog } from '../../translation/TranslationTaskDialog';
 import { PaperExportDialog } from '../../export/PaperExportDialog';
 import { UnsavedSegmentChangesDialog } from '../pdf-reader/UnsavedSegmentChangesDialog';
@@ -148,6 +146,7 @@ function ReflowEntryReaderBody({
   const [segmentCloseBusy, setSegmentCloseBusy] = useState(false);
   const [segmentOverlayMode, setSegmentOverlayMode] = useState<'segment' | 'annotation'>('segment');
   const [translationTaskOpen, setTranslationTaskOpen] = useState(false);
+  const [foldTaskOpen, setFoldTaskOpen] = useState(false);
   const [sourceLinkBusySegmentUid, setSourceLinkBusySegmentUid] = useState<string | null>(null);
   const [translatingSegmentUid, setTranslatingSegmentUid] = useState<string | null>(null);
   const [pdfDocumentRequested, setPdfDocumentRequested] = useState(false);
@@ -158,6 +157,25 @@ function ReflowEntryReaderBody({
   const handledTranslationJobKeyRef = useRef<string | null>(null);
 
   const segments = loadState.status === 'ready' ? loadState.data.segments : [];
+  const storedDisplayOptions = reflowDisplayOptions(readerPreferences);
+  const foldSurfaceRef = useRef<HTMLDivElement | null>(null);
+  const [foldVisible, setFoldVisible] = useState(false);
+  const fold = useFoldReader(workspaceRoot, entry.id, entry.title, segments, loadState.status === 'ready',
+    readerPreferences.autoGenerateFolds === true, foldVisible, initialFoldLevel(readerPreferences));
+  useEffect(() => {
+    const node = foldSurfaceRef.current;
+    if (!node) { setFoldVisible(false); return; }
+    let intersecting = false;
+    const update = () => setFoldVisible(intersecting && document.visibilityState !== 'hidden');
+    if (typeof IntersectionObserver === 'undefined') {
+      intersecting = node.getClientRects().length > 0; update();
+      document.addEventListener('visibilitychange', update);
+      return () => document.removeEventListener('visibilitychange', update);
+    }
+    const observer = new IntersectionObserver(entries => { intersecting = Boolean(entries[0]?.isIntersecting); update(); });
+    observer.observe(node); document.addEventListener('visibilitychange', update);
+    return () => { observer.disconnect(); document.removeEventListener('visibilitychange', update); };
+  }, [loadState.status]);
   const syncSegmentUid = readingJump ? (readingJump.kind === 'page' ? undefined : readingJump.segmentUid) : externalSyncSegmentUid;
   const {
     activeJob: translationJob,
@@ -424,7 +442,7 @@ function ReflowEntryReaderBody({
     catch (error) { notify({ tone: 'danger', title: '继续翻译失败', description: String(error) }); }
   };
 
-  const displayOptions = reflowDisplayOptions(readerPreferences);
+  const displayOptions = { ...storedDisplayOptions, original: effectiveFoldOriginal(fold.level, storedDisplayOptions.original) };
   const activateSegmentFromClick = useGuardedSegmentAction((segment) => {
     if (!activateSegment(segment)) return;
     readingNavigation?.linkTarget(segmentTarget(segment));
@@ -570,29 +588,27 @@ function ReflowEntryReaderBody({
   }
 
   return (
-    <div data-guide="reflow-reader" className="relative grid size-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-muted/30">
+    <div ref={foldSurfaceRef} data-guide="reflow-reader" className="relative grid size-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-muted/30">
       <ReflowToolbar navigation={<ReadingNavigationControls segments={segments} entryId={entry.id} workspaceRoot={workspaceRoot} />} compact={Boolean(readingSession)} busy={translationBusy} entryTitle={entry.title}
+        primaryTools={segments.length > 0 ? <FoldControls fold={fold} onLevelChange={fold.setLevel} onShowProgress={() => setFoldTaskOpen(true)} /> : null}
         appearance={<ReflowAppearanceControls
           compact={Boolean(readingSession)}
           preferences={readerPreferences}
           onChange={onReaderPreferencesChange}
         />}
-        translationMode={segments.length > 0 ? <div className="reflow-toolbar-translation flex min-w-0 shrink-0 items-center gap-2">
-          <Select value={displayOptions.original} onValueChange={value => onReaderPreferencesChange(withReflowDisplayOptions(
-            readerPreferences, value as ReflowOriginalDisplay, displayOptions.translation))}>
-            <SelectTrigger className="w-[108px]" size="sm" aria-label="原文显示格式"><SelectValue /></SelectTrigger>
-            <SelectContent><SelectItem value="hidden">不显示</SelectItem><SelectItem value="original">原文</SelectItem><SelectItem value="sentences">逐句</SelectItem></SelectContent>
-          </Select>
-          <label className="flex shrink-0 items-center gap-1.5 text-xs text-foreground">
-            <Switch aria-label="显示翻译" checked={displayOptions.translation}
-              onCheckedChange={checked => onReaderPreferencesChange(withReflowDisplayOptions(readerPreferences, displayOptions.original, checked))} />
-            <span>翻译</span>
-          </label>
-        </div> : null}
+        translationMode={segments.length > 0 ? <ReflowLanguageControls original={displayOptions.original} translation={displayOptions.translation}
+          onOriginalChange={value => {
+            fold.setLevel(foldLevelAfterOriginalChange(fold.level, value));
+            onReaderPreferencesChange(withReflowDisplayOptions(readerPreferences, value, displayOptions.translation));
+          }}
+          onTranslationChange={checked => onReaderPreferencesChange(withReflowDisplayOptions(readerPreferences,
+            fold.level !== 'off' ? storedDisplayOptions.original : displayOptions.original, checked))} /> : null}
       >
+        {fold.level !== 'off' && storedDisplayOptions.original === 'sentences' ? <span className="text-xs text-muted-foreground">折叠期间暂停逐句对照</span> : null}
         <ReflowComponentControls
           preferences={readerPreferences}
           onChange={onReaderPreferencesChange}
+          onTranslationViewChange={view => fold.setLevel(foldLevelAfterOriginalChange(fold.level, view === 'sentences' ? 'sentences' : 'original'))}
         />
 
         <HoverPreviewControls
@@ -635,7 +651,7 @@ function ReflowEntryReaderBody({
       </ReflowToolbar>
 
       <div className="relative size-full min-h-0 min-w-0 overflow-hidden">
-        <ReflowReader
+        <FoldReaderProvider value={fold}><ReflowReader
           activeSegmentUid={selectedSegment?.uid ?? selectedSegmentUid}
           annotationsBySegmentUid={annotationsBySegmentUid}
           entryId={entry.id}
@@ -693,7 +709,7 @@ function ReflowEntryReaderBody({
             onAddAssistantContext(readingAssistantContext(entry, segment, options), options) : undefined}
           onTranslateTextSelection={({ segment, text }) => translateTextSelection({ root: workspaceRoot, entryId: entry.id, entryTitle: entry.title, text, context: segment.markdown ?? segment.text })}
           onTranslateSegment={!translationBusy ? translateSingleSegment : undefined}
-        />
+        /></FoldReaderProvider>
         {overlaySegment ? (
           <>
             {segmentOverlayOpen && readerPreferences.closeSegmentOverlayOnBlankClick ? (
@@ -766,6 +782,7 @@ function ReflowEntryReaderBody({
         onOpenChange={setPaperExportOpen}
         onCreateTranslationNote={!translationBusy && hasExportableTranslation ? exportTranslation : undefined}
       />
+      <FoldTaskDialog open={foldTaskOpen} onOpenChange={setFoldTaskOpen} fold={fold} />
       <TranslationTaskDialog
         stopPending={translationStopPending}
         onPause={translationBusy ? () => void pauseTranslation() : undefined}

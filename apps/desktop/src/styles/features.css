@@ -909,16 +909,34 @@
 }
 
 .reflow-reader-pane { container: reflow-reader / inline-size; }
-.reflow-document-scroll { padding: 24px 24px 24px calc(var(--reflow-rail-width, 48px) + 24px); }
+/* 24px action + 12px body offset + 12px minimum clearance from the directory. */
+.reflow-document-scroll { padding: 24px 24px 24px calc(var(--reflow-rail-width, 48px) + 48px); }
 .reflow-reading-surface { font-size: var(--reflow-preferred-font-size, 16px); }
+.reflow-segment-metadata { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+.reflow-segment-metadata::-webkit-scrollbar { height: 4px; }
+.reflow-segment-metadata::-webkit-scrollbar-thumb { background: transparent; border-radius: 4px; }
+.reflow-segment:hover .reflow-segment-metadata,
+.reflow-segment:focus-within .reflow-segment-metadata { scrollbar-color: var(--border) transparent; }
+.reflow-segment:hover .reflow-segment-metadata::-webkit-scrollbar-thumb,
+.reflow-segment:focus-within .reflow-segment-metadata::-webkit-scrollbar-thumb { background: var(--border); }
+.reflow-segment-fold-tabs { opacity: 0; pointer-events: none; transition: opacity 120ms ease-out; }
+.reflow-segment:hover .reflow-segment-fold-tabs,
+.reflow-segment:focus-within .reflow-segment-fold-tabs { opacity: 1; pointer-events: auto; }
+@media (hover: none) {
+  .reflow-segment-fold-tabs { opacity: 1; pointer-events: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reflow-segment-fold-tabs { transition: none; }
+}
 
 @container reflow-reader (max-width: 600px) {
-  .reflow-document-scroll { padding: 16px 16px 16px calc(var(--reflow-rail-width, 48px) + 12px); }
+  .reflow-document-scroll { padding-top: 16px; padding-bottom: 16px; padding-right: 16px; }
   .reflow-reading-surface { font-size: min(var(--reflow-preferred-font-size, 16px), max(14px, 4cqi)); }
 }
 
 @container reflow-reader (max-width: 420px) {
-  .reflow-document-scroll { padding-right: 10px; padding-left: calc(var(--reflow-rail-width, 48px) + 8px); }
+  .reflow-document-scroll { padding-right: 10px; }
+  .reflow-segment-fold-tabs [data-slot=toggle-group-item] { padding-inline: 2px; font-size: 10px; }
 }
 
 /* Size to the pane, not the application viewport. At 220px an avatar column
@@ -952,13 +970,20 @@
   .note-proposal-actions > button { flex: 1 1 4rem; }
 }
 
+.reflow-toolbar .entry-content-header {
+  flex-wrap: nowrap;
+}
+
 .reflow-toolbar .entry-content-header-title {
-  flex: 1 1 160px;
+  flex: 1 1 0;
+  max-width: 100%;
   min-width: 0;
 }
 
 .reflow-toolbar .entry-content-header-actions {
   flex: 0 1 auto;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
 }
 
 @container reflow-toolbar (max-width: 719px) {
@@ -967,18 +992,12 @@
     padding: 8px;
   }
 
-  .reflow-toolbar .entry-content-header-title,
-  .reflow-toolbar .entry-content-header-actions {
-    flex: 0 0 100%;
-    min-width: 0;
-  }
-
   .reflow-toolbar .entry-content-header-entry-title { display: none; }
   .reflow-toolbar .entry-content-header-actions {
     flex-wrap: nowrap;
-    justify-content: flex-start;
+    flex: 0 1 auto;
   }
-  .reflow-toolbar-menu { margin-left: auto; }
+  .reflow-toolbar-controls { padding-inline: 8px; }
 }
 
 @container reflow-toolbar (max-width: 380px) {

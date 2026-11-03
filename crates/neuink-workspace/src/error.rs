@@ -5,6 +5,12 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum WorkspaceError {
     #[error("{0}")]
+    LocalCopy(String),
+    #[error("外部来源条目只能隐藏或恢复。请到 Zotero 或 MinerU 来源端删除原论文。")]
+    SourceManagedEntry,
+    #[error("只有带有 Zotero 或 MinerU 来源记录的条目支持隐藏。")]
+    SourceVisibilityUnavailable,
+    #[error("{0}")]
     Zotero(String),
     #[error("{0}")]
     Daily(String),

@@ -30,6 +30,8 @@ import { ReaderSection, ReaderSurfaceBody } from './ReaderSurfacePrimitives';
 import { ReadingExportDialog } from '../export/ReadingExportDialog';
 import { ReaderSurfaceFrame } from './ReaderSurfaceFrame';
 import { EntryTitleConsistency } from './EntryTitleConsistency';
+import { ZoteroOrganizationInfo } from '@/modules/library/components/ZoteroOrganizationInfo';
+import { SourceLocalCopyControl } from '@/modules/import/SourceLocalCopyProvider';
 
 export function EntryOverview({
   entry,
@@ -182,6 +184,11 @@ export function EntryOverview({
         </ReaderSection>
 
         <EntryTagRecommendations entry={entry} workspaceRoot={workspaceRoot ?? null} onApplyEntryTagPaths={onApplyEntryTagPaths} />
+        <SourceLocalCopyControl entry={entry} />
+
+        {entry.sourceInfo?.zotero_organization?.length ? <div className="border-b border-border py-3"><ZoteroOrganizationInfo key={entry.id}
+          organization={entry.sourceInfo.zotero_organization} tags={tags} tagPaths={tagPaths}
+          onAddTagPath={path => onApplyEntryTagPaths ? onApplyEntryTagPaths(entry.id, [path]) : onUpdateEntry(entry.id, { title: entry.title, fields: entry.fields, tagPaths: [...new Set([...tagPaths, path])] })} /></div> : null}
 
         {customFields.length > 0 ? (
           <ReaderSection className="entry-overview-section" title="条目属性" description="创建或编辑条目时保存的补充信息">

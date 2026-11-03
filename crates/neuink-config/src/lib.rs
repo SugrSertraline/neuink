@@ -37,17 +37,27 @@ pub struct AppSettings {
     pub theme: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct ZoteroSettings {
+    pub enabled: bool,
     pub data_directory: Option<String>,
     pub linked_attachment_directory: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+impl Default for ZoteroSettings {
+    fn default() -> Self { Self { enabled: true, data_directory: None, linked_attachment_directory: None } }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct MineruSettings {
+    pub enabled: bool,
     pub results_directory: Option<String>,
+}
+
+impl Default for MineruSettings {
+    fn default() -> Self { Self { enabled: true, results_directory: None } }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]

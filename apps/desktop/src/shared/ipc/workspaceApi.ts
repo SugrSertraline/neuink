@@ -238,6 +238,14 @@ export async function listEntries(root: string): Promise<EntryMeta[]> {
   });
 }
 
+export type ZoteroOrganization = { source_id: string; tags: string[]; collections: string[] };
+export type LocalCopyOrigin = { source_entry_id: string; source_title: string; source_kinds: string[]; copied_at: string; source_revision: string };
+export type EntrySourceInfo = { kinds: ('zotero' | 'mineru')[]; source_pdf_hash?: string | null; hidden?: boolean; zotero_hidden: boolean; zotero_note_ids?: string[]; zotero_organization?: ZoteroOrganization[]; local_copy_ids?: string[]; copied_from?: LocalCopyOrigin | null };
+export const listEntrySources = (root: string) => invoke<Record<string, EntrySourceInfo>>('list_entry_sources', { request: { root } });
+export const setEntrySourceHidden = (root: string, entry_id: string, hidden: boolean) => invoke<void>('set_entry_source_hidden', { request: { root, entry_id, hidden } });
+export type LocalCopyResult = { entry_id: string; created: boolean; used_cached_source?: boolean };
+export const copySourceToLocal = (root: string, entry_id: string, force_new = false) => invoke<LocalCopyResult>('copy_source_to_local', { request: { root, entry_id, force_new } });
+
 export async function listTrashedEntries(root: string): Promise<EntryMeta[]> {
   return invoke<EntryMeta[]>('list_trashed_entries', {
     request: {
@@ -768,6 +776,7 @@ export type EntryTranslationResponse = {
 };
 
 export type JobKind =
+  | 'folding'
   | 'paragraph_translation'
   | 'pdf_import'
   | 'parser'

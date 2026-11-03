@@ -10,6 +10,7 @@ import { fitColumnWidth, readElementLayoutWidth, readTableViewportWidth, unfitCo
 
 export type EntryLibraryColumnId =
   | 'title'
+  | 'source'
   | 'reading-progress'
   | 'last-read'
   | 'reading-time'
@@ -20,6 +21,7 @@ export type EntryLibraryColumnId =
   | 'actions';
 
 type EntryLibraryColumnWidthsOptions = {
+  reservedWidth?: number;
   active: boolean;
   leftPinnedColumnId: EntryLibraryColumnId | null;
   rightPinnedColumnId: EntryLibraryColumnId | null;
@@ -41,7 +43,8 @@ export const ENTRY_LIBRARY_COLUMN_WIDTHS_STORAGE_KEY = 'neuink.entryLibraryColum
 export const ENTRY_LIBRARY_MAX_COLUMN_VIEWPORT_RATIO = 0.5;
 
 export const ENTRY_LIBRARY_COLUMN_WIDTH_CONFIG: Record<EntryLibraryColumnId, ColumnWidthConfig> = {
-  title: { defaultWidth: 420, minWidth: 240, maxWidth: 640 },
+  title: { defaultWidth: 420, minWidth: 160, maxWidth: 640 },
+  source: { defaultWidth: 116, minWidth: 100, maxWidth: 220 },
   'reading-progress': { defaultWidth: 180, minWidth: 150, maxWidth: 480 },
   'last-read': { defaultWidth: 130, minWidth: 100, maxWidth: 320 },
   'reading-time': { defaultWidth: 120, minWidth: 96, maxWidth: 320 },
@@ -49,10 +52,11 @@ export const ENTRY_LIBRARY_COLUMN_WIDTH_CONFIG: Record<EntryLibraryColumnId, Col
   file: { defaultWidth: 120, minWidth: 96, maxWidth: 360 },
   parser: { defaultWidth: 120, minWidth: 96, maxWidth: 320 },
   updated: { defaultWidth: 130, minWidth: 108, maxWidth: 320 },
-  actions: { defaultWidth: 144, minWidth: 136, maxWidth: 240 }
+  actions: { defaultWidth: 192, minWidth: 128, maxWidth: 480 }
 };
 
 export function useEntryLibraryColumnWidths({
+  reservedWidth = 0,
   active,
   leftPinnedColumnId,
   rightPinnedColumnId,
@@ -63,17 +67,18 @@ export function useEntryLibraryColumnWidths({
   const [viewportWidth, setViewportWidth] = useState<number | null>(null);
   const tableShellRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<ResizeDrag | null>(null);
+  const fittingViewportWidth = viewportWidth ? Math.max(1, viewportWidth - reservedWidth) : viewportWidth;
 
   const columnMaxWidth = useCallback((columnId: EntryLibraryColumnId, measuredViewportWidth = viewportWidth) =>
     resolveColumnMaxWidth(
       columnId,
-      measuredViewportWidth,
+      measuredViewportWidth ? Math.max(1, measuredViewportWidth - reservedWidth) : measuredViewportWidth,
       visibleColumns,
       savedWidths,
       leftPinnedColumnId,
       rightPinnedColumnId
     ),
-  [leftPinnedColumnId, rightPinnedColumnId, savedWidths, viewportWidth, visibleColumns]);
+  [leftPinnedColumnId, rightPinnedColumnId, savedWidths, viewportWidth, visibleColumns, reservedWidth]);
 
   const persistWidth = useCallback((
     columnId: EntryLibraryColumnId,
@@ -105,7 +110,7 @@ export function useEntryLibraryColumnWidths({
     const measure = () => {
       const nextWidth = readTableViewportWidth(shell);
       setViewportWidth((current) => current === nextWidth ? current : nextWidth);
-      if (nextWidth <= 0) return;
+      if (nextWidth <= 0 || reservedWidth > 0) return;
       setSavedWidths((current) => {
         const adjusted = reconcileSavedWidths(
           current,
@@ -129,7 +134,7 @@ export function useEntryLibraryColumnWidths({
       observer?.disconnect();
       window.removeEventListener('resize', measure);
     };
-  }, [active, leftPinnedColumnId, rightPinnedColumnId, visibleColumns]);
+  }, [active, leftPinnedColumnId, rightPinnedColumnId, visibleColumns, reservedWidth]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -156,11 +161,11 @@ export function useEntryLibraryColumnWidths({
   }, [columnMaxWidth, resizePreview, savedWidths]);
 
   const baseTableWidth = [...visibleColumns].reduce((total, id) => total + getBaseColumnWidth(id), 0);
-  const hasHorizontalOverflow = !viewportWidth || baseTableWidth > viewportWidth;
+  const hasHorizontalOverflow = !fittingViewportWidth || baseTableWidth > fittingViewportWidth;
   const getColumnWidth = useCallback((columnId: EntryLibraryColumnId) => {
     const baseWidth = getBaseColumnWidth(columnId);
-    return fitColumnWidth(baseWidth, baseTableWidth - baseWidth, viewportWidth);
-  }, [baseTableWidth, getBaseColumnWidth, viewportWidth]);
+    return fitColumnWidth(baseWidth, baseTableWidth - baseWidth, fittingViewportWidth);
+  }, [baseTableWidth, getBaseColumnWidth, fittingViewportWidth]);
 
   const getResizeHandleProps = useCallback((columnId: EntryLibraryColumnId, label: string) => {
     const config = ENTRY_LIBRARY_COLUMN_WIDTH_CONFIG[columnId];
@@ -183,6 +188,7 @@ export function useEntryLibraryColumnWidths({
         ? headerBounds.width / headerLayoutWidth
         : 1;
       const currentViewportWidth = readTableViewportWidth(tableShellRef.current) || viewportWidth;
+      const currentFittingWidth = currentViewportWidth ? Math.max(1, currentViewportWidth - reservedWidth) : currentViewportWidth;
       const currentMaximumWidth = columnMaxWidth(columnId, currentViewportWidth);
       const startWidth = headerLayoutWidth;
       const startX = event.clientX;
@@ -217,7 +223,7 @@ export function useEntryLibraryColumnWidths({
         const delta = (pointerEvent.clientX - startX) / Math.max(coordinateScale, 0.01);
         if (!started && Math.abs(delta) < 4) return;
         started = true;
-        currentWidth = clampColumnWidth(columnId, unfitColumnWidth(startWidth + delta, otherWidths, currentViewportWidth), currentMaximumWidth);
+        currentWidth = clampColumnWidth(columnId, unfitColumnWidth(startWidth + delta, otherWidths, currentFittingWidth), currentMaximumWidth);
         setResizePreview({ columnId, width: currentWidth });
         pointerEvent.preventDefault();
       };
@@ -239,8 +245,8 @@ export function useEntryLibraryColumnWidths({
     return {
       'aria-label': `调整“${label}”列宽`,
       'aria-orientation': 'vertical' as const,
-      'aria-valuemax': Math.round(fitColumnWidth(maximumWidth, otherWidths, viewportWidth)),
-      'aria-valuemin': Math.round(fitColumnWidth(config.minWidth, otherWidths, viewportWidth)),
+      'aria-valuemax': Math.round(fitColumnWidth(maximumWidth, otherWidths, fittingViewportWidth)),
+      'aria-valuemin': Math.round(fitColumnWidth(config.minWidth, otherWidths, fittingViewportWidth)),
       'aria-valuenow': Math.round(displayedWidth),
       className: 'absolute -right-1 top-0 z-30 h-full w-2 touch-none cursor-col-resize select-none outline-none after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-transparent hover:after:bg-primary focus-visible:after:bg-primary',
       onDoubleClick: (event: React.MouseEvent<HTMLSpanElement>) => {
@@ -253,13 +259,14 @@ export function useEntryLibraryColumnWidths({
         event.preventDefault();
         event.stopPropagation();
         const currentViewportWidth = readTableViewportWidth(tableShellRef.current) || viewportWidth;
+        const currentFittingWidth = currentViewportWidth ? Math.max(1, currentViewportWidth - reservedWidth) : currentViewportWidth;
         const currentMaximumWidth = columnMaxWidth(columnId, currentViewportWidth);
         const header = event.currentTarget.closest('th');
         const currentWidth = readElementLayoutWidth(header) || displayedWidth;
         const direction = event.key === 'ArrowLeft' ? -1 : 1;
         persistWidth(
           columnId,
-          unfitColumnWidth(currentWidth + direction * (event.shiftKey ? 24 : 8), otherWidths, currentViewportWidth),
+          unfitColumnWidth(currentWidth + direction * (event.shiftKey ? 24 : 8), otherWidths, currentFittingWidth),
           currentMaximumWidth
         );
       },
@@ -268,7 +275,7 @@ export function useEntryLibraryColumnWidths({
       tabIndex: 0,
       title: `拖动调整“${label}”列宽；双击恢复默认宽度`
     };
-  }, [baseTableWidth, columnMaxWidth, getBaseColumnWidth, getColumnWidth, persistWidth, viewportWidth]);
+  }, [baseTableWidth, columnMaxWidth, getBaseColumnWidth, getColumnWidth, persistWidth, viewportWidth, fittingViewportWidth, reservedWidth]);
 
   return { getColumnWidth, getResizeHandleProps, hasHorizontalOverflow, tableShellRef };
 }
@@ -310,6 +317,7 @@ function resolveColumnMaxWidth(
   const config = ENTRY_LIBRARY_COLUMN_WIDTH_CONFIG[columnId];
   if (!viewportWidth || viewportWidth <= 0) return config.maxWidth;
 
+  const viewportShareLimit = Math.floor(viewportWidth * ENTRY_LIBRARY_MAX_COLUMN_VIEWPORT_RATIO);
   let reservedWidth = 0;
   if (
     columnId === leftPinnedColumnId &&
@@ -320,7 +328,9 @@ function resolveColumnMaxWidth(
     const rightConfig = ENTRY_LIBRARY_COLUMN_WIDTH_CONFIG[rightPinnedColumnId];
     reservedWidth = clampColumnWidth(
       rightPinnedColumnId,
-      savedWidths[rightPinnedColumnId] ?? rightConfig.defaultWidth
+      savedWidths[rightPinnedColumnId] ?? rightConfig.defaultWidth,
+      // Reserve the rendered width, since the right column also shrinks in split panes.
+      Math.min(viewportShareLimit, viewportWidth - config.minWidth)
     );
   } else if (
     columnId === rightPinnedColumnId &&
@@ -330,7 +340,6 @@ function resolveColumnMaxWidth(
   ) {
     reservedWidth = ENTRY_LIBRARY_COLUMN_WIDTH_CONFIG[leftPinnedColumnId].minWidth;
   }
-  const viewportShareLimit = Math.floor(viewportWidth * ENTRY_LIBRARY_MAX_COLUMN_VIEWPORT_RATIO);
   const pinnedPairLimit = Math.floor(viewportWidth - reservedWidth);
   return Math.max(
     config.minWidth,

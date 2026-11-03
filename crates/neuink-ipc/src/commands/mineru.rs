@@ -22,12 +22,13 @@ use super::entry::{
     CreateFromMineruClientResultRequest,
 };
 use crate::storage::{read_settings, write_settings};
-use source_catalog::{scan_root_interruptible, MineruItem};
+use source_catalog::{scan_root_interruptible, scan_root_with_limit, MineruItem};
 
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum MineruRequest {
     Settings,
+    SetEnabled { enabled: bool },
     SaveSettings {
         results_directory: Option<PathBuf>,
     },
@@ -40,6 +41,8 @@ pub enum MineruRequest {
     Scan {
         root: PathBuf,
         search_id: String,
+        #[serde(default)]
+        full_catalog: bool,
     },
     Import {
         root: PathBuf,
@@ -105,6 +108,13 @@ fn execute<R: Runtime>(app: &AppHandle<R>, request: MineruRequest) -> Result<Val
                 .map(|path| display_path(Path::new(&path)));
             Ok(json!(settings))
         }
+        MineruRequest::SetEnabled { enabled } => {
+            let mut settings = read_settings(app)?;
+            settings.mineru.enabled = enabled;
+            write_settings(app, &settings)?;
+            let _ = app.emit("mineru-settings-changed", ());
+            Ok(json!(settings.mineru))
+        }
         MineruRequest::SaveSettings { results_directory } => {
             let directory = results_directory
                 .map(|path| {
@@ -117,6 +127,7 @@ fn execute<R: Runtime>(app: &AppHandle<R>, request: MineruRequest) -> Result<Val
                 .transpose()?;
             let mut settings = read_settings(app)?;
             settings.mineru = MineruSettings {
+                enabled: settings.mineru.enabled,
                 results_directory: directory.as_deref().map(display_path),
             };
             write_settings(app, &settings)?;
@@ -152,22 +163,39 @@ fn execute<R: Runtime>(app: &AppHandle<R>, request: MineruRequest) -> Result<Val
             search_flag(&search_id, true)?;
             Ok(json!({}))
         }
-        MineruRequest::Scan { root, search_id } => {
+        MineruRequest::Scan { root, search_id, full_catalog } => {
             let flag = search_flag(&search_id, false)?;
             let result = (|| -> Result<Value, String> {
-                Workspace::open_existing(&root)
+                let workspace = Workspace::open_existing(&root)
                     .map_err(|_| "NeuInk 资料库不可用，请重新打开后重试。")?;
+                let records = workspace.mineru_source_records().map_err(|_| "无法读取 MinerU 来源记录。")?;
                 let directory = read_settings(app)?
                     .mineru
                     .results_directory
                     .ok_or("请先选择 MinerU 结果目录。")?;
                 let directory = PathBuf::from(directory);
-                let catalog = scan_root_interruptible(&directory, || flag.load(Ordering::Relaxed))?;
+                let catalog = if full_catalog {
+                    scan_root_with_limit(&directory, || flag.load(Ordering::Relaxed), 20_000)?
+                } else {
+                    scan_root_interruptible(&directory, || flag.load(Ordering::Relaxed))?
+                };
                 if flag.load(Ordering::Relaxed) {
                     return Err("MinerU 查找已取消。".into());
                 }
                 let snapshot_id = neuink_domain::EntryId::new().to_string();
                 let items = catalog.items;
+                let mut changed = Vec::new();
+                let mut fingerprints = HashMap::new();
+                for item in &items {
+                    if let Some((_, recorded_hash)) = records.get(&item.id) {
+                        if let Ok(bytes) = read_mineru_source(Path::new(&item.path)) {
+                            let fingerprint = blake3::hash(&bytes).to_hex().to_string();
+                            if recorded_hash != &fingerprint { changed.push(item.id.clone()); }
+                            fingerprints.insert(item.id.clone(), fingerprint);
+                        }
+                    }
+                }
+                let existing: HashMap<_, _> = records.into_iter().map(|(source, (entry, _))| (source, entry)).collect();
                 let visible_items = items
                     .iter()
                     .map(|item| {
@@ -180,7 +208,7 @@ fn execute<R: Runtime>(app: &AppHandle<R>, request: MineruRequest) -> Result<Val
                         })
                     })
                     .collect::<Vec<_>>();
-                let response = json!({"snapshot_id": snapshot_id, "source_directory": display_path(&directory), "items": visible_items, "truncated": catalog.truncated});
+                let response = json!({"snapshot_id": snapshot_id, "source_directory": display_path(&directory), "items": visible_items, "truncated": catalog.truncated, "existing": existing, "changed": changed, "fingerprints": fingerprints});
                 let mut cache = snapshots()
                     .lock()
                     .map_err(|_| "MinerU 列表暂不可用，请重启。")?;
@@ -237,6 +265,11 @@ fn execute<R: Runtime>(app: &AppHandle<R>, request: MineruRequest) -> Result<Val
                     if duplicate.in_trash {
                         return Err(format!("相同内容的 PDF 已在回收站：“{}”。请先恢复已有条目。", duplicate.title));
                     }
+                    workspace.record_mineru_source(
+                        &neuink_domain::EntryId::from_string(&duplicate.entry_id),
+                        item.id.clone(),
+                        blake3::hash(&zip_bytes).to_hex().to_string(),
+                    ).map_err(|error| error.to_string())?;
                     return Ok(json!({"status": "skipped", "entry_id": duplicate.entry_id, "title": duplicate.title}));
                 }
             }

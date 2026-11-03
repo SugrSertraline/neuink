@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { importZoteroPaper, scanZotero, type ZoteroImportResult, type ZoteroSnapshot } from '@/shared/ipc/zoteroApi';
+import { importZoteroPaper, scanZotero, setZoteroPaperHidden, type ZoteroImportResult, type ZoteroSnapshot } from '@/shared/ipc/zoteroApi';
 import { useConfirmPdfDuplicate } from '@/shared/lib/pdfDuplicate';
 import { runLocalBackgroundJob } from '@/shared/lib/localBackgroundJobs';
 import { registerSegmentEditorCloseHandler, setSegmentEditorDirty } from '@/modules/reader/components/segmentEditorDirtyRegistry';
@@ -14,6 +14,7 @@ export function useZoteroImport(root: string, scope = 'library') {
   const [outcomes, setOutcomes] = useState<Record<string, ImportOutcome>>({});
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [hiding, setHiding] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [progress, setProgress] = useState({ completed: 0, total: 0, current: '', stopped: false });
   const mounted = useRef(true);
@@ -40,20 +41,35 @@ export function useZoteroImport(root: string, scope = 'library') {
   const load = useCallback(async () => {
     if (pending.current) return;
     const id = ++epoch.current;
-    setLoading(true); setError(''); setSnapshot(null); setSelected(new Set()); setOutcomes({});
-    setProgress({ completed: 0, total: 0, current: '', stopped: false });
+    setLoading(true); setError('');
     try {
       const next = await scanZotero(root);
       if (!mounted.current || epoch.current !== id) return;
       setSnapshot(next);
-      setAttachments(Object.fromEntries(next.library.papers.map(p => [p.id, p.attachments.find(a => a.available)?.key ?? null])));
+      const ids = new Set(next.library.papers.map(p => p.id));
+      const hidden = new Set(next.hidden);
+      setSelected(previous => new Set([...previous].filter(id => ids.has(id) && !hidden.has(id) && !next.existing[id])));
+      setAttachments(previous => Object.fromEntries(next.library.papers.map(p => [p.id, previous[p.id] ?? p.attachments.find(a => a.available)?.key ?? null])));
     } catch (e) { if (mounted.current && epoch.current === id) setError(typeof e === 'string' ? e : '读取 Zotero 论文列表失败，请重试。'); }
     finally { if (mounted.current && epoch.current === id) setLoading(false); }
   }, [root]);
+  const setHidden = async (paperId: string, hidden: boolean) => {
+    if (!snapshot || busy || hiding) return;
+    setHiding(paperId); setError('');
+    try {
+      await setZoteroPaperHidden(root, snapshot.snapshot_id, paperId, hidden);
+      if (!mounted.current) return;
+      setSnapshot(previous => previous && previous.snapshot_id === snapshot.snapshot_id ? {
+        ...previous, hidden: hidden ? [...new Set([...previous.hidden, paperId])] : previous.hidden.filter(id => id !== paperId)
+      } : previous);
+      if (hidden) setSelected(previous => { const next = new Set(previous); next.delete(paperId); return next; });
+    } catch (caught) { if (mounted.current) setError(typeof caught === 'string' ? caught : '保存隐藏状态失败，请重试。'); }
+    finally { if (mounted.current) setHiding(null); }
+  };
   const start = async () => {
     if (pending.current || !snapshot || !selected.size) return;
     pending.current = true; canceled.current = false; setBusy(true); setError('');
-    const ids = [...selected].filter(id => !snapshot.existing[id] && !outcomes[id]?.result);
+    const ids = [...selected].filter(id => !snapshot.existing[id] && !snapshot.hidden.includes(id) && !outcomes[id]?.result);
     const attachmentSelection = { ...attachments };
     const savedSnapshot = snapshot.snapshot_id;
     setProgress({ completed: 0, total: ids.length, current: '', stopped: false });
@@ -96,6 +112,6 @@ export function useZoteroImport(root: string, scope = 'library') {
       if (mounted.current) { setBusy(false); setProgress(p => ({ ...p, current: '', stopped: canceled.current })); }
     }
   };
-  return { snapshot, selected, setSelected, attachments, setAttachments, outcomes, loading, busy, error, progress, load, reset, start,
+  return { snapshot, selected, setSelected, attachments, setAttachments, outcomes, loading, busy, hiding, setHidden, error, progress, load, reset, start,
     cancel: () => { canceled.current = true; setProgress(p => ({ ...p, stopped: true })); } };
 }

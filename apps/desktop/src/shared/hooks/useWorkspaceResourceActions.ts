@@ -99,6 +99,8 @@ export function useWorkspaceResourceActions({
   tags
 }: UseWorkspaceResourceActionsOptions) {
   const currentRoot = useRef(root);
+  const currentEntries = useRef(entries);
+  currentEntries.current = entries;
   currentRoot.current = root;
   const checkPdfDuplicateWithReview = useCallback(async (path: string, source: 'pdf' | 'mineru', candidateTitle: string) => {
     if (!root) throw new Error('请先打开资料库');
@@ -621,10 +623,12 @@ export function useWorkspaceResourceActions({
         return;
       }
       try {
-        const deleted = entries.find((entry) => entry.id === entryId) ?? null;
+        const deleted = currentEntries.current.find((entry) => entry.id === entryId) ?? null;
         await deleteEntry(root, entryId);
-        const nextEntries = entries.filter((entry) => entry.id !== entryId);
-        setEntries(nextEntries);
+        if (currentRoot.current !== root) return;
+        const nextEntries = currentEntries.current.filter((entry) => entry.id !== entryId);
+        currentEntries.current = nextEntries;
+        setEntries(current => current.filter(entry => entry.id !== entryId));
         setTrashedEntries((current) =>
           deleted ? [deleted, ...current.filter((entry) => entry.id !== entryId)] : current
         );

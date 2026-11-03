@@ -49,7 +49,7 @@ export function LibraryHeading({ title, summary, tag, ancestors, hasTagContext, 
       <p className="min-w-0 truncate text-xs tabular-nums text-muted-foreground" title={summary}>{summary}</p>
     </div>
     <div aria-label="条目库操作" className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-1.5">
-      <Button size="default" variant="ghost" className="text-xs text-muted-foreground" onClick={onManageTags} disabled={disabled}><Tags size={14} aria-hidden="true" />标签管理</Button>
+      <Button size="default" variant="ghost" className="gap-1.5 text-xs text-muted-foreground" onClick={onManageTags} disabled={disabled}><Tags size={14} aria-hidden="true" />标签管理</Button>
       {actions}
     </div>
     </div>

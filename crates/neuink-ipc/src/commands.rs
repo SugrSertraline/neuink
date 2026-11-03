@@ -11,6 +11,7 @@ pub mod embedding;
 pub mod embedding_resources;
 pub mod entry;
 pub mod export;
+pub mod folding;
 pub mod job;
 pub mod mineru;
 mod llm_http;
