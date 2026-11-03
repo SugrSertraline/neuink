@@ -4,6 +4,18 @@
 
 <h1 align="center">Neuink</h1>
 
+> **Current branch: beta — everyday development and integration validation.** This README includes capabilities that may not be in the official download yet. Downloads and the website are released from `main`; experimental research cards and ideation canvases are maintained on `alpha`.
+
+## Branches and versions
+
+| Branch | Audience | Purpose | Release boundary |
+| --- | --- | --- | --- |
+| [main](https://github.com/SugrSertraline/neuink/tree/main) | Everyday users | Approved versions, official releases and the website | Installers, portable packages and the website are published from main. |
+| [beta](https://github.com/SugrSertraline/neuink/tree/beta) | Developers and testers | Development and integration of reading, translation and library workflows | Source features may be ahead of download packages; validated changes can be proposed for main. |
+| [alpha](https://github.com/SugrSertraline/neuink/tree/alpha) | Developers exploring new workflows | Research cards, ideation canvases, node relationships and branching | Preserves the original card demo; reviewed features move into beta individually, and alpha may not contain all recent beta changes. |
+
+The intended progression is **alpha exploration → beta integration → approved main release**. These branches are maintained separately. The project version is currently `0.1.3`; the historical release notes below describe published versions, while development capabilities are explained in their relevant sections and the [development plan](docs/development/dev-plan.md).
+
 <p align="center">
   <strong><a href="https://sugrsertraline.github.io/neuink/">Explore Neuink — Product Website →</a></strong><br>
   Features, real app screenshots, core concepts, and step-by-step tutorials.<br>
@@ -70,7 +82,7 @@ macOS preview builds for Apple Silicon and Intel are available from successful [
 
 **Organize → Read and compare → Connect notes to evidence → Search and research → Export and share**
 
-[Core features](#core-features) · [Getting started](#getting-started) · [Local and online capabilities](#local-and-online-capabilities) · [Development and builds](#development-and-builds) · [Documentation](#documentation)
+[Core features](#core-features) · [Reading detail](#reading-detail-guide) · [Sources and local copies](#source-libraries-and-independent-copies) · [Getting started](#getting-started) · [Troubleshooting](#development-version-troubleshooting) · [Development and builds](#development-and-builds) · [Documentation](#documentation)
 
 ## Complete product guide
 
@@ -130,6 +142,131 @@ Opening a web tab does not automatically send its body to the model. Public PDF 
 
 Exports use saved data, independent of collapsed sections or virtual scrolling. Missing translations, stale results, and missing images are listed; you can explicitly export a draft with these caveats. Word output preserves content structure rather than reproducing the PDF's layout. Chinese PDFs, annotated PDFs, and PPTX are not current export formats.
 
+## Reading detail guide
+
+Reading detail lets you scan a paper and then expand individual paragraphs to check the evidence. It does not modify the PDF or replace the author's source text, and does not require sending an entire paper in one request. The current implementation operates on **body paragraphs in Reflow**. Original PDF pages retain their layout; headings, equations, tables and figures are not directly compressed.
+
+### What the five levels mean
+
+| Level | Content source | Typical use |
+| --- | --- | --- |
+| Original | Complete parsed source text, without a generated replacement | Close reading and checking wording, methods and evidence. |
+| Brief | Author sentences selected through validated evidence indices, in source order | Reduce reading volume while retaining the author's wording. |
+| Key points | A model-generated takeaway and short reason | Understand a paragraph's main point and supporting explanation. |
+| Takeaway | A short model-generated central statement | Scan conclusions before choosing what to expand. |
+| Topic | A short phrase validated against and extracted from the takeaway | Browse the subjects discussed in the paper. |
+
+Original is the default; there is no separate Off level. Here, “Original” means **uncompressed content**, independently of whether source-language text is visible. Generated results may omit details, so return to the original before citing a specific claim.
+
+### Generate and manage tasks
+
+1. Import a PDF and prepare its matching parsed content, then open Reflow.
+2. Select an assistant model in system settings. Detail generation reuses its connection, sampling, maximum-output and context configuration.
+3. Click Generate detail to open the task window. Opening the window does not immediately start generation.
+4. Select individual or multiple paragraphs, all visible rows, or content without results. Combine status, page and source-text filters to narrow the scope.
+5. Start the selected work and inspect preparation, generation and saving, with completed, failed, canceled and cached paragraph counts.
+6. Handle failed or canceled items individually. Hover, focus or click the eye icon to inspect the complete source, matching saved levels and failure reason.
+
+| Action | Behavior |
+| --- | --- |
+| Pause | Stop dispatching new paragraphs; requests and saves already in flight may finish. Retain the current queue. |
+| Resume | Continue dispatching remaining work. |
+| Stop | End the current execution while retaining saved results. |
+| Cancel selected items | Cancel the selected work without deleting previously saved valid results. |
+| Retry | Reprocess selected items while retaining other paragraphs' completed results. |
+| Close the task window | Close the view, not the background task. Reopen it from the progress control. |
+| Select all after filtering | Select visible rows and retain existing selections outside the filter, with their count shown. |
+
+The queue uses **up to three concurrent requests**, with one paragraph per request and independent validation and saving. Truncated or invalid output can fail locally; shared service, configuration, network or storage failures stop further dispatch with an explanation. Progress reflects actual work and saving rather than a simulated timer.
+
+### Eligible paragraphs and model usage
+
+- New generation requires at least **20 words or 40 Chinese characters**. Mixed text counts one word as two character units; whitespace and punctuation do not contribute.
+- Only independently addressable body paragraphs are eligible. Headings, non-body content, cross-page continuation groups, inline math or rich content, empty text, duplicate identifiers and oversized paragraphs are skipped.
+- The current per-paragraph input limit is 7,500 characters. Available tasks depend on the actual parsed content and eligibility rules.
+- Reuse valid cached results when the source is unchanged. A changed source paragraph no longer uses its old result.
+- **Changing an existing detail level does not call the model.** Generating or retrying detail and requesting a corresponding translation are separate operations that can call configured services.
+- Automatically generating reading detail when Reflow opens is opt-in and disabled by default. When enabled, it processes eligible missing or source-changed results; disabling it prevents new automatic starts.
+
+Generation includes bounded document-title, abstract and section context. Context length is the request's capacity, **not the maximum output-token setting**. The shared adapter estimates input and reserves output space. Leaving maximum output unset follows that adapter's defaults; there is no additional detail-specific 8,192-token cap. The provider still enforces its actual limits.
+
+### Global and paragraph-level controls
+
+| Control | Scope | Behavior |
+| --- | --- | --- |
+| Reading-detail selector in the top toolbar | Global level, with existing paragraph override rules | Update source text and Chinese translations immediately, without whole-document animations. |
+| Detail buttons above a paragraph | That paragraph | Expand or compress text with transitions, leaving other paragraphs unchanged. |
+| Hold Ctrl and scroll over paragraph text | The paragraph with a valid result | Scroll up for more detail, down for less; stop at the endpoints without wrapping. |
+| Ctrl + Up/Down on a focused paragraph | That paragraph | Keyboard equivalent of the wheel gesture. |
+
+Without a valid result, a paragraph retains its original text and uses neutral detail controls with a generation hint. Selecting a shorter level does not imply that its result already exists. Ordinary scrolling, text selection and Ctrl-dragging references keep their existing behavior. Paragraph controls retain stable positions during changes.
+
+The Reflow header keeps a title/navigation row and a reading-tools row. Truncated titles expose their full text in a tooltip. Controls use measured available space, enter the overflow menu when necessary and return when room becomes available.
+
+### Chinese translation and sentence mode
+
+Three controls have independent meanings:
+
+| Control | What it determines |
+| --- | --- |
+| Reading detail | Original, Brief, Key points, Takeaway or Topic. |
+| Source language | Paragraph display, sentence display or hidden source text. |
+| Chinese translation | Whether to show the corresponding Chinese text. |
+
+Detail text supports corresponding Chinese translations through the system's **paragraph-translation route**. Results are associated with the source paragraph, detail level and matching text. Detail generation and translation are separate tasks; an ordinary full-paragraph translation does not mean every compressed variant has already been translated.
+
+**Sentence alignment and paragraph detail are mutually exclusive.** Sentence comparison needs stable sentence pairs, while paragraph compression changes that relationship. Sentence mode temporarily suspends paragraph detail. Returning to paragraph layout or selecting a detail level restores paragraph reading, with cached results and paragraph choices retained. This does not permanently disable the feature or delete generated content.
+
+## Source libraries and independent copies
+
+Neuink distinguishes directly managed local entries from source entries recognized in Zotero or MinerU directories. Source connections reuse existing materials; explicitly import an independent local copy when you want to organize and edit it separately.
+
+### Zotero and MinerU sources
+
+1. Configure a Zotero data directory or MinerU result directory and enable that source.
+2. Open the workspace to check available sources, source papers, read issues and progress.
+3. When a source changes, review titles, fields and filenames in Source updates. Apply individual changes as appropriate or mark them reviewed.
+4. An acknowledged source revision does not repeatedly prompt; a later revision can prompt again. Scan limits and read failures are reported separately.
+
+Disabling a source hides its source entries without deleting external files or independently saved local copies. This is local source discovery and review, not Zotero cloud-account synchronization or team cloud collaboration.
+
+### Import independent copies
+
+Source entries expose Import locally, Open local copy and Create another copy actions. Existing matching local content is reused unless you explicitly request another independent entry. Copies retain provenance and are then maintained locally; ordinary edits do not automatically rewrite the external source.
+
+Copying handles available PDFs, parsed content and related reading results, with reference and provenance checks. Wait for active parsing to finish before copying a source. Incomplete copies are not presented as successfully created entries. PDF import also reports matching content and provides a review path so a filename change alone does not create an unnoticed duplicate.
+
+### Zotero notes
+
+- Select source notes to import as independent Neuink notes with source associations.
+- Compare source text, local content and differences when saving; choose local-only saving or explicitly confirm replacement of the original Zotero note.
+- Local saving does not require Zotero to be online. The write-back path requires a running Zotero version supporting authorized local access; the current UI specifies Zotero 10 or later.
+- Before write-back, reread the source version and back up the original. Conflicts require another review. A successful local save and a failed source write are reported separately, with the local draft retained.
+- Notes containing images cannot be written back directly. Some imported content is converted to text and images must be viewed in Zotero. This is not complete rich-text bidirectional synchronization.
+
+## Library and tag management
+
+Click sortable column headers to change ordering. Table headers are centered, titles truncate to available width with full-title tooltips, and row actions are displayed as icons with hover explanations. Single selection, multiple selection and batch actions use explicit selection state.
+
+Tag management provides a hierarchical tree, expand/collapse controls, panning, zoom, reset and context menus for larger topic structures. Tag membership, source properties and local editing permissions remain distinct; restricted source operations are not reported as successful writes.
+
+## Development-version troubleshooting
+
+| Symptom | Explanation and next step |
+| --- | --- |
+| A downloaded package lacks a feature described here | This README describes beta. Check whether the feature reached main and a new release. Alpha card features do not automatically appear in beta or main. |
+| A PDF opens but no Reflow content is available | Original PDF reading does not require parsing. Import matching MinerU output or complete parsing through the configured service. |
+| Many paragraphs are unavailable for generation | Check body type, the 20-word/40-character minimum, math or rich content, continuation groups and the input-length limit. These exclusions are intentional. |
+| Selecting Key points still shows original text | The paragraph may have no valid cached result. Inspect its hint or task row instead of repeatedly changing levels. |
+| Model output reached its length limit | Check the assistant model's maximum output and the provider limit, then retry affected paragraphs. Increasing context capacity does not itself increase the output allowance. |
+| Some paragraphs finish after pausing | Pause prevents new dispatch; requests and saves already in flight can finish. Use Stop to end execution. |
+| Paragraph detail is unavailable in sentence mode | The modes are mutually exclusive. Return to paragraph display or select a detail level; cached results remain. |
+| A Chinese detail level has no translation | Ordinary paragraph translations and detail translations are stored separately. Request that level's translation and check the paragraph-translation route. |
+| Local copies remain after hiding a source | Copies are independently managed. Hiding a source is not file deletion or removal of local entries. |
+| Zotero replacement failed after a local save | Check the running Zotero instance, authorization and source-version conflicts, then refresh the comparison. Local and external saves have separate outcomes. |
+
+These development workflows include browser previews and automated regression coverage. **Native Tauri visual acceptance, real long-document performance and real-model end-to-end behavior still require separate validation.** Isolated previews do not replace those checks; the development plan records their scope.
+
 ## Interface examples
 
 Read the [illustrated user guide](https://sugrsertraline.github.io/neuink/screenshots.html) (Chinese) for core concepts, feature entry points, and step-by-step workflows. The workspace below places the original PDF beside evidence-linked notes.
@@ -141,7 +278,7 @@ Read the [illustrated user guide](https://sugrsertraline.github.io/neuink/screen
 
 ### If you already have a Windows portable build
 
-Extract the complete archive and open `Neuink.exe`, keeping its resource directories beside it. Node.js and Rust are not needed; Microsoft Edge WebView2 Runtime is required. Portable builds use the application's existing workspace and settings locations, so user data is not necessarily stored beside the executable.
+Extract the complete archive and open `Neuink.exe`, keeping its resource directories beside it. Node.js and Rust are not needed; Microsoft Edge WebView2 Runtime is required. Windows portable builds default to the `data` directory beside the program. Close the app before moving the complete folder, retain your existing data during updates, and confirm the active location in data settings.
 
 The project version is **0.1.3**. A Windows portable build workflow exists; signing, in-app updates, and native distribution validation still have outstanding work. See [packaging and distribution](docs/deployment/packaging-and-distribution.md) for automated builds, downloads, and platform validation status.
 
@@ -164,6 +301,7 @@ For parsing, reflow, or translation, follow the [PDF import and parsing tutorial
 | Semantic / hybrid search | Optional local embedding resources; no silent runtime model downloads. |
 | Structured PDF parsing | Import an existing MinerU ZIP or send the PDF to your configured compatible parser. |
 | AI conversations and translation | Your configured model service receives the relevant context. |
+| Reading-detail generation and detail translations | Use the assistant model and paragraph-translation route respectively; selected text and bounded context go to those services, while switching saved results uses local caches. |
 | Online paper / web research | Network access; optional services also depend on credentials, permissions, and quotas. |
 | Embedded web pages / video captions | Native embedding currently runs on Windows; the bundled video runtime currently targets Windows x64. |
 
@@ -180,6 +318,20 @@ npm install
 npm run desktop:dev
 ```
 
+Confirm the branch in an existing checkout before making changes; do not switch branches with unresolved working-tree edits. For frontend interactions only, use `npm --workspace apps/desktop run dev:frontend`. A normal browser does not provide the complete Tauri filesystem or native capabilities.
+
+| Command | Purpose |
+| --- | --- |
+| `npm --workspace apps/desktop run dev:d-data` | Local development with the repository's `portable/data` by default; first close any portable instance using the same data. |
+| `npm --workspace apps/desktop exec tsc -- --noEmit` | TypeScript checking. |
+| `npm --workspace apps/desktop run test:frontend` | Frontend automated tests. |
+| `cargo test --workspace` | Rust workspace tests; run network-fixture scenarios serially as directed by engineering guidelines. |
+| `npm run desktop:build` | Frontend production build, not publication of a desktop installer. |
+
+Development previews include `fold-task-showcase.html`, `fold-gesture-showcase.html` and `tag-editor-showcase.html`. The detail previews use synthetic materials or cached results to exercise filtering, gestures and layout without reading real papers or calling models. The card preview, `ideation-showcase.html`, belongs to alpha.
+
+Repository boundaries: `apps/desktop` contains the desktop frontend and Tauri entry point; `crates` contains Rust services and persistence; `packages` contains shared code; `website` contains the product guides and site; `docs` contains engineering, product and deployment documentation. User data and generated build output are not source files to publish.
+
 Basic reading and notes do not require a model service. See [packaging and distribution](docs/deployment/packaging-and-distribution.md) for model resources, browser-reading components, and release builds, and [engineering guidelines](docs/development/engineering-guidelines.md) for development checks.
 
 ## Documentation
@@ -192,3 +344,5 @@ Basic reading and notes do not require a model service. See [packaging and distr
 ## Licence
 
 Neuink is licensed under [Apache-2.0](LICENSE). Third-party components retain their own licences; see the [component summary](docs/deployment/third-party-components.md) (Chinese) and [NOTICE](NOTICE).
+
+Reading detail adapts the paragraph prompt and assembly, source-word alignment and bounded transitions from [TextFold](https://github.com/chenxiachan/textfold), pinned to revision `5fc941dc4560ee2809c0f278da28457292c7f739` (Copyright 2026 Xia Chen, Apache-2.0). The adaptation uses Neuink model settings, segment identifiers, queues, persistence and scroll containers, retains the upstream English/CJK length rules and omits section summaries. The upstream [LICENSE](apps/desktop/public/licenses/TextFold-LICENSE.txt), [NOTICE](apps/desktop/public/licenses/TextFold-NOTICE.txt) and modification notices are retained. See the [reading-detail guide](#reading-detail-guide) for operations, eligibility and model limits.
