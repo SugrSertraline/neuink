@@ -5,6 +5,7 @@ import {
   entryContentSurface,
   entryContentId,
   initialWorkspaceSurfaceLayout,
+  emptyWorkspaceSurfaceLayout,
   surfaceNoteTarget,
   workspaceSurfaceLabel,
   surfaceKey,
@@ -21,6 +22,28 @@ const pdfA: WorkspaceSurface = { kind: 'pdf', entryId: 'a' };
 const reflowA: WorkspaceSurface = { kind: 'reflow', entryId: 'a' };
 const noteA: WorkspaceSurface = { kind: 'note', entryId: 'a', noteId: 'n1' };
 const pdfB: WorkspaceSurface = { kind: 'pdf', entryId: 'b' };
+
+it('closes the last library into an empty workspace and reopens a page without a phantom tab', () => {
+  const closed = workspaceSurfaceReducer(initialWorkspaceSurfaceLayout, { type: 'close', pane: 'left', key: 'library' });
+  expect(closed).toEqual(emptyWorkspaceSurfaceLayout);
+  const opened = workspaceSurfaceReducer(closed, { type: 'open', pane: 'right', surface: { kind: 'daily-dashboard' } });
+  expect(opened.leftTabs).toEqual([{ kind: 'daily-dashboard' }]);
+  expect(opened.right).toBeNull();
+  expect(surfaceKey(opened.left)).toBe('daily-dashboard');
+});
+
+it('reuses the dashboard across panes and keeps it when the library closes', () => {
+  const dashboard: WorkspaceSurface = { kind: 'daily-dashboard' };
+  let state = workspaceSurfaceReducer(initialWorkspaceSurfaceLayout, { type: 'open', pane: 'right', surface: dashboard });
+  state = workspaceSurfaceReducer(state, { type: 'open', pane: 'left', surface: dashboard });
+  expect(state.focusedPane).toBe('right');
+  expect(state.rightTabs).toEqual([dashboard]);
+  state = workspaceSurfaceReducer(state, { type: 'close', pane: 'left', key: 'library' });
+  expect(state.left).toBe(dashboard);
+  expect(state.leftTabs).toEqual([dashboard]);
+  expect(state.right).toBeNull();
+  expect(workspaceSurfaceReducer(state, { type: 'closePane', pane: 'left' })).toEqual(emptyWorkspaceSurfaceLayout);
+});
 
 it('opens a reply as a separate reusable read-only tab, movable between panes and released on close', () => {
   const reply: WorkspaceSurface = { kind: 'assistant-reply', message: { message_id: 'answer', role: 'assistant', content: '回答', source_links: [], created_at: '' } };
@@ -231,10 +254,10 @@ describe('workspaceSurfaceReducer', () => {
     expect(unpinned.leftTabs).toEqual([reflowA, pdfA, library]);
   });
 
-  it('keeps pinned tabs and the library when closing other tabs, then clears closed pins', () => {
+  it('keeps only pinned tabs when closing others, including an unpinned library', () => {
     const pinned = workspaceSurfaceReducer(layout({ leftTabs: [library, pdfA, reflowA, pdfB], right: noteA, rightTabs: [noteA] }), { type: 'setPinned', key: surfaceKey(reflowA), pinned: true });
     const closed = workspaceSurfaceReducer(pinned, { type: 'closeOthers', pane: 'left', key: surfaceKey(pdfA) });
-    expect(closed.leftTabs).toEqual([reflowA, library, pdfA]);
+    expect(closed.leftTabs).toEqual([reflowA, pdfA]);
     const removed = workspaceSurfaceReducer(closed, { type: 'close', pane: 'left', key: surfaceKey(reflowA) });
     expect(removed.pinnedTabKeys).toEqual([]);
   });
@@ -273,14 +296,14 @@ describe('workspaceSurfaceReducer', () => {
     expect(next.focusedPane).toBe('right');
   });
 
-  it('keeps the left pane valid when its final tab moves right', () => {
+  it('merges the surviving pane when its final left tab moves right, without recreating the library', () => {
     const next = workspaceSurfaceReducer(layout({ left: pdfA, leftTabs: [pdfA] }), {
       type: 'move', key: surfaceKey(pdfA), pane: 'right'
     });
 
-    expect(next.left).toEqual(library);
-    expect(next.leftTabs).toEqual([library]);
-    expect(next.right).toEqual(pdfA);
+    expect(next.left).toEqual(pdfA);
+    expect(next.leftTabs).toEqual([noteA, pdfB, pdfA]);
+    expect(next.right).toBeNull();
   });
 
   it('merges the remaining pane when moving the final left tab after swapping the library right', () => {

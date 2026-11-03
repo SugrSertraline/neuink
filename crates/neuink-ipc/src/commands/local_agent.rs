@@ -1,7 +1,7 @@
 //! Claude installation detection and opt-in execution. Detection never opens a session.
 mod installation;
 mod mcp;
-mod process;
+pub(crate) mod process;
 mod rpc;
 pub mod runtime;
 #[cfg(windows)]

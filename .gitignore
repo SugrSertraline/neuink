@@ -91,3 +91,6 @@ apps/desktop/src-tauri/resources/onboarding-availability.json
 apps/desktop/src-tauri/resources/browser-reader/
 apps/desktop/src-tauri/resources/.browser-reader-prepare-*/
 apps/desktop/src-tauri/resources/.browser-reader-backup-*/
+apps/desktop/src-tauri/resources/research-component/
+__pycache__/
+*.py[cod]

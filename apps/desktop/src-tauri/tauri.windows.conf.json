@@ -2,8 +2,14 @@
   "bundle": {
     "targets": ["nsis"],
     "windows": {
+      "allowDowngrades": false,
+      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": false,
+        "startMenuFolder": "Neuink",
+        "compression": "lzma"
       }
     }
   }

@@ -50,6 +50,14 @@ export type PdfParseStatus =
 
 export type ReadingMode = 'pdf' | 'reflow';
 
+export type ReadingSession = {
+  id: string;
+  local_date: string;
+  started_at: string;
+  ended_at: string;
+  active_ms: number;
+};
+
 export type EntryReadingState = {
   entry_id: EntryId;
   version: number;
@@ -62,6 +70,7 @@ export type EntryReadingState = {
   session_count: number;
   last_read_at: string | null;
   daily_active_ms: Record<string, number>;
+  reading_sessions?: ReadingSession[];
 };
 
 export type ReadingStateUpdate = {
@@ -72,6 +81,7 @@ export type ReadingStateUpdate = {
   active_ms_delta: number;
   session_start: boolean;
   local_date: string | null;
+  reading_session?: ReadingSession;
 };
 
 export type ContentItem = {
@@ -80,7 +90,7 @@ export type ContentItem = {
   title: string;
 };
 
-export type NoteOwner = { kind: 'entry'; entry_id: string } | { kind: 'tag_reading'; tag_id: string };
+export type NoteOwner = { kind: 'entry'; entry_id: string } | { kind: 'tag_reading'; tag_id: string } | { kind: 'daily'; date: string };
 export type NoteTarget = { owner: NoteOwner; note_id: string };
 
 export type NoteDocument = {
@@ -98,7 +108,7 @@ export type SourceLink = {
     kind: 'note';
     entry_id: EntryId;
     note_id: NoteId;
-  } | { kind: 'tag_note'; tag_id: string; note_id: NoteId };
+  } | { kind: 'tag_note'; tag_id: string; note_id: NoteId } | { kind: 'daily_note'; date: string; note_id: NoteId };
   sources: SegmentRef[];
   display_text: string;
   created_at: string;

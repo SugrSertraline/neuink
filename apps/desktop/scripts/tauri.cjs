@@ -3,6 +3,7 @@ const path = require('node:path');
 const { REQUIRED_FILES, prepareResources } = require('./onboarding-resources.cjs');
 const { resourcePaths: browserReaderResourcePaths } = require('./browser-reader-resources.cjs');
 const { resourcePaths: readerLicenseResourcePaths } = require('./reader-licenses.cjs');
+const { resourcePaths: researchResourcePaths } = require('./research-component.cjs');
 
 /** Empty optional globs are errors in Tauri. Pass only files verified before the CLI loads its config. */
 function resourceArguments(args, options = {}) {
@@ -26,6 +27,7 @@ function allResourceArguments(args, options = {}) {
     ...options.browserReader, command: args[0], log: options.log ?? console.log,
   }));
   config.bundle.resources.push(...readerLicenseResourcePaths(options.readerLicenses));
+  config.bundle.resources.push(...researchResourcePaths({ ...options.research, command: args[0], log: options.log ?? console.log }));
   if (process.platform === 'darwin' && process.arch === 'x64' && process.env.NEUINK_MACOS_INTEL_RUNTIME) {
     config.bundle.macOS = require('./macos-intel-runtime.cjs').bundleConfig(process.env.NEUINK_MACOS_INTEL_RUNTIME);
   }

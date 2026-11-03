@@ -42,12 +42,15 @@ import {
   workspaceSurfacePairRelationLabel
 } from './workspaceSurfacePairing';
 import { EntryTabHoverSwitch, entryTabViews } from './EntryTabHoverSwitch';
+import type { ReadingLinkMode } from '@/shared/lib/readerPreferences';
 
 const TAB_WIDTH = 176;
 const MENU_WIDTH = 34;
 const TAB_STEP = 180;
 
 type WorkspaceTabsBarProps = {
+  readingLinkMode?: ReadingLinkMode;
+  onReadingLinkModeChange?: (mode: ReadingLinkMode) => void;
   onNewBrowser?: () => void;
   entries: Array<{ id: string; title: string; pdfFileName?: string | null }>;
   layout: WorkspaceSurfaceLayout;
@@ -65,6 +68,8 @@ type WorkspaceTabsBarProps = {
 };
 
 export function WorkspaceTabsBar({
+  readingLinkMode = 'scroll',
+  onReadingLinkModeChange,
   onNewBrowser,
   entries,
   layout,
@@ -105,11 +110,12 @@ export function WorkspaceTabsBar({
   useEffect(() => () => releaseCapture(), []);
   const dragActive = pointerDrag?.dragging === true;
   const draggingKey = pointerDrag?.dragging ? surfaceKey(pointerDrag.surface) : null;
-  const pairRelationLabel = layout.right
-    ? workspaceSurfacePairRelationLabel(
-        resolveWorkspaceSurfacePair(layout.left, layout.right).relation
-      )
-    : null;
+  const pairRelation = layout.right ? resolveWorkspaceSurfacePair(layout.left, layout.right).relation : null;
+  const pairRelationLabel = pairRelation ? workspaceSurfacePairRelationLabel(pairRelation) : null;
+  const linkLabel = readingLinkMode === 'scroll' ? '同步滚动' : '点击联动';
+  const linkHint = readingLinkMode === 'scroll'
+    ? '两侧滚动与点击定位同步；点击切换为仅点击联动'
+    : '仅点击片段或导航时定位另一侧，滚动各自独立；点击切换为同步滚动';
 
   const startPointerDrag = (surface: WorkspaceSurface, event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || event.isPrimary === false || event.target instanceof Element && event.target.closest('[data-tab-close="true"]')) {
@@ -271,6 +277,7 @@ export function WorkspaceTabsBar({
       'tabsbar workspace-tabsbar',
       split && 'is-split',
       pairRelationLabel && 'has-pair-status',
+      pairRelation === 'reader-sync' && onReadingLinkModeChange && 'has-reader-link-button',
       dragActive && 'is-tab-dragging',
       dragActive && pointerDrag && isAssistantContextSurface(pointerDrag.surface) && 'is-assistant-context-dragging'
     )}>
@@ -324,7 +331,15 @@ export function WorkspaceTabsBar({
       {split || onNewBrowser ? (
         <div className="workspace-tabsbar-actions">
           {onNewBrowser ? <Button aria-label="新建网页标签" title="新建网页标签" size="icon-sm" variant="ghost" type="button" onClick={onNewBrowser}><Plus size={16} /></Button> : null}
-          {pairRelationLabel ? (
+          {pairRelation === 'reader-sync' && onReadingLinkModeChange ? (
+            <Tooltip><TooltipTrigger asChild>
+              <Button size="xs" variant={readingLinkMode === 'scroll' ? 'secondary' : 'outline'}
+                type="button" aria-label={`分屏联动：${linkLabel}`} aria-pressed={readingLinkMode === 'scroll'}
+                onClick={() => onReadingLinkModeChange(readingLinkMode === 'scroll' ? 'click' : 'scroll')}>
+                <Link2 size={13} aria-hidden="true" />{linkLabel}
+              </Button>
+            </TooltipTrigger><TooltipContent>{linkHint}</TooltipContent></Tooltip>
+          ) : pairRelationLabel ? (
             <span
               aria-label={pairRelationLabel}
               className="workspace-tabsbar-pair-status"
@@ -440,7 +455,6 @@ function TabPane({
       {visible.map((surface) => (
         (() => {
           const index = tabs.findIndex((tab) => surfaceKey(tab) === surfaceKey(surface));
-          const canClose = surface.kind !== 'library';
           const pinned = pinnedTabKeys.includes(surfaceKey(surface));
           const entry = isEntryReadingView(surface) ? entries.find((item) => item.id === surface.entryId) : undefined;
           const transform = tabDragTransform({
@@ -469,7 +483,7 @@ function TabPane({
           onAuxClick={(event) => {
             if (event.button === 1) {
               event.preventDefault();
-              if (canClose) onClose(pane, surface);
+              onClose(pane, surface);
             }
           }}
         >
@@ -493,7 +507,7 @@ function TabPane({
               <TooltipContent side="bottom" sideOffset={6}>{workspaceSurfaceLabel(surface, entries)}</TooltipContent>
             </Tooltip>
           )}
-          {canClose && !pinned ? <button
+          {!pinned ? <button
             aria-label={`关闭${workspaceSurfaceLabel(surface, entries)}`}
             data-tab-close="true"
             type="button"
@@ -522,10 +536,10 @@ function TabPane({
           <ContextMenuItem disabled={pane === 'left'} onSelect={() => onMove(surface, 'left')}>移到左侧分栏</ContextMenuItem>
           <ContextMenuItem disabled={pane === 'right'} onSelect={() => onMove(surface, 'right')}>移到右侧分屏</ContextMenuItem>
           <ContextMenuSeparator />
-          {canClose ? <ContextMenuItem onSelect={() => onClose(pane, surface)}>关闭</ContextMenuItem> : null}
+          <ContextMenuItem onSelect={() => onClose(pane, surface)}>关闭</ContextMenuItem>
           <ContextMenuItem onSelect={() => onCloseOthers(pane, surface)}>关闭其他</ContextMenuItem>
           {onCloseToRight ? <ContextMenuItem
-            disabled={!tabs.slice(index + 1).some((tab) => tab.kind !== 'library' && !pinnedTabKeys.includes(surfaceKey(tab)))}
+            disabled={!tabs.slice(index + 1).some((tab) => !pinnedTabKeys.includes(surfaceKey(tab)))}
             onSelect={() => onCloseToRight(pane, surface)}
           >关闭右侧标签</ContextMenuItem> : null}
           <ContextMenuSeparator />

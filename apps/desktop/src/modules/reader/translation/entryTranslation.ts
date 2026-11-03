@@ -1,4 +1,5 @@
 import { generateText } from 'ai';
+import { logTranslationFailure } from '@/shared/ipc/translationLogApi';
 import { translateSelectionService } from '@/shared/ipc/selectionTranslationApi';
 
 import { getLlmSettings, readEntryAssistantContext } from '@/shared/ipc/assistantApi';
@@ -15,7 +16,9 @@ import {
 import type { SourceSegment } from '@/shared/types/domain';
 import { runLocalBackgroundJob } from '@/shared/lib/localBackgroundJobs';
 
-import { createNeuinkModel, generationSettings } from '../../assistant/sdk/provider';
+import { createNeuinkModel } from '../../assistant/sdk/provider';
+import { translationModelSettings } from './translationModelSettings';
+import { translateSelectionWithProfile } from './modelSelectionTranslation';
 import { expandEnglishLigatures, singleEnglishWord, translateLocalEnglishWord } from './localEnglishLexicon';
 
 const MAX_PAPER_CONTEXT_BUDGET = 28_000;
@@ -68,30 +71,10 @@ export async function translateTextSelection({
       throw new Error('请先在模型设置里配置翻译模型。');
     }
 
-    const result = await generateText({
-      ...generationSettings(profile),
-      model: createNeuinkModel(profile),
-      system: word
-        ? 'Translate the single English word into concise Simplified Chinese dictionary meanings. Return the meanings only.'
-        : [
-          'You are an academic paper translator.',
-          'Translate the selected text into Simplified Chinese.',
-          'Preserve formulas, citations, numbers, abbreviations, code, and technical symbols.',
-          'Return the translation only. Do not return JSON, explanations, labels, or markdown fences.'
-        ].join('\n'),
-      prompt: word ? word : [
-        `Paper title: ${entryTitle}`,
-        context?.trim()
-          ? `Paragraph context:\n${trimToBudget(context.trim(), translationBudgets(profile.max_context_length).context)}`
-          : null,
-        `Selected text:\n${sourceText}`
-      ].filter(Boolean).join('\n\n')
+    return translateSelectionWithProfile(profile, {
+      sourceText, word, entryTitle,
+      context: context?.trim() ? trimToBudget(context.trim(), translationBudgets(profile.max_context_length).context) : null
     });
-    const translatedText = result.text.trim();
-    if (!translatedText) {
-      throw new Error('翻译模型没有返回可用译文。');
-    }
-    return translatedText;
   });
 }
 
@@ -205,7 +188,7 @@ export async function translateEntrySegments({
   }
 
   const model = createNeuinkModel(profile);
-  const generationOptions = generationSettings(profile);
+  const generationOptions = translationModelSettings(profile);
   const budgets = translationBudgets(profile.max_context_length);
   const paperContext = response.translation?.paper_context
     ? {
@@ -220,7 +203,7 @@ export async function translateEntrySegments({
         model,
         root,
         segments
-      });
+      }).catch(async error => { await logTranslationFailure(profile, 'context_validation', error); throw error; });
 
   if (response.translation?.paper_context) {
     onProgress?.({
@@ -255,7 +238,10 @@ export async function translateEntrySegments({
         generationOptions,
         model,
         paperContext
-      });
+      }).catch(async error => { await logTranslationFailure(profile, 'batch_validation', error); throw error; });
+      if (batch.some(segment => !translated.get(segment.uid)?.trim())) {
+        await logTranslationFailure(profile, 'batch_validation', 'TEST_INCOMPLETE_TRANSLATION');
+      }
       response = await upsertTranslatedSegments(
         root,
         entryId,
@@ -322,7 +308,7 @@ async function buildPaperContextFromEntry({
   contextBudget: number;
   entryId: string;
   entryTitle: string;
-  generationOptions: ReturnType<typeof generationSettings>;
+  generationOptions: ReturnType<typeof translationModelSettings>;
   model: ReturnType<typeof createNeuinkModel>;
   root: string;
   segments: SourceSegment[];
@@ -382,7 +368,7 @@ async function buildPaperContext({
   contextBudget: number;
   documentMarkdown: string;
   entryTitle: string;
-  generationOptions: ReturnType<typeof generationSettings>;
+  generationOptions: ReturnType<typeof translationModelSettings>;
   model: ReturnType<typeof createNeuinkModel>;
   segments: SourceSegment[];
 }) {
@@ -426,7 +412,7 @@ async function translateBatch({
 }: {
   batch: SourceSegment[];
   entryTitle: string;
-  generationOptions: ReturnType<typeof generationSettings>;
+  generationOptions: ReturnType<typeof translationModelSettings>;
   model: ReturnType<typeof createNeuinkModel>;
   paperContext: { summary: string; terminology: TranslationTerm[] };
 }) {

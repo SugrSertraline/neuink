@@ -189,6 +189,7 @@ impl LlmClient {
             if let Some(report) = &self.activity {
                 report(RequestActivity::Generating);
             }
+            let started = Instant::now();
             let response = timeout(
                 request_timeout,
                 self.client
@@ -198,12 +199,37 @@ impl LlmClient {
                     .send(),
             )
             .await
-            .map_err(|_| RequestError::Timeout)?
-            .map_err(|error| RequestError::Other(error.to_string()))?;
+            .map_err(|_| RequestError::Timeout)
+            .and_then(|result| {
+                result.map_err(|error| RequestError::Other(error.without_url().to_string()))
+            })
+            .inspect_err(|error| {
+                crate::translation_log::best_effort(
+                    &self.profile,
+                    crate::translation_log::Stage::Request,
+                    &error.to_string(),
+                    crate::translation_log::Details {
+                        elapsed_ms: started.elapsed().as_millis() as u64,
+                        attempt: Some(attempt + 1),
+                        ..Default::default()
+                    },
+                )
+            })?;
             if response.status() != StatusCode::TOO_MANY_REQUESTS {
                 return Ok((response, slot));
             }
             let retry_allowed = self.rate_limit.defer(attempt, response.headers());
+            crate::translation_log::best_effort(
+                &self.profile,
+                crate::translation_log::Stage::Request,
+                "HTTP_429",
+                crate::translation_log::Details {
+                    http_status: Some(429),
+                    attempt: Some(attempt + 1),
+                    elapsed_ms: started.elapsed().as_millis() as u64,
+                    ..Default::default()
+                },
+            );
             // Release the HTTP response before waiting. A 429 is never a stream-format error.
             drop(response);
             drop(slot);

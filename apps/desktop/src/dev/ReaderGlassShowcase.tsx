@@ -26,10 +26,14 @@ import { findSourceSegment } from '@/shared/lib/listItemSegments';
 import type { PdfJumpRequest } from '@/modules/reader/types';
 import { readingAssistantContext } from '@/modules/reader/components/readingAssistantContext';
 import type { AssistantContextInput, AssistantContextItem } from '@/shared/types/assistant';
-import { readStoredReaderPreferences } from '@/shared/lib/readerPreferences';
+import { readStoredReaderPreferences, type ReadingLinkMode } from '@/shared/lib/readerPreferences';
+import { WorkspaceTabsBar } from '@/app/WorkspaceTabsBar';
+import { ReadingViewSession } from '@/modules/reader/components/navigation/ReadingViewSession';
+import { ReadingLinkReflowPreview } from './ReadingLinkReflowPreview';
 import { ReadingSessionContext } from '@/modules/reader/parallel-reading/ReadingSessionContext';
 import type { LibraryEntry } from '@/modules/library/components/LibrarySidebar';
 import type { Annotation, SourceSegment } from '@/shared/types/domain';
+import type { TranslatedSegment } from '@/shared/ipc/workspaceApi';
 import { SegmentAnnotationEditor } from '@/modules/annotations/components/SegmentAnnotationEditor';
 import { createPdfPageAnnotationSegment } from '@/modules/reader/components/pdf-reader/pdfPageAnnotations';
 import { readerPdfFixture } from './readerPdfFixture';
@@ -38,13 +42,18 @@ import { EntryPdfAcquisitionPreview } from './EntryPdfAcquisitionPreview';
 import { NoteImageResizePreview } from './NoteImageResizePreview';
 import { ArrayMathPreview } from './ArrayMathPreview';
 import { ReadingStateRetention } from '@/modules/reader/components/navigation/ReadingStateRetention';
-import { ReadingNavigationScope, useReadingNavigation } from '@/modules/reader/components/navigation/ReadingNavigation';
+import { ReadingNavigationScope, segmentTarget, useReadingNavigation } from '@/modules/reader/components/navigation/ReadingNavigation';
 import { usePdfReadingNavigation } from '@/modules/reader/components/navigation/usePdfReadingNavigation';
 import { textSelectionAnnotationDraft } from '@/modules/reader/components/pdf-reader/textSelectionAnnotation';
 import '../styles/globals.css';
 
 const noop = () => undefined;
-const interactionCheck = new URLSearchParams(location.search).has('interactions');
+const visualDetailCheck = new URLSearchParams(location.search).has('visual-detail');
+const pinsCheck = new URLSearchParams(location.search).has('pins') || visualDetailCheck;
+const linkCheck = new URLSearchParams(location.search).has('linking');
+const reflowLinkCheck = linkCheck && new URLSearchParams(location.search).has('reflow');
+const sentenceFallbackCheck = new URLSearchParams(location.search).has('sentence-fallback');
+const interactionCheck = new URLSearchParams(location.search).has('interactions') || pinsCheck || linkCheck || sentenceFallbackCheck;
 const translationCheck = new URLSearchParams(location.search).has('selection-translation');
 const localPaperCheck = new URLSearchParams(location.search).has('local-paper');
 const blockDragCheck = new URLSearchParams(location.search).has('block-drag');
@@ -63,28 +72,47 @@ const interactionSegments: SourceSegment[] = Array.from({ length: 4 }, (_, page_
     text: sampleLines.slice(0, group === 4 ? 2 : 3).join(' '),
     bbox: [80, ((179 + group * 72) / 842) * 1000, 850, ((242 + group * 72) / 842) * 1000],
   } as SourceSegment))).flat();
+const sentenceFallbackTranslations = new Map<string, TranslatedSegment>(interactionSegments.map((segment, index) => [segment.uid, {
+  segment_uid: segment.uid, segment_type: segment.segment_type, page_idx: segment.page_idx, source_text: segment.text,
+  source_hash: 'preview', status: 'translated', error: null, updated_at: '',
+  translated_text: index % 5 === 1 ? '可以在共享研究笔记中比较多个来源的证据。在论文之间切换时保持原文可读。选择文字或搜索 PDF 时保留当前阅读位置。'
+    : index % 5 === 2 ? '' : '在共享研究笔记中比较多篇论文的证据时应保持原始文档清晰易读并保留当前位置以便进行检索和文本选择'.repeat(index % 5 === 3 ? 25 : 1) + '。',
+}]));
 const listInteractionSegments: SourceSegment[] = interactionSegments.map(segment => ({ ...segment,
   segment_type: 'list', text: sampleLines.join('\n'), markdown: sampleLines.map(line => `- ${line}`).join('\n'),
   mineru_metadata: { list_item_regions: JSON.stringify(sampleLines.map((text, index) => ({ text,
     bbox: [80, segment.bbox![1] + index * 24 / 842 * 1000, 850, segment.bbox![1] + (index * 24 + 17) / 842 * 1000] }))) },
 }));
+const pinSegments: SourceSegment[] = [...(visualDetailCheck ? interactionSegments.filter(segment => segment.bbox![3] < 418) : interactionSegments), ...Array.from({ length: 4 }, (_, page_idx) => ({
+  uid: `pin-figure-${page_idx}`, page_idx, segment_type: 'figure' as const, markdown: null,
+  text: `Figure ${page_idx + 1}. Research evidence grouped by source.`, bbox: [80, 636, 918, 800] as [number, number, number, number],
+})), ...(visualDetailCheck ? Array.from({ length: 4 }, (_, page_idx) => ({
+  uid: `detail-table-${page_idx}`, page_idx, segment_type: 'table' as const, markdown: null,
+  text: 'Model comparison on the evaluation set', bbox: [80, 418, 918, 575] as [number, number, number, number],
+})) : [])];
 const entry: LibraryEntry = { id:'glass-fixture', title:'跨论文阅读：证据比较与来源追溯', contents:[], tagIds:[], tags:[], fields:{}, createdAt:'', updatedAt:'', pdfFileName:'reading-study.pdf', parseMessage:null, parseEndpoint:null, status:'Parsed', progress:100 };
 // Isolated preview; no IPC operation reaches a user workspace.
 mockIPC(async () => undefined, { shouldMockEvents:true });
 
-type PdfPreviewProps = { compact: boolean; paper?: LocalPaper; jumpRequest?: PdfJumpRequest | null; onAddContext?: (item: AssistantContextInput) => void; viewId?: string };
+type PdfPreviewProps = { compact: boolean; paper?: LocalPaper; jumpRequest?: PdfJumpRequest | null; onAddContext?: (item: AssistantContextInput) => void; viewId?: string; linkMode?: ReadingLinkMode };
 function PdfPreview(props: PdfPreviewProps) {
+  if (linkCheck) return <ReadingViewSession surface={{ kind: 'pdf', entryId: entry.id, viewId: props.viewId }} workspaceRoot="preview" active linkMode={props.linkMode}>
+    <ReadingNavigationScope><PdfPreviewBody {...props} /></ReadingNavigationScope>
+  </ReadingViewSession>;
   return resumeCheck ? <ReadingStateRetention storageKey={`neuink.preview.reading:${props.viewId ?? 'left'}`}>
     <ReadingNavigationScope retentionKey="preview-pdf"><PdfPreviewBody {...props} /></ReadingNavigationScope>
   </ReadingStateRetention> : <PdfPreviewBody {...props} />;
 }
 function PdfPreviewBody({ compact, paper, jumpRequest = null, onAddContext }: PdfPreviewProps) {
   const navigation = useReadingNavigation();
-  const bytes = useMemo(() => paper?.bytes ?? readerPdfFixture(), [paper]);
+  const bytes = useMemo(() => paper?.bytes ?? readerPdfFixture(false, false, false, visualDetailCheck), [paper]);
   const previewEntry = useMemo(() => paper ? { ...entry, title: 'Attention Is All You Need', pdfFileName: 'attention-is-all-you-need.pdf' } : entry, [paper]);
   const pdfState = usePdfDocument(bytes);
   const [mode, setMode] = useState<'ready'|'loading'|'error'>('ready');
-  const [preferences, setPreferences] = useState(readStoredReaderPreferences);
+  const [preferences, setPreferences] = useState(() => ({ ...readStoredReaderPreferences(), ...(sentenceFallbackCheck ? {
+    hoverPreviewEnabled: true, hoverPreviewShowTranslation: true, hoverPreviewShowOriginal: false,
+    pdfSentenceHoverEnabled: true, pdfSentenceHoverShowTranslation: true, pdfSentenceHoverShowOriginal: false,
+  } : {}) }));
   const [page, setPage] = useState(1);
   const [auxOpen, setAuxOpen] = useState(false);
   const [selectedSegment, setSelectedSegment] = useState<SourceSegment | null>(null);
@@ -102,7 +130,7 @@ function PdfPreviewBody({ compact, paper, jumpRequest = null, onAddContext }: Pd
   const { pdfScrollRef, bindPdfScrollElement, pdfViewportWidth } = usePdfViewportMetrics({ notePaneOpen:auxOpen, segments:[] });
   const search = usePdfTextSearch(pdfState.document, page - 1);
   const pageCount = pdfState.document?.numPages ?? 4;
-  const pages = useMemo(() => groupSegmentsByPage(paper?.segments ?? (listItemsCheck ? listInteractionSegments : interactionCheck ? interactionSegments : []), pageCount), [paper, pageCount]);
+  const pages = useMemo(() => groupSegmentsByPage(paper?.segments ?? (pinsCheck ? pinSegments : listItemsCheck ? listInteractionSegments : interactionCheck ? interactionSegments : []), pageCount), [paper, pageCount]);
   const dual = preferences.pageDisplayMode === 'dual' && !(preferences.pageTurningMode === 'book' && pdfViewportWidth < 860);
   const { zoom, updateZoom, pageWidth, handleCtrlWheelZoom, zoomSuppressRegions } = usePdfReaderZoom({
     entryId: previewEntry.id, viewportWidth: pdfViewportWidth, pageDisplayMode: dual ? 'dual' : 'single', onInteractionStart: noop,
@@ -139,11 +167,16 @@ function PdfPreviewBody({ compact, paper, jumpRequest = null, onAddContext }: Pd
             bookMode={preferences.pageTurningMode === 'book'} zoom={zoom} resumePageIdx={1}
             pdfScrollRef={pdfScrollRef} bindPdfScrollElement={bindPdfScrollElement} rows={rows} leftInset={PDF_RAIL_WIDTH} pageWidth={pageWidth}
             flashSegmentUid={flashSegmentUid} hoveredSegmentUid={null} annotationsBySegmentUid={annotationsBySegmentUid} notesBySegmentUid={new Map()}
-            hoverPreviewEnabled={interactionCheck} hoverPreviewFontSize="standard" hoverPreviewSize="standard" hoverPreviewShowRegion={interactionCheck} hoverPreviewShowOriginal={interactionCheck}
-            hoverPreviewShowNote={false} hoverPreviewShowAnnotation={false} hoverPreviewShowTranslation={false}
-            sentenceHoverShowOriginal={interactionCheck} sentenceHoverShowTranslation={false} showRegions={blockDragCheck} suppressRegions={zoomSuppressRegions}
+            hoverPreviewEnabled={sentenceFallbackCheck ? preferences.hoverPreviewEnabled : interactionCheck}
+            hoverPreviewFontSize={preferences.pdfHoverPreviewFontSize} hoverPreviewSize={preferences.pdfHoverPreviewSize}
+            hoverPreviewShowRegion={interactionCheck} hoverPreviewShowOriginal={sentenceFallbackCheck ? preferences.hoverPreviewShowOriginal : interactionCheck}
+            hoverPreviewShowNote={false} hoverPreviewShowAnnotation={false} hoverPreviewShowTranslation={sentenceFallbackCheck && preferences.hoverPreviewShowTranslation}
+            sentenceHoverEnabled={sentenceFallbackCheck && preferences.pdfSentenceHoverEnabled}
+            sentenceHoverShowOriginal={sentenceFallbackCheck ? preferences.pdfSentenceHoverShowOriginal : interactionCheck}
+            sentenceHoverShowTranslation={sentenceFallbackCheck && preferences.pdfSentenceHoverShowTranslation} showRegions={blockDragCheck} suppressRegions={zoomSuppressRegions}
             inlineAnnotationHoverEnabled={false}
-            sourceBacklinksBySegmentUid={{}} translationBySegmentUid={new Map()} translationStatus={null} translationMode="hover" translationVisible={false} workspaceRoot={null}
+            sourceBacklinksBySegmentUid={{}} translationBySegmentUid={sentenceFallbackCheck ? sentenceFallbackTranslations : new Map()}
+            translationStatus={null} translationMode="hover" translationVisible={sentenceFallbackCheck} workspaceRoot={null}
             onCtrlWheelZoom={handleCtrlWheelZoom} onOpenSegmentAnnotation={segment=>{setSelectedSegment(segment);setAuxOpen(true);}} onOpenSegmentNote={noop}
             onOpenSourceBacklink={noop} onCloseSegmentOverlay={noop} onCreateTextSelectionAnnotation={input => setAnnotations(current => {
               const draft = textSelectionAnnotationDraft(input, current);
@@ -152,7 +185,7 @@ function PdfPreviewBody({ compact, paper, jumpRequest = null, onAddContext }: Pd
                 : [...current, { annotation_id: crypto.randomUUID(), segment_uid: draft.segmentUid, kind: draft.kind,
                   content: draft.content, importance: draft.importance, text_selection: input.selection,
                   created_at: new Date().toISOString(), updated_at: new Date().toISOString() }];
-            })} onToggleSegment={noop}
+            })} onToggleSegment={segment => navigation?.linkTarget(segmentTarget(segment))}
             onTranslateTextSelection={translationCheck ? async () => '示例译文：多个来源的证据可以在同一份研究笔记中比较。' : undefined}
             onAddAssistantContext={blockDragCheck ? (segment, options) => onAddContext?.(readingAssistantContext(previewEntry, segment, options)) : undefined}
             searchQuery={search.query} searchMatchCountsByPage={search.matchCountsByPage} activeSearchPageIdx={search.activeMatch?.pageIdx}
@@ -172,7 +205,8 @@ function PdfPreviewBody({ compact, paper, jumpRequest = null, onAddContext }: Pd
   </div>;
 }
 function Showcase() {
-  const [split,setSplit]=useState(false), [searchOpen,setSearchOpen]=useState(false), [scale,setScale]=useState(1);
+  const [split,setSplit]=useState(linkCheck), [searchOpen,setSearchOpen]=useState(false), [scale,setScale]=useState(1);
+  const [linkMode, setLinkMode] = useState<ReadingLinkMode>('scroll');
   const [paper, setPaper] = useState<LocalPaper>();
   const [paperError, setPaperError] = useState('');
   const [jumpRequest, setJumpRequest] = useState<PdfJumpRequest | null>(null);
@@ -201,10 +235,12 @@ function Showcase() {
       <Button size="sm" variant="outline" onClick={()=>setSplit(v=>!v)}>{split?'单栏阅读':'双栏阅读'}</Button>
       <Button size="sm" variant="plain" onClick={()=>setScale(scale===1?1.25:1)}>{scale===1?'125%':'100%'}</Button>
       <span className="text-xs text-muted-foreground">滚动查看悬浮栏，支持翻页、缩放、查找和文字选择。</span></div>
-    <div className="grid min-h-0 flex-1" style={{gridTemplateColumns:blockDragCheck?'minmax(0,1fr) 340px':split?'1fr 1fr':'1fr',zoom:scale}}><PdfPreview compact={split || blockDragCheck} paper={paper} jumpRequest={jumpRequest} onAddContext={addContext}/>{blockDragCheck ? <PdfBlockComposerPreview entry={paper ? {...entry,title:'Attention Is All You Need',pdfFileName:'attention-is-all-you-need.pdf'} : entry}
+    {linkCheck && <WorkspaceTabsBar entries={[entry]} layout={{ focusedPane: 'left', left: { kind: 'pdf', entryId: entry.id }, leftTabs: [{ kind: 'pdf', entryId: entry.id }], right: split ? { kind: reflowLinkCheck ? 'reflow' : 'pdf', entryId: entry.id, viewId: 'right' } : null, rightTabs: split ? [{ kind: reflowLinkCheck ? 'reflow' : 'pdf', entryId: entry.id, viewId: 'right' }] : [] }}
+      readingLinkMode={linkMode} onReadingLinkModeChange={setLinkMode} onClose={noop} onCloseOthers={noop} onClosePane={noop} onMove={noop} onSelect={noop} onSwap={noop} />}
+    <div className="grid min-h-0 flex-1" style={{gridTemplateColumns:blockDragCheck?'minmax(0,1fr) 340px':split?'1fr 1fr':'1fr',zoom:scale}}><PdfPreview compact={split || blockDragCheck} paper={paper} jumpRequest={jumpRequest} onAddContext={addContext} linkMode={linkMode}/>{blockDragCheck ? <PdfBlockComposerPreview entry={paper ? {...entry,title:'Attention Is All You Need',pdfFileName:'attention-is-all-you-need.pdf'} : entry}
       externalItems={contexts} onRemoveExternal={id => setContexts(current => current.filter(item => item.id !== id))}
       segment={paper?.segments.find(segment => segment.page_idx === 2 && segment.segment_type === 'paragraph' && segment.text.length > 200) ?? paper?.segments[0] ?? interactionSegments[0]}
-      onOpenSource={source => { if (source.provider !== 'sciverse') setJumpRequest(current => ({ kind: 'segment', segmentUid: source.segment_uid, pageIdx: source.page_idx, requestKey: (current?.requestKey ?? 0) + 1 })); }} /> : split?<PdfPreview compact paper={paper} viewId="right"/>:null}</div>
+      onOpenSource={source => { if (source.provider !== 'sciverse') setJumpRequest(current => ({ kind: 'segment', segmentUid: source.segment_uid, pageIdx: source.page_idx, requestKey: (current?.requestKey ?? 0) + 1 })); }} /> : split ? reflowLinkCheck ? <ReadingLinkReflowPreview entryId={entry.id} segments={paper?.segments ?? interactionSegments} linkMode={linkMode} /> : <PdfPreview compact paper={paper} viewId="right" linkMode={linkMode}/> : null}</div>
     <SearchDialog open={searchOpen} root={null} status="ready" onOpenChange={setSearchOpen} onOpenResult={noop}/>
   </main>;
 }

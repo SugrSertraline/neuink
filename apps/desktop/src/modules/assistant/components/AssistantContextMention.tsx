@@ -32,7 +32,9 @@ function ContextMentionView({ node, editor, getPos }: NodeViewProps) {
     syncEditable();
     editor.on('update', syncEditable);
     editor.on('transaction', syncEditable);
-    return () => { editor.off('update', syncEditable); editor.off('transaction', syncEditable); };
+    const dom = editor.view.dom;
+    dom.addEventListener('neuink:composer-editable-change', syncEditable);
+    return () => { editor.off('update', syncEditable); editor.off('transaction', syncEditable); dom.removeEventListener('neuink:composer-editable-change', syncEditable); };
   }, [editor]);
   return <NodeViewWrapper as="span" contentEditable={false} data-context-mention="true" className="inline-flex max-w-full align-baseline">
     <AssistantMentionChip mention={attrs} onRemove={editable ? () => {

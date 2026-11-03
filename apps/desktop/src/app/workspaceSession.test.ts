@@ -1,11 +1,31 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
 import type { EntryMeta } from '@/shared/types/domain';
-import { initialWorkspaceSurfaceLayout, surfaceKey, workspaceSurfaceReducer, type WorkspaceSurfaceLayout } from './workspaceSurface';
+import { emptyWorkspaceSurfaceLayout, initialWorkspaceSurfaceLayout, surfaceKey, workspaceSurfaceReducer, type WorkspaceSurfaceLayout } from './workspaceSurface';
 import { readWorkspaceSession, saveWorkspaceSession } from './workspaceSession';
 
 afterEach(() => { localStorage.clear(); vi.restoreAllMocks(); });
 const catalog = { entries: [{ id: 'paper', pdf: {} as EntryMeta['pdf'], contents: [{ kind: 'note' as const, note_id: 'note', title: 'Note' }] }], tags: [{ id: 'tag' }] };
+it('restores the deliberately empty workspace without reopening the library', () => {
+  saveWorkspaceSession('a', emptyWorkspaceSurfaceLayout);
+  expect(readWorkspaceSession('a', catalog)).toEqual(emptyWorkspaceSurfaceLayout);
+  expect(readWorkspaceSession('b', catalog)).toEqual(initialWorkspaceSurfaceLayout);
+});
+it('does not recreate a closed library when the remaining tabs are unavailable after restart', () => {
+  const paper = workspaceSurfaceReducer(emptyWorkspaceSurfaceLayout, { type: 'open', surface: { kind: 'pdf', entryId: 'paper' } });
+  saveWorkspaceSession('a', paper);
+  expect(readWorkspaceSession('a', { entries: [], tags: [] })).toEqual(emptyWorkspaceSurfaceLayout);
+  const form = workspaceSurfaceReducer(emptyWorkspaceSurfaceLayout, { type: 'open', surface: { kind: 'create-entry' } });
+  saveWorkspaceSession('a', form);
+  expect(readWorkspaceSession('a', catalog)).toEqual(emptyWorkspaceSurfaceLayout);
+});
+it('restores a pinned dashboard with its reading companion and no closed library', () => {
+  let value = workspaceSurfaceReducer(emptyWorkspaceSurfaceLayout, { type: 'open', surface: { kind: 'daily-dashboard' } });
+  value = workspaceSurfaceReducer(value, { type: 'setPinned', key: 'daily-dashboard', pinned: true });
+  value = workspaceSurfaceReducer(value, { type: 'open', pane: 'right', surface: { kind: 'pdf', entryId: 'paper' } });
+  saveWorkspaceSession('a', value);
+  expect(readWorkspaceSession('a', catalog)).toEqual(value);
+});
 function layout() {
   let value = workspaceSurfaceReducer(initialWorkspaceSurfaceLayout, { type: 'open', surface: { kind: 'pdf', entryId: 'paper' } });
   value = workspaceSurfaceReducer(value, { type: 'duplicate', pane: 'right', key: 'pdf:paper', viewId: 'copy' });

@@ -11,7 +11,9 @@ afterEach(cleanup);
 let root: string, sequence = 0;
 beforeEach(() => {
   vi.clearAllMocks(); root = `suggestions-test-${++sequence}`;
-  vi.mocked(getLlmSettings).mockResolvedValue({ profiles: [], assistant_profile_id: 'model', assistant_profile: null, translation_profile_id: null, translation_profile: null });
+  const profile = { id: 'model', name: '助手', model: 'model', base_url: 'https://example.test/v1', api_key: null,
+    api_protocol: 'openai_compatible' as const, max_context_length: null, max_output_tokens: null, temperature: null, top_p: null };
+  vi.mocked(getLlmSettings).mockResolvedValue({ profiles: [profile], assistant_profile_id: 'model', assistant_profile: profile, translation_profile_id: null, translation_profile: null });
 });
 const entry: LibraryEntry = { id: 'suggested-entry', title: '论文', tags: ['现有标签'], tagIds: [], fields: {}, contents: [], pdfFileName: 'paper.pdf', status: 'Parsed', progress: 100, createdAt: '', updatedAt: '', parseMessage: null, parseEndpoint: null };
 const recommendation = (path: string): TagRecommendation => ({ path, confidence: 0.9, reason: '论文内容相关', dimension: '研究主题', source: 'new' });
@@ -20,25 +22,25 @@ function page(props: Partial<React.ComponentProps<typeof EntryTagRecommendations
   return <ToastContext.Provider value={{ notify: () => 'toast', dismiss: vi.fn() }}><EntryTagRecommendations entry={entry} workspaceRoot={root} onApplyEntryTagPaths={vi.fn()} {...props} /></ToastContext.Provider>;
 }
 async function generate(view: ReturnType<typeof render>) {
-  const button = view.getByRole('button', { name: '生成推荐标签' }) as HTMLButtonElement;
-  await waitFor(() => expect(button.disabled).toBe(false)); fireEvent.click(button);
-  await waitFor(() => expect(view.queryByRole('button', { name: '正在生成…' })).toBeNull());
+  await waitFor(() => expect((view.getByRole('button', { name: '重新生成' }) as HTMLButtonElement).disabled).toBe(false));
 }
 
-describe('persistent manual tag recommendations', () => {
-  it('generates for tagged entries, retains applied results on reopen and replaces only on regeneration', async () => {
+describe('persistent automatic tag recommendations', () => {
+  it('generates for tagged entries, hides applied results on reopen and replaces only on regeneration', async () => {
     vi.mocked(analyzeEntryTags).mockResolvedValueOnce(response('现有标签', '新标签')).mockResolvedValueOnce(response('另一标签'));
     const onApplyEntryTagPaths = vi.fn().mockResolvedValue(undefined);
     let view = render(page({ onApplyEntryTagPaths }));
     expect(analyzeEntryTags).not.toHaveBeenCalled(); await generate(view);
-    expect((view.getByRole('button', { name: '现有标签，已添加' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(view.queryByRole('button', { name: /现有标签/ })).toBeNull();
     fireEvent.click(view.getByRole('button', { name: '添加所选标签' }));
     await waitFor(() => expect(onApplyEntryTagPaths).toHaveBeenCalledWith(entry.id, ['新标签']));
     const updated = { ...entry, tags: [...entry.tags, '新标签'] };
     view.rerender(page({ entry: updated, onApplyEntryTagPaths }));
-    expect(view.getByRole('button', { name: '新标签，已添加' })).toBeTruthy();
+    expect(view.queryByRole('button', { name: /新标签/ })).toBeNull();
     view.unmount(); view = render(page({ entry: updated }));
-    expect(view.getByRole('button', { name: '新标签，已添加' })).toBeTruthy();
+    expect(view.queryByRole('button', { name: /新标签/ })).toBeNull();
+    expect(view.queryByRole('button', { name: '添加所选标签' })).toBeNull();
+    expect(view.getByText('暂无新的推荐标签。')).toBeTruthy();
     await waitFor(() => expect((view.getByRole('button', { name: '重新生成' }) as HTMLButtonElement).disabled).toBe(false));
     expect(analyzeEntryTags).toHaveBeenCalledOnce(); fireEvent.click(view.getByRole('button', { name: '重新生成' }));
     await waitFor(() => expect(view.getByRole('button', { name: '另一标签' })).toBeTruthy());
@@ -60,39 +62,42 @@ describe('persistent manual tag recommendations', () => {
     await waitFor(() => expect(view.queryByRole('alert')).toBeNull());
   });
 
-  it('allows selecting already applied recommendations and discarding pending results', async () => {
-    vi.mocked(analyzeEntryTags).mockResolvedValue(response('现有标签'));
+  it('discards only pending results and does not undo the dismissal automatically on reopen', async () => {
+    vi.mocked(analyzeEntryTags).mockResolvedValue(response('现有标签', '未添加的推荐'));
     const onApplyEntryTagPaths = vi.fn().mockResolvedValue(undefined);
-    const view = render(page({ onApplyEntryTagPaths })); await generate(view);
-    expect((view.getByRole('button', { name: '添加所选标签' }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(view.getByRole('button', { name: '现有标签，已添加' }));
-    expect((view.getByRole('button', { name: '添加所选标签' }) as HTMLButtonElement).disabled).toBe(false);
-    fireEvent.click(view.getByRole('button', { name: '添加所选标签' }));
-    await waitFor(() => expect(onApplyEntryTagPaths).toHaveBeenCalledWith(entry.id, ['现有标签']));
-    expect(view.getByRole('button', { name: '现有标签，已添加' })).toBeTruthy();
+    let view = render(page({ onApplyEntryTagPaths })); await generate(view);
+    expect(view.queryByRole('button', { name: /现有标签/ })).toBeNull();
+    expect(view.getByRole('button', { name: '未添加的推荐' })).toBeTruthy();
     fireEvent.click(view.getByRole('button', { name: '丢弃推荐' }));
     expect(view.queryByRole('button', { name: '现有标签，已添加' })).toBeNull();
     expect(readTagSuggestions(tagSuggestionKey(root, entry.id)).recommendations).toEqual([]);
+    expect(readTagSuggestions(tagSuggestionKey(root, entry.id)).generatedAt).toBeTruthy();
+    view.unmount(); view = render(page()); await generate(view);
+    expect(view.queryByRole('button', { name: '未添加的推荐' })).toBeNull();
+    expect(analyzeEntryTags).toHaveBeenCalledOnce();
+    expect(onApplyEntryTagPaths).not.toHaveBeenCalled();
   });
 
   it('keeps delayed generation bound to the original workspace and survives unmount', async () => {
     let finish!: (value: ReturnType<typeof response>) => void;
-    vi.mocked(analyzeEntryTags).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    vi.mocked(analyzeEntryTags).mockReturnValueOnce(new Promise(resolve => { finish = resolve; })).mockResolvedValueOnce(response('来自新资料库'));
     let view = render(page());
-    await waitFor(() => expect((view.getByRole('button', { name: '生成推荐标签' }) as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(view.getByRole('button', { name: '生成推荐标签' }));
+    await waitFor(() => expect(analyzeEntryTags).toHaveBeenCalledOnce());
     expect((view.getByRole('button', { name: '正在生成…' }) as HTMLButtonElement).disabled).toBe(true);
     view.unmount(); view = render(page({ workspaceRoot: `${root}-other` }));
+    await waitFor(() => expect(view.getByRole('button', { name: '来自新资料库' })).toBeTruthy());
     await act(async () => { finish(response('来自旧资料库')); });
     expect(view.queryByRole('button', { name: '来自旧资料库' })).toBeNull();
     view.unmount(); view = render(page());
-    expect(view.getByRole('button', { name: '来自旧资料库' })).toBeTruthy(); expect(analyzeEntryTags).toHaveBeenCalledOnce();
+    await generate(view);
+    expect(view.getByRole('button', { name: '来自旧资料库' })).toBeTruthy(); expect(analyzeEntryTags).toHaveBeenCalledTimes(2);
   });
 
   it('treats an empty result as generated and does not generate automatically after remount', async () => {
     vi.mocked(analyzeEntryTags).mockResolvedValue(response());
     let view = render(page()); await generate(view); view.unmount(); view = render(page());
-    expect(view.getByText('本次分析没有生成推荐标签，可以重新生成。')).toBeTruthy();
+    await generate(view);
+    expect(view.getByText('暂无新的推荐标签。')).toBeTruthy();
     expect(view.getByRole('button', { name: '重新生成' })).toBeTruthy(); expect(analyzeEntryTags).toHaveBeenCalledOnce();
   });
 
@@ -105,10 +110,10 @@ describe('persistent manual tag recommendations', () => {
     expect(analyzeEntryTags).not.toHaveBeenCalled();
   });
 
-  it('reads a valid persisted cache without a request and safely ignores a corrupt one', () => {
+  it('reads a valid persisted cache without a request and safely ignores a corrupt one', async () => {
     const key = tagSuggestionKey(root, entry.id);
     localStorage.setItem(`neuink.entryTagRecommendations.v1:${key}`, JSON.stringify({ generatedAt: '2026-09-16', recommendations: [recommendation('本地结果')], selectedPaths: ['本地结果', '不存在的标签'] }));
-    const view = render(page()); expect(view.getByRole('button', { name: '本地结果' })).toBeTruthy();
+    const view = render(page()); await generate(view); expect(view.getByRole('button', { name: '本地结果' })).toBeTruthy();
     expect(readTagSuggestions(key).selectedPaths).toEqual(['本地结果']); expect(analyzeEntryTags).not.toHaveBeenCalled();
     const corrupt = tagSuggestionKey(root, 'corrupt'); localStorage.setItem(`neuink.entryTagRecommendations.v1:${corrupt}`, '{broken');
     expect(readTagSuggestions(corrupt).generatedAt).toBeNull();

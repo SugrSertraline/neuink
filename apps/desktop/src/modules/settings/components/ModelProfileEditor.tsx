@@ -245,6 +245,7 @@ export function ModelProfileEditor({ props, open, onOpenChange }: { props: Setti
                     </fieldset></div>
                   <DialogFooter className="mx-0 mb-0 flex-wrap items-center justify-end rounded-none bg-muted px-4 py-3 sm:justify-end">
                         {saveError && <p role="alert" className="w-full text-xs text-destructive">保存失败，修改已保留。请检查配置后重试。</p>}
+                        <Button disabled={busy || protocolPending || !baseUrl || !model} size="sm" type="button" variant="outline" onClick={props.onTest}>测试连接与翻译</Button>
                         <DialogClose asChild>
                           <Button disabled={busy} size="sm" type="button" variant="outline">
                             取消

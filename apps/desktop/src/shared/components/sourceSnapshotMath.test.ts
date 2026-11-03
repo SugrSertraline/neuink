@@ -3,6 +3,14 @@ import { describe, expect, it } from 'vitest';
 import { normalizeMathMarkdown } from './sourceSnapshotMath';
 
 describe('snapshot math boundaries', () => {
+  it.each(['$x^2$', String.raw`\(x^2\)`, '$$x^2$$', 'x^2'])('unwraps one complete parsed formula before displaying it: %s', value => {
+    expect(normalizeMathMarkdown(value, 'math')).toBe('$$\nx^2\n$$');
+  });
+  it('does not unwrap separate inline formulas as a single parsed expression', () => {
+    expect(normalizeMathMarkdown(String.raw`\(x\)+\(y\)`, 'math')).toContain(String.raw`\(x\)`);
+    expect(normalizeMathMarkdown('$x$+$y$', 'math')).toContain('$x$+$y$');
+  });
+
   it('keeps correctly delimited inline and display formulas intact', () => {
     for (const value of [
       String.raw`其中，$q_s(t) \in \mathbb{R}_{\geq 0}$表示工位$s \in \mathcal{S}$的库存量。`,

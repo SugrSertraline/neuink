@@ -1,14 +1,16 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { bookRowForPage, registerPdfPageReveal } from './pdfPageNavigation';
-import { animatePdfPageTurn } from './pdfPageTurn';
+import { animatePdfPageTurn, preparePdfPageTurns } from './pdfPageTurn';
 import { scrollToPage } from './readerUtils';
 import type { PageSegments } from './types';
 
 export function usePdfBookNavigation({ enabled, entryId, rows, scrollRef, document: pdfDocument,
-  continuousPages, pageWidth, zoom, leftInset = 0,
+  continuousPages, pageWidth, zoom, leftInset = 0, onReveal,
 }: { enabled: boolean; entryId: string; rows: PageSegments[][]; scrollRef: RefObject<HTMLDivElement>;
-  document: PDFDocumentProxy | null; continuousPages: Set<number>; pageWidth: number; zoom: number; leftInset?: number }) {
+  document: PDFDocumentProxy | null; continuousPages: Set<number>; pageWidth: number; zoom: number; leftInset?: number; onReveal?: () => boolean | void }) {
+  const revealRef = useRef(onReveal); revealRef.current = onReveal;
+  useEffect(() => { if (enabled) void preparePdfPageTurns(); }, [enabled]);
   const [pageIdx, setPageIdx] = useState(0);
   const lastPage = useRef(0);
   const pending = useRef<(() => void) | null>(null);
@@ -41,6 +43,7 @@ export function usePdfBookNavigation({ enabled, entryId, rows, scrollRef, docume
     if (!container || !enabled || !pdfDocument) return;
     return registerPdfPageReveal(container, (requestedPage, afterReveal) => {
       if (!Number.isInteger(requestedPage) || requestedPage < 0 || requestedPage >= pdfDocument.numPages) return false;
+      const openingCover = revealRef.current?.() === true;
       const nextRow = bookRowForPage(rows, requestedPage);
       if (turningTo.current?.pageIdx === requestedPage) {
         turningTo.current.afterReveal = afterReveal;
@@ -51,7 +54,7 @@ export function usePdfBookNavigation({ enabled, entryId, rows, scrollRef, docume
       const reveal = () => { pending.current = turningTo.current?.afterReveal ?? afterReveal; setPageIdx(requestedPage); };
       // Only adjacent leaf turns animate. Search/source jumps stay immediate.
       const destination = rows[nextRow];
-      if (Math.abs(nextRow - rowIndex) === 1 && destination?.length === row?.length) {
+      if (!openingCover && Math.abs(nextRow - rowIndex) === 1 && destination?.length === row?.length) {
         const direction = nextRow > rowIndex ? 1 : -1;
         const outgoing = direction === 1 ? row?.[row.length - 1]?.pageIdx : row?.[0]?.pageIdx;
         if (outgoing !== undefined) {
@@ -115,7 +118,7 @@ export function usePdfBookNavigation({ enabled, entryId, rows, scrollRef, docume
 
   const columns = row?.length || 1;
   const widthLimit = viewportWidth > 0 ? (viewportWidth - leftInset - 112 - (columns - 1) * 2) / columns - 2 : pageWidth / zoom;
-  return { rowIndex, visible, render,
+  return { rowIndex, visible, render, cancelTurn: () => cancelTurn.current?.(),
     pageWidth: enabled && height > 140 ? Math.max(80, Math.min(pageWidth / zoom, (height - 112) * aspect, widthLimit)) * zoom : pageWidth,
     previousPage: rows[rowIndex - 1]?.[0]?.pageIdx,
     nextPage: rows[rowIndex + 1]?.[0]?.pageIdx,

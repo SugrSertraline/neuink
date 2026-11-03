@@ -1,44 +1,48 @@
-import { ADVANCED_ASSISTANT_SETTINGS_VISIBLE, readSettingsTab, rememberSettingsTab, visibleSettingsTab, type SettingsTab, type SettingsNavigationTarget } from '../settingsCatalog';
-import { useSettingsAutosave } from '../useSettingsAutosave';
-import { open } from '@tauri-apps/plugin-dialog';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  ChevronDown,
-  ChevronUp,
-  KeyRound
-} from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+  formatCacheTime,
+  formatContextLength,
+  mergeModelPresets,
+  mergeRemoteModelPreset,
+  normalizeBaseUrl,
+  readModelCatalogCache,
+  sameBaseUrl,
+  writeModelCatalogCache
+} from '../modelCatalog';
+import {
+  ADVANCED_ASSISTANT_SETTINGS_VISIBLE,
+  readSettingsTab,
+  rememberSettingsTab,
+  visibleSettingsTab,
+  type SettingsNavigationTarget,
+  type SettingsTab
+} from '../settingsCatalog';
+import { useSettingsAutosave } from '../useSettingsAutosave';
+import { useWorkspaceSelection, type WorkspaceChangeCallbacks } from '../useWorkspaceSelection';
+import { formatPathForDisplay } from '../workspaceSelection';
+import type { ModelCatalogCache } from '../modelCatalog';
+import { WorkspaceSelectionDialog } from './WorkspaceSelectionDialog';
 
 import { useToast } from '@/shared/hooks/useToast';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle
-} from '@/components/ui/dialog';
 import {
   clearLlmSettings,
   deleteLlmProfile,
   getLlmSettings,
   loadAgentRuntimeSettings,
   openPathInFileManager,
+  resolveLlmApiProtocol,
   saveAgentRuntimeSettings,
   saveLlmSettings,
   setTaskLlmProfile,
   type LlmApiProtocol,
   type LlmProfile,
-  type LlmSettingsState,
-  resolveLlmApiProtocol
+  type LlmSettingsState
 } from '@/shared/ipc/assistantApi';
 import {
-  getWorkspaceSettings,
   forgetRecentWorkspace,
-  inspectWorkspacePath,
+  getWorkspaceSettings,
   updateTranslationAutomationSettings,
   type TranslationAutomationSettings,
-  type WorkspacePathInspection,
   type WorkspaceSettings
 } from '@/shared/ipc/workspaceApi';
 import {
@@ -46,34 +50,17 @@ import {
   normalizeAgentRuntimeSettings,
   readAgentRuntimeSettings
 } from '@/shared/lib/agentRuntimeSettings';
-import {
-  equalReaderPreferences,
-  type ReaderPreferences
-} from '@/shared/lib/readerPreferences';
+import { equalReaderPreferences, type ReaderPreferences } from '@/shared/lib/readerPreferences';
 import type { AppThemePreset, AppThemePresetId } from '@/shared/lib/themePresets';
 import type { UiScale } from '@/shared/lib/uiScale';
-import type {
-  AgentProfile,
-  AgentRuntimeSettings
-} from '@/shared/types/agentRuntime';
+import type { AgentProfile, AgentRuntimeSettings } from '@/shared/types/agentRuntime';
 
-import {
-  listOpenAiCompatibleModels,
-  testOpenAiCompatibleConnection,
-  type ProviderModelInfo
-} from '../../assistant/sdk/provider';
-import { SettingsPanelLayout } from './SettingsPanelLayout';
-import {
-  resolveWorkspaceSelection,
-  type WorkspaceSelectionIntent
-} from '../workspaceSelection';
-import {
-  PROVIDER_PRESETS,
-  type ModelPreset,
-  type ProviderPreset
-} from './providerPresets';
+import { listOpenAiCompatibleModels } from '../../assistant/sdk/provider';
+import { ModelConnectionTestDialog } from './ModelConnectionTestDialog';
+import { PROVIDER_PRESETS, type ModelPreset, type ProviderPreset } from './providerPresets';
+import { SettingsPanelLayout, type SettingsPanelLayoutProps } from './SettingsPanelLayout';
 
-type SettingsPanelProps = {
+type SettingsPanelProps = WorkspaceChangeCallbacks & {
   navigationTarget?: SettingsNavigationTarget;
   onBack?: () => void;
   onOpenMineruClientGuide: () => void;
@@ -86,19 +73,10 @@ type SettingsPanelProps = {
   onParserEndpointChange: (value: string) => void;
   onParserApiKeyChange: (value: string) => void;
   onReaderPreferencesChange: (preferences: ReaderPreferences) => void;
-  onResetWorkspaceRoot?: () => Promise<void>;
-  onBeforeWorkspaceChange?: () => Promise<void>;
-  onCreateWorkspaceRoot?: (root: string) => Promise<void>;
   onSettingsChanged?: (settings: LlmSettingsState) => void;
   onThemePresetChange: (value: AppThemePresetId) => void;
   onUiScaleChange: (value: UiScale) => void;
-  onSwitchWorkspaceRoot?: (root: string) => Promise<void>;
   workspaceRoot?: string | null;
-};
-
-type PendingWorkspaceAction = {
-  intent: WorkspaceSelectionIntent;
-  inspection: WorkspacePathInspection;
 };
 
 type ProfileTestState = {
@@ -107,15 +85,6 @@ type ProfileTestState = {
 };
 
 
-type ModelCatalogCache = Record<
-  string,
-  {
-    models: ModelPreset[];
-    updatedAt: string;
-  }
->;
-
-const MODEL_CATALOG_CACHE_STORAGE_KEY = 'neuink.llmModelCatalog.v1';
 const DEFAULT_TRANSLATION_AUTOMATION: TranslationAutomationSettings = {
   auto_translate_pdf: false,
   segment_types: [
@@ -184,12 +153,19 @@ export function SettingsPanel({
   const [draftReaderPreferences, setDraftReaderPreferences] = useState(readerPreferences);
   const [savedReaderPreferences, setSavedReaderPreferences] = useState(readerPreferences);
   const [workspaceSettings, setWorkspaceSettings] = useState<WorkspaceSettings | null>(null);
+  const {
+    workspaceBusy, pendingWorkspaceAction, chooseWorkspaceFolder, inspectAndOpenRecentWorkspace,
+    confirmWorkspaceAction, resetWorkspaceRoot, cancelWorkspaceAction
+  } = useWorkspaceSelection({
+    onBeforeWorkspaceChange, onSwitchWorkspaceRoot, onCreateWorkspaceRoot, onResetWorkspaceRoot,
+    onWorkspaceSettingsChanged: setWorkspaceSettings,
+    onFailure: notifyFailure
+  });
   const [translationAutomation, setTranslationAutomation] = useState<TranslationAutomationSettings>(
     DEFAULT_TRANSLATION_AUTOMATION
   );
-  const [workspaceBusy, setWorkspaceBusy] = useState(false);
-  const [pendingWorkspaceAction, setPendingWorkspaceAction] = useState<PendingWorkspaceAction | null>(null);
   const [profileTestStates, setProfileTestStates] = useState<Record<string, ProfileTestState>>({});
+  const [connectionTestProfile, setConnectionTestProfile] = useState<LlmProfile | null>(null);
 
   const [modelsReady, setModelsReady] = useState(false);
   const [workspaceReady, setWorkspaceReady] = useState(false);
@@ -416,6 +392,18 @@ export function SettingsPanel({
     setMaxOutputTokens('');
   };
 
+  const readProfileDraft = () => ({
+    name: name || model,
+    baseUrl,
+    apiProtocol,
+    model,
+    apiKey,
+    maxContextLength: Number(maxContextLength) || undefined,
+    temperature: parseOptionalNumber(temperature),
+    topP: parseOptionalNumber(topP),
+    maxOutputTokens: Number(maxOutputTokens) || undefined
+  });
+
   const createProfile = async () => {
     if (!baseUrl.trim() || !model.trim()) {
       notify({ tone: 'danger', title: '无法创建模型配置', description: '请先填写 Base URL 和模型 ID。' });
@@ -424,17 +412,7 @@ export function SettingsPanel({
     setBusy(true);
     try {
       const previousProfileIds = new Set(settings.profiles.map((profile) => profile.id));
-      const nextSettings = await saveLlmSettings({
-        name: name || model,
-        baseUrl,
-        apiProtocol,
-        model,
-        apiKey,
-        maxContextLength: Number(maxContextLength) || undefined,
-        temperature: parseOptionalNumber(temperature),
-        topP: parseOptionalNumber(topP),
-        maxOutputTokens: Number(maxOutputTokens) || undefined
-      });
+      const nextSettings = await saveLlmSettings(readProfileDraft());
       applySettings(nextSettings);
       const createdProfile = nextSettings.profiles.find((profile) => !previousProfileIds.has(profile.id));
       if (createdProfile) {
@@ -462,19 +440,12 @@ export function SettingsPanel({
     setBusy(true);
     try {
       const nextSettings = await saveLlmSettings({
-        profileId: editingId,
-        name: name || model,
-        baseUrl,
-        apiProtocol,
-        model,
-        apiKey,
-        maxContextLength: Number(maxContextLength) || undefined,
-        temperature: parseOptionalNumber(temperature),
-        topP: parseOptionalNumber(topP),
-        maxOutputTokens: Number(maxOutputTokens) || undefined
+        ...readProfileDraft(),
+        profileId: editingId
       });
       applySettings(nextSettings);
       const savedProfile = nextSettings.profiles.find((profile) => profile.id === editingId);
+      setProfileTestStates(current => ({ ...current, [editingId]: { status: 'idle' } }));
       if (savedProfile) {
         fillForm(savedProfile);
       }
@@ -535,50 +506,18 @@ export function SettingsPanel({
       try { writeModelCatalogCache(nextCache); } catch { /* Current-window catalog remains available if storage is full. */ }
   };
 
-  const test = async () => {
-    setBusy(true);
-    try {
-      await testOpenAiCompatibleConnection({ baseUrl, apiKey, apiProtocol });
-      notify({ tone: 'success', title: '连接测试通过' });
-    } catch (caught) {
-      notifyFailure('连接测试失败', caught);
-    } finally {
-      setBusy(false);
-    }
+  const test = () => {
+    const number = (value: string) => value.trim() ? Number(value) : null;
+    setConnectionTestProfile({ id: '__draft__', name: name || model, base_url: baseUrl.trim(), model: model.trim(),
+      api_key: apiKey, api_protocol: apiProtocol, max_context_length: number(maxContextLength),
+      max_output_tokens: number(maxOutputTokens), temperature: number(temperature), top_p: number(topP) });
   };
 
-  const testProfile = async (
-    profile: Pick<LlmProfile, 'base_url' | 'id' | 'name'> & {
-      api_key?: string | null;
-      api_protocol?: LlmProfile['api_protocol'] | null;
-    }
-  ) => {
-    setProfileTestStates((current) => ({
-      ...current,
-      [profile.id]: { status: 'testing' }
-    }));
-    try {
-      await testOpenAiCompatibleConnection({
-        baseUrl: profile.base_url,
-        apiKey: profile.api_key ?? '',
-        apiProtocol: resolveLlmApiProtocol(profile.api_protocol)
-      });
-      setProfileTestStates((current) => ({
-        ...current,
-        [profile.id]: { status: 'success' }
-      }));
-      notify({ tone: 'success', title: '连接测试通过', description: profile.name });
-    } catch (caught) {
-      const reason = caught instanceof Error ? caught.message : String(caught);
-      setProfileTestStates((current) => ({
-        ...current,
-        [profile.id]: {
-          message: reason,
-          status: 'error'
-        }
-      }));
-      notify({ tone: 'danger', title: '连接测试失败', description: reason });
-    }
+  const testProfile = (profile: Parameters<SettingsPanelLayoutProps['onTestProfile']>[0]) => {
+    setProfileTestStates(current => ({ ...current, [profile.id]: { status: 'testing' } }));
+    setConnectionTestProfile({ ...profile, api_key: profile.api_key ?? null,
+      api_protocol: resolveLlmApiProtocol(profile.api_protocol), max_context_length: profile.max_context_length ?? null,
+      max_output_tokens: profile.max_output_tokens ?? null, temperature: profile.temperature ?? null, top_p: profile.top_p ?? null });
   };
 
   const deleteProfile = async (profileId: string) => {
@@ -651,105 +590,6 @@ export function SettingsPanel({
       setBusy(false);
     }
   };
-
-  const chooseWorkspaceFolder = async (intent: PendingWorkspaceAction['intent']) => {
-    const selected = await open({
-      directory: true,
-      multiple: false
-    });
-    if (typeof selected !== 'string') {
-      return;
-    }
-    setWorkspaceBusy(true);
-    try {
-      const inspection = await inspectWorkspacePath(selected);
-      const resolution = resolveWorkspaceSelection(intent, inspection);
-      if ('intent' in resolution) {
-        setPendingWorkspaceAction({ intent: resolution.intent, inspection });
-      } else {
-        notify({ tone: 'danger', title: '无法使用所选工作区', description: resolution.message });
-      }
-    } catch (caught) {
-      notifyFailure('检查工作区失败', caught);
-    } finally {
-      setWorkspaceBusy(false);
-    }
-  };
-
-  const inspectAndOpenRecentWorkspace = async (root: string) => {
-    setWorkspaceBusy(true);
-    try {
-      const inspection = await inspectWorkspacePath(root);
-      if (inspection.kind === 'valid_workspace') {
-        setPendingWorkspaceAction({ intent: 'switch', inspection });
-      } else {
-        notify({ tone: 'danger', title: '无法打开最近工作区', description: inspection.message });
-      }
-    } catch (caught) {
-      notifyFailure('检查最近工作区失败', caught);
-    } finally {
-      setWorkspaceBusy(false);
-    }
-  };
-
-  const confirmWorkspaceAction = async () => {
-    if (!pendingWorkspaceAction) {
-      return;
-    }
-    setWorkspaceBusy(true);
-    try {
-      await onBeforeWorkspaceChange?.();
-      const { inspection, intent } = pendingWorkspaceAction;
-      if (intent === 'switch') {
-        if (!onSwitchWorkspaceRoot) {
-          throw new Error('当前窗口不支持切换工作区。');
-        }
-        await onSwitchWorkspaceRoot(inspection.root);
-        notify({ tone: 'success', title: '已切换工作区' });
-      } else if (intent === 'create') {
-        if (!onCreateWorkspaceRoot) {
-          throw new Error('当前窗口不支持新建工作区。');
-        }
-        await onCreateWorkspaceRoot(inspection.root);
-        notify({ tone: 'success', title: '已新建并打开工作区' });
-      }
-      setPendingWorkspaceAction(null);
-      setWorkspaceSettings(await getWorkspaceSettings());
-    } catch (caught) {
-      notifyFailure('工作区操作失败', caught);
-    } finally {
-      setWorkspaceBusy(false);
-    }
-  };
-
-  const resetWorkspaceRoot = async () => {
-    if (!onResetWorkspaceRoot) {
-      return;
-    }
-    setWorkspaceBusy(true);
-    try {
-      await onBeforeWorkspaceChange?.();
-      await onResetWorkspaceRoot();
-      const nextWorkspaceSettings = await getWorkspaceSettings();
-      setWorkspaceSettings(nextWorkspaceSettings);
-      notify({ tone: 'success', title: '已打开默认工作区' });
-    } catch (caught) {
-      notifyFailure('打开默认工作区失败', caught);
-    } finally {
-      setWorkspaceBusy(false);
-    }
-  };
-
-  const workspaceActionTitle = pendingWorkspaceAction?.intent === 'switch'
-    ? '切换工作区'
-    : pendingWorkspaceAction?.intent === 'create'
-      ? '新建工作区'
-      : '迁移当前工作区';
-  const workspaceActionLabel = pendingWorkspaceAction?.intent === 'switch'
-    ? '切换'
-    : pendingWorkspaceAction?.intent === 'create'
-      ? '新建并打开'
-      : '开始迁移';
 
   return (
     <>
@@ -881,38 +721,19 @@ export function SettingsPanel({
       runtimeSettings={draftAgentRuntimeSettings}
       selectedAgentId={selectedAgentId}
       />
-      <Dialog
-        open={Boolean(pendingWorkspaceAction)}
-        onOpenChange={(open) => {
-          if (!open && !workspaceBusy) {
-            setPendingWorkspaceAction(null);
-          }
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{workspaceActionTitle}</DialogTitle>
-            <DialogDescription>
-              {pendingWorkspaceAction?.intent === 'switch'
-                ? `将打开包含 ${pendingWorkspaceAction.inspection.entry_count} 个条目的工作区。`
-                : pendingWorkspaceAction?.intent === 'create'
-                  ? '所选位置是空目录，将在这里创建一个新的 Neuink 工作区。'
-                  : '将复制当前工作区到新位置，验证成功后切换。原位置会保留。'}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="break-all rounded-md border bg-muted/30 px-3 py-2 text-xs">
-            {formatPathForDisplay(pendingWorkspaceAction?.inspection.root ?? '')}
-          </div>
-          <DialogFooter>
-            <Button disabled={workspaceBusy} variant="outline" onClick={() => setPendingWorkspaceAction(null)}>
-              取消
-            </Button>
-            <Button disabled={workspaceBusy} onClick={() => void confirmWorkspaceAction()}>
-              {workspaceBusy ? '处理中…' : workspaceActionLabel}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {connectionTestProfile && <ModelConnectionTestDialog profile={connectionTestProfile}
+        onResult={result => { if (connectionTestProfile.id !== '__draft__') setProfileTestStates(current => ({ ...current, [connectionTestProfile.id]: result })); }}
+        onClose={() => {
+          setProfileTestStates(current => current[connectionTestProfile.id]?.status === 'testing'
+            ? { ...current, [connectionTestProfile.id]: { status: 'idle' } } : current);
+          setConnectionTestProfile(null);
+        }} />}
+      <WorkspaceSelectionDialog
+        pendingWorkspaceAction={pendingWorkspaceAction}
+        workspaceBusy={workspaceBusy}
+        onCancel={cancelWorkspaceAction}
+        onConfirm={confirmWorkspaceAction}
+      />
     </>
   );
 
@@ -927,121 +748,12 @@ function parseOptionalNumber(value: string) {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function formatPathForDisplay(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return '';
-  }
-  if (trimmed.startsWith('\\\\?\\UNC\\')) {
-    return `\\\\${trimmed.slice('\\\\?\\UNC\\'.length)}`;
-  }
-  if (trimmed.startsWith('\\\\?\\')) {
-    return trimmed.slice('\\\\?\\'.length);
-  }
-  return trimmed;
-}
-
 function formatEndpointForDisplay(value: string) {
   const trimmed = value.trim();
   if (!trimmed) {
     return '未填写解析服务 URL';
   }
   return trimmed;
-}
-
-function readModelCatalogCache(): ModelCatalogCache {
-  if (typeof window === 'undefined') {
-    return {};
-  }
-
-  try {
-    const parsed = JSON.parse(
-      window.localStorage.getItem(MODEL_CATALOG_CACHE_STORAGE_KEY) ?? '{}'
-    ) as unknown;
-    if (!parsed || typeof parsed !== 'object') {
-      return {};
-    }
-    const cache: ModelCatalogCache = {};
-    for (const [key, value] of Object.entries(parsed as ModelCatalogCache)) {
-      const models = Array.isArray(value.models)
-        ? value.models.filter((model) => model && typeof model.id === 'string')
-        : [];
-      if (models.length === 0) {
-        continue;
-      }
-      cache[normalizeBaseUrl(key)] = {
-        models,
-        updatedAt:
-          typeof value.updatedAt === 'string' ? value.updatedAt : new Date(0).toISOString()
-      };
-    }
-    return cache;
-  } catch {
-    return {};
-  }
-}
-
-function writeModelCatalogCache(cache: ModelCatalogCache) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  window.localStorage.setItem(MODEL_CATALOG_CACHE_STORAGE_KEY, JSON.stringify(cache));
-}
-
-function sameBaseUrl(left: string, right: string) {
-  return normalizeBaseUrl(left) === normalizeBaseUrl(right);
-}
-
-function normalizeBaseUrl(value: string) {
-  return value.trim().replace(/\/+$/, '');
-}
-
-function mergeRemoteModelPreset(model: ProviderModelInfo, staticPresets: ModelPreset[]) {
-  const fallback = staticPresets.find((preset) => preset.id === model.id);
-  return {
-    ...model,
-    id: model.id,
-    label: model.name && model.name !== model.id ? model.name : model.label,
-    maxContextLength: model.maxContextLength,
-    maxOutputTokens: model.maxOutputTokens,
-    metadataSource: model.metadataSource ?? fallback?.metadataSource ?? 'built_in',
-    modelContextLength: model.modelContextLength,
-    providerContextLength: model.providerContextLength,
-    temperature: fallback?.temperature ?? 0.2
-  };
-}
-
-function mergeModelPresets(primary: ModelPreset[], fallback: ModelPreset[]) {
-  const seen = new Set<string>();
-  return [...primary, ...fallback].filter((preset) => {
-    if (seen.has(preset.id)) {
-      return false;
-    }
-    seen.add(preset.id);
-    return true;
-  });
-}
-
-function formatContextLength(value?: number) {
-  if (value == null) {
-    return '仅模型 ID';
-  }
-  if (value >= 1000000) {
-    return `${Math.round(value / 10000) / 100}M ctx`;
-  }
-  if (value >= 1000) {
-    return `${Math.round(value / 1000)}K ctx`;
-  }
-  return `${value} ctx`;
-}
-
-function formatCacheTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return '未知时间';
-  }
-  return date.toLocaleString();
 }
 
 function equalJson<T>(left: T, right: T) { return JSON.stringify(left) === JSON.stringify(right); }

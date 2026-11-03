@@ -242,6 +242,9 @@ export function ReflowReader({
     return () => observer.disconnect();
   }, [remeasureRows]);
   const navigation = useReflowReadingNavigation(reflowScrollRef, visibleSegmentGroups, rowVirtualizer, groupIndexBySegmentUid);
+  const linkedSentenceUid = navigation.linkedTarget?.segmentUid ?? scrollToSegmentUid;
+  const linkedSentenceIndex = navigation.linkedTarget ? navigation.linkedTarget.sentenceIndex : scrollSentenceIndex;
+  const linkedSentenceRequest = navigation.linkedTarget?.requestKey ?? scrollRequestKey;
   const textSelection = useReflowTextSelection(reflowScrollRef, visibleSegments);
   const virtualRows = rowVirtualizer.getVirtualItems();
   const scrollTop = reflowScrollRef.current?.scrollTop ?? 0;
@@ -298,11 +301,11 @@ export function ReflowReader({
     }
   }, [entryId, groupIndexBySegmentUid, rowVirtualizer, scrollRequestKey, scrollToSegmentUid, localScrollRequest, jumpRequest, visibleSegmentGroups, notify]);
   useEffect(() => {
-    if (!scrollToSegmentUid || scrollSentenceIndex === undefined || scrollRequestKey === undefined) {
+    if (!linkedSentenceUid || linkedSentenceIndex === undefined || linkedSentenceRequest === undefined) {
       setFocusedSentence(null);
       return;
     }
-    const focus = { segmentUid: scrollToSegmentUid, index: scrollSentenceIndex, requestKey: scrollRequestKey };
+    const focus = { segmentUid: linkedSentenceUid, index: linkedSentenceIndex, requestKey: linkedSentenceRequest };
     setFocusedSentence(focus);
     let attempts = 0;
     let seekTimer: number | null = null;
@@ -313,13 +316,15 @@ export function ReflowReader({
           Number(element.dataset.readingSentenceIndex) <= focus.index &&
           focus.index < Number(element.dataset.readingSentenceEndIndex ?? Number(element.dataset.readingSentenceIndex) + 1));
       if (container && target) {
-        const distance = target.getBoundingClientRect().top - container.getBoundingClientRect().top - container.clientHeight / 3;
-        container.scrollTo({ top: container.scrollTop + distance, behavior: 'smooth' });
+        const bounds = container.getBoundingClientRect();
+        const scale = bounds.width / (container.offsetWidth || bounds.width) || 1;
+        const distance = (target.getBoundingClientRect().top - bounds.top - bounds.height / 3) / scale;
+        container.scrollTo({ top: container.scrollTop + distance, behavior: navigation.linkedTarget ? 'auto' : 'smooth' });
       } else if (++attempts < 24) seekTimer = window.setTimeout(seek, 50);
     };
     seekTimer = window.setTimeout(seek, 0);
     return () => { if (seekTimer !== null) window.clearTimeout(seekTimer); };
-  }, [scrollRequestKey, scrollSentenceIndex, scrollToSegmentUid]);
+  }, [linkedSentenceRequest, linkedSentenceIndex, linkedSentenceUid]);
   const updatePreview = useCallback(
     (next: ReflowPreviewPointerState | null) => {
       if (!hoverPreviewEnabled || !next || hoverInteractionBlocked()) {
@@ -398,7 +403,7 @@ export function ReflowReader({
                   activeSegmentUid={activeSegmentUid}
                   flashSegmentUid={flashSegmentUid ?? navigation.flashUid}
                   focusedSentenceIndex={focusedSentence?.segmentUid === segmentGroup.body.uid ? focusedSentence.index : undefined}
-                  sentenceLinked={scrollSentenceIndex !== undefined && scrollToSegmentUid === segmentGroup.body.uid}
+                  sentenceLinked={linkedSentenceIndex !== undefined && linkedSentenceUid === segmentGroup.body.uid}
                   active={segmentGroup.segments.some(
                     (segment) => segment.uid === activeSegmentUid,
                   )}

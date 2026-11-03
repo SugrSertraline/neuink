@@ -1,10 +1,13 @@
-const { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } = require('node:fs');
+const { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } = require('node:fs');
 const { copyOptionalResources, assertEmbeddingResources, writeAvailabilityManifest } = require('./onboarding-resources.cjs');
 const { DEFAULT_SOURCE: browserReaderSource, verifyResources: verifyBrowserReader,
   copyResources: copyBrowserReader } = require('./browser-reader-resources.cjs');
 const { DEFAULT_SOURCE: readerLicenseSource, verifyResources: verifyReaderLicenses,
   copyResources: copyReaderLicenses } = require('./reader-licenses.cjs');
 const { execFileSync, spawn } = require('node:child_process');
+const researchComponent = require('./research-component.cjs');
+const { findVcRuntimeDir } = require('./windows-runtime.cjs');
+const { assertGuiExecutable } = require('./windows-pe-subsystem.cjs');
 const path = require('node:path');
 const { preparePortableLayout } = require('./portable-layout.cjs');
 
@@ -39,6 +42,7 @@ async function main() {
   assertEmbeddingResources(modelSource);
   verifyBrowserReader(browserReaderSource);
   verifyReaderLicenses(readerLicenseSource);
+  researchComponent.verifyResources();
   const runtimeSource = findVcRuntimeDir();
   if (!skipBuild) {
     console.log('步骤 1/3：构建 Tauri release exe…');
@@ -56,6 +60,7 @@ async function main() {
     path.join(desktopRoot, 'src-tauri', 'target', 'release', 'neuink-desktop.exe'),
   ]);
   assertFile(executableSource, '未找到编译后的 neuink-desktop.exe');
+  assertGuiExecutable(executableSource);
   assertFile(envExampleSource, '未找到根目录 .env.example');
   assertFile(path.join(modelSource, 'onnx', 'model.onnx'), '未找到 embedding 的 ONNX 模型');
   assertFile(path.join(modelSource, 'tokenizer.json'), '未找到 embedding 的 tokenizer.json');
@@ -73,8 +78,11 @@ async function main() {
   mkdirSync(path.join(portableRoot, 'embedding-models'), { recursive: true });
 
   await copyPortableResources(executableSource, portableRoot, runtimeSource);
+  mkdirSync(path.join(portableRoot, 'resources'), { recursive: true });
+  copyFileSync(path.join(desktopRoot, 'src-tauri/resources/unrar-license.txt'), path.join(portableRoot, 'resources/unrar-license.txt'));
   copyBrowserReader(browserReaderSource, path.join(portableRoot, 'resources', 'browser-reader'));
   copyReaderLicenses(readerLicenseSource, path.join(portableRoot, 'resources', 'reader-licenses'));
+  researchComponent.copyResources(researchComponent.DEFAULT_SOURCE, path.join(portableRoot, 'resources', 'research-component'));
   const includesOnboarding = copyOptionalResources(onboardingSource, path.join(portableRoot, 'resources', 'onboarding'));
   writeAvailabilityManifest(includesOnboarding, path.join(portableRoot, 'resources', 'onboarding-availability.json'));
   preparePortableLayout(portableRoot);
@@ -84,7 +92,8 @@ async function main() {
     '2. 双击 Neuink.exe 启动，无需安装 Node.js、Rust 或启动开发服务。',
     '3. 请保留同目录的 embedding-models 文件夹，用于本地语义搜索。', '',
     '4. 请保留 resources/browser-reader 文件夹及其许可证；视频字幕读取已内置所需运行环境，无需安装 Python。', '',
-    '5. 请保留 resources/reader-licenses 文件夹，其中包含网页、PDF 和字幕读取组件及资源的原始许可证。', '',
+    '5. 请保留 resources/reader-licenses 文件夹及 resources/unrar-license.txt，其中包含读取组件和 RAR 解压组件的原始许可证。', '',
+    '6. 深度研究组件已包含在 resources/research-component 中。首次在助手中打开“深度研究”，点击“安装并启用”；不需要预装 Python。', '',
     includesOnboarding
       ? '已包含离线演示素材。请保留 resources/onboarding 文件夹；新手教程的演示 PDF、解析结果与笔记无需联网即可准备。'
       : '本包未包含演示素材（构建时缺失或校验未通过）；不影响主程序、本地 PDF 阅读及 embedding 语义搜索。',
@@ -153,26 +162,6 @@ function copyPortableResources(executableSource, portableRoot, runtimeSource) {
   );
 }
 
-function findVcRuntimeDir() {
-  if (process.env.NEUINK_VC_RUNTIME_DIR) {
-    assertFile(path.join(process.env.NEUINK_VC_RUNTIME_DIR, 'msvcp140.dll'), '指定目录缺少 x64 Visual C++ 运行库');
-    return process.env.NEUINK_VC_RUNTIME_DIR;
-  }
-  const vswhere = path.join(process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'Microsoft Visual Studio', 'Installer', 'vswhere.exe');
-  assertFile(vswhere, '无法定位 Visual Studio；可用 NEUINK_VC_RUNTIME_DIR 指定 x64 CRT 分发目录');
-  const installation = execFileSync(vswhere, ['-latest', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'], { encoding: 'utf8', windowsHide: true }).trim();
-  const redistRoot = path.join(installation, 'VC', 'Redist', 'MSVC');
-  const versions = readdirSync(redistRoot).filter(name => /^\d/.test(name)).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
-  for (const version of versions) {
-    const x64 = path.join(redistRoot, version, 'x64');
-    if (!existsSync(x64)) continue;
-    for (const name of readdirSync(x64).filter(name => /^Microsoft\.VC\d+\.CRT$/.test(name))) {
-      const candidate = path.join(x64, name);
-      if (existsSync(path.join(candidate, 'msvcp140.dll'))) return candidate;
-    }
-  }
-  throw new Error('未找到 x64 Visual C++ 可分发运行库，请设置 NEUINK_VC_RUNTIME_DIR。');
-}
 
 function assertFile(filePath, message) {
   if (!filePath || !existsSync(filePath) || !statSync(filePath).isFile()) {

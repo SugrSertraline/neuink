@@ -27,12 +27,20 @@ mod batch_recovery;
 mod batch_response;
 #[cfg(test)]
 mod batch_tests;
+#[cfg(test)]
+mod compat_tests;
 mod control;
 mod diagrams;
+pub mod diagnostics;
 pub mod lifecycle;
+#[cfg(test)]
+mod live_tests;
+mod model_json;
 pub mod paragraph;
 mod prompts;
 mod rate_limit;
+mod response;
+use model_json::parse_json_object;
 #[cfg(test)]
 mod recovery_tests;
 mod scheduler;
@@ -64,6 +72,9 @@ const MAX_BATCH_RECOVERY_REQUESTS: usize = MAX_BATCH_SEGMENTS + 1;
 const LLM_REQUEST_BASE_TIMEOUT: Duration = Duration::from_secs(120);
 const LLM_TIMEOUT_RETRY_STEP: Duration = Duration::from_secs(60);
 const LLM_REQUEST_MAX_ATTEMPTS: u32 = 3;
+const CONTEXT_PREPARATION_TIMEOUT: Duration = Duration::from_secs(90);
+const STREAM_RESPONSE_TIMEOUT: Duration = Duration::from_secs(180);
+const TRANSLATION_BATCH_TIMEOUT: Duration = Duration::from_secs(240);
 /// 实时进度事件的最小间隔，避免流式回调打爆事件通道。
 const LIVE_PROGRESS_INTERVAL: Duration = Duration::from_millis(800);
 /// 批次并发数：批与批之间互不依赖，并发执行可把总时间摊薄到 1/N。
@@ -644,8 +655,9 @@ impl TranslationPipeline {
             if let Some(outcome) = self.pause_if_requested(app, job_id)? {
                 return Ok(outcome);
             }
-            let context = self
-                .build_context(
+            let context_result = timeout(
+                CONTEXT_PREPARATION_TIMEOUT,
+                self.build_context(
                     &self.client.clone().with_progress(self.live_progress_sink(
                         app,
                         job_id,
@@ -654,14 +666,49 @@ impl TranslationPipeline {
                     )),
                     &entry.title,
                     &pending_candidates,
-                )
-                .await?;
+                ),
+            )
+            .await;
+            let (context, context_ready) = match context_result {
+                Ok(Ok(result)) => result,
+                Ok(Err(error)) => {
+                    crate::translation_log::best_effort(
+                        &self.task.profile,
+                        crate::translation_log::Stage::ContextValidation,
+                        &error,
+                        crate::translation_log::Details::default(),
+                    );
+                    (empty_paper_context(), false)
+                }
+                Err(_) => {
+                    crate::translation_log::best_effort(
+                        &self.task.profile,
+                        crate::translation_log::Stage::ContextValidation,
+                        "context preparation timed out",
+                        crate::translation_log::Details {
+                            elapsed_ms: CONTEXT_PREPARATION_TIMEOUT.as_millis() as u64,
+                            ..Default::default()
+                        },
+                    );
+                    (empty_paper_context(), false)
+                }
+            };
             self.update_translation(|translation| {
-                translation.paper_context = Some(context.clone());
+                if context_ready {
+                    translation.paper_context = Some(context.clone());
+                }
                 translation.status = TranslationStatus::Running;
                 translation.error = None;
             })?;
-            self.emit_translation_progress(app, job_id, "论文背景已生成")?;
+            self.emit_translation_progress(
+                app,
+                job_id,
+                if context_ready {
+                    "论文背景已生成"
+                } else {
+                    "论文背景不可用，继续使用模型翻译正文"
+                },
+            )?;
             context
         };
 
@@ -703,8 +750,9 @@ impl TranslationPipeline {
                         "正在翻译".to_string(),
                         &done_counter,
                     ));
-                    let outcome = batch_client
-                        .translate_batch_recovering(
+                    let outcome = timeout(
+                        TRANSLATION_BATCH_TIMEOUT,
+                        batch_client.translate_batch_recovering(
                             &entry.title,
                             &context,
                             ordinary_segments,
@@ -726,8 +774,10 @@ impl TranslationPipeline {
                                 done_counter.fetch_add(translated_count, Ordering::Relaxed);
                                 self.emit_translation_progress(app, job_id, "正在翻译")
                             },
-                        )
-                        .await;
+                        ),
+                    )
+                    .await
+                    .unwrap_or_else(|_| Err("翻译模型请求超时，请重试失败项".into()));
                     if let Err(error) = outcome {
                         record_fatal(&fatal_error, error);
                         return;
@@ -741,9 +791,12 @@ impl TranslationPipeline {
                         "正在翻译".to_string(),
                         &done_counter,
                     ));
-                    let outcome = self
-                        .translate_list_segment(&list_client, &entry.title, &context, &segment)
-                        .await;
+                    let outcome = timeout(
+                        TRANSLATION_BATCH_TIMEOUT,
+                        self.translate_list_segment(&list_client, &entry.title, &context, &segment),
+                    )
+                    .await
+                    .unwrap_or_else(|_| Err("翻译模型请求超时，请重试失败项".into()));
                     let translated_successfully = outcome.is_ok();
                     let io = io_lock.lock().unwrap_or_else(|error| error.into_inner());
                     match outcome {
@@ -797,11 +850,13 @@ impl TranslationPipeline {
             recompute_progress(translation);
             translation.status = completed_translation_status(translation);
             translation.task = None;
-            translation.error = None;
+            translation.error = (translation.progress.failed > 0).then(|| {
+                format!("{} 个片段翻译失败，请重试失败项", translation.progress.failed)
+            });
         })?;
         let message = if final_translation.progress.failed > 0 {
             format!(
-                "翻译部分完成，仍有 {} 个片段失败，可在翻译任务中重试",
+                "翻译失败：{} 个片段未完成，已有译文已保留，可在翻译任务中重试",
                 final_translation.progress.failed
             )
         } else if matches!(final_translation.status, TranslationStatus::Partial) {
@@ -809,13 +864,18 @@ impl TranslationPipeline {
         } else {
             "翻译完成".to_string()
         };
-        if let Some(event) = job_manager().succeed_with_progress(
-            job_id,
-            self.completed_count(&final_translation),
-            self.task.job_total,
-            message,
-            translation_payload(&final_translation),
-        ) {
+        let event = if final_translation.progress.failed > 0 {
+            job_manager().fail(job_id, message, translation_payload(&final_translation))
+        } else {
+            job_manager().succeed_with_progress(
+                job_id,
+                self.completed_count(&final_translation),
+                self.task.job_total,
+                message,
+                translation_payload(&final_translation),
+            )
+        };
+        if let Some(event) = event {
             emit_job_event(app, event);
         }
         Ok(TranslationRunOutcome::Completed)
@@ -863,7 +923,7 @@ impl TranslationPipeline {
         client: &LlmClient,
         entry_title: &str,
         segments: &[SourceSegment],
-    ) -> Result<TranslationPaperContext, String> {
+    ) -> Result<(TranslationPaperContext, bool), String> {
         let markdown = trim_to_budget(
             &segments
                 .iter()
@@ -886,12 +946,24 @@ impl TranslationPipeline {
                 &prompt,
             )
             .await?;
-        let parsed: PaperContextJson = parse_json_object(&text)?;
-        Ok(TranslationPaperContext {
-            summary: parsed.summary.unwrap_or_default().trim().to_string(),
-            terminology: normalize_terms(parsed.terminology),
-            generated_at: Utc::now(),
-        })
+        match parse_json_object::<PaperContextJson>(&text) {
+            Ok(parsed) => Ok((TranslationPaperContext {
+                summary: parsed.summary.unwrap_or_default().trim().to_string(),
+                terminology: normalize_terms(parsed.terminology),
+                generated_at: Utc::now(),
+            }, true)),
+            Err(error) => {
+                crate::translation_log::best_effort(
+                    &client.profile,
+                    crate::translation_log::Stage::ContextValidation,
+                    &error,
+                    crate::translation_log::response_details(&text),
+                );
+                // Context is advisory. A malformed summary must not prevent the
+                // selected source segments from reaching the translation stage.
+                Ok((empty_paper_context(), false))
+            }
+        }
     }
 
     /// 构造流式接收的实时进度回调：LLM 仍在生成时按 ~800ms 节流推送
@@ -1180,11 +1252,20 @@ impl LlmClient {
         })
         .to_string();
         let text = self.generate_text(prompts::SYSTEM, &prompt).await?;
-        batch_response::restore_batch_translations(
+        let result = batch_response::restore_batch_translations(
             &text,
             &protected_by_segment_uid,
             &diagrams_by_segment_uid,
-        )
+        );
+        let accepted = result.as_ref().map(|v| v.len()).unwrap_or(0);
+        if accepted != batch.len() || result.is_err() {
+            let mut details = crate::translation_log::response_details(&text);
+            details.expected_segments = Some(batch.len());
+            details.accepted_segments = Some(accepted);
+            crate::translation_log::best_effort(&self.profile, crate::translation_log::Stage::BatchValidation,
+                result.as_ref().err().map(String::as_str).unwrap_or("TEST_INCOMPLETE_TRANSLATION"), details);
+        }
+        result
     }
 }
 
@@ -1204,6 +1285,14 @@ struct TranslationTermJson {
     target: Option<String>,
     #[serde(default)]
     note: Option<String>,
+}
+
+fn empty_paper_context() -> TranslationPaperContext {
+    TranslationPaperContext {
+        summary: String::new(),
+        terminology: Vec::new(),
+        generated_at: Utc::now(),
+    }
 }
 
 fn update_translation(
@@ -1372,10 +1461,24 @@ fn retry_individually_or_fail(
 }
 
 fn should_retry_individually(error: &str) -> bool {
-    // Invalid credentials/configuration and rate limits are not fixed by smaller payloads.
-    !error.contains("LLM request failed (4")
-        && !error.contains("rate limit")
-        && !error.contains("RateLimited")
+    // Only malformed/incomplete model output can improve with smaller payloads.
+    !is_model_service_failure(error)
+}
+
+fn is_model_service_failure(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("llm request failed")
+        || lower.contains("rate limit")
+        || lower.contains("ratelimited")
+        || lower.contains("timeout")
+        || lower.contains("timed out")
+        || lower.contains("stalled")
+        || lower.contains("network")
+        || lower.contains("connect")
+        || error.contains("限流")
+        || error.contains("超时")
+        || error.contains(response::REASONING_ONLY)
+        || error.contains(response::REJECTED)
 }
 
 /// 并发批次的闭包里不能用 `?` 上抛，致命错误先记到共享槽位（保留首个错误）。
@@ -1495,6 +1598,8 @@ fn completed_translation_status(translation: &EntryTranslation) -> TranslationSt
     let completed = translation.progress.translated + translation.progress.skipped;
     if translation.progress.failed == 0 && completed >= translation.progress.total {
         TranslationStatus::Succeeded
+    } else if translation.progress.failed > 0 && translation.progress.translated == 0 {
+        TranslationStatus::Failed
     } else {
         TranslationStatus::Partial
     }
@@ -1713,82 +1818,6 @@ fn normalize_terms(terms: Vec<TranslationTermJson>) -> Vec<TranslationTerm> {
         .collect()
 }
 
-fn parse_json_object<T: for<'de> Deserialize<'de>>(text: &str) -> Result<T, String> {
-    let trimmed = text.trim();
-    let candidate = if let Some(start) = trimmed.find("```") {
-        let after_open = &trimmed[start + 3..];
-        let after_lang = after_open
-            .strip_prefix("json")
-            .unwrap_or(after_open)
-            .trim_start();
-        after_lang
-            .find("```")
-            .map(|end| &after_lang[..end])
-            .unwrap_or(after_lang)
-    } else {
-        trimmed
-    };
-    let start = candidate
-        .find('{')
-        .ok_or_else(|| "LLM did not return a JSON object".to_string())?;
-    let end = candidate
-        .rfind('}')
-        .ok_or_else(|| "LLM did not return a JSON object".to_string())?;
-    let object = &candidate[start..=end];
-    serde_json::from_str(object).or_else(|original_error| {
-        let repaired = repair_invalid_json_escapes(object);
-        serde_json::from_str(&repaired).map_err(|repair_error| {
-            format!("{original_error}; repair attempt failed: {repair_error}")
-        })
-    })
-}
-
-fn repair_invalid_json_escapes(value: &str) -> String {
-    let mut output = String::with_capacity(value.len());
-    let mut in_string = false;
-    let mut escaped = false;
-    let chars = value.chars().collect::<Vec<_>>();
-    let mut index = 0;
-    while index < chars.len() {
-        let current = chars[index];
-        if !in_string {
-            if current == '"' {
-                in_string = true;
-            }
-            output.push(current);
-            index += 1;
-            continue;
-        }
-        if escaped {
-            escaped = false;
-            output.push(current);
-            index += 1;
-            continue;
-        }
-        if current == '"' {
-            in_string = false;
-            output.push(current);
-            index += 1;
-            continue;
-        }
-        if current == '\\' {
-            let next = chars.get(index + 1).copied();
-            if !matches!(
-                next,
-                Some('"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't' | 'u')
-            ) {
-                output.push_str("\\\\");
-                index += 1;
-                continue;
-            }
-            escaped = true;
-        }
-        output.push(current);
-        index += 1;
-    }
-    output
-}
-
 fn translation_payload(translation: &EntryTranslation) -> Value {
     json!({ "translation": translation })
 }
@@ -1800,7 +1829,8 @@ mod stop_tests;
 #[cfg(test)]
 mod tests {
     use super::{
-        list_translation_units, parse_json_object, protect_formula_spans,
+        completed_translation_status, is_model_service_failure, list_translation_units,
+        parse_json_object, protect_formula_spans,
         request_timeout_for_attempt, restore_formula_spans, retry_individually_or_fail,
         should_retry_individually, should_translate_segment, split_list_translation_units,
         translation_budgets, MAX_PAPER_CONTEXT_BUDGET,
@@ -1899,6 +1929,28 @@ mod tests {
         assert!(should_retry_individually("EOF while parsing a list"));
         assert!(should_retry_individually(
             "LLM response did not contain message content"
+        ));
+        assert!(is_model_service_failure("LLM response body timed out after 120 seconds."));
+        assert!(!should_retry_individually("LLM stream stalled after 120 seconds"));
+        assert!(!should_retry_individually("LLM request failed (503 Service Unavailable)"));
+        assert!(!should_retry_individually("翻译服务仍在限流，请稍后重试"));
+        assert!(!should_retry_individually(super::response::REASONING_ONLY));
+    }
+
+    #[test]
+    fn no_successful_translation_with_failed_segments_is_a_failed_task() {
+        let mut translation = super::new_translation(
+            neuink_domain::EntryId::new(), "en".into(), "zh-CN".into(), None, 2,
+        );
+        translation.progress.failed = 2;
+        assert!(matches!(
+            completed_translation_status(&translation),
+            neuink_workspace::TranslationStatus::Failed
+        ));
+        translation.progress.translated = 1;
+        assert!(matches!(
+            completed_translation_status(&translation),
+            neuink_workspace::TranslationStatus::Partial
         ));
     }
 

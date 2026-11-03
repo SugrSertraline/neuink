@@ -20,7 +20,9 @@ type DragSession<T> = {
 };
 
 /** Shared pointer ownership, cancellation and bounded auto-scroll for document drags. */
-export function usePointerItemDrag<T>(context: string, session: DragSession<T>) {
+export function usePointerItemDrag<T>(context: string, session: DragSession<T>, {
+  autoScroll = true, cursor = 'grabbing'
+}: { autoScroll?: boolean; cursor?: string | ((item: T) => string) } = {}) {
   const dragRef = useRef<ItemDrag<T> | null>(null);
   const frameRef = useRef<number | null>(null);
   const suppressClickRef = useRef(false);
@@ -84,10 +86,10 @@ export function usePointerItemDrag<T>(context: string, session: DragSession<T>) 
         drag.dragging = true;
         suppressClickRef.current = true;
         drag.previousStyles = { cursor: document.body.style.cursor, userSelect: document.body.style.userSelect };
-        document.body.style.cursor = 'grabbing';
+        document.body.style.cursor = typeof cursor === 'function' ? cursor(drag.item) : cursor;
         document.body.style.userSelect = 'none';
         session.begin(drag.item, drag.x, drag.y);
-        frameRef.current = requestAnimationFrame(scrollFrame);
+        if (autoScroll) frameRef.current = requestAnimationFrame(scrollFrame);
       } else session.update(drag.x, drag.y);
       setPreview({ item: drag.item, x: drag.x, y: drag.y });
       event.preventDefault();

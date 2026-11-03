@@ -51,9 +51,9 @@ it('cancels without writing, then uploads to an entry without a PDF', async () =
 it('shows a picker failure and allows retry', async () => {
   vi.mocked(open).mockRejectedValueOnce(new Error('文件选择失败')).mockResolvedValueOnce('C:/result.zip');
   const onImportMineruClientResult = vi.fn(); const view = render(<EntryPdfActions entry={entry} onImportMineruClientResult={onImportMineruClientResult} />);
-  fireEvent.click(view.getByRole('button', { name: '导入客户端解析结果' }));
+  fireEvent.click(view.getByRole('button', { name: '导入 MinerU ZIP/RAR' }));
   await waitFor(() => expect(view.getByRole('alert').textContent).toContain('文件选择失败'));
-  fireEvent.click(view.getByRole('button', { name: '导入客户端解析结果' }));
+  fireEvent.click(view.getByRole('button', { name: '导入 MinerU ZIP/RAR' }));
   await waitFor(() => expect(onImportMineruClientResult).toHaveBeenCalledWith(entry.id, 'C:/result.zip'));
 });
 

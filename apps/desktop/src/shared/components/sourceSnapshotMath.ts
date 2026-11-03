@@ -64,6 +64,13 @@ function unwrapDisplayMathDelimiters(value: string) {
     return bracketMatch[1].trim();
   }
 
+  // A parsed formula may still carry inline delimiters. Strip only one whole
+  // expression before wrapping it as display math, never adjacent formulas.
+  const inlineMatch = value.match(/^\$((?:\\[\s\S]|[^$\\])+)\$$/);
+  if (inlineMatch) return inlineMatch[1].trim();
+  const parenthesesMatch = value.match(/^\\\(([\s\S]*?)\\\)$/);
+  if (parenthesesMatch && !/\\[()]/.test(parenthesesMatch[1])) return parenthesesMatch[1].trim();
+
   return value;
 }
 

@@ -33,7 +33,53 @@ const block: PdfBlockDragItem = {
   segment: { uid: 'block-4', bbox: [100, 100, 800, 400], page_idx: 3, segment_type: 'paragraph', text: 'Exact block evidence.', markdown: '**Exact** block evidence.' } as PdfBlockDragItem['segment'],
 };
 
+it('does not publish a draft update when model availability changes after navigation', async () => {
+  const onChange = vi.fn();
+  const props = { ...editorProps(textDraft('保留未发送的问题')), onChange };
+  const ui = render(<AssistantComposerEditor {...props} disabled />);
+  await waitFor(() => expect(ui.container.querySelector('.ProseMirror')).toBeTruthy());
+  expect(onChange).not.toHaveBeenCalled();
+  ui.rerender(<AssistantComposerEditor {...props} disabled={false} />);
+  expect(ui.getByRole('textbox', { name: '输入问题' }).getAttribute('contenteditable')).toBe('true');
+  expect(ui.getByRole('textbox', { name: '输入问题' }).textContent).toBe('保留未发送的问题');
+  expect(onChange).not.toHaveBeenCalled();
+  ui.rerender(<AssistantComposerEditor {...props} disabled />);
+  expect(onChange).not.toHaveBeenCalled();
+});
+
 describe('PDF block attachments', () => {
+  it('places a menu attachment inside the existing question once, updates its quote, and supports removal and re-add', async () => {
+    const onChange = vi.fn(), onSubmit = vi.fn();
+    const item = { id: `segment:${dropEntry.id}:block-4`, kind: 'segment' as const, entryId: dropEntry.id,
+      entryTitle: dropEntry.title, pageIdx: 3, segmentUid: 'block-4', text: '菜单选中的原文', addedAt: 'first' };
+    const props = { ...editorProps(textDraft('比较这段原文与已有问题')), entries: [dropEntry], onChange, onSubmit };
+    const view = render(<AssistantComposerEditor {...props} contextItems={[]} />);
+    view.rerender(<AssistantComposerEditor {...props} contextItems={[item]} />);
+    await waitFor(() => expect(view.container.querySelectorAll('[data-context-mention]')).toHaveLength(1));
+    expect(onChange.mock.lastCall?.[0].text).toContain('比较这段原文与已有问题');
+    expect(onChange.mock.lastCall?.[1]).toEqual([expect.objectContaining({ text: item.text, segmentUid: 'block-4', pageIdx: 3 })]);
+    view.rerender(<AssistantComposerEditor {...props} contextItems={[{ ...item, addedAt: 'second' }]} />);
+    expect(view.container.querySelectorAll('[data-context-mention]')).toHaveLength(1);
+    view.rerender(<AssistantComposerEditor {...props} contextItems={[{ ...item, text: '更新后的选区原文' }]} />);
+    await waitFor(() => expect(onChange.mock.lastCall?.[1][0].text).toBe('更新后的选区原文'));
+    fireEvent.click(view.getByRole('button', { name: /移除引用/ }));
+    expect(view.container.querySelectorAll('[data-context-mention]')).toHaveLength(0);
+    view.rerender(<AssistantComposerEditor {...props} contextItems={[]} />);
+    view.rerender(<AssistantComposerEditor {...props} contextItems={[item]} />);
+    await waitFor(() => expect(view.container.querySelectorAll('[data-context-mention]')).toHaveLength(1));
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('waits for an editable composer before moving a pending menu reference into the draft', async () => {
+    const props = { ...editorProps(textDraft('保留只读草稿')), contextItems: [{ id: 'pending', kind: 'segment' as const,
+      entryId: dropEntry.id, entryTitle: dropEntry.title, pageIdx: 0, segmentUid: 'pending', text: '待附加证据', addedAt: '' }] };
+    const view = render(<AssistantComposerEditor {...props} disabled />);
+    expect(props.onChange).not.toHaveBeenCalled();
+    view.rerender(<AssistantComposerEditor {...props} disabled={false} />);
+    await waitFor(() => expect(props.onChange.mock.lastCall?.[0].mentions).toHaveLength(1));
+    expect(props.onChange.mock.lastCall?.[0].text).toContain('保留只读草稿');
+  });
+
   it('retains two sibling list references separately and deduplicates only the same item', async () => {
     const onChange = vi.fn();
     const view = render(<AssistantComposerEditor {...editorProps(textDraft('比较这两项'))} entries={[dropEntry]} workspaceRoot="library-a" onChange={onChange} />);

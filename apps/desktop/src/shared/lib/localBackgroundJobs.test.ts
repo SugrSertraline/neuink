@@ -18,6 +18,15 @@ function deferred<T>() {
 beforeEach(() => vi.resetModules());
 
 describe('window-local background task projection', () => {
+  it('reports measured batch progress and distinguishes cancellation from failure', async () => {
+    const registry = await import('./localBackgroundJobs');
+    await expect(registry.runLocalBackgroundJob(options, async report => {
+      report({ current: 1, total: 3, percent: 33 });
+      expect(registry.getLocalBackgroundJobs()[0].progress.current).toBe(1);
+      throw new DOMException('Canceled', 'AbortError');
+    })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(registry.getLocalBackgroundJobs()[0]).toMatchObject({ status: 'canceled', error: null, progress: { current: 1, total: 3 } });
+  });
   it('tracks real lifetime with stable snapshots, scoped identity and no guessed percentage', async () => {
     const registry = await import('./localBackgroundJobs');
     const task = deferred<string>();

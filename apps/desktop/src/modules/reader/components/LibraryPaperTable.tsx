@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { cn } from '@/lib/utils';
 import type { EntryReadingState } from '@/shared/types/domain';
 import type { LibraryEntry } from '../../library/components/LibrarySidebar';
+import { PdfParseButton, type PdfParseAction } from '@/modules/library/components/PdfParseButton';
 import { AssetSummary, StatusBadge, TagBadges, formatDate } from './EntryDisplay';
 import { LibraryEntryTitle } from './LibraryEntryTitle';
 import { formatLastRead, formatReadingDuration, getReadingProgress } from './libraryReading';
@@ -24,6 +25,7 @@ export const ENTRY_LIBRARY_COLUMNS: Array<{ id: EntryLibraryColumnId; label: str
 ];
 
 export type LibraryPaperCollectionProps = LibraryPaperActions & {
+  pdfParseAction?: PdfParseAction;
   active: boolean;
   entries: LibraryEntry[];
   status: 'loading' | 'ready' | 'error';
@@ -43,7 +45,7 @@ const bodyCellClass = 'h-12 overflow-hidden border-b border-border/60 px-3 py-1 
 const numericColumns = new Set<EntryLibraryColumnId>(['last-read', 'reading-time', 'updated']);
 
 /** Both library layouts keep this table mounted, including its column and scroll state. */
-export function LibraryPaperTable({ active, entries, status, emptyMessage, readingStates, selectedEntryId, draggingEntryId, visibleColumns, pinnedEdges, reparseDisabled, getRowProps, onOpen, onOpenInSidePane, onReparse, onDelete }: LibraryPaperTableProps) {
+export function LibraryPaperTable({ active, entries, status, emptyMessage, readingStates, selectedEntryId, draggingEntryId, visibleColumns, pinnedEdges, reparseDisabled, getRowProps, onOpen, onOpenInSidePane, onReparse, onDelete, pdfParseAction }: LibraryPaperTableProps) {
   const shownColumns = ENTRY_LIBRARY_COLUMNS.filter(column => visibleColumns.has(column.id));
   const leftPinnedColumnId = pinnedEdges.has('left') ? shownColumns[0]?.id ?? null : null;
   const lastColumnId = shownColumns[shownColumns.length - 1]?.id ?? null;
@@ -84,9 +86,12 @@ export function LibraryPaperTable({ active, entries, status, emptyMessage, readi
               className={cn('group cursor-pointer bg-card hover:bg-muted has-aria-expanded:bg-muted data-[state=selected]:bg-accent outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring', item.id === draggingEntryId && '[&>[data-slot=table-cell]>*]:opacity-55')}>
               {shownColumns.map(column =>
                 <TableCell key={column.id} className={cn(bodyCellClass, alignment(column.id))} pin={getPin(column.id)}>
-                  {column.id === 'actions' ? <Button aria-label="移到回收站" title="移到回收站" size="icon-xs" variant="ghost"
+                  {column.id === 'actions' ? <div className="flex items-center justify-end gap-1">
+                    <Button aria-label="移到回收站" title="移到回收站" size="icon-xs" variant="ghost"
                     className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                     onClick={event => { event.stopPropagation(); onDelete(item); }}><Trash2 size={14} aria-hidden="true" /></Button>
+                    {pdfParseAction && <PdfParseButton entry={item} action={pdfParseAction} />}
+                    </div>
                     : <PaperCell column={column.id} entry={item} state={readingStates[item.id]} />}
                 </TableCell>
               )}

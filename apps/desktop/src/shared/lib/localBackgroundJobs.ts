@@ -1,4 +1,4 @@
-import type { Job, JobScope } from '@/shared/ipc/workspaceApi';
+import type { Job, JobProgress, JobScope } from '@/shared/ipc/workspaceApi';
 import { assistantErrorDiagnostic } from './assistantDebug';
 import { recentBackgroundJobs } from './backgroundJobs';
 
@@ -32,7 +32,7 @@ function publish(job: Job): void {
   }
 }
 
-export async function runLocalBackgroundJob<T>(options: LocalJobOptions, execute: () => Promise<T>): Promise<T> {
+export async function runLocalBackgroundJob<T>(options: LocalJobOptions, execute: (report: (progress: JobProgress) => void) => Promise<T>): Promise<T> {
   const now = new Date().toISOString();
   let job: Job = {
     id: `${options.idPrefix ?? 'local-task'}:${crypto.randomUUID()}`,
@@ -47,13 +47,17 @@ export async function runLocalBackgroundJob<T>(options: LocalJobOptions, execute
   };
   publish(job);
   try {
-    const result = await execute();
+    const result = await execute(progress => {
+      job = { ...job, progress, updated_at: new Date().toISOString() };
+      publish(job);
+    });
     job = { ...job, status: 'succeeded', message: options.successMessage };
     return result;
   } catch (error) {
     // Only an allowlisted category/status survives in the task registry. The
     // owning UI still receives its original exception and applies its own policy.
-    job = { ...job, status: 'failed', message: options.failureMessage, error: assistantErrorDiagnostic(error) };
+    const canceled = error instanceof DOMException && error.name === 'AbortError';
+    job = { ...job, status: canceled ? 'canceled' : 'failed', message: canceled ? '操作已停止，已完成的内容保留' : options.failureMessage, error: canceled ? null : assistantErrorDiagnostic(error) };
     throw error;
   } finally {
     publish({ ...job, updated_at: new Date().toISOString() });

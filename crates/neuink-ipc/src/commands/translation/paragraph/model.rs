@@ -31,18 +31,29 @@ pub(super) async fn translate(
         json!({"paragraph":source})
     };
     let text = client.generate_text(&system, &prompt.to_string()).await?;
-    if sentence_mode {
-        let result: SentencesJson = parse_json_object(&text)?;
-        let aligned = sentences::align(&sources, result.sentences, true)?;
-        validate_sentences(source, &aligned)?;
-        Ok(TranslationResult::Sentences(aligned))
-    } else {
-        let result: ParagraphJson = parse_json_object(&text)?;
-        if result.translation.trim().is_empty() {
-            return Err("模型返回了空的整段译文。".into());
+    let result: Result<TranslationResult, String> = (|| {
+        if sentence_mode {
+            let result: SentencesJson = parse_json_object(&text)?;
+            let aligned = sentences::align(&sources, result.sentences, true)?;
+            validate_sentences(source, &aligned)?;
+            Ok(TranslationResult::Sentences(aligned))
+        } else {
+            let result: ParagraphJson = parse_json_object(&text)?;
+            if result.translation.trim().is_empty() {
+                return Err("模型返回了空的整段译文。".into());
+            }
+            Ok(TranslationResult::Paragraph(result.translation))
         }
-        Ok(TranslationResult::Paragraph(result.translation))
+    })();
+    if let Err(error) = &result {
+        crate::translation_log::best_effort(
+            &client.profile,
+            crate::translation_log::Stage::ParagraphValidation,
+            error,
+            crate::translation_log::response_details(&text),
+        );
     }
+    result
 }
 
 pub(super) fn validate_sentences(

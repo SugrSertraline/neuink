@@ -33,6 +33,8 @@ import { notifyPdfInteraction } from "./pdfRenderQueue";
 import { PdfTextSelectionToolbar } from "./PdfTextSelectionToolbar";
 import type { ApplyTextSelectionAnnotation } from './textSelectionAnnotation';
 import { SegmentActionMenu } from "./SegmentActionMenu";
+import { PdfVisualDetail } from './PdfVisualDetail';
+import { isVisualSegment, usePdfVisualDetail } from './usePdfVisualDetail';
 import { SegmentRegion } from "./SegmentRegion";
 import { logicalSegmentUid } from "./readerUtils";
 import { requiresListItemChoice } from '@/shared/lib/listItemSegments';
@@ -43,9 +45,10 @@ import { annotationPaperProps } from '@/modules/annotations/annotationPaper';
 import { isPdfBlockDragControl, usePdfBlockDrag } from './usePdfBlockDrag';
 import { layoutTranslatedParagraphs } from './translationLayout';
 import { pdfOriginalContentWindows } from './PdfTranslationPageMask';
-import { pdfSentenceGeometry, sentenceAtPoint, type PdfSentenceGeometry } from './pdfSentenceHover';
-import { alignSavedTranslation } from '../../translation/sentenceAlignment';
+import { pdfSentenceGeometry, sentenceAtPoint, translatedSentenceGeometry, type PdfSentenceGeometry } from './pdfSentenceHover';
+import { pdfSentencePreview, type PdfSentenceHover } from './pdfSentencePreview';
 import { PaperTextPreview } from '../navigation/PaperReferences';
+import { pdfPreviewTextMetrics } from './pdfPreviewTypography';
 
 const EMPTY_ANNOTATIONS: Annotation[] = [];
 
@@ -55,8 +58,8 @@ function PdfSourcePageImpl({
   flashSegmentUid,
   hoveredSegmentUid,
   hoverPreviewEnabled,
-  hoverPreviewFontSize = 'standard',
-  hoverPreviewSize = 'standard',
+  hoverPreviewFontSize = 100,
+  hoverPreviewSize = 100,
   hoverPreviewShowRegion,
   hoverPreviewShowOriginal,
   hoverPreviewShowNote,
@@ -156,6 +159,7 @@ function PdfSourcePageImpl({
   sentenceHoverEnabled?: boolean;
   altClickOpensNote?: boolean;
 }) {
+  const hoverTextMetrics = pdfPreviewTextMetrics(hoverPreviewFontSize);
   const originalContentWindows = useMemo(
     () => translationVisible && translationMode === 'replace' && sourcePage.regions.length > 0
       ? pdfOriginalContentWindows(sourcePage)
@@ -191,41 +195,30 @@ function PdfSourcePageImpl({
     anchor: { x: number; top: number; bottom: number };
   } | null>(null);
   const [localHoveredGroupUid, setLocalHoveredGroupUid] = useState<string | null>(null);
-  const [hoveredSentence, setHoveredSentence] = useState<{ regionId: string; sentence: PdfSentenceGeometry } | null>(null);
+  const [hoveredSentence, setHoveredSentence] = useState<PdfSentenceHover | null>(null);
   const sentenceCacheRef = useRef<{ firstChild: ChildNode | null; pageWidth: number; regions: Map<string, PdfSentenceGeometry[] | null> }>({
     firstChild: null, pageWidth, regions: new Map(),
   });
+  const translatedSentenceCacheRef = useRef(new WeakMap<HTMLElement, { key: string; geometry: PdfSentenceGeometry[] | null }>());
   const [actionMenu, setActionMenu] = useState<{
     position: { x: number; y: number };
     segment: SourceSegment;
     wholeListSegment?: SourceSegment;
   } | null>(null);
   const hitLayerRef = useRef<HTMLDivElement | null>(null);
+  const visualDetail = usePdfVisualDetail(pdfDocument, sourceEntryId, workspaceRoot, suppressRegions);
   const sentencePreview = useMemo(() => {
     const host = hitLayerRef.current;
     if (!hoveredSentence || !host) return null;
     const region = page.regions.find(item => item.id === hoveredSentence.regionId);
     if (!region) return null;
-    const pageRect = pdfPageContentRect(host);
-    const rects = hoveredSentence.sentence.rects;
-    const first = rects[0];
-    if (!first) return null;
-    const translated = translationBySegmentUid.get(region.sourceSegment.uid)?.translated_text;
-    const paired = translated && hoveredSentence.sentence.linkedSentenceIndex !== null
-      ? alignSavedTranslation(region.sourceSegment.markdown ?? region.sourceSegment.text, translated) : null;
-    return {
-      anchor: {
-        x: pageRect.left + first[0] / 1000 * pageRect.width,
-        right: pageRect.left + Math.max(...rects.map(rect => rect[2])) / 1000 * pageRect.width,
-        top: pageRect.top + first[1] / 1000 * pageRect.height,
-        bottom: pageRect.top + Math.max(...rects.map(rect => rect[3])) / 1000 * pageRect.height,
-      },
-      source: hoveredSentence.sentence.source,
-      translation: paired?.find(pair => hoveredSentence.sentence.linkedSentenceIndex !== null &&
-        hoveredSentence.sentence.linkedSentenceIndex >= pair.sourceStartIndex &&
-        hoveredSentence.sentence.linkedSentenceIndex < pair.sourceEndIndex)?.translation ?? null,
-    };
+    return pdfSentencePreview(hoveredSentence, region,
+      (translationBySegmentUid.get(region.segment.uid) ??
+        translationBySegmentUid.get(region.sourceSegment.uid))?.translated_text, pdfPageContentRect(host));
   }, [hoveredSentence, page.regions, translationBySegmentUid]);
+  const paragraphFallback = sentenceHoverEnabled && sentenceHoverShowTranslation && hoverPreviewEnabled &&
+    hoverPreviewShowTranslation && translationVisible && sentencePreview?.paragraphTranslation && !sentencePreview.translation
+    ? sentencePreview : null;
   const blockDragEnabled = renderEnabled && renderPriority === 'visible' && !suppressRegions && Boolean(onAddAssistantContext);
   const blockDrag = usePdfBlockDrag(`${workspaceRoot}:${sourceEntryId}:${page.pageIdx}`, blockDragEnabled);
   const textSelection = usePdfTextSelection(hitLayerRef, page,
@@ -289,7 +282,15 @@ function PdfSourcePageImpl({
     if (!inlineAnnotationHoverEnabled || suppressRegions) setHoveredAnnotation(null);
   }, [hoverPreviewEnabled, inlineAnnotationHoverEnabled, sentenceHoverEnabled, suppressRegions]);
 
+  useEffect(() => {
+    if (hoverAnimationFrameRef.current !== null) window.cancelAnimationFrame(hoverAnimationFrameRef.current);
+    hoverAnimationFrameRef.current = null;
+    pendingHoverSampleRef.current = null;
+    setHoveredSentence(null);
+  }, [translationMode, translationVisible]);
+
   const clearFloatingSegmentUi = () => {
+    visualDetail.cancelClick();
     if (previewClearTimerRef.current !== null) {
       window.clearTimeout(previewClearTimerRef.current);
       previewClearTimerRef.current = null;
@@ -336,6 +337,7 @@ function PdfSourcePageImpl({
         setPreviewRegionId(null);
         setLocalHoveredGroupUid(null);
         setHoveredAnnotation(null);
+        setHoveredSentence(null);
       }
     }, HOVER_TIMING.close);
   };
@@ -403,6 +405,23 @@ function PdfSourcePageImpl({
 
   const sentencesForRegion = (element: HTMLDivElement, region: PageSegments['regions'][number], pageRect: DOMRect) => {
     if (!sentenceLinkEnabled && !sentenceHoverEnabled) return null;
+    if (translationVisible && translationMode === 'replace') {
+      const layer = Array.from(element.querySelectorAll<HTMLElement>('[data-pdf-translation-region]'))
+        .find(node => node.dataset.pdfTranslationRegion === region.id);
+      const translated = translationBySegmentUid.get(region.segment.uid)?.translated_text ??
+        translationBySegmentUid.get(region.sourceSegment.uid)?.translated_text;
+      if (!layer || !translated) return null;
+      const rect = layer.getBoundingClientRect();
+      const fitted = layer.querySelector<HTMLElement>('.translation-replacement-preview');
+      const key = JSON.stringify([region.bbox, region.sourceSegment.markdown ?? region.sourceSegment.text,
+        translated, layer.textContent, fitted?.style.fontSize, rect.left - pageRect.left, rect.top - pageRect.top,
+        rect.width, rect.height, pageRect.width, pageRect.height]);
+      const cached = translatedSentenceCacheRef.current.get(layer);
+      if (cached?.key === key) return cached.geometry;
+      const geometry = translatedSentenceGeometry(layer, region, pageRect, translated);
+      translatedSentenceCacheRef.current.set(layer, { key, geometry });
+      return geometry;
+    }
     const layer = element.querySelector<HTMLElement>('.pdf-text-layer');
     if (!layer?.firstChild) return null;
     const cache = sentenceCacheRef.current;
@@ -487,24 +506,28 @@ function PdfSourcePageImpl({
     const nextGroupUid = region?.hoverGroupUid ?? null;
     const sentenceRects = sentenceHoverEnabled && region && buttons === 0
       ? sentencesForRegion(element, region, hitLayerRect) : null;
+    // Allow crossing from a failed sentence to its scrollable paragraph preview.
+    if (buttons === 0 && !region && (previewRegionIdRef.current !== null || paragraphFallback)) {
+      clearListPreviewAfterPointerExit();
+      return;
+    }
     if (sentenceHoverEnabled && region?.sourceSegment.segment_type === 'paragraph') {
       const sentence = sentenceAtPoint(sentenceRects ?? [], hitLayerRect, clientX, clientY);
+      if (buttons === 0 && !sentence && sentenceRects?.length && paragraphFallback?.regionId === region.id) {
+        clearListPreviewAfterPointerExit();
+        return;
+      }
       hoveredGroupUidRef.current = null;
       previewRegionIdRef.current = null;
       setLocalHoveredGroupUid(null);
       setPreviewRegionId(null);
       setPreviewPosition(null);
-      setHoveredSentence(current => current?.regionId === region.id && current.sentence.index === sentence?.index
-        ? current : sentence ? { regionId: region.id, sentence } : null);
+      const next = buttons === 0 && (sentence || !sentenceRects?.length) ? { regionId: region.id, sentence } : null;
+      setHoveredSentence(current => current?.regionId === next?.regionId && current?.sentence === next?.sentence ? current : next);
       return;
     }
     setHoveredSentence(null);
     const nextRegionId = region?.id ?? null;
-    if (!region && previewRegionIdRef.current !== null && buttons === 0) {
-      // Keep the existing card while crossing the small gap to its scroll area.
-      clearListPreviewAfterPointerExit();
-      return;
-    }
     const nextPreviewPosition = region && buttons === 0
       ? {
           x: hitLayerRect.left + (region.bbox[0] / 1000) * hitLayerRect.width,
@@ -572,6 +595,7 @@ function PdfSourcePageImpl({
   };
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    visualDetail.cancelClick();
     notifyPdfInteraction();
     if (event.button !== 0) {
       pointerDownRef.current = null;
@@ -628,8 +652,7 @@ function PdfSourcePageImpl({
     if (
       !pointerDown ||
       event.button !== 0 ||
-      pointerDown.selectingText ||
-      hasPdfTextSelection(event.currentTarget.querySelector('.pdf-text-layer'))
+      pointerDown.selectingText
     ) {
       return;
     }
@@ -654,6 +677,15 @@ function PdfSourcePageImpl({
       return;
     }
 
+    if (isVisualSegment(segment) && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+      visualDetail.clickCandidate.current = segment.uid;
+      if (event.detail < 2 && !hasPdfTextSelection(event.currentTarget.querySelector('.pdf-text-layer'))) {
+        visualDetail.deferClick(() => onToggleSegment(segment));
+      }
+      return;
+    }
+    if (hasPdfTextSelection(event.currentTarget.querySelector('.pdf-text-layer'))) return;
+
     if (requiresListItemChoice(segment)) {
       setActionMenu({ segment, position: { x: event.clientX, y: event.clientY } });
     } else {
@@ -665,7 +697,29 @@ function PdfSourcePageImpl({
     }
   };
 
+  const openVisualDetail = (segment: SourceSegment) => {
+    clearFloatingSegmentUi();
+    onCloseSegmentOverlay();
+    const region = page.regions.find(item => item.segment.uid === segment.uid);
+    const target: SourceSegment = { ...segment };
+    if (region) {
+      target.page_idx = region.pageIdx;
+      target.bbox = [region.bbox[0], region.bbox[1], region.bbox[2], region.bbox[3]];
+    }
+    visualDetail.open(target);
+  };
+  const handleDoubleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (suppressRegions || blockDrag.dragItem || event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const region = findRegionAtPoint(event.currentTarget, event.clientX, event.clientY);
+    if (!region || !isVisualSegment(region.segment) || visualDetail.clickCandidate.current !== region.segment.uid) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (hasPdfTextSelection(event.currentTarget.querySelector('.pdf-text-layer'))) window.getSelection()?.removeAllRanges();
+    openVisualDetail(region.segment);
+  };
+
   const handleContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
+    visualDetail.cancelClick();
     event.preventDefault();
     if (blockDrag.dragItem) { blockDrag.cancel(); return; }
 
@@ -726,6 +780,7 @@ function PdfSourcePageImpl({
 
       <div
         ref={hitLayerRef}
+        tabIndex={-1}
         className={`relative w-fit overflow-hidden rounded-md border bg-white shadow-sm ${blockDrag.dragItem
           ? 'cursor-grabbing [&_.pdf-text-layer]:!cursor-grabbing [&_.pdf-text-layer_span]:!cursor-grabbing'
           : armedRegion ? 'cursor-grab [&_.pdf-text-layer]:!cursor-grab [&_.pdf-text-layer_span]:!cursor-grab' : ''} ${
@@ -743,6 +798,7 @@ function PdfSourcePageImpl({
           if (blockDrag.consumeClick()) { event.preventDefault(); event.stopPropagation(); }
         }}
         onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
         onPointerDownCapture={event => {
           const region = event.ctrlKey && blockDragEnabled
@@ -775,7 +831,7 @@ function PdfSourcePageImpl({
             pendingHoverSampleRef.current = null;
           }
           pointerDownRef.current = null;
-          if (previewRegionId !== null) {
+          if (previewRegionId !== null || paragraphFallback) {
             clearListPreviewAfterPointerExit();
             return;
           }
@@ -818,6 +874,7 @@ function PdfSourcePageImpl({
           textSelection.finish();
         }}
         onPointerCancel={event => {
+          visualDetail.cancelClick();
           blockDrag.pointerHandlers.onPointerCancel(event);
           textSelection.clear();
         }}
@@ -837,7 +894,7 @@ function PdfSourcePageImpl({
 
         <PdfTextSelectionHighlightLayer highlights={pageTextSelectionHighlights} />
 
-        {hoveredSentence && !suppressRegions && !pendingTextSelection ? (
+        {hoveredSentence?.sentence && !suppressRegions && !pendingTextSelection ? (
           <div className="pointer-events-none absolute inset-0 z-[3]" aria-hidden="true" data-pdf-hover-sentence={hoveredSentence.sentence.index}>
             {hoveredSentence.sentence.rects.map(([left, top, right, bottom], index) => <span key={index}
               className="absolute rounded-sm bg-primary/15 ring-1 ring-primary/35"
@@ -845,16 +902,18 @@ function PdfSourcePageImpl({
           </div>
         ) : null}
 
-        {sentencePreview && sentenceHoverEnabled && !suppressRegions && !pendingTextSelection &&
+        {sentencePreview && hoveredSentence?.sentence && !paragraphFallback && sentenceHoverEnabled && !suppressRegions && !pendingTextSelection &&
           (sentenceHoverShowOriginal || (sentenceHoverShowTranslation && sentencePreview.translation)) ? (
-          <PointerPreview anchor={sentencePreview.anchor} width={380} className="pdf-segment-preview grid gap-2 p-3 font-sans"
+          <PointerPreview anchor={sentencePreview.anchor} width={380} className="pdf-segment-preview p-3 font-sans"
             role="region" aria-label="PDF 整句悬停预览">
-            {sentenceHoverShowOriginal ? <PaperTextPreview allowScroll={false} markdown={sentencePreview.source}
-              segmentType="paragraph" sourceEntryId={sourceEntryId} workspaceRoot={workspaceRoot} /> : null}
-            {sentenceHoverShowTranslation && sentencePreview.translation ? <div className="text-muted-foreground">
-              <PaperTextPreview allowScroll={false} markdown={sentencePreview.translation}
-                segmentType="paragraph" sourceEntryId={sourceEntryId} workspaceRoot={workspaceRoot} />
-            </div> : null}
+            <div className="grid gap-2" style={{ fontSize: hoverTextMetrics.fontSize, lineHeight: `${hoverTextMetrics.lineHeight}px` }}>
+              {sentenceHoverShowOriginal ? <PaperTextPreview allowScroll={false} markdown={sentencePreview.source}
+                segmentType="paragraph" sourceEntryId={sourceEntryId} workspaceRoot={workspaceRoot} /> : null}
+              {sentenceHoverShowTranslation && sentencePreview.translation ? <div className="text-muted-foreground">
+                <PaperTextPreview allowScroll={false} markdown={sentencePreview.translation}
+                  segmentType="paragraph" sourceEntryId={sourceEntryId} workspaceRoot={workspaceRoot} />
+              </div> : null}
+            </div>
           </PointerPreview>
         ) : null}
 
@@ -884,10 +943,11 @@ function PdfSourcePageImpl({
         {renderSegmentLayer ? (
           <div className="pointer-events-none absolute inset-0 z-[2]">
             {page.regions.map((region) => {
+              const fallback = paragraphFallback?.regionId === region.id && !pendingTextSelection ? paragraphFallback : null;
               return (
 	                <SegmentRegion
 	                  interactionSuppressed={suppressRegions}
-	                  active={previewRegionId === region.id}
+	                  active={previewRegionId === region.id || Boolean(fallback)}
 	                  flashed={flashSegmentUid === region.segment.uid || flashSegmentUid === region.sourceSegment.uid}
                   hasAnnotation={
                     (annotationsBySegmentUid.get(region.segment.uid)?.length ??
@@ -896,11 +956,12 @@ function PdfSourcePageImpl({
                   hasNote={notesBySegmentUid.has(region.segment.uid)}
 	                  hovered={
 	                    hoverPreviewEnabled &&
+	                    (Boolean(fallback) || (
 	                    !(sentenceHoverEnabled && region.sourceSegment.segment_type === 'paragraph') &&
 	                    hoveredSentence?.regionId !== region.id &&
                     (localHoveredGroupUid === region.hoverGroupUid ||
                       hoveredSegmentUid === region.hoverGroupUid ||
-                      hoveredSegmentUid === region.sourceSegment.uid)
+                      hoveredSegmentUid === region.sourceSegment.uid)))
 	                  }
 	                  isContinuation={region.isContinuation}
 	                  listItemIndex={region.listItemIndex}
@@ -911,10 +972,11 @@ function PdfSourcePageImpl({
 	                  }
 	                  sourceSegmentUid={region.sourceSegment.uid}
                   previewPosition={
-                    hoverPreviewEnabled && !blockDrag.ctrlHeld && !blockDrag.dragItem && previewRegionId === region.id
-                      ? previewPosition
+                    hoverPreviewEnabled && !blockDrag.ctrlHeld && !blockDrag.dragItem
+                      ? fallback?.paragraphPosition ?? (previewRegionId === region.id ? previewPosition : null)
                       : null
                   }
+                  previewNotice={fallback ? '逐句译文暂不可用，已显示整段译文' : null}
                   previewFontSize={hoverPreviewFontSize}
                   previewSize={hoverPreviewSize}
                   previewShowRegion={hoverPreviewShowRegion}
@@ -1000,6 +1062,7 @@ function PdfSourcePageImpl({
 	            wholeListSegment={actionMenu.wholeListSegment}
 	            sourceBacklinks={sourceBacklinksForSegment(actionMenu.segment, sourceBacklinksBySegmentUid)}
 	            onOpenSourceBacklink={onOpenSourceBacklink}
+            onOpenVisualDetail={openVisualDetail}
 	            onAddAssistantContext={
               onAddAssistantContext
                 ? (segment) => {
@@ -1076,6 +1139,9 @@ function PdfSourcePageImpl({
           />
         ) : null}
       </div>
+      {visualDetail.segment ? <PdfVisualDetail key={visualDetail.segment.uid} segment={visualDetail.segment}
+        pdfDocument={pdfDocument} workspaceRoot={workspaceRoot} entryId={sourceEntryId}
+        onClose={visualDetail.close} onRestoreFocus={() => hitLayerRef.current?.focus({ preventScroll: true })} /> : null}
     </section>
   );
 }

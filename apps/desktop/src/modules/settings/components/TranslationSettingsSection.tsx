@@ -1,6 +1,5 @@
-import { reflowDisplayOptions, withReflowDisplayOptions, type ReflowOriginalDisplay } from '@/shared/lib/readerPreferences';
 import type { SettingsPanelLayoutProps } from './SettingsPanelLayout';
-import { SettingsPage, SettingsGroup, SettingSelect, SettingSwitch, SettingCheckbox } from './SettingsPrimitives';
+import { SettingsPage, SettingsGroup, SettingSwitch, SettingCheckbox } from './SettingsPrimitives';
 import { TaskModelSetting } from './TaskModelSetting';
 import { SelectionTranslationSettings } from './SelectionTranslationSettings';
 
@@ -11,9 +10,8 @@ const TRANSLATION_TYPES = [
 
 export function TranslationSettingsSection({ props }: { props: SettingsPanelLayoutProps }) {
   const p = props.readerPreferences;
-  const reflowDisplay = reflowDisplayOptions(p);
   const automation = props.translationAutomation;
-  return <SettingsPage tab="translation" title="翻译" description="选中文字、整篇翻译和重排显示分别设置。">
+  return <SettingsPage tab="translation" title="翻译" description="配置选中文字、整篇与片段翻译。">
     <SelectionTranslationSettings active={props.activeSettingsTab === 'translation'}>
       <SettingSwitch id="translation-selection" label="选中文字后自动翻译" description="本机阅读偏好 · 关闭后仍可手动点击“翻译”。" checked={p.autoTranslateTextSelection}
         onCheckedChange={autoTranslateTextSelection => props.onReaderPreferencesChange({ ...p, autoTranslateTextSelection })} />
@@ -30,13 +28,6 @@ export function TranslationSettingsSection({ props }: { props: SettingsPanelLayo
           onCheckedChange={checked => props.onTranslationAutomationChange({ ...automation, segment_types: checked ? [...automation.segment_types, value] : automation.segment_types.filter(type => type !== value) })} />)}</div>
         {!automation.segment_types.length && <p role="status" className="mt-2 text-xs text-warning">至少选择一种内容类型，否则不会启动自动翻译。</p>}
       </>}
-    </SettingsGroup>
-    <SettingsGroup title="重排视图显示" description="以下两项独立组合，决定重排阅读时显示原文和译文的方式。">
-      <SettingSelect id="translation-display" label="重排原文显示" description="本机阅读偏好 · 选择隐藏原文、显示整段原文或逐句原文。" value={reflowDisplay.original}
-        options={[{ value: 'hidden', label: '不显示' }, { value: 'original', label: '原文' }, { value: 'sentences', label: '逐句' }]}
-        onValueChange={value => props.onReaderPreferencesChange(withReflowDisplayOptions(p, value as ReflowOriginalDisplay, reflowDisplay.translation))} />
-      <SettingSwitch id="translation-visible" label="重排显示翻译" description="本机阅读偏好 · 可与三种原文格式独立组合。" checked={reflowDisplay.translation}
-        onCheckedChange={checked => props.onReaderPreferencesChange(withReflowDisplayOptions(p, reflowDisplay.original, checked))} />
     </SettingsGroup>
   </SettingsPage>;
 }

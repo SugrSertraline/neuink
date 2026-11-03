@@ -9,7 +9,7 @@ describe('settings discovery', () => {
     for (const query of ['主助手', '子助手', 'MCP', 'Skills']) expect(searchSettings(query)).toEqual([]);
     expect(searchSettings('sciverse').map(item => item.id)).toEqual(['tools-services']);
   });
-  it.each([['main-agent', 'models'], ['subagents', 'models'], ['removed-page', 'appearance']])('redirects the saved hidden page %s to %s', (saved, expected) => {
+  it.each([['main-agent', 'models'], ['subagents', 'models'], ['getting-started', 'appearance'], ['removed-page', 'appearance']])('redirects the saved hidden page %s to %s', (saved, expected) => {
     window.localStorage.setItem('neuink.settings.lastTab', saved);
     expect(readSettingsTab()).toBe(expected);
     window.localStorage.clear();
@@ -26,9 +26,9 @@ describe('settings discovery', () => {
   });
   it('gives each target a unique identity within the settings categories', () => {
     expect(SETTINGS_CATEGORIES.map(category => category.id)).toEqual([
-      'getting-started', 'appearance', 'reader', 'translation', 'parser', 'models', 'external-tools', 'data',
+      'appearance', 'reader', 'translation', 'parser', 'models', 'external-tools', 'data',
     ]);
-    expect(searchSettings('教程').find(item => item.id === 'data-onboarding')?.tab).toBe('getting-started');
+    expect(searchSettings('新手引导')).toEqual([]);
     expect(new Set(SETTINGS_CATALOG.map(item => item.id)).size).toBe(SETTINGS_CATALOG.length);
     for (const item of SETTINGS_CATALOG) expect(settingsCategory(item.tab)).toBeTruthy();
   });

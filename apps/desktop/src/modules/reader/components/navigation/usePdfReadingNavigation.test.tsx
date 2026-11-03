@@ -17,6 +17,14 @@ function Harness({ target, flash }: { target: ReadingTarget; flash: (uid: string
 }
 afterEach(() => { cleanup(); vi.clearAllMocks(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 describe('PDF reference navigation adapter', () => {
+  it('does not steal keyboard focus when a peer requests a linked location', () => {
+    const ui = render(<><input aria-label="other pane" /><ReadingNavigationScope>
+      <Harness target={{ pageIdx: 0, segmentUid: 'source', focus: false }} flash={vi.fn()} />
+    </ReadingNavigationScope></>);
+    const input = ui.getByLabelText('other pane'); input.focus();
+    fireEvent.click(ui.getByText('jump'));
+    expect(document.activeElement).toBe(input);
+  });
   it.each([false, true])('corrects late PDF geometry while giving user input priority (interrupted: %s)', async interrupted => {
     let resize!: () => void;
     const disconnect = vi.fn();

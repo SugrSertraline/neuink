@@ -108,15 +108,18 @@ function AssistantTaskRow({ task, onOpen, onStop }: {
   onStop?: (id: string) => void;
 }) {
   const status = assistantTaskStatusLabels[task.status];
+  const category = task.category === 'research' ? 'Research 调研' : '助手对话';
+  const openLabel = task.category === 'research' ? '查看研究' : '返回对话';
+  const stopLabel = task.category === 'research' ? '停止研究' : '停止对话';
   const Icon = task.status === 'running' ? Loader2 : task.status === 'paused' ? Pause
     : task.status === 'waiting' || task.status === 'queued' ? Clock3 : MessageSquare;
   return (
-    <div className="py-2.5" role="group" aria-label={`助手对话：${task.title}`}>
+    <div className="py-2.5" role="group" aria-label={`${category}：${task.title}`}>
       <div className="flex items-start gap-2">
         <Icon aria-hidden="true" className={cn('mt-0.5 size-3.5 shrink-0 text-primary', task.status === 'running' && 'animate-spin motion-reduce:animate-none')} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-xs">
-            <span className="font-medium">助手对话</span><span className="text-muted-foreground">{status}</span>
+            <span className="font-medium">{category}</span><span className="text-muted-foreground">{status}</span>
           </div>
           <div className="mt-0.5 truncate text-xs font-medium" title={task.title}>{task.title}</div>
           {task.question && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground [overflow-wrap:anywhere]" title={task.question}>{task.question}</p>}
@@ -124,9 +127,9 @@ function AssistantTaskRow({ task, onOpen, onStop }: {
           {(task.queuedCount ?? 0) > 0 && <p className="mt-1 text-xs text-muted-foreground">{task.queuedCount} 条消息待发送</p>}
           <div className="mt-1.5 flex flex-wrap gap-1">
             {onOpen && <Button size="xs" variant="outline" type="button" disabled={!task.canOpen} onClick={() => onOpen(task.id)}
-              aria-label={`返回对话：${task.title}`}>{task.status === 'waiting' ? '前往处理' : '返回对话'}</Button>}
+              aria-label={`${openLabel}：${task.title}`}>{task.status === 'waiting' ? '前往处理' : openLabel}</Button>}
             {onStop && task.status !== 'queued' && task.status !== 'paused' && <Button size="xs" variant="ghost" type="button"
-              disabled={!task.canStop || task.status === 'stopping'} onClick={() => onStop(task.id)} aria-label={`停止对话：${task.title}`}>
+              disabled={!task.canStop || task.status === 'stopping'} onClick={() => onStop(task.id)} aria-label={`${stopLabel}：${task.title}`}>
               <Square size={11} aria-hidden="true" />{task.status === 'stopping' ? '正在停止' : '停止'}
             </Button>}
           </div>

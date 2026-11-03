@@ -38,9 +38,51 @@ afterEach(() => {
   textLayerRender.mockResolvedValue(undefined);
   textLayerContainers.length = 0;
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe('PdfCanvasPage', () => {
+  it('coalesces a burst of width changes into one sharp repaint while scaling the existing page immediately', async () => {
+    vi.useFakeTimers();
+    const fixture = createPdfFixture(Promise.resolve());
+    mockCanvasContexts(fixture.drawImage);
+    const page = (width: number) => <PdfCanvasPage pageIdx={0} pageWidth={width}
+      pdfDocument={fixture.document} renderEnabled renderPriority="visible" />;
+    const view = render(page(600));
+    await act(async () => {});
+    expect(fixture.drawImage).toHaveBeenCalledOnce();
+    const canvas = view.container.querySelector('canvas')!;
+    for (let index = 1; index <= 30; index += 1) {
+      view.rerender(page(600 + index * 10));
+      await act(async () => vi.advanceTimersByTimeAsync(16));
+      expect(parseFloat(canvas.style.width)).toBeCloseTo(600 + index * 10);
+    }
+    expect(fixture.render).toHaveBeenCalledOnce();
+    expect(canvas.width).toBe(600);
+    expect(view.container.querySelector<HTMLElement>('.pdf-text-layer')!.style.getPropertyValue('--total-scale-factor')).toBe('1.5');
+    await act(async () => vi.advanceTimersByTimeAsync(180));
+    expect(fixture.render).toHaveBeenCalledTimes(2);
+    expect(canvas.width).toBe(900);
+  });
+  it('cancels deferred repaint when returning to the painted width or releasing the page', async () => {
+    vi.useFakeTimers();
+    const fixture = createPdfFixture(Promise.resolve());
+    mockCanvasContexts(fixture.drawImage);
+    const page = (width: number) => <PdfCanvasPage pageIdx={0} pageWidth={width}
+      pdfDocument={fixture.document} renderEnabled renderPriority="visible" />;
+    const view = render(page(600));
+    await act(async () => {});
+    view.rerender(page(800));
+    await act(async () => vi.advanceTimersByTimeAsync(70));
+    view.rerender(page(600));
+    await act(async () => vi.advanceTimersByTimeAsync(200));
+    expect(fixture.render).toHaveBeenCalledOnce();
+    view.rerender(page(1000));
+    view.unmount();
+    await act(async () => vi.advanceTimersByTimeAsync(200));
+    expect(fixture.render).toHaveBeenCalledOnce();
+    expect(fixture.drawImage).toHaveBeenCalledOnce();
+  });
   it('masks the whole page except original visual blocks without rerasterizing when translation changes', async () => {
     const fixture = createPdfFixture(Promise.resolve());
     mockCanvasContexts(fixture.drawImage);

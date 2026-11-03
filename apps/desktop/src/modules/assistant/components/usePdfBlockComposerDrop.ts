@@ -2,6 +2,7 @@ import type { Editor } from '@tiptap/core';
 import { useEffect, useRef, useState } from 'react';
 import { pdfBlockDrag } from '@/shared/lib/pdfBlockDrag';
 import type { LibraryEntry } from '@/modules/library/components/LibrarySidebar';
+import { insertSegmentMention } from './useInlineSegmentContext';
 
 /** The composer document owns the attachment and its undo history, just like @ mentions. */
 export function usePdfBlockComposerDrop(editor: Editor | null, entries: LibraryEntry[], workspaceRoot: string | null, disabled: boolean) {
@@ -17,19 +18,9 @@ export function usePdfBlockComposerDrop(editor: Editor | null, entries: LibraryE
       onDrop: item => {
         const entry = entries.find(entry => entry.id === item.entryId);
         if (!entry || !editor.isEditable) return;
-        const id = `segment:${entry.id}:${item.segment.uid}`;
-        let attached = false;
-        editor.state.doc.descendants(node => { if (node.type.name === 'contextMention' && node.attrs.id === id) attached = true; });
-        if (attached) { editor.commands.focus(); return; }
-        const text = item.segment.markdown || item.segment.text;
-        editor.chain().focus().insertContent([
-          { type: 'contextMention', attrs: {
-            id, kind: 'segment', role: 'evidence', entryId: entry.id, entryTitle: entry.title,
-            segmentUid: item.segment.uid, pageIdx: item.segment.page_idx, text,
-            label: `${entry.title} · 第 ${item.segment.page_idx + 1} 页 · ${item.segment.text.slice(0,24)}`,
-          } },
-          { type: 'text', text: ' ' },
-        ]).run();
+        insertSegmentMention(editor, { id: `segment:${entry.id}:${item.segment.uid}`, kind: 'segment', entryId: entry.id,
+          entryTitle: entry.title, segmentUid: item.segment.uid, pageIdx: item.segment.page_idx, text: item.segment.markdown || item.segment.text });
+        editor.commands.focus(undefined, { scrollIntoView: false });
       },
     });
     const update = () => setActive(pdfBlockDrag.isTargetActive(element));

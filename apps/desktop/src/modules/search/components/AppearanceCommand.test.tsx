@@ -24,12 +24,12 @@ function renderSearch(panel = false) {
 
 it.each([false, true])('opens settings without a loaded library and ignores IME Enter (sidebar: %s)', async panel => {
   const { input, openSetting, close } = renderSearch(panel);
-  fireEvent.change(input, { target: { value: '预览大小' } });
-  await waitFor(() => expect(screen.getByRole('option', { name: /PDF 预览大小/ }).getAttribute('data-selected')).toBe('true'));
+  fireEvent.change(input, { target: { value: '预览显示内容' } });
+  await waitFor(() => expect(screen.getByRole('option', { name: /预览显示内容/ }).getAttribute('data-selected')).toBe('true'));
   fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
   expect(openSetting).not.toHaveBeenCalled();
   fireEvent.keyDown(input, { key: 'Enter' });
-  expect(openSetting).toHaveBeenCalledWith('reader-preview-size');
+  expect(openSetting).toHaveBeenCalledWith('reader-preview-content');
   if (!panel) expect(close).toHaveBeenCalledWith(false);
 });
 describe('the hidden appearance command in real search surfaces', () => {

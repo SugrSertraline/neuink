@@ -8,18 +8,18 @@ import { groupSegmentsByPage, scrollToPage, scrollToPdfRect, scrollToSegment } f
 import { revealPdfPage } from './pdfPageNavigation';
 
 const motion = vi.hoisted(() => ({ animate: vi.fn<typeof import('./pdfPageTurn').animatePdfPageTurn>(() => null) }));
-vi.mock('./pdfPageTurn', () => ({ animatePdfPageTurn: motion.animate }));
+vi.mock('./pdfPageTurn', () => ({ animatePdfPageTurn: motion.animate, preparePdfPageTurns: vi.fn() }));
 const pages = groupSegmentsByPage([], 5);
 const single = pages.map(page => [page]);
 const dual = [pages.slice(0, 2), pages.slice(2, 4), pages.slice(4)];
 const pdfDocument = { numPages: 5, getPage: async () => ({ getViewport: () => ({ width: 595, height: 842 }) }) } as unknown as PDFDocumentProxy;
 const continuous = new Set([2]);
 
-function Harness({ enabled = true, spread = false, id = 'entry' }: { enabled?: boolean; spread?: boolean; id?: string }) {
+function Harness({ enabled = true, spread = false, id = 'entry', onReveal }: { enabled?: boolean; spread?: boolean; id?: string; onReveal?: () => boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const rows = spread ? dual : single;
   const book = usePdfBookNavigation({ enabled, entryId: id, rows, scrollRef: ref, document: pdfDocument,
-    continuousPages: continuous, pageWidth: 600, zoom: 1 });
+    continuousPages: continuous, pageWidth: 600, zoom: 1, onReveal });
   return <div ref={ref} data-testid={id} data-current={book.rowIndex} data-width={book.pageWidth}>
     {rows.map((row, index) => <div key={row[0].pageIdx} style={{ display: enabled && index !== book.rowIndex ? 'none' : undefined }}>
       {row.map(page => <section key={page.pageIdx} data-pdf-page-index={page.pageIdx}>
@@ -39,6 +39,15 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('book page navigation', () => {
+  it('opens a closed cover for page navigation without overlapping two animations', async () => {
+    const onReveal = vi.fn(() => true);
+    render(<Harness onReveal={onReveal} />);
+    const root = screen.getByTestId('entry');
+    await act(async () => { scrollToPage(1, root); });
+    expect(onReveal).toHaveBeenCalled();
+    expect(root.dataset.current).toBe('1');
+    expect(motion.animate).not.toHaveBeenCalled();
+  });
   it('keeps the fitted paper size while the window is minimized and restored', async () => {
     let notifyResize: (() => void) | undefined;
     vi.stubGlobal('ResizeObserver', class {

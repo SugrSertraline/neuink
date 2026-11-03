@@ -3,7 +3,7 @@ import { findSourceSegment } from '@/shared/lib/listItemSegments';
 import type { ComponentProps } from 'react';
 import { readingAssistantContext } from '../readingAssistantContext';
 import { translateTextSelection } from '../../translation/entryTranslation';
-import { ReadingNavigationScope, useReadingNavigation } from '../navigation/ReadingNavigation';
+import { ReadingNavigationScope, segmentTarget, useReadingNavigation } from '../navigation/ReadingNavigation';
 import { ReadingNavigationControls } from '../navigation/ReadingNavigationControls';
 import { buildSegmentNoteLookup } from '../pdf-reader/segmentNoteLookup';
 import { useReadingSession } from '../../parallel-reading/ReadingSessionContext';
@@ -131,6 +131,7 @@ function ReflowEntryReaderBody({
 }) {
   const { notify } = useToast();
   const readingSession = useReadingSession();
+  const readingNavigation = useReadingNavigation();
   const readingJump = jumpRequest ?? readingSession?.jump;
   const syncRequestKey = readingJump?.requestKey ?? externalSyncRequestKey;
   const [paperExportOpen, setPaperExportOpen] = useState(false);
@@ -426,6 +427,7 @@ function ReflowEntryReaderBody({
   const displayOptions = reflowDisplayOptions(readerPreferences);
   const activateSegmentFromClick = useGuardedSegmentAction((segment) => {
     if (!activateSegment(segment)) return;
+    readingNavigation?.linkTarget(segmentTarget(segment));
     onSegmentClick?.(segment);
     if (readerPreferences.segmentNoteOpenGesture === 'single' && !suppressClickOverlay) {
       setSegmentOverlayMode('segment');

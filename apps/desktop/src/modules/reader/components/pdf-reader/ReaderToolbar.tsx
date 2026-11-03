@@ -14,14 +14,12 @@ import {
   Pause,
   Play,
   Search,
-  Sparkles,
   RotateCcw,
   X
 } from 'lucide-react';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
@@ -44,6 +42,8 @@ import { useReadingSession } from '../../parallel-reading/ReadingSessionContext'
 import { PdfReadingModeControl } from './PdfReadingModeControl';
 import { PdfViewControls } from '../navigation/ReadingViewSession';
 import { PdfZoomControls } from './PdfZoomControls';
+import { PdfPreviewSizeControls } from './PdfPreviewSizeControls';
+import { RecommendedTagControls } from './RecommendedTagControls';
 
 export function ReaderToolbar({
   navigation,
@@ -55,6 +55,11 @@ export function ReaderToolbar({
   tagSuggestionBusy,
   tagSuggestionError,
   tagSuggestionsOpen,
+  tagSuggestionDisabledReason,
+  tagSuggestionGeneratedAt,
+  tagSuggestionPhase,
+  showTagSuggestionsInReader = true,
+  onGenerateRecommendedTags,
   translation,
   translationBusy,
   translationMessage,
@@ -100,6 +105,11 @@ export function ReaderToolbar({
   tagSuggestionBusy: boolean;
   tagSuggestionError?: string | null;
   tagSuggestionsOpen: boolean;
+  tagSuggestionDisabledReason?: string | null;
+  tagSuggestionGeneratedAt?: string | null;
+  tagSuggestionPhase?: 'idle' | 'generating' | 'applying';
+  showTagSuggestionsInReader?: boolean;
+  onGenerateRecommendedTags?: () => void;
   translation: EntryTranslation | null;
   translationBusy: boolean;
   translationMessage?: string | null;
@@ -153,6 +163,12 @@ export function ReaderToolbar({
     onResumeTranslation={onResumeTranslation} translationPaused={translationPaused}
     onRetryPdfParse={onRetryPdfParse} onRevealPdf={onRevealPdf} onStartPdfParse={onStartPdfParse} />;
 
+  const tagControls = showTagSuggestionsInReader && entry.status === 'Parsed' && (onGenerateRecommendedTags || recommendedTags.length > 0 || tagSuggestionBusy || tagSuggestionError)
+    ? <RecommendedTagControls busy={tagSuggestionBusy} open={tagSuggestionsOpen} error={tagSuggestionError} appliedPaths={entry.tags}
+      recommendedTags={recommendedTags} selectedRecommendedTagPaths={selectedRecommendedTagPaths} onApply={onApplyRecommendedTags}
+      onDismiss={onDismissRecommendedTags} onOpenChange={onTagSuggestionsOpenChange} onToggleTag={onRecommendedTagToggle}
+      onGenerate={onGenerateRecommendedTags} disabledReason={tagSuggestionDisabledReason} generatedAt={tagSuggestionGeneratedAt} phase={tagSuggestionPhase} /> : null;
+
   // The parallel-reading frame already owns the title and PDF/reflow switch.
   if (readingSession) return <div data-guide="pdf-tools" aria-label="PDF 阅读工具" data-reader-compact-toolbar className="flex min-h-9 min-w-0 shrink-0 flex-wrap items-center gap-1 border-b bg-background px-2 py-1 text-xs">
     {pageNavigation}
@@ -160,6 +176,7 @@ export function ReaderToolbar({
     <PdfViewControls />
     <PdfReadingModeControl preferences={readerPreferences} onChange={onReaderPreferencesChange} />
     <PdfZoomControls zoom={zoom} onZoomIn={onZoomIn} onZoomOut={onZoomOut} onZoomReset={onZoomReset} />
+    {tagControls}
     <Popover>
       <PopoverTrigger asChild><Button size="sm" variant="outline" className="px-2 text-xs" aria-label="阅读显示" title="调整单页/双页与悬停预览">显示</Button></PopoverTrigger>
       <PopoverContent viewportAligned align="end" className="w-72 max-w-[calc(100vw-2rem)] space-y-3 text-xs">
@@ -168,10 +185,6 @@ export function ReaderToolbar({
           {readerPreferences.pageDisplayMode === 'dual' ? '切换为单页' : '切换为双页'}
         </Button>
         <HoverPreviewControls preferences={readerPreferences} onChange={onReaderPreferencesChange} />
-        {entry.status === 'Parsed' && recommendedTags.length > 0 ? <RecommendedTagControls busy={tagSuggestionBusy} open={tagSuggestionsOpen}
-          error={tagSuggestionError} appliedPaths={entry.tags}
-          recommendedTags={recommendedTags} selectedRecommendedTagPaths={selectedRecommendedTagPaths} onApply={onApplyRecommendedTags}
-          onDismiss={onDismissRecommendedTags} onOpenChange={onTagSuggestionsOpenChange} onToggleTag={onRecommendedTagToggle} /> : null}
         <p className="break-words text-muted-foreground">{entry.pdfFileName} · {segmentCount} 个区域</p>
         <StatusBadge status={entry.status} />
       </PopoverContent>
@@ -282,20 +295,7 @@ export function ReaderToolbar({
           </ToolbarTooltip>
         ) : null}
 
-        {entry.status === 'Parsed' && recommendedTags.length > 0 ? (
-          <RecommendedTagControls
-            error={tagSuggestionError}
-            appliedPaths={entry.tags}
-            busy={tagSuggestionBusy}
-            open={tagSuggestionsOpen}
-            recommendedTags={recommendedTags}
-            selectedRecommendedTagPaths={selectedRecommendedTagPaths}
-            onApply={onApplyRecommendedTags}
-            onDismiss={onDismissRecommendedTags}
-            onOpenChange={onTagSuggestionsOpenChange}
-            onToggleTag={onRecommendedTagToggle}
-          />
-        ) : null}
+        {tagControls}
 
         <HoverPreviewControls
           preferences={readerPreferences}
@@ -630,115 +630,6 @@ function PdfSearchControls({
   );
 }
 
-function RecommendedTagControls({
-  error,
-  appliedPaths,
-  busy,
-  open,
-  recommendedTags,
-  selectedRecommendedTagPaths,
-  onApply,
-  onDismiss,
-  onOpenChange,
-  onToggleTag
-}: {
-  error?: string | null;
-  appliedPaths: string[];
-  busy: boolean;
-  open: boolean;
-  recommendedTags: TagRecommendation[];
-  selectedRecommendedTagPaths: string[];
-  onApply: () => void;
-  onDismiss: () => void;
-  onOpenChange: (open: boolean) => void;
-  onToggleTag: (tag: TagRecommendation) => void;
-}) {
-  const selected = new Set(selectedRecommendedTagPaths);
-  const selectedCount = selected.size;
-
-  return (
-    <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverTrigger asChild>
-        <Button
-          aria-label={`推荐标签 ${recommendedTags.length} 项`}
-          className="shrink-0"
-          size="sm"
-          title="查看条目概览中生成的推荐标签"
-          type="button"
-          variant={open ? 'secondary' : 'outline'}
-        >
-          <Sparkles size={14} aria-hidden="true" />
-          <span className="pdf-reader-toolbar-label">推荐标签</span>
-          <Badge variant="outline">{recommendedTags.length}</Badge>
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-[24rem] p-3" side="bottom" sideOffset={8}>
-        <div className="grid gap-3">
-          <div>
-            <p className="font-medium">推荐标签</p>
-            <p className="mt-1 text-xs text-muted-foreground">结果与条目概览同步；需要更新时可在概览中重新生成。</p>
-          </div>
-
-          <div className="grid gap-2">
-            {recommendedTags.map((tag) => {
-              const active = selected.has(tag.path);
-              const applied = appliedPaths.includes(tag.path);
-              return (
-                <Button
-                  key={tag.path}
-                  className="h-auto justify-between px-3 py-2 text-left"
-                  size="sm"
-                  type="button"
-                  variant={active ? 'secondary' : 'outline'}
-                  disabled={busy}
-                  aria-pressed={active}
-                  onClick={() => onToggleTag(tag)}
-                >
-                  <span className="grid min-w-0 gap-0.5">
-                    <span className="truncate">{tag.path}</span>
-                    <span className="truncate text-[11px] text-muted-foreground">
-                      {tag.dimension} · {tag.reason}
-                    </span>
-                  </span>
-                  <Badge variant="outline">{applied ? '已添加' : `${Math.round(tag.confidence * 100)}%`}</Badge>
-                </Button>
-              );
-            })}
-          </div>
-
-          {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
-          <div className="flex items-center justify-between gap-2 border-t pt-3">
-            <Button
-              disabled={busy}
-              size="sm"
-              type="button"
-              variant="ghost"
-              onClick={onDismiss}
-            >
-              丢弃推荐
-            </Button>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">
-                已选 {selectedCount} 项
-              </span>
-              <Button
-                disabled={busy || selectedCount === 0}
-                size="sm"
-                type="button"
-                variant="default"
-                onClick={onApply}
-              >
-                {busy ? <Loader2 className="animate-spin" size={14} aria-hidden="true" /> : null}
-                保存推荐
-              </Button>
-            </div>
-          </div>
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
 export function HoverPreviewControls({
   preferences,
   onChange,
@@ -777,7 +668,7 @@ export function HoverPreviewControls({
       </PopoverTrigger>
       <PopoverContent
         align="end"
-        className="w-80 gap-0 p-2.5 duration-0"
+        className="max-h-[var(--radix-popover-content-available-height)] w-80 max-w-[calc(100vw-2rem)] gap-0 overflow-y-auto overscroll-contain p-2.5 duration-0"
         side="bottom"
         sideOffset={8}
       >
@@ -808,6 +699,7 @@ export function HoverPreviewControls({
                   label="悬停批注" onClick={() => update({ hoverPreviewShowAnnotation: !preferences.hoverPreviewShowAnnotation })} />
               </div>
             </section>
+            {mode === 'pdf' && <PdfPreviewSizeControls preferences={preferences} onChange={onChange} />}
             {mode === 'pdf' ? <section aria-label="PDF 逐句悬停" className="border-t pt-2">
               <p className="px-2 text-xs font-medium text-muted-foreground">PDF 逐句</p>
               <HoverPreviewToggle checked={preferences.pdfSentenceHoverEnabled} label="整句悬停"

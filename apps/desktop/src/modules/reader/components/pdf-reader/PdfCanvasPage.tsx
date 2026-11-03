@@ -1,7 +1,7 @@
 import { Loader2, RotateCcw } from 'lucide-react';
 import { TextLayer } from 'pdfjs-dist';
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist';
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { AnnotationHighlightColor } from '@/shared/types/domain';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,7 @@ import type { SegmentRegionItem } from './types';
 
 const DEFAULT_PAGE_ASPECT_RATIO = 1.414;
 const TEXT_LAYER_RENDER_DELAY_MS = 240;
+const RESIZE_RASTER_DELAY_MS = 140;
 
 export type PdfTextSelectionHighlight = {
   active?: boolean;
@@ -91,15 +92,19 @@ function PdfCanvasPageImpl({
     rasterJobRef.current?.setKind(rasterJobKind(renderPriority));
   }, [renderPriority]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!renderEnabled || !hasRenderedPageRef.current || !isPositiveSize(pageWidth)) return;
     const nextSize = {
       width: pageWidth,
       height: pageWidth * pageAspectRatioRef.current
     };
-    setPageSize(nextSize);
+    // Geometry follows the gesture immediately, using the last completed bitmap.
+    // Updating the text scale in the same layout phase keeps selection aligned.
     applyPdfLayerSize(canvasRef.current, nextSize);
-    applyPdfLayerSize(textLayerRef.current, nextSize);
+    const baseWidth = pageRef.current?.getViewport({ scale: 1 }).width;
+    if (textLayerRef.current && baseWidth && isPositiveSize(baseWidth)) {
+      applyTextLayerViewport(textLayerRef.current, nextSize, pageWidth / baseWidth);
+    }
   }, [pageWidth, renderEnabled]);
 
   useEffect(() => {
@@ -231,16 +236,26 @@ function PdfCanvasPageImpl({
       }
     };
 
-    const job = schedulePdfRenderJob({
-      kind: rasterJobKind(renderPriorityRef.current),
-      retryOnPreempt: true,
-      run: renderPage
-    });
-    rasterJobRef.current = job;
+    let job: PdfRenderJobHandle | null = null;
+    const schedule = () => {
+      if (cancelled) return;
+      job = schedulePdfRenderJob({
+        kind: rasterJobKind(renderPriorityRef.current),
+        retryOnPreempt: true,
+        run: renderPage
+      });
+      rasterJobRef.current = job;
+    };
+    // Do not allocate/cancel a full-resolution PDF.js raster on every wheel or
+    // divider frame. First paint stays immediate; replacements wait for rest.
+    const resizeTimer = hasRenderedPageRef.current
+      ? window.setTimeout(schedule, RESIZE_RASTER_DELAY_MS) : null;
+    if (resizeTimer === null) schedule();
 
     return () => {
       cancelled = true;
-      job.cancel();
+      if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+      job?.cancel();
       if (rasterJobRef.current === job) rasterJobRef.current = null;
       cancelActiveRender?.();
     };

@@ -43,6 +43,13 @@ function isTerminalJobStatus(status: Job['status']) {
 }
 
 const RECEIVED_CHARS_PATTERN = /已接收\s*(\d+)\s*字/;
+const CONTEXT_PHASE = '正在整理论文背景';
+
+function runningPhase(message: string | null | undefined) {
+  return message?.startsWith('正在生成论文背景') || message === '准备论文背景'
+    ? CONTEXT_PHASE
+    : '正在翻译';
+}
 
 // Single-segment translation has no job event. Share its refreshed snapshot
 // with other mounted PDF/reflow views of the same entry in this window.
@@ -58,16 +65,22 @@ export function normalizeTranslationJobMessage(
     return message ?? null;
   }
 
+  const phase = runningPhase(message);
   const received = message?.match(RECEIVED_CHARS_PATTERN)?.[1];
-  if (received) {
-    const previousReceived = previous?.match(RECEIVED_CHARS_PATTERN)?.[1];
+  if (received !== undefined) {
+    if (Number(received) === 0) return `${phase} · 等待模型正文`;
+    const previousReceived = previous?.startsWith(phase)
+      ? previous.match(RECEIVED_CHARS_PATTERN)?.[1]
+      : undefined;
     if (previousReceived && Number(previousReceived) > Number(received)) {
       return previous;
     }
-    return `正在翻译 · 已接收 ${received} 字`;
+    return `${phase} · 已接收 ${received} 字`;
   }
 
-  return previous?.match(RECEIVED_CHARS_PATTERN) ? previous : '正在翻译';
+  return previous?.startsWith(phase) && previous.match(RECEIVED_CHARS_PATTERN)
+    ? previous
+    : phase;
 }
 
 export function useEntryTranslationTask({

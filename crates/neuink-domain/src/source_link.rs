@@ -37,6 +37,7 @@ impl SourceLink {
 pub enum LinkOwner {
     Note { entry_id: EntryId, note_id: NoteId },
     TagNote { tag_id: TagId, note_id: NoteId },
+    DailyNote { date: String, note_id: NoteId },
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

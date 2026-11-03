@@ -159,13 +159,13 @@ export function readStoredBoolean(key: string, fallback: boolean) {
 export function readStoredSidePanel(): SidePanel {
   if (typeof window === 'undefined') return 'library';
   const value = window.localStorage.getItem(SIDE_PANEL_STORAGE_KEY);
-  return value === 'assistant' || value === 'search' || value === 'library' || value === 'details' || value === 'same-tag' ? value : 'library';
+  return value === 'assistant' || value === 'search' || value === 'library' || value === 'details' || value === 'same-tag' || value === 'daily-dashboard' ? value : 'library';
 }
 
 export function readStoredLibraryView(): LibraryView {
   if (typeof window === 'undefined') return 'all';
   const value = window.localStorage.getItem(LIBRARY_VIEW_STORAGE_KEY);
-  return value === 'recent' || value === 'unparsed' || value === 'parsed' || value === 'parsing' || value === 'failed' || value === 'no_pdf' || value === 'trash' ? value : 'all';
+  return value === 'recent' || value === 'pdf' || value === 'unparsed' || value === 'parsed' || value === 'parsing' || value === 'failed' || value === 'no_pdf' || value === 'trash' ? value : 'all';
 }
 
 export function readStoredRecentReading() {
@@ -291,19 +291,26 @@ export function ActivityButton({
   children,
   label,
   onClick,
-  onContextMenu
+  onContextMenu,
+  expanded,
+  kind = 'tool'
 }: {
   active: boolean;
+  expanded?: boolean;
   children: ReactNode;
   label: string;
   onClick: () => void;
   onContextMenu?: () => void;
+  kind?: 'page' | 'tool' | 'navigation';
 }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
           aria-label={label}
+          aria-expanded={expanded}
+          aria-current={active && kind !== 'tool' ? kind === 'page' ? 'page' : 'true' : undefined}
+          aria-pressed={kind === 'tool' ? active : undefined}
           className={active ? 'active' : undefined}
           type="button"
           onClick={onClick}

@@ -23,3 +23,17 @@ export function resolveWorkspaceSelection(
   }
   return { message: inspection.message };
 }
+
+export function formatPathForDisplay(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+  if (trimmed.startsWith('\\\\?\\UNC\\')) {
+    return `\\\\${trimmed.slice('\\\\?\\UNC\\'.length)}`;
+  }
+  if (trimmed.startsWith('\\\\?\\')) {
+    return trimmed.slice('\\\\?\\'.length);
+  }
+  return trimmed;
+}

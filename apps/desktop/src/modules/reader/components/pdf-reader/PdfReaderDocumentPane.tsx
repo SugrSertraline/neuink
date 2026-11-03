@@ -3,7 +3,7 @@ import type {
   MouseEvent as ReactMouseEvent,
   RefObject
 } from 'react';
-import { useEffect, useLayoutEffect } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import type { AssistantContextAddOptions } from '@/shared/types/assistant';
 
 import type {
@@ -27,8 +27,12 @@ import { useVisiblePdfPages } from './useVisiblePdfPages';
 import { PDF_SPREAD_GAP } from './readerConstants';
 import { centeredPdfScrollLeft } from './pdfViewportLayout';
 import { usePdfBookNavigation } from './usePdfBookNavigation';
+import { hasBookOpening } from '../book/bookOpeningSession';
+import { PdfBookModel } from './PdfBookModel';
+import { useAppearance } from '@/shared/components/AppearanceProvider';
 import { PdfBookControls } from './PdfBookControls';
-import { scrollToPage } from './readerUtils';
+import { scrollToPage, scrollToPdfRect } from './readerUtils';
+import { ReaderPinnedSegments } from '../pins/ReaderPinnedSegments';
 import { PdfLayoutAnchor } from './PdfLayoutAnchor';
 import { usePdfPan } from './usePdfPan';
 import type { ApplyTextSelectionAnnotation } from './textSelectionAnnotation';
@@ -161,6 +165,10 @@ export function PdfReaderDocumentPane({
   onVisiblePageIndexesChange?: (pageIndexes: number[]) => void;
   altClickOpensNote?: boolean;
 }) {
+  const { appearance } = useAppearance();
+  const modelEnabled = bookMode && appearance === 'atelier';
+  const [coverOpen, setCoverOpen] = useState(() => hasBookOpening(entry.id));
+  useLayoutEffect(() => { setCoverOpen(hasBookOpening(entry.id)); }, [entry.id, modelEnabled]);
   const pageCount = rows.reduce((sum, row) => sum + row.length, 0);
   const pan = usePdfPan({ scrollRef: pdfScrollRef, context: `${entry.id}:${bookMode}:${pageWidth}`,
     enabled: pdfState.status === 'ready' && !suppressRegions });
@@ -171,7 +179,7 @@ export function PdfReaderDocumentPane({
   });
   const book = usePdfBookNavigation({ enabled: bookMode, entryId: entry.id, rows,
     scrollRef: pdfScrollRef, document: pdfState.status === 'ready' ? pdfState.document : null,
-    continuousPages: continuous.visiblePageIndexes, pageWidth, zoom, leftInset });
+    continuousPages: continuous.visiblePageIndexes, pageWidth, zoom, leftInset, onReveal: () => { setCoverOpen(true); return modelEnabled && !coverOpen; } });
   const spreadLength = rows[book.rowIndex]?.length ?? 1;
   const bookWidth = (book.pageWidth + 2) * spreadLength + (spreadLength - 1) * 2;
   const renderPageIndexes = bookMode ? book.render : continuous.renderPageIndexes;
@@ -213,6 +221,9 @@ export function PdfReaderDocumentPane({
   };
 
   return (
+    <ReaderPinnedSegments entryId={entry.id} workspaceRoot={workspaceRoot}
+      pdfDocument={pdfState.status === 'ready' ? pdfState.document : null} scrollRef={pdfScrollRef}
+      onLocate={segment => scrollToPdfRect(segment.page_idx, segment.bbox, pdfScrollRef.current) || scrollToPage(segment.page_idx, pdfScrollRef.current)}>
     <PdfLayoutAnchor scrollRef={pdfScrollRef} documentKey={entry.id} pageWidth={book.pageWidth} zoom={zoom} bookMode={bookMode} leftInset={leftInset}>
     <div
       ref={bindPdfScrollElement}
@@ -235,6 +246,7 @@ export function PdfReaderDocumentPane({
       {pdfState.status === 'ready' ? (
         <div
           data-pdf-document-stage
+          data-cover-closed={modelEnabled && !coverOpen || undefined}
           className={bookMode ? 'pdf-book-stage' : undefined}
           style={{
             marginLeft: leftInset,
@@ -244,6 +256,8 @@ export function PdfReaderDocumentPane({
               minWidth: bookMode ? undefined : `calc(100% - ${leftInset}px)`
           }}
         >
+          {modelEnabled && <PdfBookModel key={entry.id} id={entry.id} title={entry.title} topic={entry.tags[0] || '研究札记'}
+            layoutKey={`${book.rowIndex}:${bookWidth}:${book.pageWidth}`} open={coverOpen} onOpen={() => { setCoverOpen(true); pdfScrollRef.current?.focus({ preventScroll: true }); }} />}
           {rows.map((row, rowIndex) => (
             <div
               key={row[0].pageIdx}
@@ -316,7 +330,7 @@ export function PdfReaderDocumentPane({
               })}
             </div>
           ))}
-          {bookMode ? <PdfBookControls previousPage={book.previousPage} nextPage={book.nextPage} scrollRef={pdfScrollRef}
+          {bookMode && (!modelEnabled || coverOpen) ? <PdfBookControls onClose={modelEnabled ? () => { book.cancelTurn(); setCoverOpen(false); } : undefined} previousPage={book.previousPage} nextPage={book.nextPage} scrollRef={pdfScrollRef}
             width={bookWidth}
             currentPage={(rows[book.rowIndex]?.[0]?.pageIdx ?? 0) + 1} pageCount={pageCount} resumePageIdx={resumePageIdx} /> : null}
         </div>
@@ -366,6 +380,7 @@ export function PdfReaderDocumentPane({
       )}
     </div>
     </PdfLayoutAnchor>
+    </ReaderPinnedSegments>
   );
 }
 

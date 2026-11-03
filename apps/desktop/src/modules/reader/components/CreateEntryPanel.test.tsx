@@ -76,7 +76,7 @@ describe('CreateEntryPanel', () => {
     );
 
     fireEvent.click(view.getByRole('tab', { name: '导入 MinerU 结果' }));
-    fireEvent.click(view.getByRole('button', { name: '选择 ZIP' }));
+    fireEvent.click(view.getByRole('button', { name: '选择 ZIP/RAR' }));
     await waitFor(() => expect(view.getByText('mineru-result.zip')).toBeTruthy());
 
     fireEvent.click(view.getByRole('tab', { name: '上传 PDF' }));
@@ -128,5 +128,21 @@ describe('CreateEntryPanel', () => {
     expect(mocks.notify).not.toHaveBeenCalledWith(
       expect.objectContaining({ title: '解析服务未配置', tone: 'danger' })
     );
+  });
+
+  it('prefills the MinerU form when a result folder is dropped into the window', async () => {
+    const view = render(
+      <CreateEntryPanel
+        parserEndpoint=""
+        tags={[]}
+        onCreateEntry={vi.fn(async () => undefined)}
+        onCreateEntryFinished={vi.fn()}
+        onOpenMineruClientGuide={vi.fn()}
+        mineruDrop={{ path: 'C:\\results\\My Paper\\auto', nonce: 1 }}
+      />
+    );
+    await waitFor(() => expect(view.getByRole('tab', { name: '导入 MinerU 结果' }).getAttribute('aria-selected')).toBe('true'));
+    expect((view.getByLabelText(/标题/) as HTMLInputElement).value).toBe('My Paper');
+    expect(view.getByText('auto')).toBeTruthy();
   });
 });

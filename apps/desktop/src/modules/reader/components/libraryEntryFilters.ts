@@ -30,6 +30,9 @@ export function filterEntries(
   readingStates: Record<string, EntryReadingState>
 ) {
   const entriesInView = entries.filter((item) => {
+    if (libraryView === 'pdf') {
+      return Boolean(item.pdfFileName);
+    }
     if (libraryView === 'recent') {
       return recentReadingEntryIds.includes(item.id);
     }

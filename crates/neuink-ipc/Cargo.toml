@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 blake3.workspace = true
+sha2 = "0.10"
 base64.workspace = true
 chrono.workspace = true
 neuink-config = { path = "../neuink-config" }
@@ -16,6 +17,7 @@ neuink-parser = { path = "../neuink-parser" }
 neuink-search = { path = "../neuink-search" }
 neuink-sciverse = { path = "../neuink-sciverse" }
 neuink-workspace = { path = "../neuink-workspace" }
+neuink-zotero = { path = "../neuink-zotero" }
 futures-util.workspace = true
 reqwest.workspace = true
 serde.workspace = true
@@ -30,6 +32,7 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["sync", "process", "io-util", "time", "net"] }
 tokio-stream.workspace = true
 zip.workspace = true
+unrar = "0.5.8"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

@@ -9,11 +9,12 @@ import { useReaderPreviewVisible } from '@/components/ui/hover-interactions';
 import { cn } from '@/lib/utils';
 import { SourceSnapshotPreview } from '@/shared/components/SourceSnapshotPreview';
 import type { TranslatedSegment, TranslationStatus } from '@/shared/ipc/workspaceApi';
-import type { PdfHoverPreviewFontSize, PdfHoverPreviewSize } from '@/shared/lib/readerPreferences';
+import { normalizePdfPreviewSize, type PdfHoverPreviewFontSize, type PdfHoverPreviewSize } from '@/shared/lib/readerPreferences';
 import type { Annotation, SourceSegment } from '@/shared/types/domain';
 
 import { segmentColor, segmentDisplayLabel } from './readerUtils';
 import { ListHoverPreview } from './ListHoverPreview';
+import { pdfPreviewTextMetrics } from './pdfPreviewTypography';
 import { translatedListItemText } from './listItemTranslation';
 import { FittedTranslation } from './FittedTranslation';
 import { preservesOriginalContent } from '../../translation/translationEligibility';
@@ -33,8 +34,9 @@ function SegmentRegionImpl({
   listItemIndex,
   pageIdx,
   previewPosition,
-  previewFontSize = 'standard',
-  previewSize = 'standard',
+  previewNotice,
+  previewFontSize = 100,
+  previewSize = 100,
   previewShowRegion,
   previewShowOriginal,
   previewShowNote,
@@ -73,6 +75,7 @@ function SegmentRegionImpl({
   listItemIndex?: number;
   pageIdx: number;
   previewPosition: { x: number; segmentRight?: number; segmentTop: number; segmentBottom: number } | null;
+  previewNotice?: string | null;
   previewFontSize?: PdfHoverPreviewFontSize;
   previewSize?: PdfHoverPreviewSize;
   previewShowRegion: boolean;
@@ -199,6 +202,7 @@ function SegmentRegionImpl({
           className={cn(
             'absolute inset-0 z-[1] flex overflow-hidden bg-white text-foreground'
           )}
+          data-pdf-translation-region={regionId}
         >
           {showTranslationReplacement ? (
             <FittedTranslation fontSize={Number(replacementStyle.fontSize)} missing={!translatedText}>
@@ -268,6 +272,7 @@ function SegmentRegionImpl({
           listItemRegions={listItemRegions}
           pageIdx={pageIdx}
           position={previewPosition}
+          notice={previewNotice}
           previewFontSize={previewFontSize}
           previewSize={previewSize}
           showOriginal={previewShowOriginal}
@@ -408,6 +413,7 @@ function shouldMaskInTranslationMode(segment: SourceSegment) {
 
 function SegmentPreview({
   position,
+  notice,
   isContinuation,
   listItemRegions,
   pageIdx,
@@ -434,6 +440,7 @@ function SegmentPreview({
   onPointerLeave
 }: {
   position: { x: number; segmentRight?: number; segmentTop: number; segmentBottom: number };
+  notice?: string | null;
   isContinuation: boolean;
   listItemRegions: ListItemRegion[];
   pageIdx: number;
@@ -487,6 +494,7 @@ function SegmentPreview({
   }
 
   const layoutText = [
+    notice,
     showOriginal ? originalText : null,
     showOriginal ? captionText : null,
     showTranslationPreview ? translatedText : null,
@@ -524,6 +532,7 @@ function SegmentPreview({
       onClick={event => event.stopPropagation()}
       onKeyDown={event => { if (event.key !== 'Escape') event.stopPropagation(); }}
     >
+      {notice ? <p role="status" className="px-2 pt-2 text-xs leading-4 text-muted-foreground">{notice}</p> : null}
       <div className="mb-1 flex items-center gap-2 px-2 pt-2">
         <Badge variant="secondary">
           {segmentDisplayLabel(segment)}
@@ -686,11 +695,11 @@ type PreviewLayout = {
 };
 
 export function buildPreviewLayout({
-  fontSize = 'standard',
+  fontSize = 100,
   hasFooter,
   position,
   preferScrollable,
-  size = 'standard',
+  size = 100,
   text
 }: PreviewLayoutInput): PreviewLayout {
   const viewportWidth = typeof window === 'undefined' ? 1024 : window.innerWidth;
@@ -699,18 +708,17 @@ export function buildPreviewLayout({
   const availableHeight = Math.max(0, viewportHeight - PREVIEW_MARGIN * 2);
   const maxHeight = availableHeight * previewCardHeightScale(size);
   const cardScale = previewCardWidthScale(size);
-  const fontScale = previewFontScale(fontSize);
+  const typography = pdfPreviewTextMetrics(fontSize);
 
   const candidates = (preferScrollable
-    ? [{ columns: 1, fontSize: 13, lineHeight: 21, width: 480 }]
+    ? [{ columns: 1, width: 480 }]
     : [
-    { columns: 1, fontSize: 13, lineHeight: 21, width: 500 },
-    { columns: 1, fontSize: 13, lineHeight: 21, width: 640 }
+    { columns: 1, width: 500 },
+    { columns: 1, width: 640 }
   ])
     .map((candidate) => ({
       ...candidate,
-      fontSize: candidate.fontSize * fontScale,
-      lineHeight: candidate.lineHeight * fontScale,
+      ...typography,
       width: Math.min(candidate.width * cardScale, maxWidth)
     }))
     .map((candidate) => ({
@@ -775,22 +783,14 @@ export function buildPreviewLayout({
   };
 }
 
-function previewFontScale(size: PdfHoverPreviewFontSize) {
-  if (size === 'small') return 0.85;
-  if (size === 'large') return 1.2;
-  return 1;
-}
-
 function previewCardWidthScale(size: PdfHoverPreviewSize) {
-  if (size === 'compact') return 0.82;
-  if (size === 'large') return 1.2;
-  return 1;
+  return normalizePdfPreviewSize(size) / 100;
 }
 
 function previewCardHeightScale(size: PdfHoverPreviewSize) {
-  if (size === 'compact') return 0.62;
-  if (size === 'large') return 0.94;
-  return 0.78;
+  const percent = normalizePdfPreviewSize(size);
+  // Interpolate through the old compact/standard/large heights, bounded by the viewport.
+  return Math.min(1, 0.78 + (percent - 100) * (percent < 100 ? 0.16 / 18 : 0.16 / 20));
 }
 
 function estimateTextHeight(

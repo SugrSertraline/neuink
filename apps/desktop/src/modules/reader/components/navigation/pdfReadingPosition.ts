@@ -7,9 +7,11 @@ export function capturePdfReadingPosition(container: HTMLDivElement | null): Rea
     .find(page => { const rect = page.getBoundingClientRect(); return rect.height > 0 && rect.bottom > top + 1; });
   if (!page) return null;
   const rect = page.getBoundingClientRect();
-  const segment = [...page.querySelectorAll<HTMLElement>('[data-segment-uid]')].find(node => {
-    const bounds = node.getBoundingClientRect(); return bounds.height > 0 && bounds.top <= top + 24 && bounds.bottom > top;
-  });
+  const segments = [...page.querySelectorAll<HTMLElement>('[data-segment-uid]')]
+    .filter(node => node.getBoundingClientRect().height > 0);
+  const segment = segments.find(node => {
+    const bounds = node.getBoundingClientRect(); return bounds.top <= top + 24 && bounds.bottom > top;
+  }) ?? segments.find(node => node.getBoundingClientRect().bottom > top) ?? segments[segments.length - 1];
   const bounds = segment?.getBoundingClientRect();
   return { pageIdx: Number(page.dataset.pdfPageIndex), offset: (top - rect.top) / rect.height, left: container.scrollLeft,
     ...(segment && bounds ? { segmentUid: segment.dataset.segmentUid, segmentOffset: (top - bounds.top) / bounds.height } : {}) };
@@ -24,7 +26,9 @@ export function restorePdfReadingPosition(container: HTMLDivElement, position: R
   const scale = bounds.width / (container.offsetWidth || bounds.width) || 1;
   const segment = position.segmentUid ? [...page.querySelectorAll<HTMLElement>('[data-segment-uid]')].find(node => node.dataset.segmentUid === position.segmentUid) : undefined;
   const segmentRect = segment?.getBoundingClientRect();
-  const offset = segmentRect && position.segmentOffset !== undefined ? segmentRect.top - bounds.top + position.segmentOffset * segmentRect.height : rect.top - bounds.top + position.offset * rect.height;
+  const segmentOffset = position.sourceKind === 'reflow' ? Math.max(0, Math.min(1, position.segmentOffset ?? 0)) : position.segmentOffset;
+  const offset = segmentRect && segmentOffset !== undefined ? segmentRect.top - bounds.top + segmentOffset * segmentRect.height
+    : rect.top - bounds.top + (position.sourceKind === 'reflow' ? 0 : position.offset) * rect.height;
   container.scrollTo({ top: container.scrollTop + offset / scale,
     left: position.left, behavior: 'auto' });
 }

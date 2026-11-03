@@ -1,0 +1,14 @@
+{
+  "generator": "built-in image_gen",
+  "transparent_background": true,
+  "assets": [
+    {
+      "file": "calendar-v1.png",
+      "prompt": "Create ONE production skeuomorphic desktop navigation icon, square PNG, TRUE RGBA transparent background. Quiet research library style, refined early macOS physical miniature, near-frontal orthographic view elevated 12 degrees, slight right-hand thickness. Soft warm upper-left studio light, crisp silhouette readable at 30px, short subtle contact shadow with partial alpha. Centered object fills 82% of canvas, complete silhouette. No app tile or rounded-square backing, no text, no numbers, no watermark, no background surface, no drawn checkerboard. Fine realistic materials, no toy clay, no excessive glossy bevels. Subject: a compact standing desk flip calendar, warm ivory paper stack, two small aged brass binding rings at the top, dark oxblood-red leather triangular stand subtly visible at the bottom and right. Paper front has a tasteful calendar grid of small embossed dark gray squares with a single muted red highlighted square. Two or three subtle layered sheet edges. It must unmistakably read as a daily calendar."
+    },
+    {
+      "file": "settings-v1.png",
+      "prompt": "Create ONE production skeuomorphic desktop navigation icon, square PNG, TRUE RGBA transparent background. Quiet research library style, refined early macOS physical miniature, near-frontal orthographic view elevated 12 degrees, slight right-hand thickness. Soft warm upper-left studio light, crisp silhouette readable at 30px, short subtle contact shadow with partial alpha. Centered object fills 82% of canvas, complete silhouette. No app tile or rounded-square backing, no text, no numbers, no watermark, no background surface, no drawn checkerboard. Fine realistic materials, no toy clay, no excessive glossy bevels. Subject: one precision machined brushed-steel mechanical gear with eight broad readable teeth, a recessed warm brass central hub and dark circular center hole. Restrained realistic metal, slight bevels and visible right-side depth. Clean original icon unmistakably representing settings, no screwdriver or other extra object. Coordinated with ivory paper and oxblood library icon palette."
+    }
+  ]
+}

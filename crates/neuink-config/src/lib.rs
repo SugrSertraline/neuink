@@ -23,9 +23,26 @@ pub struct AppSettings {
     #[serde(default)]
     pub research: ResearchSettings,
     #[serde(default)]
+    pub zotero: ZoteroSettings,
+    #[serde(default)]
+    pub mineru: MineruSettings,
+    #[serde(default)]
     pub recent_workspaces: Vec<RecentWorkspace>,
     pub autosave_interval_ms: Option<u64>,
     pub theme: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct ZoteroSettings {
+    pub data_directory: Option<String>,
+    pub linked_attachment_directory: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct MineruSettings {
+    pub results_directory: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]

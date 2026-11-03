@@ -81,13 +81,15 @@ describe('LibrarySidebar tag drop', () => {
     const statuses = ['Not started', 'Canceled', 'Queued', 'Uploading', 'Parsing', 'Parsed', 'Failed', 'No PDF'] as const;
     const view = renderSidebar({ activeView: 'unparsed', onSelectView,
       entries: statuses.map(status => ({ ...entry, id: status, status, pdfFileName: status === 'No PDF' ? null : 'paper.pdf' })) });
-    const button = view.getByRole('button', { name: '未解析 PDF 2' });
+    const button = view.getByRole('button', { name: '未解析 2' });
     expect(button.getAttribute('aria-current')).toBe('page');
     button.focus(); expect(document.activeElement).toBe(button);
     fireEvent.click(button); expect(onSelectView).toHaveBeenCalledWith('unparsed');
     expect(view.getByRole('button', { name: '解析中 3' })).toBeTruthy();
     expect(view.getByRole('button', { name: '解析失败 1' })).toBeTruthy();
     expect(view.getByRole('button', { name: '无 PDF 1' })).toBeTruthy();
+    fireEvent.click(view.getByRole('button', { name: '全部 7' }));
+    expect(onSelectView).toHaveBeenLastCalledWith('pdf');
   });
   it('keeps library navigation visible when a paper is open but details were not selected', () => {
     const view = renderSidebar({ selectedEntry: entry, activeContentId: 'pdf', entryExplorerOpen: false });
@@ -142,9 +144,9 @@ it('shares resize handles while preserving three independent scroll regions and 
   viewports[2].scrollTop = 80;
   fireEvent.scroll(viewports[2]);
   fireEvent.keyDown(view.getByRole('separator', { name: '调整解析与全部标签高度' }), { key: 'ArrowUp' });
-  expect(panels[0].style.flexGrow).toBe('1');
-  expect(Number(panels[1].style.flexGrow)).toBeLessThan(1.25);
-  expect(Number(panels[2].style.flexGrow)).toBeGreaterThan(2);
+  expect(panels[0].style.flexBasis).toBe('100px');
+  expect(panels[1].style.flexBasis).toBe('117px');
+  expect(panels[2].style.flexBasis).toBe('208px');
   expect(viewports[2].scrollTop).toBe(80);
   fireEvent.click(view.getByRole('button', { name: '显示全部' }));
   expect(onClearFilters).toHaveBeenCalledOnce();
@@ -154,7 +156,7 @@ it('shares resize handles while preserving three independent scroll regions and 
   fireEvent.click(view.getByRole('button', { name: '解析' }));
   expect(view.getAllByRole('separator')).toHaveLength(1);
   expect(view.getByRole('separator', { name: '调整快速视图与全部标签高度' })).toBeTruthy();
-  expect(within(panels[1]).queryByRole('button', { name: /已解析 PDF/ })).toBeNull();
+  expect(within(panels[1]).queryByRole('button', { name: /已解析/ })).toBeNull();
   fireEvent.click(view.getByRole('button', { name: '解析' }));
   expect(view.getAllByRole('separator')).toHaveLength(2);
   expect(panels[1].querySelector('[data-slot="scroll-area-viewport"]')).toBe(viewports[1]);

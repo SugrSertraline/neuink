@@ -255,6 +255,7 @@
 }
 
 .app-sidebar-resizer {
+  position: relative;
   z-index: 80;
   grid-column: 2;
   grid-row: 1 / span 2;
@@ -264,6 +265,73 @@
   cursor: col-resize;
   transform: translateX(4px);
   touch-action: none;
+  outline: none;
+}
+
+.app-sidebar-resizer-grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  width: 16px;
+  height: 40px;
+  place-items: center;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--muted-foreground);
+}
+
+.app-sidebar-resizer:hover .app-sidebar-resizer-grip,
+.app-sidebar-resizer:focus-visible .app-sidebar-resizer-grip,
+.app-shell.is-sidebar-resizing .app-sidebar-resizer-grip {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.app-sidebar-resizer:focus-visible .app-sidebar-resizer-grip {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* The collapsed sidebar keeps its handle at the rail/content boundary. */
+button.app-sidebar-expander {
+  position: relative;
+  z-index: 80;
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  justify-self: end;
+  align-self: center;
+  width: 18px;
+  height: 40px;
+  padding: 0;
+  transform: translateX(50%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--muted-foreground);
+  box-shadow: 1px 0 3px color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+button.app-sidebar-expander:is(:hover, :focus-visible) {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--accent);
+}
+button.app-sidebar-expander:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Boundary handles must mask the content beneath them, including in glass mode.
+   Keep this more specific than the shared button hover/pressed material rules. */
+:root .app-shell [data-material="opaque-sidebar-handle"],
+:root[data-appearance] .app-shell button.app-sidebar-expander[data-ui="button"][data-material="opaque-sidebar-handle"],
+:root[data-appearance] .app-shell button.app-sidebar-expander[data-ui="button"][data-material="opaque-sidebar-handle"]:is(:hover, :focus-visible, :active) {
+  opacity: 1;
+  background: var(--atelier-metal, var(--card));
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 .app-sidebar-resizer::after {
@@ -461,6 +529,8 @@
 
 .activitybar {
   position: relative;
+  width: var(--app-activity-width);
+  flex-shrink: 0;
   z-index: 70;
   grid-column: 1;
   grid-row: 1 / span 2;
@@ -496,6 +566,75 @@
 .activitybar .spacer {
   flex: 1;
 }
+
+.activitybar-group {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+
+
+.activitybar-slider {
+  position: absolute;
+  top: 0;
+  width: 38px;
+  height: 38px;
+  border: 1px solid color-mix(in srgb, var(--primary) 35%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--primary) 14%, var(--card));
+  pointer-events: none;
+  opacity: 0;
+  transition: transform 160ms ease-out, opacity 100ms ease-out;
+}
+.activitybar-slider[data-visible="true"] { opacity: 1; }
+:root .activitybar[data-navigation="workspace"] .activitybar-group[data-navigation-group="items"] button {
+  z-index: 1;
+  flex: 0 0 38px;
+}
+:root .activitybar[data-navigation="workspace"] .activitybar-group[data-navigation-group="items"] button:not(.active):hover {
+  border-color: transparent;
+  background: var(--muted);
+}
+:root .activitybar[data-navigation="workspace"] .activitybar-group[data-navigation-group="items"] button.active {
+  color: var(--primary);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .activitybar-slider { transition: none; }
+}
+.activitybar button:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+
+.workspace-sidebar {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  isolation: isolate;
+  z-index: 60;
+  background: var(--card);
+}
+
+.workspace-sidebar > .app-sidebar,
+.workspace-sidebar > [data-sidebar-panel-slot] {
+  grid-area: 1 / 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+[data-sidebar-panel-slot] {
+  flex-direction: column;
+  overflow: hidden;
+}
+
+[data-sidebar-panel-slot] > .app-sidebar { flex: 1; }
 
 .app-sidebar {
   /* Radix scrollbars overlay by default; reserve their full width in every sidebar. */

@@ -1,13 +1,18 @@
-import { jsonSchema, tool, type JSONSchema7, type ToolSet } from 'ai';
-import { PDF_TOOL_NAMES } from './pdfTools';
-import { loadAssistantToolCatalog } from './toolCatalog';
-import { assertResearchRetry } from './researchRecovery';
-import { buildDiagramArtifact } from './diagramArtifact';
-import { createBrowserTabTool } from './browserTabTool';
 import type { BrowserTabTarget } from '@/shared/ipc/browserApi';
-import { safeToolErrorEvent, toolPreflight, trackToolFailures, ToolPreconditionError } from './toolFailurePolicy';
-import { createAgentToolFailure, isAgentToolFailure } from '../agent-core/toolFailure';
+import { jsonSchema, tool, type JSONSchema7, type ToolSet } from 'ai';
 import { AgentLocalLimitError, AgentStoppedError } from '../agent-core/agent';
+import { createAgentToolFailure, isAgentToolFailure } from '../agent-core/toolFailure';
+import { createBrowserTabTool } from './browserTabTool';
+import { buildDiagramArtifact } from './diagramArtifact';
+import { PDF_TOOL_NAMES } from './pdfTools';
+import { assertResearchRetry } from './researchRecovery';
+import { loadAssistantToolCatalog } from './toolCatalog';
+import {
+  safeToolErrorEvent,
+  ToolPreconditionError,
+  toolPreflight,
+  trackToolFailures
+} from './toolFailurePolicy';
 
 import type {
   AssistantContextSnapshot,
@@ -15,82 +20,76 @@ import type {
   ConversationMessage,
   ConversationSourceLink,
   LlmProfile,
-  ReadEntryAssistantContextResponse,
-  ReadSegmentContentResponse,
   ScopeSnapshot
 } from '@/shared/ipc/assistantApi';
-import { invokeAssistantTool } from '@/shared/ipc/assistantApi';
+import { readNote } from '@/shared/ipc/workspaceApi';
 import type {
   AgentInvocationPlan,
   AssistantActiveNote,
   AssistantContext,
   AssistantEntryMetaProposal,
   AssistantEntryMetaTarget,
-  AssistantMarkdownPatchOperation,
   AssistantNoteProposal,
-  AssistantNoteProposalAction,
-  AssistantNoteProposalSource,
-  AssistantSegmentContextItem,
   AssistantTagProposal,
   AssistantTaskPlan
 } from '@/shared/types/assistant';
-import { readNote } from '@/shared/ipc/workspaceApi';
 
+import { executeTool, runningSummary } from './toolExecution';
 import {
-  asObject,
+  entryIdOrSingleScope,
+  mcpToolIdsForAgent,
+  normalizeToolInput,
+  proposalToolInput,
+  publicInput
+} from './toolInput';
+import { buildNoteProposal, noteProposalSummary } from './toolNoteProposal';
+import { numberMarkdownLines, readCurrentNoteOutput } from './toolOutput';
+import {
   assertModelToolNameAvailable,
   assertValidModelToolNames,
-  buildNoteProposal,
-  entryIdOrSingleScope,
-  errorMessage,
-  executeTool,
-  mcpToolIdsForAgent,
   modelInputSchema,
   modelToolName,
-  normalizeToolInput,
   noteProposalInputSchema,
-  noteProposalSummary,
-  noteSnapshotKey,
-  numberMarkdownLines,
-  optionalString,
   proposalToolDescription,
-  proposalToolInput,
-  publicInput,
   readCurrentNoteInputSchema,
-  readCurrentNoteOutput,
+  runSubagentInputSchema,
+  tagProposalInputSchema,
+  toolDescription
+} from './toolSchema';
+import {
+  asObject,
+  errorMessage,
+  noteSnapshotKey,
+  optionalString,
   rememberReadNote,
   requiredEnum,
   requiredString,
-  runSubagentInputSchema,
-  runningSummary,
   stringArray,
-  tagProposalInputSchema,
-  toolDescription,
   trimToBudget
-} from './toolSupport';
+} from './toolValues';
 
-import type { AgentExecutionSelection, AgentRuntimeSettings, AgentToolId } from '@/shared/types/agentRuntime';
 import {
   auditAgentToolPermissions,
   buildAgentSystemPrompt,
   resolveAllowedSubagents
 } from '@/shared/lib/agentRuntimeSettings';
+import type { AgentExecutionSelection, AgentRuntimeSettings, AgentToolId } from '@/shared/types/agentRuntime';
 
-import { assistantContextCharBudget } from './contextBudget';
-import { runSubagentTask } from '../runtime/subagent';
+import { RunBudget, type AgentLoopGuard } from '../agent-core';
+import type { ApplicationActions } from '../runtime/applicationActions';
 import type { DurableExecution } from '../runtime/durableExecution';
 import { stableHash } from '../runtime/evidenceLedger';
-import { RunBudget, type AgentLoopGuard } from '../agent-core';
-import { SourceLedger } from '../runtime/sourceLedger';
-import type { ApplicationActions } from '../runtime/applicationActions';
-import { resolveModelProfile } from './modelTasks';
 import { PLANNING_READ_TOOLS } from '../runtime/executionPolicy';
+import { SourceLedger } from '../runtime/sourceLedger';
+import { runSubagentTask } from '../runtime/subagent';
+import { assistantContextCharBudget } from './contextBudget';
 import { buildEntryMetaProposal } from './entryMetaProposal';
 import {
   ENTRY_META_PROPOSAL_TOOL_DESCRIPTION,
   entryMetaProposalInputSchema,
   entryMetaProposalSummary
 } from './entryMetaProposalTool';
+import { resolveModelProfile } from './modelTasks';
 
 const SUPPORTED_TOOL_NAMES = new Set([
   ...PDF_TOOL_NAMES,
@@ -891,7 +890,8 @@ export async function createAssistantTools({
   };
 }
 
-export { entryIdOrSingleScope, modelToolName } from './toolSupport';
+export { entryIdOrSingleScope } from './toolInput';
+export { modelToolName } from './toolSchema';
 
 function assertToolPrerequisites(
   toolName: string,

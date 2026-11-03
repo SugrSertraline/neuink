@@ -37,6 +37,17 @@ describe('the opt-in application material layer', () => {
     next.unmount();
     expect(renderHook(useAppearance, { wrapper }).result.current.appearance).toBe('standard');
   });
+  it('defaults to spines and preserves explicit cover choices across launches', () => {
+    const first = renderHook(useAppearance, { wrapper });
+    expect(first.result.current.libraryDisplay).toBe('spines');
+    act(() => first.result.current.setLibraryDisplay('shelf'));
+    first.unmount();
+    const next = renderHook(useAppearance, { wrapper });
+    expect(next.result.current.libraryDisplay).toBe('shelf');
+    act(() => next.result.current.setLibraryDisplay('spines'));
+    next.unmount();
+    expect(renderHook(useAppearance, { wrapper }).result.current.libraryDisplay).toBe('spines');
+  });
   it('stores the book/list choice separately from the original table preferences', () => {
     window.localStorage.setItem('neuink.entryLibraryColumns.v1', '["title"]');
     const first = renderHook(useAppearance, { wrapper });

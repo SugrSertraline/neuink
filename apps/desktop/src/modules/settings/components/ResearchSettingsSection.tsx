@@ -52,7 +52,7 @@ export function ResearchSettingsSection({ active, children }: { active: boolean;
     } catch (caught) { if (mounted.current) setError(String(caught)); }
     finally { pending.current = false; if (mounted.current) setBusy(false); }
   };
-  return <><SettingsGroup id="tools-research" title="基础检索" description="默认使用免费服务，无需密钥。下载 PDF 前仍需确认。">
+  return <><SettingsGroup id="tools-research" title="基础检索" description="免费检索，无需密钥。">
     {!settings ? <div className="grid gap-2 text-sm">
       {busy ? <p role="status">正在读取检索设置…</p> : <Button variant="outline" size="sm" onClick={() => setAttempt(n => n + 1)}>重新读取检索设置</Button>}
     </div> : <div>
@@ -65,20 +65,18 @@ export function ResearchSettingsSection({ active, children }: { active: boolean;
     </div>}
     {busy && settings && !key && <p role="status" className="mt-2 text-xs text-muted-foreground">保存中…</p>}
     {error && !key && <p role="alert" className="mt-2 text-sm text-destructive [overflow-wrap:anywhere]">{error}</p>}
-    <p className="mt-2 text-xs leading-5 text-muted-foreground">检索会发送关键词或目标网址，不上传本地 PDF；请勿输入敏感内容。</p>
   </SettingsGroup>
-  <SettingsGroup title="可选服务" description="不配置也能使用免费检索。保存密钥不会自动启用服务。">
+  <SettingsGroup title="可选服务" description="按需配置，分别启用。">
       <SettingsServiceSection title="Tavily" description="替代免费网页搜索，需独立密钥，可能产生费用。"
         status={key ? '未保存' : busy ? (settings ? '保存中…' : '读取中…') : !settings ? '未就绪' : settings.use_tavily ? '已启用' : settings.has_web_key ? '未启用' : '未配置'}>
         {settings ? <>
-        <div className="mt-3 grid min-w-0 gap-2">
+        <div className="grid min-w-0 gap-2">
         <SettingSwitch label="使用 Tavily 替代免费网页服务" checked={settings.use_tavily} disabled={busy || (!settings.has_web_key && !settings.use_tavily)}
-          description={settings.has_web_key ? '仅手动开启后使用，可能产生服务费用。保存密钥不会自动开启；关闭后恢复免密钥方式。' : '需先保存独立检索密钥才能开启。若原凭据已不可用，可以关闭此项恢复免费服务。'}
+          description={settings.has_web_key ? '关闭后恢复免费搜索。' : '保存密钥后可启用。'}
           onCheckedChange={value => void save({ use_tavily: value })} />
         <Label htmlFor={`${owner}-key`}>Tavily API Key{settings.has_web_key ? '（已配置）' : '（未配置）'}</Label>
         <Input id={`${owner}-key`} type="password" autoComplete="off" spellCheck={false} value={key} maxLength={4096}
           disabled={busy} placeholder={settings.has_web_key ? '输入新密钥可替换现有凭据' : '输入检索服务密钥'} onChange={event => setKey(event.target.value)} />
-        <p className="text-xs text-muted-foreground">凭据只保存到系统凭据库，不回显、不写入对话或资料库。新配置在下一次助手请求中生效。</p>
         {key && <div className="flex flex-wrap justify-end gap-2">
           <span role="status" className="mr-auto text-xs text-muted-foreground">{busy ? '保存中…' : '未保存'}</span>
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => setKey('')}>放弃输入</Button>

@@ -1,6 +1,9 @@
+import { SidebarBoundaryControl } from './SidebarBoundaryControl';
+import { useAssistantContextState } from './useAssistantContextState';
 import { fetchEntryPdf } from '@/shared/ipc/entryPdfApi';
 import { Library, ListFilter, MessageSquare, PanelRight, Search, Settings } from 'lucide-react';
 import { OnboardingGuide } from '@/modules/onboarding/OnboardingGuide';
+import { ONBOARDING_GUIDE_VISIBLE } from '@/modules/onboarding/availability';
 import { importOnboardingPaper } from '@/shared/ipc/onboardingApi';
 import {
   type CSSProperties,
@@ -40,7 +43,6 @@ import {
   sourceLinkSurfaceActions,
   surfaceKey,
   surfaceNoteTarget,
-  workspaceSurfaceOpenActions,
   workspaceSurfaceReducer,
   type WorkspaceSurfaceLayout,
   type WorkspacePaneId,
@@ -48,6 +50,8 @@ import {
 } from './workspaceSurface';
 import { resolveEntrySidebarContext, resolveTagNoteSidebarContext } from './entrySidebarContext';
 import { useWorkspaceSession } from './useWorkspaceSession';
+import { useWorkspaceNavigation } from './useWorkspaceNavigation';
+import { SidebarPanelSlot, WorkspaceSidebar } from './WorkspaceSidebar';
 import { resolveSourceLinkSurface } from './workspaceSourceNavigation';
 import { assistantEvidenceNavigation } from './assistantReplyNavigation';
 import { localizeSciverseImages } from './sciverseRemoteImages';
@@ -56,6 +60,8 @@ import { sameTagEntries, startTagReadingActions, tagNoteOpenPane, tagReadingMove
 import { SameTagSidebar } from '../modules/library/components/SameTagSidebar';
 import { useSameTagContext } from './useSameTagContext';
 import { WorkspaceNotesProvider } from '../modules/notes/WorkspaceNotesContext';
+import { DailyProvider } from '../modules/daily/DailyContext';
+import { DailySidebar } from '../modules/daily/DailySidebar';
 import { NoteReviewProvider } from '../modules/assistant/review/NoteReviewContext';
 import {
   resolveActiveActivityPanel,
@@ -70,6 +76,9 @@ import {
   workspaceSplitLeftWidthFromRatio
 } from './workspaceSplit';
 import { AssistantPanel } from '../modules/assistant/components/AssistantPanel';
+import type { PdfParseAction } from '../modules/library/components/PdfParseButton';
+import { useResearchTasks } from '../modules/assistant/research/useResearchTasks';
+import { RESEARCH_DOCK_ID, researchDockTask } from '../modules/assistant/research/researchTaskDock';
 import type { AssistantComposerDraft } from '../modules/assistant/components/AssistantComposerEditor';
 import type { SourceLinkOpenTarget } from '../modules/notes/editor/SourceLinkNode';
 import {
@@ -89,7 +98,7 @@ import type { PdfJumpRequest, SidePaneState, SidePaneTarget } from '../modules/r
 import { SearchDialog } from '../modules/search/components/SearchDialog';
 import { AssistantReplyActionsContext } from '../modules/assistant/components/AssistantReplyActionsContext';
 import { ResearchPaperActionsProvider } from '../modules/assistant/components/ResearchPaperActions';
-import { AppearanceIcon } from '../shared/components/AppearanceIcon';
+import { ActivityNavigation } from './ActivityNavigation';
 import { AppearanceExit } from '../shared/components/AppearanceExit';
 import { SearchPanel } from '../modules/search/components/SearchPanel';
 import { useSearchIndexBuildStatus } from '../modules/search/hooks/useSearchIndexBuildStatus';
@@ -139,7 +148,6 @@ import type {
   AssistantActiveNote,
   AssistantActiveSegment,
   AssistantActiveSurfaceSnapshot,
-  AssistantContext,
   AssistantContextAddOptions,
   AssistantContextInput,
   AssistantNoteProposal,
@@ -165,7 +173,6 @@ type PendingMarkdownNoteDelete = {
 
 import {
   ACTIVE_PARSE_STATUSES,
-  ActivityButton,
   DEFAULT_MINERU_ENDPOINT,
   EMPTY_SIDE_PANE,
   LEGACY_MINERU_ENDPOINTS,
@@ -185,7 +192,6 @@ import {
   formatVectorStatus,
   getWorkspaceSplitContainerWidth,
   noteIdFromContentId,
-  readStoredBoolean,
   readStoredLibraryView,
   readStoredRecentReading,
   readStoredSidePanel,
@@ -287,18 +293,19 @@ export function App() {
   const [libraryFilterResetKey, setLibraryFilterResetKey] = useState(0);
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [librarySection, setLibrarySection] = useState<'papers' | 'notes'>('papers');
-  const [assistantContext, setAssistantContext] = useState<AssistantContext>({ items: [] });
+  const { assistantContext, setAssistantContext, replaceAssistantContext } = useAssistantContextState();
   const [assistantComposerDraft, setAssistantComposerDraft] =
     useState<AssistantComposerDraft | null>(null);
   const [activeAssistantSegment, setActiveAssistantSegment] =
     useState<AssistantActiveSegment | null>(null);
   const [assistantDraftQuestion, setAssistantDraftQuestion] = useState<string | null>(null);
   const [sidePanel, setSidePanel] = useState<SidePanel>(readStoredSidePanel);
-  const [sidebarOpen, setSidebarOpen] = useState(() => readStoredBoolean(SIDEBAR_OPEN_STORAGE_KEY, true));
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [recentReadingEntryIds, setRecentReadingEntryIds] = useState<string[]>(readStoredRecentReading);
   const [sidebarWidth, setSidebarWidth] = useState(() => readStoredSidebarWidth());
   const { previewRef: sidebarResizePreviewRef, effectiveWidth: effectiveSidebarWidth, maxWidth: sidebarMaxWidth,
     onPointerDown: startSidebarResize, onKeyDown: resizeSidebarWithKeyboard, observeContainer: observeSidebarContainer } = useSidebarResize({
+    onCollapse: () => setSidebarOpen(false),
     width: sidebarWidth, min: SIDEBAR_MIN_WIDTH, max: SIDEBAR_MAX_WIDTH, enabled: sidebarOpen, containerRef: appShellRef,
     liveResize: surfaceLayout.left.kind === 'browser' || surfaceLayout.right?.kind === 'browser',
     onCommit: next => { setSidebarWidth(next); window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(next)); }
@@ -325,12 +332,17 @@ export function App() {
     mineruEndpoint, parserApiKey,
     workspace.entries.map(entry => `${entry.id}:${entry.pdf?.parse.status}`).join('|'),
     () => workspace.refreshEntries());
+  const [mineruDrop, setMineruDrop] = useState<{ path: string; nonce: number } | null>(null);
   const pdfDropImport = usePdfDropImport({
     workspaceRoot: workspace.root,
     workspaceReady: workspace.status === 'ready',
     parserEndpoint: mineruEndpoint,
     parserApiKey,
     createEntry: workspace.createLibraryEntry,
+    onMineruSourceDrop: (path) => {
+      setMineruDrop({ path, nonce: Date.now() });
+      dispatchSurface({ type: 'open', surface: { kind: 'create-entry' } });
+    },
     notify,
     dismiss
   });
@@ -366,6 +378,9 @@ export function App() {
   const localBackgroundJobs = useSyncExternalStore(subscribeLocalBackgroundJobs, getLocalBackgroundJobs);
   const showAssistantTasks = useCallback(() => { setSidePanel('assistant'); setSidebarOpen(true); }, []);
   const assistantTaskDock = useAssistantTaskDock(workspace.root, showAssistantTasks);
+  const researchModel = useResearchTasks(workspace.root);
+  const [researchOpenRequest, setResearchOpenRequest] = useState(0);
+  const dockTasks = useMemo(() => [...assistantTaskDock.tasks, ...researchDockTask(researchModel.status, researchModel.tasks)], [assistantTaskDock.tasks, researchModel.status, researchModel.tasks]);
   const scopedSciverseJobs = useMemo(() => sciverseBackgroundJobs.filter(job => job.scope?.root === workspace.root),
     [sciverseBackgroundJobs, workspace.root]);
   const visibleBackgroundJobs = useMemo(
@@ -445,31 +460,19 @@ export function App() {
     setWorkspaceSplitLeftWidth(nextWidth);
   }, [surfaceLayout.left, surfaceLayout.right, workspaceSplitLeftWidth]);
 
-  const openWorkspaceSurface = useCallback(
-    (surface: WorkspaceSurface, pane?: WorkspacePaneId) => {
-      const actions = workspaceSurfaceOpenActions(surfaceLayout, surface, pane);
-      const movesBetweenPanes = actions.some((action) => action.type === 'move');
-
-      // An explicit pane request is a placement command. Move an already-open
-      // surface just like tab dragging does instead of silently focusing it in
-      // the old pane and making the split entry appear unresponsive.
-      if (movesBetweenPanes && hasUnsavedSurface(surface)) {
-        notify({
-          tone: 'default',
-          title: '请先保存当前修改',
-          description: '跨分屏移动会重新打开编辑器，请先保存或放弃当前修改。'
-        });
-        return false;
-      }
-
-      if (pane === 'right' && !surfaceLayout.right) {
-        prepareWorkspaceSplit(surface);
-      }
-      actions.forEach(dispatchSurface);
-      return true;
-    },
-    [notify, prepareWorkspaceSplit, surfaceLayout]
-  );
+  const selectSidePanel = useCallback((panel: SidePanel) => {
+    setSidePanel(panel);
+    setSidebarOpen(true);
+  }, []);
+  const notifyBlockedWorkspaceMove = useCallback(() => notify({
+    tone: 'default', title: '请先保存当前修改',
+    description: '跨分屏移动会重新打开编辑器，请先保存或放弃当前修改。'
+  }), [notify]);
+  const openWorkspaceSurface = useWorkspaceNavigation({
+    layout: surfaceLayout, dispatch: dispatchSurface, prepareSplit: prepareWorkspaceSplit,
+    onSelectPage: selectSidePanel,
+    onBlockedMove: notifyBlockedWorkspaceMove
+  });
 
   useEffect(() => {
     const split = document.querySelector('.workspace-split');
@@ -685,18 +688,18 @@ export function App() {
   const openSetting = (id: string) => {
     dispatchSurface({ type: 'open', surface: { kind: 'settings', target: { id, nonce: ++settingsNavigationNonce.current } } });
   };
+  const pdfParseAction: PdfParseAction = {
+    configured: Boolean(mineruEndpoint.trim()),
+    disabled: workspace.status !== 'ready' || !workspace.root,
+    onStart: entryId => workspace.startQueuedPdfParseForEntry(entryId, mineruEndpoint, parserApiKey),
+    onConfigure: () => openSetting('parser-zip')
+  };
   const openSettingsTab = () => {
     dispatchSurface({ type: 'open', surface: { kind: 'settings' } });
   };
 
-  const toggleSidePanel = (panel: SidePanel) => {
-    if (sidebarOpen && sidePanel === panel) {
-      setSidebarOpen(false);
-      return;
-    }
-
-    setSidePanel(panel);
-    setSidebarOpen(true);
+  const openActivityPage = (page: 'library' | 'daily-dashboard' | 'settings', pane?: WorkspacePaneId) => {
+    openWorkspaceSurface({ kind: page }, pane);
   };
 
   const openTagEditorTab = () => {
@@ -954,8 +957,8 @@ export function App() {
     [mineruEndpoint, parserApiKey, reloadPdfReaders, workspace.refreshParsingEntries]
   );
 
-  const selectLibraryView = (view: LibraryView) => changeLibraryContext(() => {
-    setActiveTag(null);
+  const selectLibraryView = (view: LibraryView, preserveTag = false) => changeLibraryContext(() => {
+    if (!preserveTag || view === 'trash') setActiveTag(null);
     setLibrarySection('papers');
     setLibraryView(view);
     dispatchSurface({ type: 'open', surface: { kind: 'library' } });
@@ -1520,28 +1523,6 @@ export function App() {
     });
   };
 
-  const replaceAssistantContext = (items: AssistantContextInput[]) => {
-    setAssistantContext({
-      items: items.map((item) => {
-        const itemId =
-          item.id ??
-          (item.kind === 'segment'
-            ? item.kind + ':' + item.entryId + ':' + item.segmentUid
-            : item.kind + ':' + item.entryId + (
-                item.contentKind && item.contentKind !== 'entry'
-                  ? ':' + item.contentKind + ':' + (item.contentId ?? item.contentKind)
-                  : ''
-              ));
-        return {
-          ...item,
-          id: itemId,
-          addedAt: new Date().toISOString()
-        };
-      })
-    });
-    setSidePanel('assistant');
-    setSidebarOpen(true);
-  };
 
   const applyAssistantNoteProposal = async (proposal: AssistantNoteProposal) => {
     if (!workspace.root || !proposal.taskId || !proposal.verifiedAt || !proposal.proposalDigest) {
@@ -1793,8 +1774,8 @@ export function App() {
         >
           <div className="border border-border bg-popover px-4 py-3 text-sm font-medium text-popover-foreground shadow-sm">
             {workspace.status === 'ready'
-              ? '松开以导入 PDF · 可同时拖入多个文件'
-              : '请先打开资料库，再拖入 PDF'}
+              ? '松开以导入 PDF 或 MinerU 结果目录、ZIP、RAR'
+              : '请先打开资料库，再拖入文件'}
           </div>
         </div>
       ) : null}
@@ -1845,7 +1826,7 @@ export function App() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <ResearchPaperActionsProvider key={workspace.root ?? 'no-workspace'} root={workspace.root}>
+      <ResearchPaperActionsProvider key={workspace.root ?? 'no-workspace'} root={workspace.root} entries={workspace.entries} libraryStatus={workspace.status} onOpenEntry={openEntryTab}>
       <AssistantReplyActionsContext.Provider value={{ root: workspace.root, openReply: message => {
         openWorkspaceSurface({ kind: 'assistant-reply', message });
       }, openSource: openAssistantSource, openContext: openAssistantContext, addSciverseSource: addSciversePaperToLibrary }}>
@@ -1855,6 +1836,7 @@ export function App() {
       <WorkspaceNotesProvider root={workspace.root} refreshKey={noteCatalogRefreshKey(
         workspace.tags, entries, trashedEntries, markdownNoteRefreshById
       )}>
+      <DailyProvider key={workspace.root} root={workspace.root} openNote={(target, title) => openWorkspaceSurface(noteSurface(target, title))} openSource={openMarkdownSourceLink}>
       <main
         data-guide="reader-workspace"
         ref={observeSidebarContainer}
@@ -1862,6 +1844,8 @@ export function App() {
         style={shellStyle}
       >
         <WorkspaceTabsBar
+          readingLinkMode={readerPreferences.readingLinkMode}
+          onReadingLinkModeChange={(readingLinkMode) => updateReaderPreferences({ ...readerPreferences, readingLinkMode })}
           onNewBrowser={openNewBrowserTab}
           entries={entries}
           layout={surfaceLayout}
@@ -1869,14 +1853,14 @@ export function App() {
           onClose={requestCloseSurfaceTab}
           onDuplicate={(surface, pane) => dispatchSurface({ type: 'duplicate', key: surfaceKey(surface), pane, viewId: crypto.randomUUID() })}
           onCloseOthers={(pane, surface) => closeGuard.requestClose((pane === 'left' ? surfaceLayout.leftTabs : surfaceLayout.rightTabs)
-            .filter((tab) => surfaceKey(tab) !== surfaceKey(surface) && tab.kind !== 'library' && !surfaceLayout.pinnedTabKeys?.includes(surfaceKey(tab)))
+            .filter((tab) => surfaceKey(tab) !== surfaceKey(surface) && !surfaceLayout.pinnedTabKeys?.includes(surfaceKey(tab)))
             .map((tab) => ({ pane, surface: tab })))}
           onCloseToRight={(pane, surface) => {
             const tabs = pane === 'left' ? surfaceLayout.leftTabs : surfaceLayout.rightTabs;
             const index = tabs.findIndex((tab) => surfaceKey(tab) === surfaceKey(surface));
             if (index < 0) return;
             closeGuard.requestClose(tabs.slice(index + 1)
-              .filter((tab) => tab.kind !== 'library' && !surfaceLayout.pinnedTabKeys?.includes(surfaceKey(tab)))
+              .filter((tab) => !surfaceLayout.pinnedTabKeys?.includes(surfaceKey(tab)))
               .map((tab) => ({ pane, surface: tab })));
           }}
           onClosePane={(pane) => closeGuard.requestClose((pane === 'left' ? surfaceLayout.leftTabs : surfaceLayout.rightTabs).map((surface) => ({ pane, surface })))}
@@ -1900,51 +1884,23 @@ export function App() {
             }
             dispatchSurface({ type: 'swap' });
           }}
-          onSelect={(pane, surface) => dispatchSurface({ type: 'open', pane, surface })}
+          onSelect={(pane, surface) => openWorkspaceSurface(surface, pane)}
         />
-        <nav className="activitybar" aria-label="主导航">
-          <ActivityButton
-            active={activeActivityPanel === 'library'}
-            label="条目库"
-            onClick={() => toggleSidePanel('library')}
-            onContextMenu={() => openWorkspaceSurface({ kind: 'library' }, 'right')}
-          >
-            <AppearanceIcon kind="library"><Library size={18} aria-hidden="true" /></AppearanceIcon>
-          </ActivityButton>
-          <ActivityButton
-            active={activeActivityPanel === 'details'}
-            label={sidebarNote ? '笔记详情' : '条目详情'}
-            onClick={() => toggleSidePanel('details')}
-          >
-            <AppearanceIcon kind="details"><PanelRight size={18} aria-hidden="true" /></AppearanceIcon>
-          </ActivityButton>
-          <ActivityButton
-            active={activeActivityPanel === 'search'}
-            label="搜索"
-            onClick={() => toggleSidePanel('search')}
-          >
-            <AppearanceIcon kind="search"><Search size={18} aria-hidden="true" /></AppearanceIcon>
-          </ActivityButton>
-          <ActivityButton
-            active={activeActivityPanel === 'assistant'}
-            label="助手"
-            onClick={() => toggleSidePanel('assistant')}
-          >
-            <AppearanceIcon kind="assistant"><MessageSquare size={18} aria-hidden="true" /></AppearanceIcon>
-          </ActivityButton>
-          <ActivityButton active={activeActivityPanel === 'same-tag'} label="标签阅读" onClick={() => toggleSidePanel('same-tag')}>
-            <AppearanceIcon kind="tags"><ListFilter size={18} aria-hidden="true" /></AppearanceIcon>
-          </ActivityButton>
-          <div className="spacer" />
-          <ActivityButton
-            active={focusedSurface.kind === 'settings'}
-            label="设置"
-            onClick={openSettingsTab}
-            onContextMenu={() => openWorkspaceSurface({ kind: 'settings' }, 'right')}
-          >
-            <Settings size={18} aria-hidden="true" />
-          </ActivityButton>
-        </nav>
+        <ActivityNavigation focusedKind={focusedSurface.kind} activePanel={activeActivityPanel} noteDetails={Boolean(sidebarNote)}
+          onOpenPage={openActivityPage}
+          onOpenRight={page => openActivityPage(page, 'right')}
+          onSelectTool={selectSidePanel}
+          onCloseSidebar={() => setSidebarOpen(false)} />
+        <WorkspaceSidebar open={sidebarOpen}>
+        <SidebarPanelSlot active={sidebarOpen && sidePanel === 'daily-dashboard'}><DailySidebar
+          active={sidebarOpen && sidePanel === 'daily-dashboard'} entries={entries} status={workspace.status}
+          onOpenEntry={openEntryTab}
+          onOpenRecommendations={() => {
+            openWorkspaceSurface({ kind: 'daily-dashboard' });
+            requestAnimationFrame(() => { const section = document.getElementById('daily-recommendations'); if (section?.getClientRects().length) { section.scrollIntoView({ block: 'start' }); section.focus({ preventScroll: true }); } });
+          }}
+          onReflect={entry => addAssistantContext({ kind: 'entry', entryId: entry.id, entryTitle: entry.title }, { draftQuestion: `帮我复盘今天阅读的《${entry.title}》：先提出三个帮助我检验理解的问题，再根据我的回答讨论关键假设和待验证之处。` })}
+          onSettings={openSettingsTab} /></SidebarPanelSlot>
         {sidebarOpen && librarySidebarMode === 'note-details' && sidebarNote ? (
           <TagNoteDetailsSidebar key={workspace.root} target={sidebarNote.target} title={sidebarNote.label}
             entries={entries} tags={workspace.tags} status={workspace.status} error={workspace.error} layout={surfaceLayout}
@@ -2003,6 +1959,7 @@ export function App() {
             onRenameMarkdownNote={renameMarkdownNote}
             onRenamePdfDisplayName={workspace.renameWorkspacePdfDisplayName}
             onOpenCreateEntryTab={openCreateEntryTab}
+                onOpenImportTab={() => dispatchSurface({ type: 'open', surface: { kind: 'external-import' } })}
             onOpenTagEditorTab={openTagEditorTab}
             onSelectContent={selectEntryContent}
             onOpenTagDetails={(tagId) => selectLibraryTag(tagId, 'papers', true)}
@@ -2018,7 +1975,7 @@ export function App() {
         onOpenSetting={openSetting}
           />
         ) : null}
-        <div className={sidebarOpen && sidePanel === 'same-tag' ? 'contents' : 'hidden'}>
+        <SidebarPanelSlot active={sidebarOpen && sidePanel === 'same-tag'}>
           <SameTagSidebar key={workspace.root} entries={entries} tags={workspace.tags} tagId={sameTagId} descendants={readingContext.descendants}
             onEditTags={openTagEditorTab}
             workspaceRoot={workspace.root} contextKey={readingContext.contextKey} contextReason={readingContext.reason} currentEntryId={readingContext.entryId}
@@ -2029,9 +1986,12 @@ export function App() {
             onRead={(entry, pane) => openWorkspaceSurface(tagReadingSurface(entry, sameTagId ?? undefined), pane)}
             onOpenContent={(entry, contentId, pane) => openWorkspaceSurface(entryContentSurface(entry.id, contentId, sameTagId ?? undefined), pane)}
             onDetails={entry => openWorkspaceSurface({ kind: 'entry-overview', entryId: entry.id, contextTagId: sameTagId ?? undefined })} />
-        </div>
-        <div className={sidebarOpen && sidePanel === 'assistant' ? 'contents' : 'hidden'}>
+        </SidebarPanelSlot>
+        <SidebarPanelSlot active={sidebarOpen && sidePanel === 'assistant'}>
           <AssistantPanel
+            pdfParseAction={pdfParseAction}
+            researchModel={researchModel}
+            researchOpenRequest={researchOpenRequest}
             activeEntry={activeEntry}
             activeNote={activeAssistantNote}
             activeSegment={activeAssistantSegmentForPanel}
@@ -2060,27 +2020,16 @@ export function App() {
             onDraftQuestionConsumed={() => setAssistantDraftQuestion(null)}
             onExportConversation={exportAssistantConversation}
             onOpenSettings={openSettingsTab}
+            onOpenResearchSettings={() => openSetting('tools-deep-research')}
             onOpenSource={openAssistantSource}
             onAddSciverseSource={addSciversePaperToLibrary}
             onReplaceAssistantContext={replaceAssistantContext}
             onRemoveAssistantContextItem={removeAssistantContextItem}
           />
-        </div>
-        {sidebarOpen ? (
-        <div
-          aria-label="调整侧栏宽度"
-          aria-orientation="vertical"
-          aria-valuemax={sidebarMaxWidth}
-          aria-valuemin={SIDEBAR_MIN_WIDTH}
-          aria-valuenow={effectiveSidebarWidth}
-          className="app-sidebar-resizer"
-          role="separator"
-          tabIndex={0}
-          title="拖动调整侧栏宽度"
-          onKeyDown={resizeSidebarWithKeyboard}
-          onPointerDown={startSidebarResize}
-        />
-        ) : null}
+        </SidebarPanelSlot>
+        </WorkspaceSidebar>
+        <SidebarBoundaryControl open={sidebarOpen} width={effectiveSidebarWidth} minWidth={SIDEBAR_MIN_WIDTH} maxWidth={sidebarMaxWidth}
+          onExpand={() => setSidebarOpen(true)} onPointerDown={startSidebarResize} onKeyDown={resizeSidebarWithKeyboard} />
         {sidebarOpen ? (
           <div
             aria-hidden="true"
@@ -2090,6 +2039,7 @@ export function App() {
           />
         ) : null}
         <ReaderPane
+          pdfParseAction={pdfParseAction}
           onUpdateBrowser={(id, url, title, metadata) => dispatchSurface({ type: 'updateBrowser', id, url, title, metadata })}
           onUpdateTagDescription={workspace.updateWorkspaceTagDescription}
           onOpenTrash={() => selectLibraryView('trash')}
@@ -2110,6 +2060,8 @@ export function App() {
           isRefreshingParseStatus={workspace.isRefreshingParseStatus}
           libraryView={libraryView}
           librarySection={librarySection} onLibrarySectionChange={setLibrarySection}
+          onLibraryViewChange={view => selectLibraryView(view, true)}
+          onClearLibraryFilters={clearLibraryFilters}
           onOpenTagLibrary={(tagId, section) => selectLibraryTag(tagId, section, true)}
           libraryFilterResetKey={libraryFilterResetKey}
           recentReadingEntryIds={recentReadingEntryIds}
@@ -2121,6 +2073,9 @@ export function App() {
           onCreateEntry={(request) =>
             workspace.createLibraryEntry(request, mineruEndpoint, parserApiKey)
           }
+          onMineruImported={() => workspace.refreshEntries()}
+          mineruDrop={mineruDrop}
+          onMineruDropConsumed={() => setMineruDrop(null)}
           onCreateEntryFinished={(result) => {
             if (result.parseSubmissionFailed) {
               dispatchSurface({ type: 'open', surface: { kind: 'create-entry' } });
@@ -2229,11 +2184,12 @@ export function App() {
           status={workspace.status}
         />
       </main>
+      </DailyProvider>
       </WorkspaceNotesProvider>
       </NoteReviewProvider>
       </AssistantReplyActionsContext.Provider>
       </ResearchPaperActionsProvider>
-      <OnboardingGuide root={workspace.root} ready={workspace.status === 'ready'} entries={workspace.entries}
+      {ONBOARDING_GUIDE_VISIBLE && <OnboardingGuide root={workspace.root} ready={workspace.status === 'ready'} entries={workspace.entries}
         selectedEntryId={workspace.selectedEntryId} layout={surfaceLayout}
         onImportSample={async () => {
           const root = workspace.root;
@@ -2284,7 +2240,7 @@ export function App() {
           else if ((route === 'pdf' || route === 'reflow') && entryId) openEntryContentTab(entryId, route);
           else if (route === 'details' && entryId) { workspace.setSelectedEntryId(entryId); openEntryContentTab(entryId, 'overview'); setSidePanel('details'); setSidebarOpen(true); }
           else if (route === 'assistant') { if (entryId) openEntryContentTab(entryId, 'pdf'); setSidePanel('assistant'); setSidebarOpen(true); }
-        }} />
+        }} />}
       <footer className="statusbar">
         <AppearanceExit />
         <button type="button">侧栏</button>
@@ -2294,8 +2250,13 @@ export function App() {
         <span>{vectorStatusText}</span>
         <span>{entries.length} 个条目</span>
         <span>{selectedEntry?.title ?? '未选择条目'}</span>
-        <JobStatusDock jobs={visibleBackgroundJobs} assistantTasks={assistantTaskDock.tasks} entryTitles={taskEntryTitles}
-          onOpenAssistantTask={assistantTaskDock.openTask} onStopAssistantTask={assistantTaskDock.stopTask}
+        <JobStatusDock jobs={visibleBackgroundJobs} assistantTasks={dockTasks} entryTitles={taskEntryTitles}
+          onOpenAssistantTask={id => {
+            if (id !== RESEARCH_DOCK_ID) { assistantTaskDock.openTask(id); return; }
+            const taskId = researchModel.status?.active?.installation ? null : researchModel.status?.active?.id ?? researchModel.status?.pending_task_id;
+            if (taskId) researchModel.select(taskId);
+            setResearchOpenRequest(value => value + 1); showAssistantTasks();
+          }} onStopAssistantTask={id => { if (id === RESEARCH_DOCK_ID) void researchModel.command({ kind: 'cancel' }); else assistantTaskDock.stopTask(id); }}
           onOpenJob={job => {
             const scope = job.scope;
             if (scope?.root !== workspace.root || scope.kind !== 'entry') return;

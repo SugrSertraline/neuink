@@ -658,6 +658,10 @@
   padding-right: 118px;
 }
 
+.workspace-tabsbar.has-reader-link-button .workspace-tab-pane:last-child {
+  padding-right: 160px;
+}
+
 .workspace-tabsbar:not(.is-split) .workspace-tab-pane {
   padding-right: 92px;
 }
@@ -932,7 +936,16 @@
 }
 
 .note-proposal-list { container: note-proposal / inline-size; }
-.note-proposal-actions > button { max-width: 100%; white-space: normal; height: auto; min-height: 24px; }
+.note-proposal-actions > button,
+.entry-meta-proposal-actions > button { max-width: 100%; white-space: normal; height: auto; min-height: 24px; }
+
+/* A wide application can still contain a narrow assistant pane. Only show
+   before/after columns side by side when the proposal itself has room. */
+.entry-meta-proposal { container: entry-meta-proposal / inline-size; }
+@container entry-meta-proposal (min-width: 480px) {
+  .entry-meta-proposal-diff { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 @container note-proposal (max-width: 230px) {
   .note-proposal-header { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; }
   .note-proposal-status { grid-column: 2; }

@@ -12,6 +12,10 @@ import { SettingsPanel } from './SettingsPanel';
 import { loadPublicModelCatalog, readPublicModelCatalog } from '@/modules/assistant/sdk/modelCatalogStore';
 import type { PublicModelCatalog } from '@/modules/assistant/sdk/modelCatalog';
 import { listOpenAiCompatibleModels } from '@/modules/assistant/sdk/provider';
+import { runModelDiagnostics } from '../modelConnectionDiagnostics';
+import { deepResearchCommand } from '@/shared/ipc/deepResearchApi';
+vi.mock('@/shared/ipc/deepResearchApi', () => ({ deepResearchCommand: vi.fn(async (_root: string, action: Record<string, unknown>) => action.kind === 'list' ? [] : { ready: false, active: null, error: null, pending_save: false }) }));
+vi.mock('../modelConnectionDiagnostics', async original => ({ ...await original<typeof import('../modelConnectionDiagnostics')>(), runModelDiagnostics: vi.fn() }));
 vi.mock('@/modules/assistant/sdk/provider', async original => ({ ...await original<typeof import('@/modules/assistant/sdk/provider')>(), listOpenAiCompatibleModels: vi.fn() }));
 vi.mock('@/modules/assistant/sdk/modelCatalogStore', () => ({ loadPublicModelCatalog: vi.fn(), readPublicModelCatalog: vi.fn() }));
 vi.mock('@/shared/ipc/researchApi', () => ({ getResearchSettings: vi.fn(async () => ({ papers_enabled: true, web_enabled: true, use_tavily: false, has_web_key: false })), saveResearchSettings: vi.fn() }));
@@ -44,6 +48,10 @@ beforeEach(() => {
   mocks.getWorkspaceSettings.mockResolvedValue({ root: 'fixture', default_root: 'fixture', recent_workspaces: [], translation_automation: { auto_translate_pdf: false, segment_types: ['paragraph'] } });
   mocks.saveLlmSettings.mockResolvedValue(llm);
   mocks.loadAgentRuntimeSettings.mockResolvedValue(DEFAULT_AGENT_RUNTIME_SETTINGS);
+  vi.mocked(runModelDiagnostics).mockImplementation(async (_profile, _signal, update) => {
+    const steps = [{ label: '选中文字翻译', status: 'success' as const }, { label: '片段与批量翻译', status: 'success' as const }];
+    update(steps); return steps;
+  });
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 function Harness({ target }: { target?: SettingsNavigationTarget }) {
@@ -57,6 +65,61 @@ function Harness({ target }: { target?: SettingsNavigationTarget }) {
 }
 
 describe('settings information architecture and navigation', () => {
+  it('opens the Research installation section from a chat navigation target without installing on navigation', async () => {
+    vi.mocked(deepResearchCommand).mockClear();
+    render(<Harness target={{ id: 'tools-deep-research', nonce: 1 }} />);
+    const install = await screen.findByRole('button', { name: '安装并启用' });
+    expect(install.closest('[data-setting-id]')?.getAttribute('data-setting-id')).toBe('tools-deep-research');
+    const optionalServices = screen.getByRole('heading', { name: '可选服务' }).closest('section')!;
+    expect(optionalServices.contains(screen.getByRole('region', { name: '深度研究 · Research' }))).toBe(true);
+    expect(within(optionalServices).getByRole('button', { name: '安装并启用' })).toBe(install);
+    expect(vi.mocked(deepResearchCommand).mock.calls.some(([, action]) => action.kind === 'install')).toBe(false);
+    fireEvent.click(install);
+    await waitFor(() => expect(deepResearchCommand).toHaveBeenCalledWith('fixture', { kind: 'install' }));
+  });
+  it('tests saved model and unsaved draft translations without saving the draft', async () => {
+    render(<Harness target={{ id: 'models-connections', nonce: 1 }} />);
+    fireEvent.click(await screen.findByRole('button', { name: '测试连接' }));
+    let dialog = await screen.findByRole('dialog', { name: '连接与翻译测试' });
+    await waitFor(() => expect(runModelDiagnostics).toHaveBeenCalledOnce());
+    expect(vi.mocked(runModelDiagnostics).mock.calls[0][0]).toMatchObject({ id: 'model', model: 'test-model', api_protocol: 'openai_compatible' });
+    fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }));
+    await screen.findByRole('button', { name: '测试通过' });
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
+    const editor = await screen.findByRole('dialog', { name: '模型配置：测试连接' });
+    fireEvent.change(within(editor).getByLabelText('最大输出（Token）'), { target: { value: '1234' } });
+    fireEvent.click(within(editor).getByRole('button', { name: '测试连接与翻译' }));
+    dialog = await screen.findByRole('dialog', { name: '连接与翻译测试' });
+    await waitFor(() => expect(runModelDiagnostics).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(runModelDiagnostics).mock.calls[1][0]).toMatchObject({ id: '__draft__', max_output_tokens: 1234 });
+    expect(mocks.saveLlmSettings).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }));
+    expect(within(editor).getByLabelText('最大输出（Token）')).toHaveProperty('value', '1234');
+  });
+  it('uses a swatch popover for accent colors and returns focus to its trigger', async () => {
+    render(<Harness target={{ id: 'appearance-color', nonce: 1 }} />);
+    const trigger = await screen.findByRole('button', { name: '强调色：蓝色' });
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(screen.queryByRole('combobox', { name: '强调色' })).toBeNull();
+    fireEvent.click(trigger);
+    const palette = screen.getByRole('dialog', { name: '强调色色板' });
+    expect(within(palette).getAllByRole('button')).toHaveLength(APP_THEME_PRESETS.length);
+    expect(within(palette).getByRole('button', { name: '蓝色' }).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(within(palette).getByRole('button', { name: '绿色' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '强调色色板' })).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
+  it('keeps reader-only preview sizes and reflow display out of settings', async () => {
+    render(<Harness target={{ id: 'reader-preview', nonce: 1 }} />);
+    await screen.findByRole('switch', { name: 'PDF 片段悬停' });
+    expect(screen.queryByText('预览文字大小')).toBeNull();
+    expect(screen.queryByText('预览卡片大小')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '翻译' }));
+    expect(screen.queryByRole('heading', { name: '重排视图显示' })).toBeNull();
+    expect(screen.getByRole('switch', { name: '选中文字后自动翻译' })).toBeTruthy();
+  });
+
   it('defaults to the client import tab, keeps service settings separate, and opens the illustrated guide', async () => {
     render(<Harness target={{ id: 'parser-zip', nonce: 1 }} />);
     const tutorial = await screen.findByRole('button', { name: '查看客户端导入图文教程' });
@@ -127,7 +190,7 @@ describe('settings information architecture and navigation', () => {
     expect(screen.getByRole('heading', { level: 2, name: '检索与工具' }).closest('.settings-form')).toBeTruthy();
     expect(screen.getByRole('heading', { name: '基础检索' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '可选服务' })).toBeTruthy();
-    expect(view.container.querySelectorAll('.settings-service')).toHaveLength(2);
+    expect(view.container.querySelectorAll('.settings-service')).toHaveLength(3);
   });
   it('selects incomplete providers, shows their models, and requires an explicit protocol before syncing or saving', async () => {
     vi.mocked(loadPublicModelCatalog).mockResolvedValue({ ...catalog, models: [{ id: 'remote-chat', providerId: 'remote-demo', providerName: 'Remote Demo' }] });
@@ -200,22 +263,20 @@ describe('settings information architecture and navigation', () => {
     expect(mocks.loadAgentRuntimeSettings).not.toHaveBeenCalled();
     expect(mocks.saveAgentRuntimeSettings).not.toHaveBeenCalled();
   });
-  it('keeps onboarding separate from storage and every searchable target at a stable address', async () => {
+  it('hides the onboarding settings and keeps every visible target at a stable address', async () => {
     const { container } = render(<Harness />);
-    expect(within(screen.getByRole('navigation', { name: '设置分类' })).getAllByRole('button')).toHaveLength(8);
-    const tutorial = screen.getByRole('heading', { level: 2, name: '入门与教程' }).closest('.settings-form')!;
-    const storage = screen.getByRole('heading', { level: 2, name: '资料与存储' }).closest('.settings-form')!;
-    expect(tutorial.querySelector('[data-setting-id="data-onboarding"]')).toBeTruthy();
-    expect(storage.querySelector('[data-setting-id="data-onboarding"]')).toBeNull();
+    expect(within(screen.getByRole('navigation', { name: '设置分类' })).getAllByRole('button')).toHaveLength(7);
+    expect(screen.queryByRole('heading', { level: 2, name: '入门与教程' })).toBeNull();
+    expect(container.querySelector('[data-setting-id="data-onboarding"]')).toBeNull();
     for (const item of SETTINGS_CATALOG) expect(container.querySelectorAll(`[data-setting-id="${item.id}"]`).length, item.id).toBe(1);
     await waitFor(() => expect(screen.queryByText('正在读取配置…')).toBeNull());
   });
   it('locates flat settings, including repeated requests', async () => {
-    const { rerender, container } = render(<Harness target={{ id: 'reader-preview-size', nonce: 1 }} />);
-    await waitFor(() => expect(container.querySelector('section[data-setting-id="reader-preview-size"]')?.getAttribute('data-setting-highlight')).toBe('true'));
-    expect(container.querySelector('details[data-setting-id="reader-preview-size"]')).toBeNull();
+    const { rerender, container } = render(<Harness target={{ id: 'reader-preview-content', nonce: 1 }} />);
+    await waitFor(() => expect(container.querySelector('section[data-setting-id="reader-preview-content"]')?.getAttribute('data-setting-highlight')).toBe('true'));
+    expect(container.querySelector('details[data-setting-id="reader-preview-content"]')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '翻译' }));
-    rerender(<Harness target={{ id: 'reader-preview-size', nonce: 2 }} />);
+    rerender(<Harness target={{ id: 'reader-preview-content', nonce: 2 }} />);
     await waitFor(() => expect(screen.getByRole('heading', { name: '阅读与批注' })).toBeTruthy());
     expect(container.querySelector('[data-setting-highlight="true"]')).toBeTruthy();
   });

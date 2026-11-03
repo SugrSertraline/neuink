@@ -64,9 +64,15 @@ jobs:
       - run: node apps/desktop/scripts/embedding-resources.cjs
       - run: npm --workspace apps/desktop run prepare:browser-reader
       - run: npm --workspace apps/desktop run verify:browser-reader
+      - name: Build standalone research component (no end-user Python dependency)
+        run: py -3.12 apps/desktop/scripts/build-research-component.py
       - run: npm run desktop:release:portable
+      - name: Build Windows installer with optional offline Research
+        run: npm --workspace apps/desktop run release:installer
       - name: Prepare download metadata and checksums
         run: node apps/desktop/scripts/release-artifacts.cjs
+      - name: Include Windows installer and checksums
+        run: node apps/desktop/scripts/installer-artifacts.cjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: Neuink-windows-x64-${{ github.sha }}

@@ -1,11 +1,15 @@
 use std::{collections::BTreeSet, fs};
 
-use chrono::Utc;
-use neuink_domain::{EntryId, EntryReadingState, ReadingState, ReadingStateUpdate};
+use chrono::{NaiveDate, Utc};
+use neuink_domain::{EntryId, EntryReadingState, ReadingSession, ReadingState, ReadingStateUpdate};
 
 use crate::{atomic_write_json, Workspace, WorkspaceError};
 
 const MAX_ACTIVE_DELTA_MS: u64 = 5 * 60 * 1_000;
+
+#[cfg(test)]
+#[path = "reading_session_tests.rs"]
+mod session_tests;
 
 impl Workspace {
     pub fn read_reading_state(
@@ -70,15 +74,24 @@ impl Workspace {
         );
         state.visited_pages = visited.into_iter().collect();
 
-        let active_delta = update.active_ms_delta.min(MAX_ACTIVE_DELTA_MS);
+        let (active_delta, local_date, session_start) =
+            if let Some(session) = update.reading_session {
+                apply_session_checkpoint(&mut state, session)?
+            } else {
+                (
+                    update.active_ms_delta.min(MAX_ACTIVE_DELTA_MS),
+                    update.local_date,
+                    update.session_start,
+                )
+            };
         if active_delta > 0 {
             state.total_active_ms = state.total_active_ms.saturating_add(active_delta);
-            if let Some(local_date) = update.local_date.filter(|value| valid_date_key(value)) {
+            if let Some(local_date) = local_date.filter(|value| valid_date_key(value)) {
                 let daily = state.daily_active_ms.entry(local_date).or_default();
                 *daily = daily.saturating_add(active_delta);
             }
         }
-        if update.session_start {
+        if session_start {
             state.session_count = state.session_count.saturating_add(1);
         }
         if active_delta > 0 || state.current_page_idx.is_some() {
@@ -91,6 +104,56 @@ impl Workspace {
             entry_id: entry_id.clone(),
             state,
         })
+    }
+}
+
+fn apply_session_checkpoint(
+    state: &mut ReadingState,
+    session: ReadingSession,
+) -> Result<(u64, Option<String>, bool), WorkspaceError> {
+    let elapsed = (session.ended_at - session.started_at).num_milliseconds();
+    if session.id.is_empty()
+        || session.id.len() > 128
+        || !session
+            .id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        || !valid_date_key(&session.local_date)
+        || elapsed < 0
+        || session.active_ms == 0
+        || session.active_ms > elapsed as u64
+        || session.active_ms > 26 * 60 * 60 * 1_000
+    {
+        return Err(WorkspaceError::InvalidReadingSession(
+            "invalid identity, date or duration".into(),
+        ));
+    }
+    let date = session.local_date.clone();
+    if let Some(previous) = state
+        .reading_sessions
+        .iter_mut()
+        .find(|item| item.id == session.id)
+    {
+        if previous.local_date != session.local_date || previous.started_at != session.started_at {
+            return Err(WorkspaceError::InvalidReadingSession(
+                "checkpoint identity changed".into(),
+            ));
+        }
+        if session.active_ms <= previous.active_ms {
+            return Ok((0, Some(date), false));
+        }
+        let delta = session.active_ms - previous.active_ms;
+        if session.ended_at < previous.ended_at {
+            return Err(WorkspaceError::InvalidReadingSession(
+                "checkpoint moved backwards".into(),
+            ));
+        }
+        *previous = session;
+        Ok((delta, Some(date), false))
+    } else {
+        let delta = session.active_ms;
+        state.reading_sessions.push(session);
+        Ok((delta, Some(date), true))
     }
 }
 
@@ -119,7 +182,8 @@ fn normalize_pages(state: &mut ReadingState) {
 }
 
 fn valid_date_key(value: &str) -> bool {
-    value.len() == 10
+    NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok()
+        && value.len() == 10
         && value
             .chars()
             .enumerate()
@@ -161,6 +225,7 @@ mod tests {
                     active_ms_delta: 12_500,
                     session_start: true,
                     local_date: Some("2026-09-04".to_string()),
+                    ..Default::default()
                 },
             )
             .unwrap();

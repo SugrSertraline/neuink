@@ -23,8 +23,8 @@ function writeStored(key: string, value: string | null) {
 type AppearanceContextValue = {
   appearance: AppAppearance;
   setAppearance: (appearance: AppAppearance) => boolean;
-  libraryDisplay: 'shelf' | 'list';
-  setLibraryDisplay: (display: 'shelf' | 'list') => void;
+  libraryDisplay: 'spines' | 'shelf' | 'list';
+  setLibraryDisplay: (display: 'spines' | 'shelf' | 'list') => void;
   glassReducedTransparency: boolean;
   setGlassReducedTransparency: (reduced: boolean) => boolean;
 };
@@ -44,8 +44,8 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
   });
   const [glassReducedTransparency, updateGlassReducedTransparency] = useState(() =>
     readStored(GLASS_TRANSPARENCY_STORAGE_KEY) === 'true');
-  const [libraryDisplay, updateLibraryDisplay] = useState<'shelf' | 'list'>(() =>
-    readStored(SHELF_STORAGE_KEY) === 'list' ? 'list' : 'shelf');
+  const [libraryDisplay, updateLibraryDisplay] = useState<'spines' | 'shelf' | 'list'>(() =>
+    readStored(SHELF_STORAGE_KEY) === 'list' ? 'list' : readStored(SHELF_STORAGE_KEY) === 'shelf' ? 'shelf' : 'spines');
 
   useWindowIcon(appearanceLogos[appearance]);
   useGlassMaterial(appearance === 'liquid-glass' && !glassReducedTransparency);
@@ -72,7 +72,7 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
     // Only explicit commands persist. Do not migrate the standalone Demo preference.
     return writeStored(APP_APPEARANCE_STORAGE_KEY, next === 'standard' ? null : next);
   }, []);
-  const setLibraryDisplay = useCallback((next: 'shelf' | 'list') => {
+  const setLibraryDisplay = useCallback((next: 'spines' | 'shelf' | 'list') => {
     updateLibraryDisplay(next);
     writeStored(SHELF_STORAGE_KEY, next);
   }, []);

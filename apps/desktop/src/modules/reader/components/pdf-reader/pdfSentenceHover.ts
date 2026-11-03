@@ -1,4 +1,4 @@
-import { splitAcademicSentences, splitPdfTextSentences } from '../../translation/sentenceAlignment';
+import { alignSavedTranslation, splitAcademicSentences, splitPdfTextSentences } from '../../translation/sentenceAlignment';
 import type { SegmentRegionItem } from './types';
 
 export type PdfSentenceRect = readonly [number, number, number, number];
@@ -125,6 +125,49 @@ export function pdfSentenceGeometry(layer: HTMLElement, region: SegmentRegionIte
     const linkedSentenceIndex = match?.sourceIndexes[index] ?? null;
     result.push({ index, source: linkedSentenceIndex !== null ? match!.sourceSentences[linkedSentenceIndex] : sentence,
       linkedSentenceIndex, rects: mergeLineRects(rects) });
+  }
+  return result;
+}
+
+/** Measure the rendered translation itself; never reuse the hidden PDF text geometry. */
+export function translatedSentenceGeometry(layer: HTMLElement, region: SegmentRegionItem, page: DOMRect,
+  translated: string): PdfSentenceGeometry[] | null {
+  if (region.sourceSegment.segment_type !== 'paragraph' || !page.width || !page.height) return null;
+  const pairs = alignSavedTranslation(region.sourceSegment.markdown ?? region.sourceSegment.text, translated);
+  if (!pairs?.length) return null;
+  const walker = document.createTreeWalker(layer, NodeFilter.SHOW_TEXT);
+  const positions: Array<{ node: Text; offset: number }> = [];
+  let rendered = '';
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text;
+    for (let offset = 0; offset < node.length; offset++) {
+      if (/\s/u.test(node.data[offset])) continue;
+      rendered += node.data[offset];
+      positions.push({ node, offset });
+    }
+  }
+  const texts = pairs.map(pair => pair.translation.replace(/\s/gu, ''));
+  // Markdown, math or an incomplete rendering may not map faithfully to the saved text.
+  if (!rendered || texts.join('') !== rendered) return null;
+  const [x1, y1, x2, y2] = region.bbox;
+  const bounds = { left: page.left + x1 / 1000 * page.width, top: page.top + y1 / 1000 * page.height,
+    right: page.left + x2 / 1000 * page.width, bottom: page.top + y2 / 1000 * page.height };
+  let cursor = 0;
+  const result: PdfSentenceGeometry[] = [];
+  for (const [index, pair] of pairs.entries()) {
+    const length = texts[index].length;
+    if (!length) return null;
+    const start = positions[cursor], end = positions[cursor + length - 1];
+    if (!start || !end) return null;
+    const range = document.createRange();
+    range.setStart(start.node, start.offset);
+    range.setEnd(end.node, end.offset + 1);
+    const rects = Array.from(range.getClientRects()).map(rect => normalizedRect(rect, page, bounds))
+      .filter((rect): rect is PdfSentenceRect => rect !== null);
+    range.detach();
+    if (!rects.length) return null;
+    result.push({ index, source: pair.source, linkedSentenceIndex: pair.sourceStartIndex, rects: mergeLineRects(rects) });
+    cursor += length;
   }
   return result;
 }

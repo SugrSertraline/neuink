@@ -15,20 +15,39 @@ fn text(value: &Value) -> String {
 }
 
 pub async fn arxiv(query: &str, count: usize) -> Result<Vec<Paper>, String> {
-    // arXiv asks clients to leave three seconds between requests, including concurrent conversations.
-    static LAST: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
-    let mut last = LAST.get_or_init(|| Mutex::new(None)).lock().await;
-    if let Some(at) = *last {
-        tokio::time::sleep_until(at + Duration::from_secs(3)).await;
-    }
-    *last = Some(Instant::now());
+    parse_arxiv(&arxiv_feed(query, count, false).await?)
+}
+pub async fn arxiv_feed(query: &str, count: usize, newest: bool) -> Result<String, String> {
     let mut url =
         reqwest::Url::parse("https://export.arxiv.org/api/query").map_err(|_| "检索地址无效")?;
     url.query_pairs_mut()
         .append_pair("search_query", query)
         .append_pair("max_results", &count.to_string());
+    if newest { url.query_pairs_mut().append_pair("sortBy", "submittedDate").append_pair("sortOrder", "descending"); }
+    arxiv_response(url).await
+}
+pub async fn arxiv_by_ids(ids: &[String]) -> Result<Vec<Paper>, String> {
+    if ids.is_empty() { return Ok(vec![]); }
+    if ids.len() > 10 || ids.iter().any(|id| id.is_empty() || id.len() > 100 || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b".-/".contains(&b)) || id.contains("..")) { return Err("arXiv 论文标识无效".into()); }
+    let mut url = reqwest::Url::parse("https://export.arxiv.org/api/query").map_err(|_| "检索地址无效")?;
+    url.query_pairs_mut().append_pair("id_list", &ids.join(",")).append_pair("max_results", &ids.len().to_string());
+    parse_arxiv(&arxiv_response(url).await?)
+}
+async fn arxiv_response(url: reqwest::Url) -> Result<String, String> {
+    let _slot = arxiv_request_slot().await;
     let bytes = network::get(url.as_str(), 2 * 1024 * 1024).await?;
-    parse_arxiv(&String::from_utf8(bytes).map_err(|_| "arXiv 编码无效")?)
+    String::from_utf8(bytes).map_err(|_| "arXiv 编码无效".into())
+}
+pub struct ArxivRequestSlot(tokio::sync::MutexGuard<'static, Option<Instant>>);
+impl Drop for ArxivRequestSlot {
+    fn drop(&mut self) { *self.0 = Some(Instant::now()); }
+}
+pub async fn arxiv_request_slot() -> ArxivRequestSlot {
+    // All arXiv clients share a slot; spacing starts after the last request completes.
+    static LAST: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+    let last = LAST.get_or_init(|| Mutex::new(None)).lock().await;
+    if let Some(at) = *last { tokio::time::sleep_until(at + Duration::from_secs(3)).await; }
+    ArxivRequestSlot(last)
 }
 
 #[derive(Deserialize)]

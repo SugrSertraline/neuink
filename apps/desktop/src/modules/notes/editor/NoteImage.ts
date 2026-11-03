@@ -89,7 +89,7 @@ export function resolveNoteImageSrc(src: string | null | undefined, options: Not
   const normalized = src.replace(/\\/g, '/').replace(/^\.\//, '');
   const absolutePath = [
     options.workspaceRoot,
-    ...(options.noteOwner?.kind === 'tag_reading' ? ['tag-reading', options.noteOwner.tag_id] : ['entries', options.entryId]),
+    ...(options.noteOwner?.kind === 'daily' ? ['daily'] : options.noteOwner?.kind === 'tag_reading' ? ['tag-reading', options.noteOwner.tag_id] : ['entries', options.entryId]),
     'notes',
     ...normalized.split('/').filter(Boolean)
   ].join('\\');

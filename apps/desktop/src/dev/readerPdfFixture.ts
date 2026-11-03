@@ -1,5 +1,5 @@
 /** Small, original PDF fixture. Actual PDF.js rendering and text selection, without workspace files or a network download. */
-export function readerPdfFixture(withReferences = false, brokenReference = false, twoColumnReferences = false) {
+export function readerPdfFixture(withReferences = false, brokenReference = false, twoColumnReferences = false, withTable = false) {
   const objects = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [4 0 R 6 0 R 8 0 R 10 0 R] /Count 4 >>', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];
   for (let page = 0; page < 4; page++) {
     const body = twoColumnReferences && page === 3 ? [
@@ -13,7 +13,15 @@ export function readerPdfFixture(withReferences = false, brokenReference = false
       `BT /F1 23 Tf 1 1 1 rg 58 759 Td (Reading across research papers) Tj ET`,
       `BT /F1 11 Tf 1 1 1 rg 58 723 Td (NEUINK / READING STUDY / PAGE ${page + 1}) Tj ET`,
       '0.16 0.20 0.27 rg',
-      ...body,
+      ...(withTable ? body.slice(0, 6) : body),
+      ...(withTable ? [
+        'BT /F1 11 Tf 48 502 Td (Table 1. Model comparison on the evaluation set) Tj ET',
+        '0.93 0.95 0.97 rg 48 454 498 32 re f',
+        '0.30 0.35 0.42 RG 0.8 w 48 486 m 546 486 l S 48 454 m 546 454 l S 48 422 m 546 422 l S 48 390 m 546 390 l S 48 358 m 546 358 l S',
+        '0.16 0.20 0.27 rg',
+        ...['Model|Accuracy|Latency', 'Baseline|82.4%|36 ms', 'Attention model|91.2%|28 ms', 'Proposed method|94.8%|19 ms'].flatMap((row, rowIndex) =>
+          row.split('|').map((cell, column) => `BT /F1 12 Tf ${[58, 280, 430][column]} ${466 - rowIndex * 32} Td (${cell}) Tj ET`)),
+      ] : []),
       '0.55 0.72 0.80 rg 48 172 110 110 re f', '0.70 0.66 0.80 rg 182 172 110 80 re f',
       '0.50 0.68 0.63 rg 316 172 110 134 re f', '0.76 0.69 0.59 rg 450 172 96 64 re f',
       `BT /F1 11 Tf 0.25 0.30 0.38 rg 48 130 Td (Figure ${page + 1}. Research evidence grouped by source.) Tj ET`

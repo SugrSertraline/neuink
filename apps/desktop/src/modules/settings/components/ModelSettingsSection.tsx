@@ -113,10 +113,10 @@ function profileTestButtonLabel(status: 'error' | 'idle' | 'success' | 'testing'
     return '测试中';
   }
   if (status === 'success') {
-    return '已连接';
+    return '测试通过';
   }
   if (status === 'error') {
-    return '连接失败';
+    return '测试未通过';
   }
   return '测试连接';
 }

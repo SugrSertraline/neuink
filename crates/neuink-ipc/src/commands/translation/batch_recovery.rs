@@ -47,6 +47,9 @@ impl LlmClient {
                         );
                     }
                     Err(error) => {
+                        if is_model_service_failure(&error) {
+                            return Err(format!("翻译模型请求失败：{error}"));
+                        }
                         if should_retry_individually(&error) {
                             retry_individually_or_fail(
                                 segments,
