@@ -4,7 +4,10 @@
 
 - `main` is the approved release branch and the GitHub default branch.
 - Use `beta` for everyday feature development. Validate changes and obtain the user's confirmation before merging new features into `main`.
-- Keep `seal-campus-travel` separate for the campus travel prototype.
+- Use the public `alpha` branch for exploratory work before promoting reviewed changes to `beta`. It preserves the research ideation card canvas previously developed on `demo/ideation-evaluation`; keep its experimental scope and limitations clear in its README.
+- Keep `seal-campus-travel` local-only and separate for the campus travel prototype.
+- The public `origin` may expose `main`, `beta` and `alpha` branches. Keep `seal-campus-travel`, local archive refs and work-in-progress snapshots local. The local pre-push hook preserves Git LFS handling and guards this policy; it is not a server-side permission rule.
+- Before removing obsolete branches, verify their changes are merged or patch-equivalent and preserve a local recovery ref. Local branch-cleanup manifests and working-file backups live in `.git/branch-archives/`; archive refs are outside `refs/heads/`.
 - Name branches by purpose without a `codex/` prefix.
 - Desktop release artifacts and website deployments must come from `main`; release tags must point to commits already included in `main`. Pull requests targeting `main` may run validation without publishing artifacts.
 - Keep unrelated uncommitted work out of maintenance commits and preserve it when switching branches.

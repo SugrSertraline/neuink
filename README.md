@@ -4,6 +4,31 @@
 
 <h1 align="center">Neuink</h1>
 
+## 当前分支：alpha · 研究卡片与构思探索
+
+`alpha` 是 Neuink 的**公开探索分支**，承接原 `demo/ideation-evaluation` 中的卡片与研究构思功能，用于验证新的阅读、整理证据和构思交互。功能、界面与数据结构仍在迭代，不作为正式发行来源。
+
+| 分支 | 定位 |
+| --- | --- |
+| [main](https://github.com/SugrSertraline/neuink/tree/main) | 已批准的正式发布分支；官网和下载包从这里发布。 |
+| [beta](https://github.com/SugrSertraline/neuink/tree/beta) | 日常开发与集成验证。 |
+| [alpha](https://github.com/SugrSertraline/neuink/tree/alpha) | 卡片与研究构思等探索性功能；评审后再逐项进入 beta。 |
+
+本分支保留的探索内容：
+
+- **论文卡片**：整理或生成研究背景、研究问题、方法、结果、适用条件与局限等卡片，并提供来源证据入口。
+- **构思画布**：管理多份研究构思，拖入卡片，平移、缩放和排列节点，编辑卡片之间的关系。
+- **分支探索**：围绕已有节点选择后续卡片、添加自己的研究问题，并保留构思的关系与布局。
+- **助手讨论**：将所选构思作为上下文带入现有助手，继续核对证据与讨论研究方向。
+
+这里的“分支探索”指画布中的构思路径。`alpha` 不会自动合并到 `beta` 或 `main`，也不保证包含 `beta` 的最新开发内容。上方表格中的正式下载与本探索分支分别维护。
+
+[隔离交互演示](apps/desktop/ideation-showcase.html)使用示例数据和模拟 IPC，不读取真实论文或调用模型；它不代表原生应用与真实模型链路已经完成验收。
+
+内置的研究启发参考资料保留了 [Microsoft ResearchStudio 的来源说明](apps/desktop/src/modules/ideation/patterns/researchstudio/README.md)与 [MIT 许可](apps/desktop/src/modules/ideation/patterns/researchstudio/LICENSE)。这些模式用于启发构思，不是对用户论文的事实认定。
+
+---
+
 <p align="center">
   <strong><a href="https://sugrsertraline.github.io/neuink/">访问 Neuink 官网 · 完整功能介绍 →</a></strong><br>
   通过实机截图、核心概念和分步教程，了解 Neuink 并开始第一次阅读。<br>

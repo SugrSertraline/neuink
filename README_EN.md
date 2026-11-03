@@ -4,6 +4,31 @@
 
 <h1 align="center">Neuink</h1>
 
+## Current branch: alpha — research cards and ideation
+
+`alpha` is Neuink's **public exploration branch**. It preserves the card and research-ideation work previously developed on `demo/ideation-evaluation`, for evaluating new reading, evidence organization and ideation interactions. Features, interfaces and data structures are still evolving; this branch is not a source for official releases.
+
+| Branch | Purpose |
+| --- | --- |
+| [main](https://github.com/SugrSertraline/neuink/tree/main) | Approved releases; the public website and download packages are published from here. |
+| [beta](https://github.com/SugrSertraline/neuink/tree/beta) | Everyday development and integration validation. |
+| [alpha](https://github.com/SugrSertraline/neuink/tree/alpha) | Exploratory features such as research cards and ideation; reviewed changes can move into beta individually. |
+
+Exploratory features retained in this branch:
+
+- **Paper cards:** organize or generate cards for research background, problems, methods, results, assumptions and limitations, with access to source evidence.
+- **Ideation canvases:** manage multiple research ideas, drag in cards, pan, zoom and arrange nodes, and edit relationships between cards.
+- **Branch exploration:** choose follow-up cards around an existing node, add research questions, and retain the idea's relationships and layout.
+- **Assistant discussions:** bring the selected idea into the existing assistant as context for checking evidence and discussing research directions.
+
+“Branch exploration” above refers to paths on the ideation canvas. `alpha` does not automatically merge into `beta` or `main`, and may not contain beta's latest development changes. Official download packages are maintained separately from this exploratory branch.
+
+The [isolated interaction preview](apps/desktop/ideation-showcase.html) uses sample data and mocked IPC. It does not read real papers or call models, and does not establish that the native app or real model integrations have passed acceptance testing.
+
+Bundled research-inspiration references retain the [Microsoft ResearchStudio attribution](apps/desktop/src/modules/ideation/patterns/researchstudio/README.md) and [MIT license](apps/desktop/src/modules/ideation/patterns/researchstudio/LICENSE). These patterns are inspiration, not factual claims about a user's papers.
+
+---
+
 <p align="center">
   <strong><a href="https://sugrsertraline.github.io/neuink/">Explore Neuink — Product Website →</a></strong><br>
   Features, real app screenshots, core concepts, and step-by-step tutorials.<br>
