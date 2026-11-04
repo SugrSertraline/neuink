@@ -8,6 +8,7 @@ import { lastMemoryCheckpointIndex, renderConversationTranscript } from '../runt
 import { renderMessagesForSummary } from '../sdk/summaryTranscript';
 import type { RunBudget } from '../agent-core';
 import { summarizeConversation } from '../sdk/conversationSummary';
+import { modelTranscript } from '../runtime/modelTranscript';
 
 /** The newest checkpoint is sent as the first conversation turn by `answerWithGroundedAgent`. */
 export function latestConversationMemory(history: ConversationMessage[]) {
@@ -37,7 +38,8 @@ export function buildConversationTail(
 }
 
 /**
- * Manual compaction summarizes the previous checkpoint and every uncompressed message,
+ * Manual compaction rebuilds from original history when it exists, repairing lossy checkpoints.
+ * Imported checkpoints without archived messages still use their retained suffix and summary,
  * returning a `memory` part without a retained suffix. It delegates summarizing to
  * `summarizeConversation` — the same function the loop's usage-triggered projection calls.
  */
@@ -58,10 +60,14 @@ export async function updateConversationMemory({
   settings: LlmProfile;
   sourceCount: number;
 }): Promise<AssistantConversationMemory> {
+  const boundary = lastMemoryCheckpointIndex(history);
+  const hasArchivedMessages = history.slice(0, boundary + 1).some(message =>
+    message.content.trim() || modelTranscript(message)?.messages.length);
   const summary = await summarizeConversation({
     abortSignal,
     budget,
-    dropped: renderMessagesForSummary(renderConversationTranscript(history)),
+    dropped: renderMessagesForSummary(renderConversationTranscript(history, undefined,
+      { includeSummarized: hasArchivedMessages })),
     chargeTurn: false,
     previous: latestConversationMemory(history),
     settings

@@ -33,9 +33,10 @@ export function renderConversationContext(history: readonly ConversationMessage[
  */
 export function renderConversationTranscript(
   history: readonly ConversationMessage[],
-  model?: TranscriptModel
+  model?: TranscriptModel,
+  options?: { includeSummarized?: boolean }
 ): ModelMessage[] {
-  const boundary = lastMemoryCheckpointIndex(history);
+  const boundary = options?.includeSummarized ? -1 : lastMemoryCheckpointIndex(history);
   const memoryPart = history[boundary]?.parts?.find(part => part.type === 'memory');
   const retained = memoryPart?.type === 'memory' ? retainedTranscript(memoryPart.memory) : undefined;
   const turns: ModelMessage[] = retained ? replayModelTranscript(retained, 'neuink_memory', model) : [];

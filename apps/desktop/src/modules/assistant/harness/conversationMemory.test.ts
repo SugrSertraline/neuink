@@ -1,3 +1,4 @@
+import { summaryResponse } from '../sdk/testHelpers/summary';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConversationMessage, AssistantConversationMemory, LlmProfile } from '@/shared/ipc/assistantApi';
 import { latestConversationMemory, updateConversationMemory } from './conversationMemory';
@@ -18,7 +19,7 @@ const oldMemory: AssistantConversationMemory = {
 };
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.mocked(runTextModelTask).mockResolvedValue({ text: 'Merged brief.', finishReason: 'stop' });
+  vi.mocked(runTextModelTask).mockResolvedValue({ text: summaryResponse('Merged brief.'), finishReason: 'stop' });
 });
 describe('manual full-context summary', () => {
   it('covers the beginning, middle and end of long unsummarized history, not only a fixed tail', async () => {
@@ -26,24 +27,36 @@ describe('manual full-context summary', () => {
     const before = JSON.stringify(history);
     const result = await updateConversationMemory({ history, answer: history[23].content, question: history[22].content,
       settings, pendingProposalCount: 0, sourceCount: 0 });
-    const input = vi.mocked(runTextModelTask).mock.calls.map(([call]) => call.system).join('\n');
+    const input = vi.mocked(runTextModelTask).mock.calls.map(([call]) => call.prompt).join('\n');
     for (let index = 0; index < 24; index++) expect(input).toContain('TURN_SENTINEL_' + index);
     expect(vi.mocked(runTextModelTask).mock.calls.length).toBeGreaterThan(1);
     expect(result.retained_context).toBeUndefined();
     expect(JSON.stringify(history)).toBe(before);
   });
 
-  it('includes prior structured memory, its retained tail and every new message exactly once', async () => {
+  it('uses an imported checkpoint and its retained tail when no archived messages exist', async () => {
     const checkpoint = { ...message('', 1), parts: [{ type: 'memory' as const, memory: oldMemory }] };
-    const history = [message('Already covered raw history', 0), checkpoint, message('NEW_REQUEST_SENTINEL', 2)];
+    const history = [checkpoint, message('NEW_REQUEST_SENTINEL', 2)];
     await updateConversationMemory({ history, question: 'NEW_REQUEST_SENTINEL', answer: '', settings, pendingProposalCount: 0, sourceCount: 1 });
-    const input = vi.mocked(runTextModelTask).mock.calls[0][0].system;
+    const input = vi.mocked(runTextModelTask).mock.calls[0][0].prompt;
     expect(input).toContain('EARLIER_MEMORY_SENTINEL');
     expect(input).toContain('Prefer Chinese');
     expect(input).toContain('RETAINED_RECENT_SENTINEL');
     expect(input.match(/NEW_REQUEST_SENTINEL/g)).toHaveLength(1);
-    expect(input).not.toContain('Already covered raw history');
     expect(latestConversationMemory(history)).toBe(oldMemory);
+  });
+
+  it('rebuilds archived facts and tools when an earlier checkpoint is only a last-turn chat reply', async () => {
+    const damaged = { ...oldMemory, summary: '如果你有什么需要，随时告诉我。', retained_context: undefined };
+    const history = [message('FIRST_FACT_NAME_SENTINEL', 0), message('Explained PAPER_TOPIC_SENTINEL', 1),
+      message('Create DIAGRAM_REQUEST_SENTINEL', 2), message('Done', 3),
+      { ...message('', 5), parts: [{ type: 'memory' as const, memory: damaged }] }, message('LATEST_REQUEST_SENTINEL', 6)];
+    await updateConversationMemory({ history, question: '', answer: '', settings, pendingProposalCount: 0, sourceCount: 0 });
+    const input = vi.mocked(runTextModelTask).mock.calls.map(([call]) => call.prompt).join('\n');
+    for (const fact of ['FIRST_FACT_NAME_SENTINEL', 'PAPER_TOPIC_SENTINEL', 'DIAGRAM_REQUEST_SENTINEL', 'LATEST_REQUEST_SENTINEL']) {
+      expect(input).toContain(fact);
+    }
+    expect(input.match(/FIRST_FACT_NAME_SENTINEL/g)).toHaveLength(1);
   });
 
   it('includes complete model-visible tool results when manually compacting', async () => {
@@ -56,7 +69,7 @@ describe('manual full-context summary', () => {
         ] }
     }] }];
     await updateConversationMemory({ history, question: 'Read note', answer: 'Done', settings, pendingProposalCount: 0, sourceCount: 0 });
-    const input = vi.mocked(runTextModelTask).mock.calls.map(([call]) => call.system).join('\n');
+    const input = vi.mocked(runTextModelTask).mock.calls.map(([call]) => call.prompt).join('\n');
     expect(input).toContain('TOOL_BEGIN_SENTINEL');
     expect(input).toContain('TOOL_END_SENTINEL');
   });
@@ -65,7 +78,7 @@ describe('manual full-context summary', () => {
     const history = Array.from({ length: 30 }, (_, index) => message('a'.repeat(1_000), index));
     history.unshift({ ...message('', 1), parts: [{ type: 'memory', memory: oldMemory }] });
     const before = JSON.stringify(history);
-    vi.mocked(runTextModelTask).mockResolvedValueOnce({ text: 'First partial summary', finishReason: 'stop' })
+    vi.mocked(runTextModelTask).mockResolvedValueOnce({ text: summaryResponse('First partial summary'), finishReason: 'stop' })
       .mockRejectedValue(new Error('summary unavailable'));
     await expect(updateConversationMemory({ history, question: '', answer: '', settings, pendingProposalCount: 0, sourceCount: 0 }))
       .rejects.toThrow('上下文摘要无效');

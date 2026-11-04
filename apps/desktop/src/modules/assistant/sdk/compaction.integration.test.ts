@@ -1,3 +1,4 @@
+import { summaryResponse } from './testHelpers/summary';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { generateText } from 'ai';
 import type { ConversationMessage, AssistantConversationMemory, LlmProfile } from '@/shared/ipc/assistantApi';
@@ -18,7 +19,7 @@ const chat = (role: 'user' | 'assistant', content: string, index: number): Conve
 });
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(generateText).mockResolvedValue({ text: 'Merged old questions and preferences.', finishReason: 'stop',
+  vi.mocked(generateText).mockResolvedValue({ text: summaryResponse('Merged old questions and preferences.'), finishReason: 'stop',
     usage: { inputTokens: 500, outputTokens: 50 } } as never);
 });
 it('keeps the automatic suffix across a completed run, persisted conversation and next request', async () => {
@@ -38,7 +39,7 @@ it('keeps the automatic suffix across a completed run, persisted conversation an
   expect(retained).toContain('CURRENT_REQUEST_SENTINEL');
   expect(retained).toContain('NEW_FINAL_ANSWER_SENTINEL');
   expect(retained).not.toContain('HISTORY_0 ');
-  const supplied = vi.mocked(generateText).mock.calls.map(([call]) => call.system).join('\n');
+  const supplied = vi.mocked(generateText).mock.calls.map(([call]) => call.prompt).join('\n');
   expect(supplied).toContain('PRIOR_MEMORY_SENTINEL');
   expect(supplied).toContain('OLD_PREFERENCE_SENTINEL');
   expect(supplied).toContain('HISTORY_0 ');

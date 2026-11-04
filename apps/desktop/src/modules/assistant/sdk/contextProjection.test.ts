@@ -1,3 +1,4 @@
+import { summaryResponse } from './testHelpers/summary';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ModelMessage } from 'ai';
 import type { LlmProfile } from '@/shared/ipc/assistantApi';
@@ -29,7 +30,7 @@ const tools: ModelMessage[] = [
 ];
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.mocked(runTextModelTask).mockResolvedValue({ text: 'Earlier findings [S1] and original goal.', finishReason: 'stop' });
+  vi.mocked(runTextModelTask).mockResolvedValue({ text: summaryResponse('Earlier findings [S1] and original goal.'), finishReason: 'stop' });
 });
 
 describe('automatic prefix compaction', () => {
@@ -44,7 +45,7 @@ describe('automatic prefix compaction', () => {
     expect(JSON.stringify(result)).toContain('EXACT_CURRENT_GOAL');
     expect(JSON.stringify(result)).toContain('[S1]');
     expect(JSON.stringify(tools)).toBe(before);
-    const supplied = vi.mocked(runTextModelTask).mock.calls.map(([call]) => call.system).join('\n');
+    const supplied = vi.mocked(runTextModelTask).mock.calls.map(([call]) => call.prompt).join('\n');
     expect(supplied).toContain('EARLY_TOOL_RESULT');
   });
   it('passes the existing checkpoint and every dropped turn to the summarizer', async () => {
@@ -54,7 +55,7 @@ describe('automatic prefix compaction', () => {
       initialMemory: memory('PERSIST_OLD_MEMORY_SENTINEL'), requestIndex: messages.length - 1,
       onState: value => { state = value; }
     }).project(messages, 5_000);
-    const supplied = vi.mocked(runTextModelTask).mock.calls.map(([call]) => call.system).join('\n');
+    const supplied = vi.mocked(runTextModelTask).mock.calls.map(([call]) => call.prompt).join('\n');
     expect(supplied).toContain('PERSIST_OLD_MEMORY_SENTINEL');
     expect(supplied).toContain('Use Chinese');
     expect(supplied).toContain('EARLIEST_REQUEST_SENTINEL');
