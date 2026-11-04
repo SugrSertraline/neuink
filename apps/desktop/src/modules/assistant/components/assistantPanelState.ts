@@ -1,3 +1,4 @@
+import type { AssistantExecutionItem } from './assistantExecutionTimeline';
 import {
   ArrowDown,
   Archive,
@@ -336,6 +337,7 @@ export function buildAssistantMessageParts({
   contextItems = [],
   contextPlan,
   entryMetaProposals = [],
+  executionTimeline,
   memory,
   modelTranscript,
   noteProposals = [],
@@ -352,6 +354,7 @@ export function buildAssistantMessageParts({
   contextItems?: AssistantContextItem[];
   contextPlan?: AssistantContextPlan | null;
   entryMetaProposals?: AssistantEntryMetaProposal[];
+  executionTimeline?: AssistantExecutionItem[];
   memory?: AssistantConversationMemory | null;
   modelTranscript?: import('@/shared/types/modelTranscript').AssistantModelTranscript;
   noteProposals?: AssistantNoteProposal[];
@@ -399,7 +402,7 @@ export function buildAssistantMessageParts({
     });
   }
 
-  for (const event of toolEvents) {
+  const appendToolParts = (event: AssistantToolTraceEvent) => {
     parts.push({
       args: event.input,
       recovered: event.recovered,
@@ -429,19 +432,31 @@ export function buildAssistantMessageParts({
         type: 'error'
       });
     }
+  };
+
+  if (executionTimeline) {
+    const eventsById = new Map(toolEvents.map(event => [event.id, event]));
+    for (const item of executionTimeline) {
+      if (item.type === 'reasoning') {
+        if (item.text.trim()) parts.push({ ...item });
+      } else {
+        const event = eventsById.get(item.id);
+        if (event) {
+          appendToolParts(event);
+          eventsById.delete(item.id);
+        }
+      }
+    }
+    for (const event of eventsById.values()) appendToolParts(event);
+  } else {
+    for (const event of toolEvents) appendToolParts(event);
+    if (reasoning?.trim()) parts.push({ text: reasoning, type: 'reasoning' });
   }
 
   if (content.trim()) {
     parts.push({
       markdown: content,
       type: 'text'
-    });
-  }
-
-  if (reasoning?.trim()) {
-    parts.push({
-      text: reasoning,
-      type: 'reasoning'
     });
   }
 
