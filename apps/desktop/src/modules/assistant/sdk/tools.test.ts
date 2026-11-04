@@ -1,3 +1,4 @@
+import { mcpModelToolName } from './toolSchema';
 import { describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_AGENT_RUNTIME_SETTINGS } from '@/shared/lib/agentRuntimeSettings';
@@ -6,7 +7,6 @@ import { createAgentLoopState, AgentLoopGuard } from '../agent-core';
 import {
   createAssistantTools,
   entryIdOrSingleScope,
-  modelToolName,
   scopedEnabledToolIds
 } from './tools';
 
@@ -37,27 +37,20 @@ describe('Assistant tool scope', () => {
   });
 });
 
-describe('modelToolName', () => {
-  it.each([
-    ['entry.propose_meta_patch', 'entry_propose_meta_patch'],
-    ['note.propose_create', 'note_propose_create'],
-    ['segment_note.propose_patch', 'segment_note_propose_patch'],
-    ['mcp.server.search-web', 'mcp_server_search-web']
-  ])('normalizes %s to an OpenAI-compatible function name', (internalName, expected) => {
-    const exposedName = modelToolName(internalName);
-
-    expect(exposedName).toBe(expected);
-    expect(exposedName).toMatch(/^[a-zA-Z0-9_-]+$/);
+describe('external MCP names', () => {
+  it('aliases external routing IDs only', () => {
+    expect(mcpModelToolName('mcp.server.search-web')).toBe('mcp_server_search-web');
+    expect(() => mcpModelToolName('note_propose_patch')).toThrow('Only external MCP');
   });
 });
 
 describe('scopedEnabledToolIds', () => {
   it('never lets a model-generated plan grant tools missing from the agent policy', () => {
     const tools = scopedEnabledToolIds(
-      ['task.run_subagent'],
+      ['task_run_subagent'],
       null,
       {
-        enabledToolIds: ['read_entry_assistant_context', 'entry.propose_meta_patch'],
+        enabledToolIds: ['read_entry_assistant_context', 'entry_propose_meta_patch'],
         mainAssistantId: 'main-assistant', missing: [], mode: 'agent_execute', rationale: '',
         subagentTasks: [], writePolicy: 'proposal_only'
       }
@@ -134,7 +127,7 @@ describe('model-driven side-effect tools', () => {
     const runtime = await createAssistantTools({
       activeExecution: { agent: DEFAULT_AGENT_RUNTIME_SETTINGS.mainAssistant },
       invocationPlan: {
-        enabledToolIds: ['read_note', 'note.propose_patch'], mainAssistantId: 'main-assistant',
+        enabledToolIds: ['read_note', 'note_propose_patch'], mainAssistantId: 'main-assistant',
         missing: [], mode: 'agent_execute', rationale: '', subagentTasks: [],
         writePolicy: 'proposal_only'
       },
@@ -160,5 +153,22 @@ describe('model-driven side-effect tools', () => {
     }, options);
 
     expect(proposals[0]?.beforeMarkdown).toContain('Old text');
+    expect(runtime.events[runtime.events.length - 1]).toMatchObject({ toolName: 'note_propose_patch', status: 'done' });
+    expect(runtime.tools).not.toHaveProperty('note.propose_patch');
+  });
+
+  it('restores legacy internal event names under the unchanged model-facing tool names', async () => {
+    const runtime = await createAssistantTools({
+      activeExecution: { agent: DEFAULT_AGENT_RUNTIME_SETTINGS.mainAssistant },
+      invocationPlan: { enabledToolIds: ['note_propose_patch'], writePolicy: 'proposal_only' } as never,
+      restoredState: { toolNames: ['note_propose_patch'], createdEntries: [], readNotes: [],
+        events: [{ id: 'old', status: 'done', toolName: 'note.propose_patch' }],
+        observations: [{ toolName: 'task.run_subagent', output: { externalSourceUrls: ['https://example.com'] } }] },
+      onNoteProposal: vi.fn(), root: 'C:/workspace', scope
+    });
+    expect(runtime.toolNames).toEqual(['note_propose_patch']);
+    expect(runtime.events[0].toolName).toBe('note_propose_patch');
+    expect(runtime.observations[0].toolName).toBe('task_run_subagent');
+    expect(runtime.snapshot().toolNames).toEqual(['note_propose_patch']);
   });
 });

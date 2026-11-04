@@ -2,6 +2,7 @@ import type { ModelMessage } from 'ai';
 import type { ConversationMessage, ConversationSourceLink } from '@/shared/ipc/assistantApi';
 import { conversationSourceSnapshotKey } from '@/shared/ipc/assistantApi';
 import type { AssistantModelTranscript } from '@/shared/types/modelTranscript';
+import { canonicalAssistantToolId } from '@/shared/lib/assistantToolNames';
 import { validContextUsage } from '../sdk/contextUsage';
 
 export type TranscriptModel = { profileId: string; model: string; protocol: string };
@@ -120,7 +121,7 @@ export function transcriptObservations(history: readonly ConversationMessage[]) 
       if (turn.role !== 'tool') continue;
       for (const part of turn.content) {
         if (part.type !== 'tool-result' || part.output.type !== 'json') continue;
-        observations.push({ toolName: part.toolName === 'task_run_subagent' ? 'task.run_subagent' : part.toolName,
+        observations.push({ toolName: canonicalAssistantToolId(part.toolName),
           output: part.output.value });
       }
     }

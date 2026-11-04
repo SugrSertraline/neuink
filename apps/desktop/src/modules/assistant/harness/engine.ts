@@ -284,7 +284,7 @@ async function executeAssistantHarness(options: RunAssistantHarnessOptions): Pro
         : undefined,
       onReasoningDelta,
       onToolEvent: (event) => {
-        if (event.toolName === 'task.run_subagent') {
+        if (event.toolName === 'task_run_subagent') {
           delegatedCalls.add(event.id);
           agentRun.subagentTaskCount = delegatedCalls.size;
           upsertRunNode(agentRun, {

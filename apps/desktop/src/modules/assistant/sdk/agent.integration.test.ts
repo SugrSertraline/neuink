@@ -269,7 +269,7 @@ describe('production agent wiring', () => {
     const runtimeSettings = structuredClone(DEFAULT_AGENT_RUNTIME_SETTINGS);
     const result = await answerWithGroundedAgent({
       activeExecution: { agent: runtimeSettings.mainAssistant }, runtimeSettings,
-      invocationPlan: { enabledToolIds: ['read_segment_content', 'note.propose_create'],
+      invocationPlan: { enabledToolIds: ['read_segment_content', 'note_propose_create'],
         mainAssistantId: 'main-assistant', missing: [], mode: 'agent_execute', rationale: '',
         subagentTasks: [], writePolicy: 'proposal_only' },
       question: 'Prepare a grounded note.', root: 'fixture', scope, settings: profile,
@@ -298,7 +298,7 @@ describe('production agent wiring', () => {
     const runtimeSettings = structuredClone(DEFAULT_AGENT_RUNTIME_SETTINGS);
     const options = {
       activeExecution: { agent: runtimeSettings.mainAssistant }, runtimeSettings,
-      invocationPlan: { enabledToolIds: ['read_segment_content', 'note.propose_create'], requiredToolIds: ['read_segment_content', 'note.propose_create'],
+      invocationPlan: { enabledToolIds: ['read_segment_content', 'note_propose_create'], requiredToolIds: ['read_segment_content', 'note_propose_create'],
         mainAssistantId: 'main-assistant', missing: [], mode: 'agent_execute', rationale: '', subagentTasks: [], writePolicy: 'proposal_only' },
       question: 'Read and draft a note.', root: 'fixture', scope, settings: profile,
       plan: { citationPolicy: 'required', capabilities: [], intent: 'note_create', noteAction: 'create', needsNoteProposal: true,
@@ -336,7 +336,7 @@ describe('production agent wiring', () => {
     const runtimeSettings = structuredClone(DEFAULT_AGENT_RUNTIME_SETTINGS);
     const result = await answerWithGroundedAgent({
       activeExecution: { agent: runtimeSettings.mainAssistant }, runtimeSettings,
-      invocationPlan: { enabledToolIds: ['read_segment_content', 'note.propose_create'], requiredToolIds: ['read_segment_content', 'note.propose_create'],
+      invocationPlan: { enabledToolIds: ['read_segment_content', 'note_propose_create'], requiredToolIds: ['read_segment_content', 'note_propose_create'],
         mainAssistantId: 'main-assistant', missing: [], mode: 'agent_execute', rationale: '', subagentTasks: [], writePolicy: 'proposal_only' },
       question: 'Read the paper and prepare a note.', root: 'fixture', scope, settings: profile,
       plan: { citationPolicy: 'required', capabilities: [], intent: 'note_create', noteAction: 'create', needsNoteProposal: true,
@@ -364,7 +364,7 @@ describe('production agent wiring', () => {
     runtimeSettings.subagents[0].enabled = true;
     const result = await answerWithGroundedAgent({
       activeExecution: { agent: runtimeSettings.mainAssistant }, runtimeSettings,
-      invocationPlan: { enabledToolIds: ['task.run_subagent', 'read_segment_content'], requiredToolIds: ['task.run_subagent'],
+      invocationPlan: { enabledToolIds: ['task_run_subagent', 'read_segment_content'], requiredToolIds: ['task_run_subagent'],
         mainAssistantId: 'main-assistant', missing: [], mode: 'agent_execute', rationale: '', subagentTasks: [], writePolicy: 'chat_only' },
       question: 'Delegate evidence reading.', root: 'fixture', scope, settings: profile,
       plan: { citationPolicy: 'required', capabilities: [], intent: 'paper_qa' } as never
@@ -383,7 +383,7 @@ describe('production agent wiring', () => {
     runtimeSettings.subagents[0].enabled = true;
     const options = {
       activeExecution: { agent: runtimeSettings.mainAssistant }, runtimeSettings,
-      invocationPlan: { enabledToolIds: ['task.run_subagent', 'read_segment_content'], requiredToolIds: ['task.run_subagent'],
+      invocationPlan: { enabledToolIds: ['task_run_subagent', 'read_segment_content'], requiredToolIds: ['task_run_subagent'],
         mainAssistantId: 'main-assistant', missing: [], mode: 'agent_execute', rationale: '', subagentTasks: [], writePolicy: 'chat_only' },
       question: 'Delegate evidence reading.', root: 'fixture', scope, settings: profile,
       plan: { citationPolicy: 'required', capabilities: [], intent: 'paper_qa' }

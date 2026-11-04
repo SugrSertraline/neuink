@@ -6,7 +6,7 @@ export type AgentToolId =
   | 'read_webpage'
   | 'read_browser_tab'
   | 'import_papers'
-  | 'app.set_appearance'
+  | 'app_set_appearance'
   | 'create_entry'
   | 'search_segments'
   | 'read_segment_content'
@@ -15,12 +15,12 @@ export type AgentToolId =
   | 'read_sciverse_content'
   | 'read_current_note'
   | 'read_note'
-  | 'note.propose_create'
-  | 'note.propose_patch'
-  | 'segment_note.propose_patch'
-  | 'entry.propose_meta_patch'
-  | 'tag.propose_change'
-  | 'task.run_subagent'
+  | 'note_propose_create'
+  | 'note_propose_patch'
+  | 'segment_note_propose_patch'
+  | 'entry_propose_meta_patch'
+  | 'tag_propose_change'
+  | 'task_run_subagent'
   | `mcp.${string}`;
 
 export type AgentLoopStatus =

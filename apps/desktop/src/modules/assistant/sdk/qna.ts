@@ -50,7 +50,8 @@ import { answerVerification } from './answerVerification';
 import { createAgentDriver, agentExecutors } from './agentDriver';
 import { SourceLedger } from '../runtime/sourceLedger';
 import { assistantContextCharBudget } from './contextBudget';
-import { createAssistantTools, modelToolName, type ToolRuntimeState } from './tools';
+import { createAssistantTools, type ToolRuntimeState } from './tools';
+import { mcpModelToolName } from './toolSchema';
 import { Agent, RunBudget, AgentLoopGuard, AgentLoopGuardError, createAgentLoopState } from '../agent-core';
 import { executionModeInstructions } from '../runtime/executionPolicy';
 import { answerLightweightChat } from './lightweightChat';
@@ -230,7 +231,7 @@ export async function answerWithGroundedAgent({
     runtime.toolNames.push('ask_user');
   }
   const unavailableRequiredTools = (invocationPlan?.requiredToolIds ?? []).filter(
-    (toolId) => !runtime.toolNames.includes(modelToolName(toolId))
+    (toolId) => !runtime.toolNames.includes(toolId.startsWith('mcp.') ? mcpModelToolName(toolId) : toolId)
   );
   const availabilityNotes = [...runtime.availabilityNotes,
     ...(unavailableRequiredTools.length ? [`这些原计划工具当前不可用：${unavailableRequiredTools.join(', ')}。不要调用它们；仅使用实际允许的替代工具或明确说明未完成部分，不能声称已完成这些操作。`] : [])];
@@ -279,7 +280,7 @@ export async function answerWithGroundedAgent({
   const missingRequiredToolIds = () => {
     const attempted = new Set(runtime.events.filter((event) => event.status === 'done' || event.status === 'error').map((event) => event.toolName));
     return (invocationPlan?.requiredToolIds ?? []).filter((id) => !unavailableRequiredTools.includes(id)
-      && !attempted.has(id) && !attempted.has(modelToolName(id)));
+      && !attempted.has(id));
   };
   const hasProposals = () => Boolean(noteProposals.length || entryMetaProposals.length || tagProposals.length || agentLoopState.createdEntryIds.length);
   let correctionCount = 0;

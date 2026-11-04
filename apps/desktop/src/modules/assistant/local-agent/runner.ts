@@ -109,8 +109,8 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
     })();
     execution?.set('contextSnapshot', snapshot);
     const { plan, invocationPlan } = buildDirectExecution(runtimeSettings, options.question, options.composerSnapshot?.executionMode ?? 'act');
-    invocationPlan.enabledToolIds = invocationPlan.enabledToolIds.filter(id => id !== 'task.run_subagent');
-    const main = { ...runtimeSettings.mainAssistant, enabledToolIds:runtimeSettings.mainAssistant.enabledToolIds.filter(id => id !== 'task.run_subagent') };
+    invocationPlan.enabledToolIds = invocationPlan.enabledToolIds.filter(id => id !== 'task_run_subagent');
+    const main = { ...runtimeSettings.mainAssistant, enabledToolIds:runtimeSettings.mainAssistant.enabledToolIds.filter(id => id !== 'task_run_subagent') };
     const pinned = buildPinnedContext(options.assistantContext?.items ?? [], 1);
     const frozenSelected = execution?.get<string>('local:selectedNotes');
     const selected = frozenSelected !== undefined ? {text:frozenSelected, sourceByMarker:new Map()} :

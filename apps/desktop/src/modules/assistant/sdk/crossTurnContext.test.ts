@@ -127,7 +127,7 @@ describe('cross-turn context through the real provider driver', () => {
     const result = await answerWithGroundedAgent({ ...options, currentNote: {
       entryId: 'entry', entryTitle: 'Paper', noteId: 'note', noteTitle: 'Notes'
     }, activeExecution: { agent: DEFAULT_AGENT_RUNTIME_SETTINGS.mainAssistant },
-    invocationPlan: { enabledToolIds: ['note.propose_patch'], mainAssistantId: 'main-assistant', missing: [],
+    invocationPlan: { enabledToolIds: ['note_propose_patch'], mainAssistantId: 'main-assistant', missing: [],
       mode: 'agent_execute', rationale: '', subagentTasks: [], writePolicy: 'proposal_only' },
     plan: buildDirectExecution(DEFAULT_AGENT_RUNTIME_SETTINGS, 'Append to the note.').plan,
     runtimeSettings: DEFAULT_AGENT_RUNTIME_SETTINGS, conversationHistory: [

@@ -67,7 +67,9 @@ Sciverse 检索先由 `sdk/sciverseOutput` 做确定性整理：精确重复片�
 - 对话摘要使用 `runTextModelTask`，结构化固定模型任务使用 `runJsonModelTask`，均无工具和子 Agent。推荐标签使用 Rust 固定任务策略直接调用模型，不由用户选择模板。宿主要求每级标签及理由使用简体中文，专有名词可附中文说明保留原文；校验拒绝没有汉字的层级或理由，不做自动翻译重试。旧英文标签及缓存推荐不自动改名，须重新生成推荐。标签输出 schema 为 `{tags: [{path, dimension, reason, confidence}]}`，只推荐、不执行修改。翻译保留 Rust `TranslationPipeline`、共享 `llm_http`、调度、缓存和重试，不绕入 Agent 循环。
 - 能力由 Agent、可选只读 Subagent 和受权限约束的 Tools 组成；MCP 只负责连接外部工具。翻译、标签推荐是宿主固定业务服务，条目属性修改和笔记生成由主 Agent 使用原子工具与溯源能力完成。配置规范化丢弃不支持的工具和旧扩展字段；不读取或执行已退役的用户扩展文件，也不删除用户文件。
 - PatchPlannerAgent 已移除；EvidenceAgent 是可选的只读证据工作者，默认关闭。旧双子 Agent 配置首次规范化时关闭原默认开启的 EvidenceAgent，可随后手动重新开启；只有启用且有主助手授权时才向模型提供委派工具。子 Agent 不产生写盘、应用外观或外部 MCP 副作用。计划和子任务只能缩小已授予权限。
-- `app.set_appearance` 通过注入的 `ApplicationActions` 调用既有 `AppearanceProvider`，只切换三种外观；不开放通用设置写入。状态、持久化与原界面共用，滚动、键盘、拖动协议不变。条目标题等知识数据修改仍走提案。
+- 内置工具的权限 ID、模型名称和执行事件统一使用下划线名称，例如 `note_propose_patch`、`task_run_subagent`；注册时直接使用该名称。旧点号名称只在读取配置、历史事件和恢复执行计数时兼容。外部 MCP 继续保留服务器路由与模型别名映射及重名检查。
+- 旧任务恢复只兼容这七个内置工具的名称变化；身份摘要仍检查模型、权限及提示词，不能通过改名绕过配置变化检查。
+- `app_set_appearance` 通过注入的 `ApplicationActions` 调用既有 `AppearanceProvider`，只切换三种外观；不开放通用设置写入。状态、持久化与原界面共用，滚动、键盘、拖动协议不变。条目标题等知识数据修改仍走提案。
 - Runtime v4 不迁移 v3 Agent 配置；旧配置不执行，新默认不影响安装级模型 Key、文档、Source Link 或用户已有编辑。普通设置继续隐藏 Agent/MCP 高级配置；该产品开关不是多用户账户权限系统。
 
 ## MCP 与溯源

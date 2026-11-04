@@ -133,7 +133,7 @@ describe('ordinary failures stay inside the tool boundary', () => {
   it('returns a failed child and its actual partial evidence to the parent in a durable run', async () => {
     const provider = model([{ call: childCall }, { call: readCall }, { error: new Error('provider secret diagnostic') },
       { text: '子任务未完成，但已取得的片段提到 42 participants [S1]。' }]);
-    const input = options(); input.invocationPlan.requiredToolIds = ['task.run_subagent'];
+    const input = options(); input.invocationPlan.requiredToolIds = ['task_run_subagent'];
     const result = await answerWithGroundedAgent(input);
     expect(result.agentLoopState?.status).toBe('completed');
     expect(result.toolEvents).toContainEqual(expect.objectContaining({ toolName: 'task_run_subagent', status: 'error' }));

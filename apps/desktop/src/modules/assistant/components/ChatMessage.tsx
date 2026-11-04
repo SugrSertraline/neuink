@@ -34,6 +34,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 
 import { Button } from '@/components/ui/button';
+import { canonicalAssistantToolId, isProposalTool } from '@/shared/lib/assistantToolNames';
 import type {
   AssistantMessagePart,
   AssistantToolTraceEvent,
@@ -1067,7 +1068,7 @@ function ToolTraceIcon({ event }: { event: AssistantToolTraceEvent }) {
     return <Search className="shrink-0 text-primary" size={12} aria-hidden="true" />;
   }
 
-  if (event.toolName.includes('.propose_')) {
+  if (isProposalTool(event.toolName)) {
     return <FilePlus2 className="shrink-0 text-primary" size={12} aria-hidden="true" />;
   }
 
@@ -1083,6 +1084,7 @@ function ToolTraceIcon({ event }: { event: AssistantToolTraceEvent }) {
 
 function toolLabel(toolName: string) {
   toolName = toolName.replace(/^(?:claude|codex|opencode)\.mcp__neuink__/, '');
+  toolName = canonicalAssistantToolId(toolName);
   if (toolName === 'read_pdf_pages') return '读取 PDF 文字';
   if (toolName === 'search_pdf_text') return '搜索 PDF 文字';
   if (toolName === 'agent.route') {
@@ -1109,19 +1111,16 @@ function toolLabel(toolName: string) {
   if (toolName === 'read_entry_assistant_context') {
     return 'Read entry markdown';
   }
-  if (toolName === 'note.propose_create' || toolName === 'note_propose_create') {
+  if (toolName === 'note_propose_create') {
     return 'Propose new note';
   }
-  if (toolName === 'note.propose_patch' || toolName === 'note_propose_patch') {
+  if (toolName === 'note_propose_patch') {
     return 'Propose note patch';
   }
-  if (
-    toolName === 'segment_note.propose_patch' ||
-    toolName === 'segment_note_propose_patch'
-  ) {
+  if (toolName === 'segment_note_propose_patch') {
     return 'Propose segment note patch';
   }
-  if (toolName === 'entry.propose_meta_patch' || toolName === 'entry_propose_meta_patch') {
+  if (toolName === 'entry_propose_meta_patch') {
     return 'Propose Entry metadata';
   }
   return toolName;

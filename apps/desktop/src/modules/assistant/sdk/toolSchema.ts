@@ -182,15 +182,16 @@ export function runSubagentInputSchema(
   } as JSONSchema7;
 }
 
-export function modelToolName(toolId: string) {
-  const normalized = toolId.replace(/[^a-zA-Z0-9_-]/g, '_');
-  return normalized || 'tool';
+/** External MCP routing IDs need a model-safe alias; built-in tools already use their final name. */
+export function mcpModelToolName(toolId: string) {
+  if (!toolId.startsWith('mcp.')) throw new Error('Only external MCP tools require a model alias.');
+  return toolId.replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
 export function assertModelToolNameAvailable(
   tools: ToolSet,
   internalToolId: string,
-  exposedToolName: string
+  exposedToolName = internalToolId
 ) {
   if (Object.prototype.hasOwnProperty.call(tools, exposedToolName)) {
     throw new Error(
@@ -209,10 +210,10 @@ export function assertValidModelToolNames(tools: ToolSet) {
 }
 
 export function proposalToolDescription(toolName: string) {
-  if (toolName === 'note.propose_create') {
+  if (toolName === 'note_propose_create') {
     return 'Create a reviewable proposal for a new Markdown note. This never writes to disk.';
   }
-  if (toolName === 'segment_note.propose_patch') {
+  if (toolName === 'segment_note_propose_patch') {
     return 'Create a reviewable prepend, append, patch, delete, or replacement proposal for the confirmed Segment Note target.';
   }
   return 'Create a reviewable prepend, append, patch, delete, or replacement proposal for the confirmed Markdown note target.';

@@ -14,19 +14,19 @@ describe('direct execution policy', () => {
     const { plan, invocationPlan } = buildDirectExecution(DEFAULT_AGENT_RUNTIME_SETTINGS, question);
     expect(plan.steps).toEqual([]);
     expect(invocationPlan.requiredToolIds).toEqual([]);
-    expect(invocationPlan.enabledToolIds).toContain('note.propose_create');
+    expect(invocationPlan.enabledToolIds).toContain('note_propose_create');
   });
   it('offers only known read tools in plan mode', () => {
     const { invocationPlan } = buildDirectExecution(DEFAULT_AGENT_RUNTIME_SETTINGS, '计划', 'plan');
     expect(invocationPlan.writePolicy).toBe('chat_only');
     expect(invocationPlan.enabledToolIds.length).toBeGreaterThan(0);
     expect(invocationPlan.enabledToolIds.every(id => PLANNING_READ_TOOLS.has(id))).toBe(true);
-    expect(invocationPlan.enabledToolIds).not.toContain('task.run_subagent');
-    expect(invocationPlan.enabledToolIds).not.toContain('app.set_appearance');
+    expect(invocationPlan.enabledToolIds).not.toContain('task_run_subagent');
+    expect(invocationPlan.enabledToolIds).not.toContain('app_set_appearance');
   });
   it('never grants disabled tools or overrides a read-only agent', () => {
     const settings = structuredClone(DEFAULT_AGENT_RUNTIME_SETTINGS);
-    settings.mainAssistant.enabledToolIds = ['read_note', 'note.propose_patch'];
+    settings.mainAssistant.enabledToolIds = ['read_note', 'note_propose_patch'];
     settings.mainAssistant.sandbox = 'read-only';
     const { invocationPlan } = buildDirectExecution(settings, '修改笔记');
     expect(invocationPlan.enabledToolIds).toEqual(['read_note']);

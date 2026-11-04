@@ -30,7 +30,7 @@ export {
   readCurrentNoteInputSchema,
   tagProposalInputSchema,
   runSubagentInputSchema,
-  modelToolName,
+  mcpModelToolName,
   assertModelToolNameAvailable,
   assertValidModelToolNames,
   proposalToolDescription,
