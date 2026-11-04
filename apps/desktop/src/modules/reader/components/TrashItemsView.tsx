@@ -158,6 +158,7 @@ export function TrashItemsView({
                       <div className="flex h-10 min-w-0 flex-col justify-center gap-0.5">
                         <div className="truncate text-sm font-medium leading-5">{item.title}</div>
                         <div className="truncate text-[11px] leading-4 text-muted-foreground">{trashPreview(item)}</div>
+                        {item.source_managed && <span className="text-[11px] text-muted-foreground">来源条目仅可恢复，删除请到来源端操作</span>}
                       </div>
                     </TrashTextHoverCard>
                   </TableCell>
@@ -196,7 +197,7 @@ export function TrashItemsView({
                       >
                         <RotateCcw size={13} aria-hidden="true" />
                       </Button>
-                      {item.kind === 'entry' || item.restorable ? (
+                      {!item.source_managed && (item.kind === 'entry' || item.restorable) ? (
                         <Button
                           disabled={itemBusy}
                           size="icon-xs"

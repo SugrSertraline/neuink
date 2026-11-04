@@ -909,16 +909,34 @@
 }
 
 .reflow-reader-pane { container: reflow-reader / inline-size; }
-.reflow-document-scroll { padding: 24px 24px 24px calc(var(--reflow-rail-width, 48px) + 24px); }
+/* 24px action + 12px body offset + 12px minimum clearance from the directory. */
+.reflow-document-scroll { padding: 24px 24px 24px calc(var(--reflow-rail-width, 48px) + 48px); }
 .reflow-reading-surface { font-size: var(--reflow-preferred-font-size, 16px); }
+.reflow-segment-metadata { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+.reflow-segment-metadata::-webkit-scrollbar { height: 4px; }
+.reflow-segment-metadata::-webkit-scrollbar-thumb { background: transparent; border-radius: 4px; }
+.reflow-segment:hover .reflow-segment-metadata,
+.reflow-segment:focus-within .reflow-segment-metadata { scrollbar-color: var(--border) transparent; }
+.reflow-segment:hover .reflow-segment-metadata::-webkit-scrollbar-thumb,
+.reflow-segment:focus-within .reflow-segment-metadata::-webkit-scrollbar-thumb { background: var(--border); }
+.reflow-segment-fold-tabs { opacity: 0; pointer-events: none; transition: opacity 120ms ease-out; }
+.reflow-segment:hover .reflow-segment-fold-tabs,
+.reflow-segment:focus-within .reflow-segment-fold-tabs { opacity: 1; pointer-events: auto; }
+@media (hover: none) {
+  .reflow-segment-fold-tabs { opacity: 1; pointer-events: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reflow-segment-fold-tabs { transition: none; }
+}
 
 @container reflow-reader (max-width: 600px) {
-  .reflow-document-scroll { padding: 16px 16px 16px calc(var(--reflow-rail-width, 48px) + 12px); }
+  .reflow-document-scroll { padding-top: 16px; padding-bottom: 16px; padding-right: 16px; }
   .reflow-reading-surface { font-size: min(var(--reflow-preferred-font-size, 16px), max(14px, 4cqi)); }
 }
 
 @container reflow-reader (max-width: 420px) {
-  .reflow-document-scroll { padding-right: 10px; padding-left: calc(var(--reflow-rail-width, 48px) + 8px); }
+  .reflow-document-scroll { padding-right: 10px; }
+  .reflow-segment-fold-tabs [data-slot=toggle-group-item] { padding-inline: 2px; font-size: 10px; }
 }
 
 /* Size to the pane, not the application viewport. At 220px an avatar column
@@ -952,13 +970,20 @@
   .note-proposal-actions > button { flex: 1 1 4rem; }
 }
 
+.reflow-toolbar .entry-content-header {
+  flex-wrap: nowrap;
+}
+
 .reflow-toolbar .entry-content-header-title {
-  flex: 1 1 160px;
+  flex: 1 1 0;
+  max-width: 100%;
   min-width: 0;
 }
 
 .reflow-toolbar .entry-content-header-actions {
   flex: 0 1 auto;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
 }
 
 @container reflow-toolbar (max-width: 719px) {
@@ -967,18 +992,12 @@
     padding: 8px;
   }
 
-  .reflow-toolbar .entry-content-header-title,
-  .reflow-toolbar .entry-content-header-actions {
-    flex: 0 0 100%;
-    min-width: 0;
-  }
-
   .reflow-toolbar .entry-content-header-entry-title { display: none; }
   .reflow-toolbar .entry-content-header-actions {
     flex-wrap: nowrap;
-    justify-content: flex-start;
+    flex: 0 1 auto;
   }
-  .reflow-toolbar-menu { margin-left: auto; }
+  .reflow-toolbar-controls { padding-inline: 8px; }
 }
 
 @container reflow-toolbar (max-width: 380px) {
@@ -1023,17 +1042,45 @@
   display: none;
 }
 
+.pdf-reader-toolbar .entry-content-header {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+}
+.pdf-reader-toolbar .entry-content-header-title { min-width: 0; }
+.pdf-reader-document-heading { display: grid; min-width: 0; gap: 4px; }
+.pdf-reader-document-meta { overflow: hidden; }
 .pdf-reader-toolbar .entry-content-header-actions {
   max-width: 100%;
-  flex-wrap: nowrap;
-  justify-content: flex-start;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: thin;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
 }
+.pdf-reader-translation-status { display: inline-flex; }
+.pdf-reader-controls-row {
+  display: grid;
+  grid-template-columns: auto minmax(max-content, 1fr) minmax(180px, 320px);
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 6px 12px;
+}
+.pdf-reader-display-controls,
+.pdf-reader-page-controls { display: flex; min-width: 0; align-items: center; gap: 6px; }
+.pdf-reader-page-controls { justify-content: center; flex-wrap: wrap; }
+.pdf-reader-search { min-width: 0; }
+.pdf-reader-search > form { width: 100%; margin-left: 0; }
+.pdf-reader-search > form > div { min-width: 0; max-width: none; }
 
-.pdf-reader-translation-status {
-  display: inline-flex;
+@container pdf-reader-toolbar (max-width: 1100px) {
+  .pdf-reader-toolbar .pdf-reader-toolbar-label { display: none; }
+}
+@container pdf-reader-toolbar (max-width: 840px) {
+  .pdf-reader-controls-row { grid-template-columns: minmax(0, 1fr) minmax(180px, 1fr); gap: 8px; }
+  .pdf-reader-display-controls { grid-column: 1 / -1; justify-content: space-between; }
+  .pdf-reader-page-controls { justify-content: flex-start; }
 }
 
 .entry-overview {
@@ -1127,55 +1174,22 @@
 }
 
 @container pdf-reader-toolbar (max-width: 680px) {
-  .pdf-reader-toolbar .entry-content-header {
-    align-items: stretch;
-    gap: 6px;
-    padding: 8px;
-  }
-
-  .pdf-reader-toolbar .entry-content-header-title,
-  .pdf-reader-toolbar .entry-content-header-actions {
-    flex: 0 0 100%;
-    min-width: 0;
-  }
-
-  .pdf-reader-toolbar .entry-content-header-title {
-    min-height: 20px;
-  }
-
-  .pdf-reader-toolbar .entry-content-header-entry-title,
-  .pdf-reader-toolbar .pdf-reader-translation-status,
-  .pdf-reader-toolbar .pdf-reader-toolbar-label {
-    display: none;
-  }
-
-  .pdf-reader-toolbar .entry-content-header-actions {
-    flex-wrap: nowrap;
-    justify-content: flex-start;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: thin;
-  }
+  .pdf-reader-toolbar .entry-content-header { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 8px; }
+  .pdf-reader-toolbar .entry-content-header-actions { gap: 4px; }
+  .pdf-reader-toolbar .pdf-reader-translation-status > span { display: none; }
+  .pdf-reader-controls-row { padding: 6px 8px; }
 }
-
-@container pdf-reader-toolbar (max-width: 420px) {
-  .pdf-reader-toolbar .pdf-reader-toolbar-overflow-action {
-    display: none;
-  }
-
-  .pdf-reader-toolbar .pdf-reader-toolbar-overflow {
-    display: inline-flex;
-  }
+@container pdf-reader-toolbar (max-width: 520px) {
+  .pdf-reader-toolbar .pdf-reader-toolbar-overflow-action { display: none; }
+  .pdf-reader-toolbar .pdf-reader-toolbar-overflow { display: inline-flex; }
+  .pdf-reader-controls-row { grid-template-columns: minmax(0, 1fr); }
+  .pdf-reader-display-controls { flex-wrap: wrap; }
+  .pdf-reader-page-controls { justify-content: center; }
 }
-
-@container pdf-reader-toolbar (max-width: 320px) {
-  .pdf-reader-toolbar .entry-content-header-actions {
-    gap: 4px;
-  }
-
-  .pdf-reader-toolbar .pdf-reader-zoom-value {
-    display: none;
-  }
+@container pdf-reader-toolbar (max-width: 360px) {
+  .pdf-reader-toolbar .pdf-reader-zoom-value { display: none; }
+  .pdf-reader-document-meta { gap: 4px; font-size: 11px; }
+  .pdf-reader-document-meta > span:first-child { display: none; }
 }
 
 .workspace-pane-surface {

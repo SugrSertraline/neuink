@@ -75,6 +75,27 @@ function renderSidebar(props: Partial<ComponentProps<typeof LibrarySidebar>> = {
   );
 }
 
+it('removes the hidden Zotero view when that source is disabled', () => {
+  const view = renderSidebar({ zoteroEnabled: false, hiddenSourceCount: 2 });
+  expect(view.queryByRole('button', { name: /已隐藏/ })).toBeNull();
+  expect(within(view.getByRole('region', { name: '快速视图' })).getByRole('button', { name: '全部 1' })).toBeTruthy();
+});
+
+it('keeps hidden navigation and the hide action available while previewing entry details', () => {
+  const onSelectView = vi.fn(), onToggleSourceHidden = vi.fn();
+  const view = renderSidebar({ entryExplorerOpen: true, hiddenSourceCount: 2, onSelectView, onToggleSourceHidden,
+    selectedEntry: { ...entry, sourceInfo: { kinds: ['zotero'], zotero_hidden: false } } });
+  fireEvent.click(view.getByRole('button', { name: '从条目库隐藏当前来源论文' }));
+  expect(onToggleSourceHidden).toHaveBeenCalledExactlyOnceWith(entry.id);
+  fireEvent.click(view.getByRole('button', { name: '查看已隐藏论文 2' }));
+  expect(onSelectView).toHaveBeenCalledExactlyOnceWith('hidden');
+});
+
+it('identifies Zotero notes in the selected entry details', () => {
+  const view = renderSidebar({ entryExplorerOpen: true, selectedEntry: { ...entry, contents: [{ kind: 'note', note_id: 'from-zotero', title: 'Imported note' }] }, zoteroNoteIds: ['from-zotero'] });
+  expect(view.getByText('Zotero · 本地副本')).toBeTruthy();
+});
+
 describe('LibrarySidebar tag drop', () => {
   it('shows an unparsed category with a matching count, selection, and navigation', () => {
     const onSelectView = vi.fn();

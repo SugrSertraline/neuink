@@ -2,44 +2,41 @@
 
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-
 import { TagEditorNode } from './TagEditorNode';
 
 afterEach(cleanup);
 
 describe('TagEditorNode', () => {
-  it('uses the shared double-click-to-open contract while preserving keyboard activation', () => {
-    const onSelectTag = vi.fn();
-    const view = render(
-      <TagEditorNode
-        activeTag={null}
-        busy={false}
-        childName=""
-        creatingChildForId={null}
-        editingId={null}
-        editingName=""
-        node={{ children: [], count: 2, depth: 0, id: 'research', name: '研究', parentId: null, path: '研究' }}
-        onCreateChild={vi.fn()}
-        onDeleteRequest={vi.fn()}
-        onEdit={vi.fn()}
-        onRename={vi.fn()}
-        onSelectTag={onSelectTag}
-        onSetChildName={vi.fn()}
-        onSetEditingName={vi.fn()}
-        onStartCreateChild={vi.fn()}
-        onStopCreateChild={vi.fn()}
-        onStopEdit={vi.fn()}
-      />
-    );
+  it('selects on click, opens on double click or keyboard, and toggles a branch', () => {
+    const onSelect = vi.fn();
+    const onOpen = vi.fn();
+    const onToggle = vi.fn();
+    const onCreateChild = vi.fn();
+    const onRename = vi.fn();
+    const onDelete = vi.fn();
+    const node = { children: [{ children: [], count: 0, depth: 1, id: 'child', name: '子标签', parentId: 'research', path: '研究/子标签' }],
+      count: 2, depth: 0, id: 'research', name: '研究', parentId: null, path: '研究' };
+    const view = render(<TagEditorNode node={node} active={false} selected={true} expanded={true} busy={false}
+      onSelect={onSelect} onOpen={onOpen} onToggle={onToggle}
+      onCreateChild={onCreateChild} onRename={onRename} onDelete={onDelete} />);
 
-    const tag = view.getByRole('button', { name: '打开标签 研究' });
-    expect(tag.getAttribute('title')).toBe('双击打开：研究');
+    const tag = view.getByRole('button', { name: '选择标签 研究' });
     fireEvent.click(tag, { detail: 1 });
-    expect(onSelectTag).not.toHaveBeenCalled();
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onOpen).not.toHaveBeenCalled();
     fireEvent.doubleClick(tag);
-    expect(onSelectTag).toHaveBeenCalledExactlyOnceWith('research');
-    onSelectTag.mockClear();
+    expect(onOpen).toHaveBeenCalledTimes(1);
     fireEvent.click(tag, { detail: 0 });
-    expect(onSelectTag).toHaveBeenCalledExactlyOnceWith('research');
+    expect(onOpen).toHaveBeenCalledTimes(2);
+    const disclosure = view.getByRole('button', { name: '收起 研究' });
+    expect(disclosure.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(disclosure);
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    expect(disclosure.parentElement?.lastElementChild).toBe(disclosure);
+
+    fireEvent.contextMenu(tag, { clientX: 70, clientY: 80 });
+    expect(view.getByRole('menuitem', { name: '添加子标签' })).toBeTruthy();
+    fireEvent.click(view.getByRole('menuitem', { name: '重命名' }));
+    expect(onRename).toHaveBeenCalledTimes(1);
   });
 });

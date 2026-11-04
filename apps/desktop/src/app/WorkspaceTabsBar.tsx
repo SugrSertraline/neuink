@@ -51,7 +51,7 @@ const TAB_STEP = 180;
 type WorkspaceTabsBarProps = {
   readingLinkMode?: ReadingLinkMode;
   onReadingLinkModeChange?: (mode: ReadingLinkMode) => void;
-  onNewBrowser?: () => void;
+  onNewTab?: () => void;
   entries: Array<{ id: string; title: string; pdfFileName?: string | null }>;
   layout: WorkspaceSurfaceLayout;
   onAddToAssistantContext?: (surface: WorkspaceSurface) => void;
@@ -70,7 +70,7 @@ type WorkspaceTabsBarProps = {
 export function WorkspaceTabsBar({
   readingLinkMode = 'scroll',
   onReadingLinkModeChange,
-  onNewBrowser,
+  onNewTab,
   entries,
   layout,
   onAddToAssistantContext,
@@ -328,9 +328,9 @@ export function WorkspaceTabsBar({
           />
         ) : null}
       </div>
-      {split || onNewBrowser ? (
+      {split || onNewTab ? (
         <div className="workspace-tabsbar-actions">
-          {onNewBrowser ? <Button aria-label="新建网页标签" title="新建网页标签" size="icon-sm" variant="ghost" type="button" onClick={onNewBrowser}><Plus size={16} /></Button> : null}
+          {onNewTab ? <Button aria-label="新建标签" title="新建标签" size="icon-sm" variant="ghost" type="button" onClick={onNewTab}><Plus size={16} /></Button> : null}
           {pairRelation === 'reader-sync' && onReadingLinkModeChange ? (
             <Tooltip><TooltipTrigger asChild>
               <Button size="xs" variant={readingLinkMode === 'scroll' ? 'secondary' : 'outline'}

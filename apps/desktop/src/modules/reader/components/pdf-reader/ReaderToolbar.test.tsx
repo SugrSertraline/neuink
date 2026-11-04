@@ -282,7 +282,7 @@ describe('ReaderToolbar', () => {
 
     expect(screen.getByText('PDF 内容')).toBeTruthy();
     expect(screen.getByText('相对论笔记')).toBeTruthy();
-    expect(screen.getByText('einstein-paper.pdf')).toBeTruthy();
+    expect(screen.getByTitle('einstein-paper.pdf')).toBeTruthy();
     expect(screen.getByText('86 个区域')).toBeTruthy();
     expect(screen.getByText('/ 12')).toBeTruthy();
     expect(screen.getByText('已解析')).toBeTruthy();
@@ -392,7 +392,7 @@ describe('ReaderToolbar', () => {
     );
 
     const mode = screen.getByRole('button', { name: '译文' });
-    expect(mode.closest('.entry-content-header-actions')).toBeTruthy();
+    expect(mode.closest('.pdf-reader-display-controls')).toBeTruthy();
     expect(screen.queryByLabelText('阅读视图设置')).toBeNull();
     fireEvent.click(mode);
     expect(mode.getAttribute('aria-pressed')).toBe('true');

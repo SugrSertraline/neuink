@@ -1,5 +1,7 @@
 import { useRef, useState } from 'react';
+import { Clock3, FileScan, LoaderCircle, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { TooltipIconButton } from '@/shared/components/TooltipIconButton';
 import { useToast } from '@/shared/hooks/useToast';
 import type { LibraryEntry } from './LibrarySidebar';
 
@@ -11,7 +13,7 @@ export type PdfParseAction = {
 };
 
 /** Submission is local; persisted entry status and the existing queue own parsing progress. */
-export function PdfParseButton({ entry, action }: { entry: LibraryEntry; action: PdfParseAction }) {
+export function PdfParseButton({ entry, action, iconOnly = false }: { entry: LibraryEntry; action: PdfParseAction; iconOnly?: boolean }) {
   const { notify } = useToast();
   const pending = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -39,6 +41,14 @@ export function PdfParseButton({ entry, action }: { entry: LibraryEntry; action:
       setBusy(false);
     }
   };
+  if (iconOnly) {
+    const Icon = busy || running ? LoaderCircle : queued ? Clock3 : entry.status === 'Failed' ? RotateCcw : FileScan;
+    return <TooltipIconButton label={label} tooltip={!action.configured && !queued && !running ? `${label} · 先选择解析方式` : label}
+      variant="ghost" className="text-muted-foreground hover:text-foreground" disabled={action.disabled || busy || queued || running}
+      onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); void start(); }}>
+      <Icon aria-hidden="true" className={busy || running ? 'size-4 animate-spin motion-reduce:animate-none' : 'size-4'} />
+    </TooltipIconButton>;
+  }
   return <Button type="button" size="xs" variant="outline" className="shrink-0 whitespace-nowrap"
     disabled={action.disabled || busy || queued || running}
     title={!action.configured && !queued && !running ? '先选择解析方式' : `${label}：${entry.title}`}

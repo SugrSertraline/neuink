@@ -7,6 +7,7 @@ Neuink 自身采用 [Apache License 2.0](../../LICENSE)。项目使用下列主�
 | [Tauri](https://tauri.app/) 与 Tauri Plugins | 桌面运行时、原生对话框、HTTP | Apache-2.0 OR MIT |
 | [React](https://react.dev/)、[Vite](https://vite.dev/)、[Tailwind CSS](https://tailwindcss.com/) | 用户界面与构建工具 | MIT |
 | [PDF.js](https://mozilla.github.io/pdf.js/) | PDF 渲染与文字提取 | Apache-2.0，字体／CMap／WASM 保留各自声明 |
+| [TextFold](https://github.com/chenxiachan/textfold) | 开发中的阅读详略生成、原文词语对齐及过渡算法；改写自 `5fc941dc4560ee2809c0f278da28457292c7f739` | Apache-2.0；上游 LICENSE 与 NOTICE 保留在 `apps/desktop/public/licenses` |
 | [Mozilla Readability](https://github.com/mozilla/readability) | 已加载网页正文提取，固定 0.6.0 原始源码 | Apache-2.0 |
 | [yt-dlp](https://github.com/yt-dlp/yt-dlp)／[EJS](https://github.com/yt-dlp/ejs) | 公开视频字幕及元信息 | Unlicense；EJS 捆绑组件另含 MIT／ISC |
 | [CPython](https://www.python.org/)／[QuickJS-NG](https://github.com/quickjs-ng/quickjs) | 隔离媒体读取运行时 | PSF 及随附组件许可／MIT 及随附组件许可 |

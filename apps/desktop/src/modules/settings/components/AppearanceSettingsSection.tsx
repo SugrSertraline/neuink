@@ -3,11 +3,14 @@ import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useAppearance, type AppAppearance } from '@/shared/components/AppearanceProvider';
 import { normalizeUiScale, UI_SCALE_OPTIONS } from '@/shared/lib/uiScale';
+import { ZODIAC_SIGNS } from '@/modules/daily/dailyLifestyle';
+import { useDailySidebarPreferences } from '@/modules/daily/useDailySidebarPreferences';
 import type { SettingsPanelLayoutProps } from './SettingsPanelLayout';
 import { SettingsPage, SettingsGroup, SettingRow, SettingSelect, SettingSwitch } from './SettingsPrimitives';
 
 export function AppearanceSettingsSection({ props }: { props: SettingsPanelLayoutProps }) {
   const { appearance, setAppearance, glassReducedTransparency, setGlassReducedTransparency } = useAppearance();
+  const daily = useDailySidebarPreferences();
   const [failedSave, setFailedSave] = useState<null | (() => boolean)>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   useEffect(() => { setPaletteOpen(false); }, [appearance]);
@@ -49,6 +52,12 @@ export function AppearanceSettingsSection({ props }: { props: SettingsPanelLayou
       <SettingSelect id="appearance-scale" label="界面缩放" description="Ctrl/Cmd + 加减号调整，Ctrl/Cmd + 0 恢复 100%。" value={String(props.uiScale)}
         options={UI_SCALE_OPTIONS.map(scale => ({ value: String(scale), label: `${Math.round(scale * 100)}%${scale === 1 ? '（默认）' : ''}` }))}
         onValueChange={value => persist(() => { props.onUiScaleChange(normalizeUiScale(value)); return true; })} />
+    </SettingsGroup>
+    <SettingsGroup id="appearance-zodiac" title="每日推荐" description="星座只需设置一次，之后每日看板会沿用这个选择。">
+      <SettingSelect id="appearance-zodiac-choice" label="我的星座" description="仅用于本地趣味签；选择会保存在这台设备上。" value={daily.preferences.zodiac}
+        placeholder="选择星座" options={ZODIAC_SIGNS.map(sign => ({ value: sign, label: sign }))}
+        onValueChange={zodiac => daily.update(previous => ({ ...previous, zodiac }))} />
+      {daily.saveError && <p role="alert" className="mt-2 text-xs text-destructive">{daily.saveError}</p>}
     </SettingsGroup>
   </SettingsPage>;
 }

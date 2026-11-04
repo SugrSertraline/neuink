@@ -16,6 +16,19 @@ function page(props: Partial<React.ComponentProps<typeof EntryEditPage>> = {}) {
 }
 
 describe('entry page editing', () => {
+  it('copies source information into the local draft without losing other edits or saving early', async () => {
+    const onUpdateEntry = vi.fn().mockResolvedValue(undefined);
+    const view = render(page({ onUpdateEntry, entry: { ...entry, sourceInfo: { kinds: ['zotero'], zotero_hidden: false,
+      zotero_organization: [{ source_id: 'source', collections: [], tags: ['来源标签'] }] } } }));
+    fireEvent.change(view.getByLabelText('标题'), { target: { value: '未保存的新标题' } });
+    fireEvent.click(view.getByRole('button', { name: '添加标签 来源标签 到我的标签' }));
+    fireEvent.click(view.getByRole('button', { name: '确认添加' }));
+    await waitFor(() => expect(view.queryByRole('dialog')).toBeNull());
+    expect(view.getByLabelText('我的标签')).toHaveProperty('value', '研究, 来源标签');
+    expect(onUpdateEntry).not.toHaveBeenCalled();
+    fireEvent.keyDown(view.getByLabelText('标题'), { key: 's', ctrlKey: true });
+    await waitFor(() => expect(onUpdateEntry).toHaveBeenCalledWith(entry.id, expect.objectContaining({ title: '未保存的新标题', tagPaths: ['研究', '来源标签'] })));
+  });
   it('edits in a page, saves title/description/tags/properties with Ctrl+S and clears the close guard', async () => {
     const onUpdateEntry = vi.fn().mockResolvedValue(undefined), onBack = vi.fn();
     const view = render(page({ onUpdateEntry, onBack }));
@@ -23,7 +36,7 @@ describe('entry page editing', () => {
     expect(document.activeElement).toBe(view.getByLabelText('标题'));
     fireEvent.change(view.getByLabelText('标题'), { target: { value: ' 新论文 ' } });
     fireEvent.change(view.getByLabelText('描述'), { target: { value: ' 新描述 ' } });
-    fireEvent.change(view.getByLabelText('标签'), { target: { value: '研究, 软件工程/需求, 研究' } });
+    fireEvent.change(view.getByLabelText('我的标签'), { target: { value: '研究, 软件工程/需求, 研究' } });
     expect(hasUnsavedEntrySegmentEditors(entry.id)).toBe(true);
     fireEvent.keyDown(view.getByLabelText('标题'), { key: 's', ctrlKey: true });
     await waitFor(() => expect(onBack).toHaveBeenCalledOnce());

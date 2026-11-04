@@ -2,14 +2,15 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ZoteroSnapshot } from '@/shared/ipc/zoteroApi';
+import { PdfDuplicateReviewContext } from '@/shared/lib/pdfDuplicate';
 import { ZoteroImportDialog } from './ZoteroImportDialog';
 
-const api = vi.hoisted(() => ({ getZoteroSettings: vi.fn(), saveZoteroSettings: vi.fn(), discoverZotero: vi.fn(), scanZotero: vi.fn(), importZoteroPaper: vi.fn(), onZoteroSettingsChanged: vi.fn(() => () => undefined) }));
+const api = vi.hoisted(() => ({ getZoteroSettings: vi.fn(), saveZoteroSettings: vi.fn(), discoverZotero: vi.fn(), scanZotero: vi.fn(), importZoteroPaper: vi.fn(), setZoteroPaperHidden: vi.fn(), onZoteroSettingsChanged: vi.fn(() => () => undefined) }));
 const pick = vi.hoisted(() => vi.fn());
 vi.mock('@/shared/ipc/zoteroApi', () => api);
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: pick }));
 const snapshot: ZoteroSnapshot = {
-  snapshot_id: 'snapshot', existing: { old: 'local-entry' },
+  snapshot_id: 'snapshot', existing: { old: 'local-entry' }, hidden: [],
   library: { source_id: 'source', data_directory: 'C:\\Zotero', collections: [], papers: [
     { id: 'old', key: 'OLD', library_id: 1, library_name: '我的文库', title: 'Already imported', authors: 'Ada', year: '2024', fields: {}, tags: [], collection_ids: [], attachments: [] },
     { id: 'alpha', key: 'ALPHA', library_id: 1, library_name: '我的文库', title: 'Alpha paper', authors: 'Alice', year: '2025', fields: { doi: '10.1/alpha' }, tags: ['扩散模型'], collection_ids: [], attachments: [{ key: 'PDF1', file_name: 'Alpha.pdf', available: true, reason: null }] },
@@ -20,6 +21,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   api.getZoteroSettings.mockResolvedValue({ data_directory: 'C:\\Zotero', linked_attachment_directory: null });
   api.scanZotero.mockResolvedValue(structuredClone(snapshot));
+  api.setZoteroPaperHidden.mockResolvedValue({ hidden: true });
   api.importZoteroPaper.mockImplementation(async (_root, _snapshot, id) => ({ entry_id: `local-${id}`, title: id, status: 'imported', has_pdf: id === 'alpha' }));
 });
 afterEach(cleanup);
@@ -33,6 +35,19 @@ async function openList() {
 }
 
 describe('Zotero selection import', () => {
+  it('shows a duplicate for review and imports a second copy only after confirmation', async () => {
+    const duplicate = { entryId: 'existing', title: 'Original paper', fileName: 'original.pdf', contentHash: 'same-hash', inTrash: false };
+    const confirm = vi.fn().mockResolvedValue(true);
+    api.importZoteroPaper.mockResolvedValueOnce({ entry_id: 'existing', title: 'Original paper', status: 'duplicate', has_pdf: true, duplicate })
+      .mockResolvedValueOnce({ entry_id: 'new-entry', title: 'Alpha paper', status: 'imported', has_pdf: true });
+    render(<PdfDuplicateReviewContext.Provider value={confirm}><ZoteroImportDialog root="workspace" onClose={vi.fn()} /></PdfDuplicateReviewContext.Provider>);
+    await screen.findByText('Alpha paper');
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 Alpha paper' }));
+    fireEvent.click(screen.getByRole('button', { name: '导入所选' }));
+    await screen.findByText('本批导入已结束。');
+    expect(confirm).toHaveBeenCalledWith({ candidateTitle: 'Alpha paper', sourcePath: 'Alpha.pdf', duplicate });
+    expect(api.importZoteroPaper.mock.calls[1]).toEqual(['workspace', 'snapshot', 'alpha', 'PDF1', 'same-hash']);
+  });
   it('loads automatically, excludes existing entries and imports only explicit selections', async () => {
     render(<ZoteroImportDialog root="workspace" onClose={vi.fn()} />);
     await screen.findByText('Alpha paper');
@@ -140,7 +155,7 @@ describe('Zotero selection import', () => {
     fireEvent.click(screen.getByRole('button', { name: '选择目录' }));
     await screen.findByText('目录已保存');
     expect(screen.getByRole('checkbox', { name: '选择 Alpha paper' }).getAttribute('aria-checked')).toBe('true');
-    expect(api.scanZotero).toHaveBeenCalledTimes(1);
+    expect(api.scanZotero).toHaveBeenCalledTimes(2);
   });
 
   it('keeps the current source and selection when a chosen directory is invalid', async () => {
@@ -152,6 +167,19 @@ describe('Zotero selection import', () => {
     await screen.findByText('所选目录中没有 Zotero 数据库。');
     expect(screen.getByDisplayValue('C:\\Zotero')).toBeTruthy();
     expect(screen.getByRole('checkbox', { name: '选择 Alpha paper' }).getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('hides a paper and restores it from the hidden list', async () => {
+    await openList();
+    fireEvent.click(screen.getAllByRole('button', { name: '隐藏' })[1]);
+    await waitFor(() => expect(api.setZoteroPaperHidden).toHaveBeenCalledWith('workspace', 'snapshot', 'alpha', true));
+    expect(screen.queryByText('Alpha paper')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '已隐藏 1 篇' }));
+    expect(screen.getByText('Alpha paper')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '恢复显示' }));
+    await waitFor(() => expect(api.setZoteroPaperHidden).toHaveBeenCalledWith('workspace', 'snapshot', 'alpha', false));
+    fireEvent.click(screen.getByRole('button', { name: '返回可见列表' }));
+    expect(screen.getByText('Alpha paper')).toBeTruthy();
   });
 
   it('discovers and saves a single source without importing any paper', async () => {

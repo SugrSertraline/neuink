@@ -70,6 +70,7 @@ export const DEFAULT_REFLOW_COMPONENT_PREFERENCES: ReflowComponentPreferences = 
 };
 
 export type ReaderPreferences = {
+  autoGenerateFolds?: boolean;
   readingLinkMode?: ReadingLinkMode;
   openEntryPdfByDefault: boolean;
   autoTranslateTextSelection: boolean;
@@ -134,6 +135,7 @@ export function withReflowTranslationMode(preferences: ReaderPreferences, mode: 
 const READER_PREFERENCES_STORAGE_KEY = 'neuink.reader.preferences';
 
 const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
+  autoGenerateFolds: false,
   readingLinkMode: 'scroll',
   openEntryPdfByDefault: true,
   autoTranslateTextSelection: false,
@@ -194,6 +196,7 @@ export function persistReaderPreferences(preferences: ReaderPreferences) {
 
 export function equalReaderPreferences(left: ReaderPreferences, right: ReaderPreferences) {
   return (
+    (left.autoGenerateFolds ?? false) === (right.autoGenerateFolds ?? false) &&
     (left.readingLinkMode ?? 'scroll') === (right.readingLinkMode ?? 'scroll') &&
     left.openEntryPdfByDefault === right.openEntryPdfByDefault &&
     left.autoTranslateTextSelection === right.autoTranslateTextSelection &&
@@ -234,6 +237,7 @@ function normalizeReaderPreferences(value: unknown): ReaderPreferences {
   const candidate = value as Partial<ReaderPreferences>;
 
   return {
+    autoGenerateFolds: candidate.autoGenerateFolds === true,
     readingLinkMode: candidate.readingLinkMode === 'click' ? 'click' : 'scroll',
     openEntryPdfByDefault:
       typeof candidate.openEntryPdfByDefault === 'boolean'

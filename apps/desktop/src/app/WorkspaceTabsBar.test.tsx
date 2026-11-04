@@ -43,6 +43,16 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
+it('opens a blank tab from the tab bar plus button', () => {
+  const onNewTab = vi.fn();
+  const view = render(<TooltipProvider><WorkspaceTabsBar entries={[]} layout={layout}
+    onNewTab={onNewTab}
+    onClose={vi.fn()} onCloseOthers={vi.fn()} onClosePane={vi.fn()}
+    onMove={vi.fn()} onSelect={vi.fn()} onSwap={vi.fn()} /></TooltipProvider>);
+  fireEvent.click(view.getByRole('button', { name: '新建标签' }));
+  expect(onNewTab).toHaveBeenCalledTimes(1);
+});
+
 const layout: WorkspaceSurfaceLayout = {
   focusedPane: 'left',
   left: { kind: 'pdf', entryId: 'a' },

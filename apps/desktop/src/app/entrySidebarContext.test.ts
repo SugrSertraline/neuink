@@ -10,6 +10,12 @@ const open = (left: WorkspaceSurface, right?: WorkspaceSurface) => {
 };
 
 describe('entry sidebar follows the paper during tag-note reading', () => {
+  it('previews a library selection without changing the library surface or using the other pane', () => {
+    const layout = { ...open(paper), right: { kind: 'library' as const }, focusedPane: 'right' as const };
+    expect(resolveEntrySidebarContext(layout, { entryId: 'selected-paper', tagId: 'software' })).toMatchObject({ entryId: 'selected-paper', contentId: 'overview', pane: 'right', contextTagId: 'software' });
+    expect(layout.right?.kind).toBe('library');
+    expect(resolveEntrySidebarContext(layout, { entryId: null, tagId: null })).toBeNull();
+  });
   it('keeps the paper and its tag when focus moves to its note, including swapped panes', () => {
     const layout = open(paper, note);
     expect(resolveEntrySidebarContext(layout)).toMatchObject({ entryId: 'paper-a', contentId: 'pdf', contextTagId: 'software', pane: 'left' });

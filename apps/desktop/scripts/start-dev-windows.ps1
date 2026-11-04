@@ -79,11 +79,25 @@ try {
     $startInfo.EnvironmentVariables['NEUINK_DEV_LOG_FILE'] = $logPath
     $developmentProcess = [System.Diagnostics.Process]::Start($startInfo)
     $startedAt = Get-Date
+    $lastProgressRead = [DateTime]::MinValue
+    $startupStage = '正在检查数据和准备依赖'
     $shown = $false
     while (-not $developmentProcess.HasExited) {
         if (Show-DevelopmentWindow) { $shown = $true; break }
-        $elapsed = [int]((Get-Date) - $startedAt).TotalSeconds
-        $statusLabel.Text = "正在准备最新版 Neuink… 已等待 $elapsed 秒`r`n准备好后会自动打开，资料仍保存在 D 盘。"
+        $now = Get-Date
+        if (($now - $lastProgressRead).TotalSeconds -ge 1) {
+            $lastProgressRead = $now
+            try {
+                foreach ($line in @(Get-Content -LiteralPath $logPath -Tail 30 -Encoding UTF8)) {
+                    if ($line -match 'Blocking waiting for file lock on build directory') { $startupStage = '正在等待其他编译任务结束' }
+                    elseif ($line -match '\bCompiling\s') { $startupStage = '正在编译开发版' }
+                    elseif ($line -match '\bFinished\s') { $startupStage = '编译完成，正在打开应用' }
+                    elseif ($line -match '^\s*error:') { $startupStage = '启动遇到错误，正在收集日志' }
+                }
+            } catch { } # Log creation and writes may overlap with this read.
+        }
+        $elapsed = [int]($now - $startedAt).TotalSeconds
+        $statusLabel.Text = "$startupStage… 已等待 $elapsed 秒`r`n准备好后会自动打开，资料仍保存在 D 盘。"
         [System.Windows.Forms.Application]::DoEvents()
         Start-Sleep -Milliseconds 200
     }

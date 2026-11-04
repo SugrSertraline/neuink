@@ -9,7 +9,7 @@ import { registerSegmentEditorCloseHandler, setSegmentEditorDirty } from '@/modu
 import { SettingsGroup, SettingSelect } from './SettingsPrimitives';
 
 const presets: Record<Provider, { label: string; endpoint: string; model: string; help: string; links?: { label: string; url: string }[] }> = {
-  reading_model: { label: '沿用整体翻译模型', endpoint: '', model: '', help: '选中文字翻译将使用下方的整体翻译模型；更改该模型也会影响选中文字翻译。如需独立配置，请选择其他服务。' },
+  reading_model: { label: '沿用统一默认模型', endpoint: '', model: '', help: '使用上方的统一默认模型。只有来源选择了“选区专用服务／沿用模型”的单词或选中文字才使用此处配置。' },
   azure: { label: 'Microsoft Azure Translator', endpoint: 'https://api.cognitive.microsofttranslator.com/translate', model: '',
     help: '需自行申请 Translator 密钥。F0 免费层每月 200 万字符；付费层按量计费。请选择适合的套餐，额度和地区以官网为准。', links: [
       { label: '官网与价格', url: 'https://azure.microsoft.com/pricing/details/translator/' },
@@ -94,7 +94,7 @@ export function SelectionTranslationSettings({ active, children }: { active: boo
         else change({ [field]: event.target.value });
       }} />
   </div>;
-  return <SettingsGroup id="translation-service" title="选中文字翻译" description="常见英文单词优先使用本地词库；句子、段落和词库未收录的单词使用下方服务或阅读模型。保存后从下一次选中文字翻译生效。">
+  return <SettingsGroup id="translation-service" title="选中文字翻译" description="仅当上方单词或选中文字来源选择“选区专用服务／沿用模型”时生效；独立指定的模型优先。保存后用于下一次请求。">
     {!draft ? <>{busy ? <p role="status" className="text-xs">正在读取配置…</p> : <Button size="sm" variant="outline" onClick={() => setAttempt(value => value + 1)}>重新读取配置</Button>}</> : <div className="grid min-w-0 gap-3">
       <SettingSelect label="选中文字翻译服务" value={draft.provider} disabled={busy}
         options={Object.entries(presets).map(([value, preset]) => ({ value, label: preset.label }))}

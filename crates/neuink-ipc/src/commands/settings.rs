@@ -182,16 +182,6 @@ pub fn set_task_llm_profile<R: Runtime>(
     Ok(settings_state(&settings))
 }
 
-pub(crate) fn read_translation_profile<R: Runtime>(
-    app: &AppHandle<R>,
-) -> Result<Option<LlmProfile>, String> {
-    let mut settings = read_settings(app)?;
-    ensure_legacy_profile(&mut settings);
-    let profile = task_profile(settings.translation_llm_profile_id.as_deref(), &settings).cloned();
-    write_settings(app, &settings)?;
-    Ok(profile)
-}
-
 pub(crate) fn read_assistant_profile<R: Runtime>(
     app: &AppHandle<R>,
 ) -> Result<Option<LlmProfile>, String> {
@@ -202,7 +192,7 @@ pub(crate) fn read_assistant_profile<R: Runtime>(
     Ok(profile)
 }
 
-fn ensure_legacy_profile(settings: &mut AppSettings) {
+pub(super) fn ensure_legacy_profile(settings: &mut AppSettings) {
     if settings.llm_profiles.is_empty() {
         if let Some(llm) = settings.llm.clone() {
             let profile = LlmProfile {

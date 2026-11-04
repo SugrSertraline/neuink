@@ -182,11 +182,15 @@ async fn fetch_requested_local_entry_pdf() {
         &saved_entry::FetchEntryPdfRequest {
             root: root.into(),
             entry_id: id.clone(),
+            confirmed_duplicate_hash: None,
         },
         Some(&client),
     )
     .await
     .unwrap();
+    let saved_entry::FetchEntryPdfResult::Saved { entry: after } = after else {
+        panic!("expected saved PDF");
+    };
     assert!(after.pdf.is_some());
     assert_eq!(after.contents, before.contents);
     assert_eq!(after.tags, before.tags);

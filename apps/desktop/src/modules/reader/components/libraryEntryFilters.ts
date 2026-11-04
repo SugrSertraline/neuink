@@ -1,7 +1,7 @@
 import type { EntryReadingState, TagMeta } from '@/shared/types/domain';
 import type { LibraryEntry, LibraryView } from '../../library/components/LibrarySidebar';
-import { getReadingProgress, getReadingTimestamp } from './libraryReading';
 import { isUnparsedPdf } from '../../library/utils/libraryView';
+import { defaultLibrarySortDirection, sortLibraryEntries, type LibraryEntrySortDirection, type LibraryEntrySortKey, type LibraryEntrySourceKinds } from './libraryEntrySorting';
 
 export function buildTagBreadcrumb(tags: TagMeta[], activeTag: string | null) {
   if (!activeTag) {
@@ -25,9 +25,10 @@ export function filterEntries(
   libraryView: LibraryView,
   activeTagIds: Set<string> | null,
   query: string,
-  sortBy: string,
+  sortBy: LibraryEntrySortKey,
   recentReadingEntryIds: string[],
-  readingStates: Record<string, EntryReadingState>
+  readingStates: Record<string, EntryReadingState>,
+  sortOptions: { direction?: LibraryEntrySortDirection; sourceKindsByEntry?: LibraryEntrySourceKinds } = {}
 ) {
   const entriesInView = entries.filter((item) => {
     if (libraryView === 'pdf') {
@@ -69,25 +70,6 @@ export function filterEntries(
       })
     : entriesInTag;
 
-  return [...filtered].sort((left, right) => {
-    if (libraryView === 'recent') {
-      return recentReadingEntryIds.indexOf(left.id) - recentReadingEntryIds.indexOf(right.id);
-    }
-    if (sortBy === 'title') {
-      return left.title.localeCompare(right.title);
-    }
-    if (sortBy === 'parser') {
-      return left.status.localeCompare(right.status);
-    }
-    if (sortBy === 'reading-progress') {
-      return getReadingProgress(readingStates[right.id]) - getReadingProgress(readingStates[left.id]);
-    }
-    if (sortBy === 'last-read') {
-      return getReadingTimestamp(readingStates[right.id]) - getReadingTimestamp(readingStates[left.id]);
-    }
-    if (sortBy === 'reading-time') {
-      return (readingStates[right.id]?.total_active_ms ?? 0) - (readingStates[left.id]?.total_active_ms ?? 0);
-    }
-    return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
-  });
+  return sortLibraryEntries(filtered, { by: sortBy, direction: sortOptions.direction ?? defaultLibrarySortDirection(sortBy) },
+    readingStates, recentReadingEntryIds, sortOptions.sourceKindsByEntry);
 }

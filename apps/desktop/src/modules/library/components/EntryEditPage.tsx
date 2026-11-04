@@ -15,6 +15,7 @@ import { EntryFieldsEditor, fieldsFromRecord, fieldsToRecord } from './EntryFiel
 import { TagQuickPicker } from './TagQuickPicker';
 import { parseTagInput } from '../utils/tagSelection';
 import type { LibraryEntry } from './LibrarySidebar';
+import { ZoteroOrganizationInfo } from './ZoteroOrganizationInfo';
 
 export type EntryUpdate = { fields: Record<string, string>; tagPaths: string[]; title: string };
 function draftFrom(entry: LibraryEntry) {
@@ -107,7 +108,9 @@ export function EntryEditPage({ entry, tags, workspaceRoot, scopeKey, onUpdateEn
         <fieldset disabled={saving} className="grid min-w-0 gap-5">
           <div className="grid gap-2"><Label htmlFor={`${id}-title`}>标题</Label><Input autoFocus id={`${id}-title`} value={draft.title} onChange={event => update({ title: event.target.value })} /></div>
           <div className="grid gap-2"><Label htmlFor={`${id}-description`}>描述</Label><Textarea id={`${id}-description`} className="min-h-28 resize-y leading-6" value={draft.description} onChange={event => update({ description: event.target.value })} /></div>
-          <div className="grid gap-2"><Label htmlFor={`${id}-tags`}>标签</Label>
+          {entry.sourceInfo?.zotero_organization?.length ? <ZoteroOrganizationInfo draft organization={entry.sourceInfo.zotero_organization} tags={tags} tagPaths={selectedPaths}
+            onAddTagPath={path => update({ tagInput: [...new Set([...selectedPaths, path])].join(', ') })} /> : null}
+          <div className="grid gap-2"><Label htmlFor={`${id}-tags`}>我的标签</Label>
             <Input id={`${id}-tags`} placeholder="输入标签路径，以逗号分隔" value={draft.tagInput} onChange={event => update({ tagInput: event.target.value })} />
             {selectedPaths.length ? <div className="flex flex-wrap gap-1.5">{selectedPaths.map(path => <Button key={path} variant="secondary" size="xs" title={path} aria-label={`移除标签 ${path}`} onClick={() => update({ tagInput: selectedPaths.filter(item => item !== path).join(', ') })}><span className="max-w-64 truncate">{path}</span><X size={12} /></Button>)}</div> : null}
             <TagQuickPicker allowMultiple disabled={saving} selectedPaths={selectedPaths} tags={tags} onTogglePath={path => update({ tagInput: (selectedPaths.includes(path) ? selectedPaths.filter(item => item !== path) : [...selectedPaths, path]).join(', ') })} />

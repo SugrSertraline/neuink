@@ -2,6 +2,7 @@ import type { LlmProfile } from '@/shared/ipc/assistantApi';
 import { generateText, Output } from 'ai';
 import { createNeuinkModel, generationSettings } from './provider';
 import type { RunBudget } from '../agent-core';
+import { modelTaskOutputTokens } from './contextBudget';
 
 // The compaction prompt lives with the summarizer in `conversationSummary`, so there is no
 // second copy here for a caller to pass in and let the two triggers drift apart.
@@ -15,31 +16,54 @@ export async function runJsonModelTask(options: {
   system: string;
   prompt: string;
   abortSignal?: AbortSignal;
+  timeoutMs?: number;
   /** Compaction is a bookkeeping call, not a model reply: it still pays for its real tokens
    *  but must not consume a loop turn, which is reserved for the task itself. */
   chargeTurn?: boolean;
   onFinish?: (finishReason: string | undefined) => void;
 }) {
   options.abortSignal?.throwIfAborted();
+  const parameters = generationSettings(options.settings);
+  const maxOutputTokens = modelTaskOutputTokens({
+    maxContextLength: options.settings.max_context_length, maxOutputTokens: parameters.maxOutputTokens,
+    system: options.system, prompt: options.prompt
+  });
   if (options.chargeTurn === false) options.budget?.assertTokenBudget();
   else options.budget?.turn();
   await options.budget?.persist?.();
   const result = await generateText({
-    ...generationSettings(options.settings),
+    ...parameters,
+    maxOutputTokens,
     model: createNeuinkModel(options.settings),
     output: Output.json({ name: options.name, description: options.description }),
     system: options.system,
     prompt: options.prompt,
     abortSignal: options.abortSignal
-      ? AbortSignal.any([options.abortSignal, AbortSignal.timeout(120_000)])
-      : AbortSignal.timeout(120_000),
+      ? AbortSignal.any([options.abortSignal, AbortSignal.timeout(options.timeoutMs ?? 120_000)])
+      : AbortSignal.timeout(options.timeoutMs ?? 120_000),
     maxRetries: 0
   });
   options.abortSignal?.throwIfAborted();
   options.budget?.usage(result.usage?.inputTokens, result.usage?.outputTokens);
   options.onFinish?.(result.finishReason);
   await options.budget?.persist?.();
-  return result.output;
+  if (result.finishReason === 'length') {
+    throw new Error('模型输出达到长度上限，未生成完整结果。请提高该模型的最大输出 Token 后重试。');
+  }
+  if (result.finishReason === 'content-filter') {
+    throw new Error('模型服务未返回结果：输出被内容过滤。请检查模型设置或更换模型。');
+  }
+  try {
+    return result.output;
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AI_NoOutputGeneratedError') {
+      throw new Error('模型没有返回可用内容。请重试，或检查所选模型是否支持 JSON 输出。');
+    }
+    if (error instanceof Error && error.name === 'AI_NoObjectGeneratedError') {
+      throw new Error('模型返回的内容不是有效 JSON。请重试，或更换支持 JSON 输出的模型。');
+    }
+    throw error;
+  }
 }
 
 /** A fixed task that returns prose. Unlike `runJsonModelTask` it does not request JSON output;

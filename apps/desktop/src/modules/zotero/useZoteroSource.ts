@@ -1,6 +1,6 @@
 import { open } from '@tauri-apps/plugin-dialog';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { discoverZotero, getZoteroSettings, onZoteroSettingsChanged, saveZoteroSettings, type ZoteroSettings } from '@/shared/ipc/zoteroApi';
+import { discoverZotero, getZoteroSettings, onZoteroSettingsChanged, saveZoteroSettings, setZoteroEnabled, type ZoteroSettings } from '@/shared/ipc/zoteroApi';
 
 export function useZoteroSource(active: boolean, onSaved?: () => void) {
   const [settings, setSettings] = useState<ZoteroSettings | null>(null);
@@ -24,7 +24,7 @@ export function useZoteroSource(active: boolean, onSaved?: () => void) {
   }, []);
   const reload = useCallback(() => run(async current => {
     let value = await getZoteroSettings();
-    if (!value.data_directory) {
+    if (value.enabled !== false && !value.data_directory) {
       const found = await discoverZotero();
       if (!current()) return;
       if (found.length === 1) value = await saveZoteroSettings(found[0]);
@@ -54,6 +54,13 @@ export function useZoteroSource(active: boolean, onSaved?: () => void) {
   };
   return {
     settings, candidates, busy, error, notice, reload,
+    setEnabled: (enabled: boolean) => run(async current => {
+      const value = await setZoteroEnabled(enabled);
+      if (!current()) return;
+      latestSettings.current = value; setSettings(value);
+      setNotice(enabled ? '已启用 Zotero 自动同步和条目显示。' : '已关闭 Zotero 自动同步；已有副本保留，但在条目库隐藏。');
+      saved.current?.();
+    }),
     choose: (linked = false) => run(async current => {
       const path = await open({ directory: true, multiple: false, title: linked ? '选择链接附件基础目录' : '选择 Zotero 数据目录（包含 zotero.sqlite）' });
       if (typeof path !== 'string' || !current()) return;

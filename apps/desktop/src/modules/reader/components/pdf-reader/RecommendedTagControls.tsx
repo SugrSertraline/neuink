@@ -27,7 +27,7 @@ export function RecommendedTagControls({ error, appliedPaths, busy, open, recomm
         className="shrink-0" title={error ? '推荐标签生成或保存失败，点击查看' : '查看并添加推荐标签'}
         type="button" variant={open ? 'secondary' : 'outline'}>
         {busy ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Sparkles size={14} aria-hidden="true" />}
-        <span>{generating ? '生成中…' : '推荐标签'}</span>
+        <span className="pdf-reader-toolbar-label">{generating ? '生成中…' : '推荐标签'}</span>
         {pending.length > 0 ? <Badge variant="outline">{pending.length}</Badge> : null}
       </Button>
     </PopoverTrigger>

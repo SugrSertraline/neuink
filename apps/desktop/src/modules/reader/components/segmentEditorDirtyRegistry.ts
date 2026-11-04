@@ -67,8 +67,12 @@ export function hasAnyUnsavedSegmentEditors() {
 }
 
 export function hasUnsavedEntrySegmentEditors(entryId: string) {
-  return [...dirtyOwnersByScope.keys()].some((scope) =>
-    ['entry-overview', 'pdf', 'reflow', 'segment-records'].some((kind) => scope === `${kind}:${entryId}` || scope.endsWith(`/${kind}:${entryId}`)));
+  return entryEditorScopes(entryId).length > 0;
+}
+
+function entryEditorScopes(entryId: string) {
+  return [...dirtyOwnersByScope.keys()].filter(scope => ['entry-overview', 'pdf', 'reflow', 'segment-records'].some(kind =>
+    scope === `${kind}:${entryId}` || scope.startsWith(`${kind}:${entryId}/`) || scope.endsWith(`/${kind}:${entryId}`) || scope.includes(`/${kind}:${entryId}/`)));
 }
 
 export async function saveSegmentEditorsBeforeClose(scopeKey: string) {
@@ -98,6 +102,12 @@ export async function saveAllSegmentEditorsBeforeWorkspaceChange() {
     if (!await saveSegmentEditorsBeforeClose(scope)) return false;
   }
   return !hasAnyUnsavedSegmentEditors();
+}
+
+export async function saveEntrySegmentEditorsBeforeCopy(entryId: string) {
+  const scopes = entryEditorScopes(entryId);
+  for (const scope of scopes) if (!await saveSegmentEditorsBeforeClose(scope)) return false;
+  return !hasUnsavedEntrySegmentEditors(entryId);
 }
 
 export function discardSegmentEditorsBeforeClose(scopeKey: string) {

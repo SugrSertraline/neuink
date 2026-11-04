@@ -1,12 +1,12 @@
 import { AppearanceIcon } from '@/shared/components/AppearanceIcon';
 import {
   AlertTriangle,
+  EyeOff,
   FileText,
   FolderTree,
   FilterX,
   History,
   Plus,
-  Download,
   RefreshCw,
   Trash2
 } from 'lucide-react';
@@ -17,6 +17,8 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/shared/hooks/useToast';
 import type { ContentItem, TagMeta } from '@/shared/types/domain';
+import type { EntrySourceInfo } from '@/shared/ipc/workspaceApi';
+import { isEntrySourceHidden } from '../utils/sourceVisibility';
 
 import { EntryContentSidebar } from './EntryContentSidebar';
 import type { EntryUpdate } from './EntryEditPage';
@@ -41,6 +43,7 @@ export type LibraryEntryStatus =
 export type { LibraryView } from '../utils/libraryView';
 
 export type LibraryEntry = {
+  sourceInfo?: EntrySourceInfo;
   id: string;
   contents: ContentItem[];
   title: string;
@@ -62,6 +65,15 @@ type LibrarySidebarProps = {
   activeView: LibraryView;
   entries: LibraryEntry[];
   trashItemCount: number;
+  hiddenSourceCount?: number;
+  zoteroEnabled?: boolean;
+  mineruEnabled?: boolean;
+  zoteroNoteIds?: string[];
+  hiddenActionEntryId?: string | null;
+  onToggleSourceHidden?: (entryId: string) => void;
+  onApplyEntryTagPaths?: (entryId: string, paths: string[]) => Promise<unknown> | unknown;
+  sourceUpdateCount?: number;
+  onReviewSourceChanges?: () => void;
   error: string | null;
   entryExplorerOpen: boolean;
   status: 'loading' | 'ready' | 'error';
@@ -78,7 +90,6 @@ type LibrarySidebarProps = {
   onRenameMarkdownNote: (entryId: string, noteId: string, title: string) => Promise<unknown> | unknown;
   onRenamePdfDisplayName: (entryId: string, fileName: string) => Promise<unknown> | unknown;
   onOpenCreateEntryTab: () => void;
-  onOpenImportTab?: () => void;
   onOpenTagEditorTab: () => void;
   onSelectContent: (contentId: string) => void;
   onOpenTagDetails: (tagId: string) => void;
@@ -112,6 +123,15 @@ export function LibrarySidebar({
   activeContentId,
   entries,
   trashItemCount,
+  hiddenSourceCount = 0,
+  zoteroEnabled = true,
+  mineruEnabled = false,
+  zoteroNoteIds,
+  hiddenActionEntryId,
+  onToggleSourceHidden,
+  onApplyEntryTagPaths,
+  sourceUpdateCount = 0,
+  onReviewSourceChanges,
   error,
   entryExplorerOpen,
   selectedEntry,
@@ -127,7 +147,6 @@ export function LibrarySidebar({
   onRenameMarkdownNote,
   onRenamePdfDisplayName,
   onOpenCreateEntryTab,
-  onOpenImportTab,
   onOpenTagEditorTab,
   onSelectContent,
   onOpenTagDetails,
@@ -186,9 +205,16 @@ export function LibrarySidebar({
         <div className="flex min-w-0 items-center gap-1">
           <span>{entryExplorerOpen ? '条目详情' : '条目库'}</span>
         </div>
+        <div className="flex items-center gap-1">
+          {entryExplorerOpen && Boolean(selectedEntry?.sourceInfo?.kinds.length) && selectedEntry && onToggleSourceHidden ? <Button size="xs" variant="ghost"
+            disabled={hiddenActionEntryId === selectedEntry.id} onClick={() => onToggleSourceHidden(selectedEntry.id)}
+            aria-label={isEntrySourceHidden(selectedEntry.sourceInfo) ? '恢复显示当前来源论文' : '从条目库隐藏当前来源论文'}>
+            {hiddenActionEntryId === selectedEntry.id ? '正在保存…' : isEntrySourceHidden(selectedEntry.sourceInfo) ? '恢复显示' : '隐藏'}
+          </Button> : null}
+          {(zoteroEnabled || mineruEnabled) && entryExplorerOpen ? <Button size="icon-sm" variant="ghost" aria-label={`查看已隐藏论文 ${hiddenSourceCount}`} title="查看已隐藏的来源论文" onClick={() => onSelectView('hidden')}><EyeOff size={15} aria-hidden="true" /></Button> : null}
+        </div>
         {!entryExplorerOpen ? (
           <div className="flex items-center gap-1">
-          {onOpenImportTab && <Button disabled={status !== 'ready'} size="icon-sm" variant="ghost" title="从其他来源导入" aria-label="从其他来源导入" onClick={onOpenImportTab}><AppearanceIcon kind="import"><Download size={15} aria-hidden="true" /></AppearanceIcon></Button>}
           <Button
             disabled={status !== 'ready'}
             size="icon-sm"
@@ -204,8 +230,11 @@ export function LibrarySidebar({
 
       {entryExplorerOpen && selectedEntry ? (
         <EntryContentSidebar
+          key={selectedEntry.id}
           activeContentId={activeContentId}
           entry={selectedEntry}
+          zoteroNoteIds={zoteroNoteIds}
+          onApplyEntryTagPaths={onApplyEntryTagPaths}
           tags={tags}
           tagNotes={tagNotes}
           onOpenTrash={() => onSelectView('trash')}
@@ -244,6 +273,8 @@ export function LibrarySidebar({
           >
             <SidebarRow active={activeView === 'all'} icon={<FolderTree size={14} />} label={LIBRARY_VIEW_LABELS.all} value={entries.length} onClick={() => onSelectView('all')} />
             <SidebarRow active={activeView === 'recent'} icon={<History size={14} />} label={LIBRARY_VIEW_LABELS.recent} value={recentReadingEntryIds.filter((id) => entries.some((entry) => entry.id === id)).length} onClick={() => onSelectView('recent')} />
+            {zoteroEnabled || mineruEnabled ? <SidebarRow active={activeView === 'hidden'} icon={<EyeOff size={14} />} label={LIBRARY_VIEW_LABELS.hidden} value={hiddenSourceCount} onClick={() => onSelectView('hidden')} /> : null}
+            {sourceUpdateCount > 0 && onReviewSourceChanges ? <SidebarRow icon={<RefreshCw size={14} />} label="来源动态" value={sourceUpdateCount} onClick={onReviewSourceChanges} /> : null}
             <SidebarRow active={activeView === 'trash'} icon={<Trash2 size={14} />} label={LIBRARY_VIEW_LABELS.trash} value={trashItemCount + deletedTagNoteCount} onClick={() => onSelectView('trash')} />
           </SidebarPanel>
           <SidebarPanel name="解析" label="解析" weight={1.25} open={openSections.parsing} onToggle={() => toggleSection('parsing')}>

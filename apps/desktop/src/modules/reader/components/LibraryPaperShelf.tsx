@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Eye, PanelRight } from 'lucide-react';
+import { Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { LibraryPaperContextMenu } from './LibraryPaperContextMenu';
@@ -10,12 +10,13 @@ import { AssetSummary, StatusBadge } from './EntryDisplay';
 import { BookSpine } from './book/BookSpine';
 import { BookCover } from './book/BookCover';
 import { PdfParseButton } from '@/modules/library/components/PdfParseButton';
+import { LibrarySelectionCheckbox } from './LibrarySelectionCheckbox';
 
 
 
 /** A presentation of the existing filtered collection, with no data or action ownership. */
 export function LibraryPaperShelf(props: LibraryPaperCollectionProps & { display?: 'spines' | 'shelf' }) {
-  const { active, entries, status, emptyMessage, readingStates, selectedEntryId, draggingEntryId, getRowProps } = props;
+  const { active, entries, status, emptyMessage, readingStates, selectedEntryId, draggingEntryId, getRowProps, selection } = props;
   const spines = props.display === 'spines';
   const rowHeight = spines ? 282 : 340;
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -83,9 +84,10 @@ export function LibraryPaperShelf(props: LibraryPaperCollectionProps & { display
                 }
                 rowProps.onKeyDown?.(event);
               }}
-              data-entry-id={entry.id} data-allow-context-menu="true" data-state={entry.id === selectedEntryId ? 'selected' : undefined}
-              className={cn('library-shelf-entry', entry.id === draggingEntryId && 'is-dragging')}>
-              {spines ? <BookSpine id={entry.id} title={entry.title} topic={entry.tags[0] || '研究札记'} progress={progressLabel} /> : <BookCover id={entry.id} title={entry.title} topic={entry.tags[0]?.split('/').slice(-1)[0] || '研究札记'} bookmark={progress > 0} enabled={active && !draggingEntryId}/>}
+              data-entry-id={entry.id} data-allow-context-menu="true" data-state={(selection?.enabled ? selection.ids.has(entry.id) : entry.id === selectedEntryId) ? 'selected' : undefined}
+              className={cn('library-shelf-entry relative', entry.id === draggingEntryId && 'is-dragging')}>
+              {selection?.enabled && <div className="absolute left-1 top-1 z-10 rounded bg-background p-1"><LibrarySelectionCheckbox entryId={entry.id} title={entry.title} selection={selection} /></div>}
+              {spines ? <BookSpine id={entry.id} title={entry.title} topic={entry.tags[0] || '研究札记'} progress={progressLabel} /> : <BookCover id={entry.id} title={entry.title} topic={entry.tags[0]?.split('/').slice(-1)[0] || '研究札记'} bookmark={progress > 0} enabled={active && !draggingEntryId && !selection?.enabled}/>}
               {!spines && <div className="library-book-caption">
                 <div className="library-book-progress" title={`${progressLabel} · ${formatReadingDuration(state?.total_active_ms ?? 0)}`}>
                   <span>{progressLabel}</span>
@@ -97,8 +99,6 @@ export function LibraryPaperShelf(props: LibraryPaperCollectionProps & { display
                   <div className="min-w-0 flex-1"><AssetSummary entry={entry} compact /></div>
                   <Button variant="ghost" size="icon-xs" aria-label={`打开 ${entry.title}`} title="打开条目详情"
                     onClick={event => { event.stopPropagation(); props.onOpen(entry.id); }}><Eye aria-hidden="true" /></Button>
-                  <Button variant="ghost" size="icon-xs" aria-label={`在右侧打开 ${entry.title}`} title="在右侧分屏打开"
-                    onClick={event => { event.stopPropagation(); props.onOpenInSidePane(entry.id); }}><PanelRight aria-hidden="true" /></Button>
                 </div>
                 <div className="flex items-center justify-between gap-2">
                   {entry.status !== 'Parsed' && entry.status !== 'No PDF' ? <StatusBadge status={entry.status} /> : null}

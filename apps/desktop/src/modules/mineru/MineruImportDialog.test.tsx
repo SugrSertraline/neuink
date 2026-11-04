@@ -2,6 +2,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MineruSnapshot } from '@/shared/ipc/mineruApi';
+import { PdfDuplicateReviewContext } from '@/shared/lib/pdfDuplicate';
+import { checkPdfDuplicate } from '@/shared/ipc/workspaceApi';
 import { MineruImportDialog } from './MineruImportDialog';
 
 const api = vi.hoisted(() => ({
@@ -11,6 +13,7 @@ const api = vi.hoisted(() => ({
 const pick = vi.hoisted(() => vi.fn());
 const fileManager = vi.hoisted(() => ({ openPathInFileManager: vi.fn() }));
 vi.mock('@/shared/ipc/mineruApi', () => api);
+vi.mock('@/shared/ipc/workspaceApi', async importOriginal => ({ ...(await importOriginal<typeof import('@/shared/ipc/workspaceApi')>()), checkPdfDuplicate: vi.fn() }));
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: pick }));
 vi.mock('@/shared/ipc/assistantApi', () => fileManager);
 
@@ -30,10 +33,24 @@ beforeEach(() => {
   api.importMineruItem.mockImplementation(async (_root, _snapshot, id) => ({ status: 'imported', entry_id: `entry-${id}`, title: id }));
   api.cancelMineruSearch.mockResolvedValue(undefined);
   fileManager.openPathInFileManager.mockResolvedValue(undefined);
+  vi.mocked(checkPdfDuplicate).mockResolvedValue(null);
 });
 afterEach(cleanup);
 
 describe('MinerU local import', () => {
+  it('keeps a cancelled duplicate selectable and accepts the confirmed hash on retry', async () => {
+    const duplicate = { entryId: 'existing', title: 'Original paper', fileName: 'original.pdf', contentHash: 'same-hash', inTrash: false };
+    vi.mocked(checkPdfDuplicate).mockResolvedValue(duplicate);
+    const confirm = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    render(<PdfDuplicateReviewContext.Provider value={confirm}><MineruImportDialog root="workspace" onClose={vi.fn()} /></PdfDuplicateReviewContext.Provider>);
+    await screen.findByText('First paper');
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 First paper' }));
+    fireEvent.click(screen.getByRole('button', { name: '导入所选' }));
+    await screen.findByText('已取消，可重新导入');
+    expect(api.importMineruItem).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '导入所选' }));
+    await waitFor(() => expect(api.importMineruItem).toHaveBeenCalledWith('workspace', 'snapshot', 'first', 'same-hash'));
+  });
   it('reads the configured directory automatically and imports only selected results with PDFs', async () => {
     const refreshed = vi.fn();
     render(<MineruImportDialog root="workspace" onClose={vi.fn()} onImported={refreshed} />);

@@ -58,6 +58,7 @@ import { listTagArchives, TAG_ARCHIVES_CHANGED } from '../ipc/tagReadingApi';
 import { createWorkspaceReadScope } from './workspaceReadScope';
 import { onResearchLibraryChanged } from '../ipc/researchApi';
 import { onZoteroLibraryChanged, zoteroCatalogTags } from '../ipc/zoteroApi';
+import type { ConfirmPdfDuplicate } from '../lib/pdfDuplicate';
 
 type WorkspaceStatus = 'loading' | 'ready' | 'error';
 
@@ -82,7 +83,7 @@ export type RefreshParsingEntriesResult = {
   updatedEntries: EntryMeta[];
 };
 
-export function useWorkspace() {
+export function useWorkspace(confirmPdfDuplicate?: ConfirmPdfDuplicate) {
   const [readScope] = useState(createWorkspaceReadScope);
   useEffect(() => () => readScope.open(null), [readScope]);
   const [root, setRoot] = useState<string | null>(null);
@@ -333,6 +334,7 @@ export function useWorkspace() {
     createMarkdownSourceLink,
     importMarkdownNoteSegmentAsset
   } = useWorkspaceResourceActions({
+    confirmPdfDuplicate,
     entries,
     refreshAnnotationCatalog,
     refreshEntries,

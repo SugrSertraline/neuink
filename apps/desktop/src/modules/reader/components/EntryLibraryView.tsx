@@ -1,8 +1,10 @@
 import {
   AlertTriangle,
   CalendarDays,
+  EyeOff,
   FilePlus2,
   Network,
+  RefreshCw,
   Trash2
 } from 'lucide-react';
 import {
@@ -29,6 +31,7 @@ import { useLibraryReadingStates } from '../useLibraryReadingStates';
 import type { LibraryEntry, LibraryView } from '../../library/components/LibrarySidebar';
 import { getLibraryViewTitle } from '../../library/utils/libraryView';
 import {
+  buildTagPathById,
   buildTagTree,
   collectDescendantTagIds,
   flattenTagTree
@@ -44,16 +47,25 @@ import type { EntryLibraryColumnId } from './useEntryLibraryColumnWidths';
 import { ENTRY_LIBRARY_COLUMNS } from './LibraryPaperTable';
 import { LibraryPapers } from './LibraryPapers';
 import { LibraryTagNavigation } from './LibraryTagNavigation';
-import { LibraryPaperToolbar } from './LibraryPaperToolbar';
+import { LibraryPaperToolbar, type PaperSource } from './LibraryPaperToolbar';
 import { PointerPreview } from '@/components/ui/pointer-preview';
 import { useBookOpening } from './book/BookOpeningProvider';
 import { useLibraryEntryDrag } from './useLibraryEntryDrag';
 import { buildTagBreadcrumb, filterEntries } from './libraryEntryFilters';
 import { useAppearance } from '@/shared/components/AppearanceProvider';
+import type { LibrarySourceCatalog } from '@/modules/library/useLibrarySourceCatalog';
+import type { LibrarySourceSync } from '@/modules/import/useLibrarySourceSync';
+import { isEntrySourceHidden, isSourceEntryVisible } from '@/modules/library/utils/sourceVisibility';
 import type { PdfParseAction } from '@/modules/library/components/PdfParseButton';
+import { useLibrarySelection } from './useLibrarySelection';
+import { LibrarySelectionActions } from './LibrarySelectionActions';
+import { defaultLibrarySortDirection, type LibraryEntrySort } from './libraryEntrySorting';
 
 type EntryLibraryViewProps = {
+  onApplyEntryTagPaths?: (entryId: string, paths: string[]) => Promise<unknown> | unknown;
   pdfParseAction?: PdfParseAction;
+  librarySourceSync?: LibrarySourceSync;
+  librarySourceCatalog?: LibrarySourceCatalog;
   onOpenDailyDashboard: () => void;
   section?: 'papers' | 'notes';
   onSectionChange?: (section: 'papers' | 'notes') => void;
@@ -103,7 +115,10 @@ const ENTRY_LIBRARY_TAG_SCOPE_STORAGE_KEY = 'neuink.entryLibraryTagScope';
 const ENTRY_LIBRARY_COLUMNS_STORAGE_KEY = 'neuink.entryLibraryColumns.v1';
 export const ENTRY_LIBRARY_PINNED_EDGES_STORAGE_KEY = 'neuink.entryLibraryPinnedEdges.v1';
 export function EntryLibraryView({
+  onApplyEntryTagPaths,
   pdfParseAction,
+  librarySourceSync,
+  librarySourceCatalog,
   onOpenDailyDashboard,
   onOpenRelations,
   section: controlledSection, onSectionChange, onUpdateTagDescription, onOpenTagNote, onOpenTrash,
@@ -144,9 +159,20 @@ export function EntryLibraryView({
   useEffect(() => setLocalSection('papers'), [activeTag]);
   const noteCount = notesModel && !notesModel.loading && !notesModel.error ? notesModel.catalog.notes.filter(note => !note.deleted_at && note.target.owner.kind === 'tag_reading' && note.target.owner.tag_id === activeTag).length : null;
   const [query, setQuery] = useState('');
-  const [sortBy, setSortBy] = useState('recent');
-  const [rootScope, setRootScope] = useState<'all' | 'unclassified'>('all');
-  useEffect(() => setRootScope('all'), [activeTag, libraryView, workspaceRoot, filterResetKey]);
+  const [explicitSort, setSort] = useState<LibraryEntrySort | null>(null);
+  const sort: LibraryEntrySort = explicitSort ?? { by: libraryView === 'recent' ? 'recent' : 'created', direction: 'desc' };
+  const { by: sortBy, direction: sortDirection } = sort;
+  const [sourceFilter, setSourceFilter] = useState<PaperSource>('all');
+  const entrySources = librarySourceCatalog?.sources ?? {};
+  const enabledSources = librarySourceSync?.enabledSources ?? { zotero: true, mineru: true };
+  const selectedSource = (sourceFilter === 'zotero' && !enabledSources.zotero) || (sourceFilter === 'mineru' && !enabledSources.mineru) ? 'all' : sourceFilter;
+  const [hidingEntryId, setHidingEntryId] = useState<string | null>(null);
+  const sourceAvailable = libraryView !== 'trash' && status === 'ready' && Boolean(workspaceRoot);
+  const isHiddenView = libraryView === 'hidden';
+  useEffect(() => setSourceFilter('all'), [workspaceRoot, filterResetKey]);
+  useEffect(() => {
+    if ((sourceFilter === 'zotero' && !enabledSources.zotero) || (sourceFilter === 'mineru' && !enabledSources.mineru)) setSourceFilter('all');
+  }, [sourceFilter, enabledSources.zotero, enabledSources.mineru]);
   const [showTagNavigation, setShowTagNavigation] = useState(readStoredShowTagNavigation);
   const [tagScope, setTagScope] = useState<EntryLibraryTagScope>(readStoredEntryLibraryTagScope);
   const [visibleColumns, setVisibleColumns] = useState<Set<EntryLibraryColumnId>>(readStoredEntryLibraryColumns);
@@ -163,7 +189,7 @@ export function EntryLibraryView({
   const isTrashView = libraryView === 'trash';
   useEffect(() => {
     setQuery('');
-    setSortBy('recent');
+    setSort(null);
   }, [filterResetKey]);
   const visibleEntries = isTrashView ? trashedEntries : entries;
   const activeTagIds = useMemo(
@@ -171,16 +197,28 @@ export function EntryLibraryView({
     [activeTag, tagScope, tags]
   );
   const entriesInCurrentView = useMemo(
-    () => filterEntries(visibleEntries, libraryView, null, '', 'recent', recentReadingEntryIds, readingStates),
-    [libraryView, readingStates, recentReadingEntryIds, visibleEntries]
+    () => filterEntries(visibleEntries.filter(item => isSourceEntryVisible(entrySources[item.id], enabledSources)), libraryView, null, '', 'recent', recentReadingEntryIds, readingStates),
+    [libraryView, readingStates, recentReadingEntryIds, visibleEntries, entrySources, enabledSources.zotero, enabledSources.mineru]
   );
-  const unclassifiedEntries = useMemo(() => entriesInCurrentView.filter(item => item.tagIds.length === 0), [entriesInCurrentView]);
+  const externalEntryIds = useMemo(() => new Set(Object.entries(entrySources).filter(([, source]) => source.kinds.length > 0).map(([id]) => id)), [entrySources]);
+  const protectedTrashEntries = new Set(trashItems.filter(item => item.kind === 'entry' && (item.source_managed || externalEntryIds.has(item.entry_id))).map(item => item.entry_id));
+  const purgeableTrashItems = trashItems.filter(item => !protectedTrashEntries.has(item.entry_id));
+  const hiddenEntryCount = entries.filter(item => isEntrySourceHidden(entrySources[item.id]) && isSourceEntryVisible(entrySources[item.id], enabledSources)).length;
+  const sourceKindsByEntry = useMemo(() => Object.fromEntries(Object.entries(entrySources).map(([id, source]) => [id, source.kinds.filter(kind => enabledSources[kind])])), [entrySources, enabledSources.zotero, enabledSources.mineru]);
+  const sourceHiddenByEntry = useMemo(() => Object.fromEntries(Object.entries(entrySources).map(([id, source]) => [id, isEntrySourceHidden(source)])), [entrySources]);
   const filteredEntries = useMemo(
-    () => filterEntries(!activeTag && rootScope === 'unclassified' ? unclassifiedEntries : entriesInCurrentView,
-      libraryView, activeTagIds, query, sortBy, recentReadingEntryIds, readingStates),
-    [activeTag, activeTagIds, entriesInCurrentView, libraryView, query, readingStates, recentReadingEntryIds, rootScope, sortBy, unclassifiedEntries]
+    () => filterEntries(entriesInCurrentView.filter(item => {
+        const source = entrySources[item.id];
+        if (isHiddenView) return isEntrySourceHidden(source);
+        if (isEntrySourceHidden(source)) return false;
+        return !sourceAvailable || selectedSource === 'all' || (selectedSource === 'local' ? !source?.kinds.length : source?.kinds.includes(selectedSource));
+      }),
+      libraryView, activeTagIds, query, sortBy, recentReadingEntryIds, readingStates, { direction: sortDirection, sourceKindsByEntry }),
+    [activeTagIds, entriesInCurrentView, libraryView, query, readingStates, recentReadingEntryIds, sortBy, sortDirection, sourceKindsByEntry, sourceAvailable, selectedSource, entrySources, isHiddenView]
   );
-  const tagTree = useMemo(() => buildTagTree(tags, entriesInCurrentView), [entriesInCurrentView, tags]);
+  const selectionContext = JSON.stringify([workspaceRoot, activeTag, libraryView, section, status, filterResetKey]);
+  const selection = useLibrarySelection(selectionContext, JSON.stringify([query, selectedSource, tagScope]), filteredEntries);
+  const tagTree = useMemo(() => buildTagTree(tags, entriesInCurrentView.filter(item => isEntrySourceHidden(entrySources[item.id]) === isHiddenView)), [entriesInCurrentView, tags, entrySources, isHiddenView]);
   const currentFolderNode = useMemo(
     () => activeTag ? flattenTagTree(tagTree).find(node => node.id === activeTag) ?? null : null,
     [activeTag, tagTree]
@@ -188,6 +226,7 @@ export function EntryLibraryView({
   const visibleFolderNodes = activeTag ? currentFolderNode?.children ?? [] : tagTree;
   const folderBreadcrumb = useMemo(() => buildTagBreadcrumb(tags, activeTag), [activeTag, tags]);
   const activeJobs = entries.filter((item) => ['Queued', 'Uploading', 'Parsing'].includes(item.status)).length;
+  const sourceAlertCount = (librarySourceSync?.changes.length ?? 0) + (librarySourceSync?.issues.length ?? 0) + (librarySourceSync?.error ? 1 : 0) + (librarySourceSync?.truncated ? 1 : 0);
   const activeTagMeta = !isTrashView && activeTag ? tags.find((tag) => tag.id === activeTag) : null;
   const viewTitle = getLibraryViewTitle(libraryView);
   const pageTitle = !isTrashView && activeTag
@@ -197,7 +236,6 @@ export function EntryLibraryView({
     status === 'loading' ? '正在加载…' : status === 'error' ? '加载失败' : isTrashView
       ? '条目、标签与笔记'
       : `${query.trim() ? '搜索结果：' : ''}${filteredEntries.length} 个条目`,
-    !isTrashView && !activeTag && rootScope === 'unclassified' ? '未分类' : null,
     activeTagMeta
       ? tagScope === 'descendants' ? '含子标签' : '仅当前标签'
       : null
@@ -236,16 +274,16 @@ export function EntryLibraryView({
   };
 
   const confirmEmptyTrash = async () => {
-    if (trashItems.length === 0) {
+    if (purgeableTrashItems.length === 0) {
       setEmptyTrashConfirmOpen(false);
       return;
     }
     setEmptyTrashBusy(true);
     try {
-      for (const item of trashItems.filter((item) => item.kind === 'entry')) {
+      for (const item of purgeableTrashItems.filter((item) => item.kind === 'entry')) {
         await onPurgeEntry(item.entry_id);
       }
-      for (const item of trashItems.filter((item) => item.kind !== 'entry' && item.restorable)) {
+      for (const item of purgeableTrashItems.filter((item) => item.kind !== 'entry' && item.restorable)) {
         await onPurgeTrashItem(item.entry_id, item.trash_id);
       }
       setEmptyTrashConfirmOpen(false);
@@ -317,46 +355,73 @@ export function EntryLibraryView({
     }
   };
 
+  const toggleSourceHidden = async (entry: LibraryEntry) => {
+    if (!workspaceRoot || hidingEntryId) return;
+    const hidden = !isEntrySourceHidden(entrySources[entry.id]);
+    setHidingEntryId(entry.id);
+    try {
+      if (!librarySourceCatalog) return;
+      await librarySourceCatalog.setHidden(entry.id, hidden);
+      notify({ tone: 'success', title: hidden ? '已隐藏来源论文' : '已恢复显示', description: hidden ? '本地副本保留，可通过“已隐藏”查看并恢复。' : entry.title,
+        action: hidden ? <Button size="xs" variant="outline" onClick={() => onSelectView('hidden')}>查看已隐藏</Button> : undefined });
+    } catch (caught) {
+      notify({ tone: 'danger', title: '保存显示状态失败', description: String(caught) });
+    } finally { setHidingEntryId(null); }
+  };
+
   const content = (
     <>
-      <Tabs value={section} onValueChange={changeSection} data-material="library-workspace" className="h-full min-h-0 min-w-0 gap-0 overflow-hidden bg-card">
+      <Tabs value={section} onValueChange={changeSection} onKeyDown={selection.onKeyDown} data-material="library-workspace" className="h-full min-h-0 min-w-0 gap-0 overflow-hidden bg-card">
           <LibraryHeading title={pageTitle} summary={pageSummary} tag={activeTagMeta} ancestors={folderBreadcrumb.slice(0, -1)} workspaceRoot={workspaceRoot}
             hasTagContext={!isTrashView && Boolean(activeTag)} view={libraryView} onSelectView={onSelectView} onClearFilters={onClearFilters} onManageTags={onManageTags}
             disabled={status !== 'ready'} onNavigate={onSelectTag} onDescription={onUpdateTagDescription}
-            actions={isTrashView ? <Button disabled={!trashItems.length || emptyTrashBusy} size="default" variant="destructive" onClick={() => setEmptyTrashConfirmOpen(true)}>清空条目与记录</Button> : <>
+            actions={isTrashView ? <Button disabled={!purgeableTrashItems.length || emptyTrashBusy} size="default" variant="destructive" onClick={() => setEmptyTrashConfirmOpen(true)}>清空条目与记录</Button> : <>
+              {(enabledSources.zotero || enabledSources.mineru) && <Button size="default" variant={isHiddenView ? 'secondary' : 'ghost'} className="gap-1.5 text-xs" aria-label={`已隐藏 ${hiddenEntryCount}`} onClick={() => onSelectView('hidden')}>
+                <EyeOff size={14} aria-hidden="true" />已隐藏{hiddenEntryCount > 0 ? ` ${hiddenEntryCount}` : ''}
+              </Button>}
               {activeTagMeta ? <TabsList aria-label="标签内容" className="shrink-0">
                 <TabsTrigger value="papers" className="px-2 text-xs">论文</TabsTrigger>
                 <TabsTrigger value="notes" className="px-2 text-xs" disabled={!onOpenTagNote}>标签笔记{noteCount === null ? '' : ` ${noteCount}`}</TabsTrigger>
               </TabsList> : null}
-              {onOpenRelations ? <Button size="default" variant="outline" aria-label="关系图" title="关系图" className="@max-[700px]/library-heading:w-8 @max-[700px]/library-heading:px-0" onClick={onOpenRelations}><Network size={14} aria-hidden="true" /><span className="@max-[700px]/library-heading:hidden">关系图</span></Button> : null}
-              <Button aria-label="阅读统计" title="在每日看板查看全资料库阅读统计" variant="outline"
-                className="@max-[700px]/library-heading:w-8 @max-[700px]/library-heading:px-0"
+              {onOpenRelations ? <Button size="default" variant="ghost" aria-label="关系图" title="关系图" className="gap-1.5 text-xs text-muted-foreground @max-[900px]/library-heading:w-8 @max-[900px]/library-heading:px-0" onClick={onOpenRelations}><Network size={14} aria-hidden="true" /><span className="@max-[900px]/library-heading:hidden">关系图</span></Button> : null}
+              {librarySourceSync && <Button size="default" variant="ghost" aria-label={sourceAlertCount ? `查看 ${sourceAlertCount} 项来源动态` : '检查 Zotero 和 MinerU 来源'} title="检查 Zotero 和 MinerU 来源" disabled={librarySourceSync.running} className="gap-1.5 text-xs text-muted-foreground @max-[900px]/library-heading:w-8 @max-[900px]/library-heading:px-0" onClick={sourceAlertCount && librarySourceSync.review ? librarySourceSync.review : librarySourceSync.refresh}><RefreshCw size={14} className={librarySourceSync.running ? 'animate-spin' : undefined} aria-hidden="true" /><span className="@max-[900px]/library-heading:hidden">{sourceAlertCount ? `来源动态 ${sourceAlertCount}` : '检查来源'}</span></Button>}
+              <Button size="default" aria-label="阅读统计" title="在每日看板查看全资料库阅读统计" variant="ghost"
+                className="gap-1.5 text-xs text-muted-foreground @max-[900px]/library-heading:w-8 @max-[900px]/library-heading:px-0"
                 onClick={onOpenDailyDashboard}>
                 <CalendarDays size={14} aria-hidden="true" />
-                <span className="@max-[700px]/library-heading:hidden">阅读统计</span>
+                <span className="@max-[900px]/library-heading:hidden">阅读统计</span>
               </Button>
               <div hidden={section !== 'papers'}>
-                <Button size="default" aria-label="创建条目" title="创建条目" className="@max-[700px]/library-heading:w-8 @max-[700px]/library-heading:px-0" onClick={onOpenCreateEntryTab}><FilePlus2 size={14} aria-hidden="true" /><span className="@max-[700px]/library-heading:hidden">创建条目</span></Button>
+                <Button size="default" aria-label="创建条目" title="创建条目" className="gap-1.5 text-xs" onClick={onOpenCreateEntryTab}><FilePlus2 size={14} aria-hidden="true" /><span>创建条目</span></Button>
               </div>
               {activeTagMeta && onOpenTagNote ? <div hidden={section !== 'notes'}>
-                <CreateTagNoteButton key={`${workspaceRoot}:${activeTagMeta.id}`} tagId={activeTagMeta.id} tagLabel={folderBreadcrumb.map(tag => tag.name).join(' / ')} scope={`library/tag:${activeTagMeta.id}`} disabled={status !== 'ready'} onOpen={onOpenTagNote} className="@max-[700px]/library-heading:w-8 @max-[700px]/library-heading:px-0" />
+                <CreateTagNoteButton key={`${workspaceRoot}:${activeTagMeta.id}`} tagId={activeTagMeta.id} tagLabel={folderBreadcrumb.map(tag => tag.name).join(' / ')} scope={`library/tag:${activeTagMeta.id}`} disabled={status !== 'ready'} onOpen={onOpenTagNote} />
               </div> : null}
             </>} />
           <TabsContent forceMount value="papers" aria-hidden={section !== 'papers' || undefined} className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden">
+            {librarySourceCatalog?.error && !isTrashView ? <div role="alert" className="flex shrink-0 items-center gap-2 border-b px-3 py-2 text-xs text-destructive">
+              <span>来源信息读取失败，可能导致隐藏和恢复操作不可用。</span>{librarySourceCatalog.reload && <Button size="xs" variant="outline" onClick={librarySourceCatalog.reload}>重试读取来源</Button>}
+            </div> : null}
             {!isTrashView && showTagNavigation && status === 'ready' ? <LibraryTagNavigation
               key={activeTag ?? 'root'} nested={Boolean(activeTag)} nodes={visibleFolderNodes}
               onOpen={onSelectTag} onAssignEntryToTag={assignEntryToTag} /> : null}
-            {!isTrashView ? <LibraryPaperToolbar query={query} sortBy={sortBy}
-              scope={activeTagMeta ? tagScope : !activeTag ? rootScope : null}
-              unclassifiedCount={status === 'ready' ? unclassifiedEntries.length : null}
+            {!isTrashView ? <LibraryPaperToolbar query={query} sortBy={sortBy} sortDirection={sortDirection}
+              recentOrderAvailable={libraryView === 'recent'}
+              onSortDirectionChange={direction => setSort({ by: sortBy, direction })}
+              selection={{ enabled: selection.enabled, disabled: status !== 'ready', onToggle: selection.enabled ? selection.exit : selection.enter }}
+              sourceFilter={sourceAvailable && !isHiddenView ? { value: selectedSource, onChange: setSourceFilter, enabledSources, loading: librarySourceCatalog?.loading ?? false } : undefined}
+              scope={activeTagMeta ? tagScope : null}
               visibleColumns={visibleColumns} pinnedEdges={pinnedEdges}
               tagNavigation={{ shown: showTagNavigation, disabled: status !== 'ready', onShownChange: changeShowTagNavigation }}
-              onQueryChange={setQuery} onSortChange={setSortBy} onColumnChange={toggleColumn} onPinChange={togglePinnedEdge}
-              onScopeChange={value => {
-                if (value === 'direct' || value === 'descendants') changeTagScope(value);
-                else setRootScope(value);
-              }}
+              onQueryChange={setQuery} onSortChange={by => setSort({ by, direction: defaultLibrarySortDirection(by) })} onColumnChange={toggleColumn} onPinChange={togglePinnedEdge}
+              onScopeChange={changeTagScope}
               refresh={libraryView === 'parsing' ? { busy: isRefreshingParseStatus, disabled: activeJobs === 0, onRefresh: () => void onRefreshParseStatus() } : undefined} /> : null}
+            <LibrarySelectionActions active={selection.enabled && !isTrashView && section === 'papers'} context={selectionContext}
+              selected={filteredEntries.filter(entry => selection.ids.has(entry.id)).map(entry => ({ ...entry, sourceInfo: entrySources[entry.id] ?? entry.sourceInfo }))}
+              total={filteredEntries.length} hidden={isHiddenView} sourceUnavailable={Boolean(librarySourceCatalog?.loading || librarySourceCatalog?.error)}
+              tagPaths={[...buildTagPathById(tags).values()]} onClear={selection.clear} onSelectAll={selection.toggleAll} onComplete={selection.remove}
+              onDelete={onDeleteEntry} onSetHidden={workspaceRoot ? librarySourceCatalog?.setHidden : undefined} onAddTags={onApplyEntryTagPaths} />
+            {librarySourceSync?.running && <p role="status" className="border-b border-border px-4 py-1 text-xs text-muted-foreground">{librarySourceSync.current || '正在检查来源'} · {librarySourceSync.completed}/{librarySourceSync.total}</p>}
 
           {isTrashView ? (
             onRestoreTagArchive ? <WorkspaceTrashView root={workspaceRoot} tags={tags} items={trashItems} onRestoreTag={onRestoreTagArchive}
@@ -373,31 +438,42 @@ export function EntryLibraryView({
             </div>
           ) : <>
             <LibraryPapers active={section === 'papers'} entries={filteredEntries} status={status}
+              sort={sort} onSortChange={setSort}
+              selection={selection.enabled ? selection : undefined}
+              deleteDisabled={Boolean(librarySourceCatalog?.loading || librarySourceCatalog?.error)}
+              sourceKindsByEntry={sourceKindsByEntry}
+              sourceChangedEntryIds={new Set(librarySourceSync?.changedEntryIds ?? [])}
+              onReviewSourceChanges={librarySourceSync?.review}
+              externalEntryIds={externalEntryIds} sourceHiddenByEntry={sourceHiddenByEntry} onToggleSourceHidden={entry => void toggleSourceHidden(entry)}
               pdfParseAction={pdfParseAction}
-              emptyMessage={activeTag && !activeTagMeta
+              emptyMessage={isHiddenView ? '当前标签下没有已隐藏的来源论文。' : activeTag && !activeTagMeta
                 ? '当前标签已移入回收站或不可用。返回全部条目或打开回收站继续。'
                 : query.trim() ? '没有符合当前筛选条件的条目。'
-                : !activeTag && rootScope === 'unclassified' ? '当前范围内没有未分类论文。'
                 : activeTag && tagScope === 'direct' ? '还没有论文直接归入当前标签。可以切换到“含子标签”查看下级论文。'
                 : activeTag ? '当前标签及其子标签中还没有论文。可将论文拖到标签上增加归属。'
                 : '没有符合当前筛选条件的条目。'}
               readingStates={readingStates} selectedEntryId={selectedEntryId} draggingEntryId={draggingEntryId}
+              onSelect={id => { selection.ensureSelected(id); onSelectEntry(id); }}
               visibleColumns={visibleColumns} pinnedEdges={pinnedEdges} reparseDisabled={activeJobs > 0}
               getRowProps={item => ({
-                ...entryDragHandlers(item),
+                ...(!selection.enabled ? entryDragHandlers(item) : {}),
                 onClick: event => {
-                  if (event.target instanceof Element && event.target.closest('button, a, input, select, textarea, [role="button"]')) return;
+                  if (event.target instanceof Element && event.target.closest('button, a, input, select, textarea, [role="button"], [role="menuitem"], [data-allow-context-menu="true"][role="menu"]')) return;
+                  if (!consumeDragClick()) { if (selection.enabled) selection.toggle(item.id, event.shiftKey); onSelectEntry(item.id); }
+                },
+                onDoubleClick: event => {
+                  if (selection.enabled) return;
+                  if (event.target instanceof Element && event.target.closest('button, a, input, select, textarea, [role="button"], [role="menuitem"]')) return;
                   if (!consumeDragClick()) openEntry(item.id, event.currentTarget);
                 },
-                onContextMenu: () => onSelectEntry(item.id),
                 onKeyDown: event => {
                   if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
-                    event.preventDefault(); openEntry(item.id, event.currentTarget);
+                    event.preventDefault(); if (selection.enabled) selection.toggle(item.id, event.shiftKey); else openEntry(item.id, event.currentTarget);
                   }
                 }
               })}
               onOpen={entryId => { onSelectEntry(entryId); onOpenEntryExplorer(entryId, 'overview'); }} onOpenInSidePane={onOpenEntryInSidePane}
-              onDelete={item => setDialog({ action: 'move-to-trash', entry: item })}
+              onDelete={item => { if (externalEntryIds.has(item.id) || item.sourceInfo?.kinds.length) void toggleSourceHidden(item); else setDialog({ action: 'move-to-trash', entry: item }); }}
               onReparse={item => {
                 void Promise.resolve(onReparseEntry(item.id)).then(() => notify({
                   title: '已重新提交解析', description: `${item.title} 已重新加入解析队列，解析结果会覆盖现有内容。`
@@ -434,7 +510,7 @@ export function EntryLibraryView({
               清空条目与记录
             </DialogTitle>
             <DialogDescription>
-              将永久删除回收站中的 {trashItems.length} 个条目与记录，标签保留在回收站中。此操作无法撤销。
+              将永久删除回收站中的 {purgeableTrashItems.length} 个条目与记录，来源条目和标签保留在回收站中。此操作无法撤销。
             </DialogDescription>
           </DialogHeader>
           <div className="rounded-md border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -450,7 +526,7 @@ export function EntryLibraryView({
               取消
             </Button>
             <Button
-              disabled={emptyTrashBusy || trashItems.length === 0}
+              disabled={emptyTrashBusy || purgeableTrashItems.length === 0}
               type="button"
               variant="destructive"
               onClick={() => void confirmEmptyTrash()}
@@ -509,6 +585,11 @@ function readStoredEntryLibraryColumns() {
     }
     const validIds = new Set(ENTRY_LIBRARY_COLUMNS.map((column) => column.id));
     const selected = stored.filter((value): value is EntryLibraryColumnId => validIds.has(value));
+    if (selected.length > 0 && !window.localStorage.getItem('neuink.entryLibrarySourceColumnMigrated.v1')) {
+      if (!selected.includes('source')) selected.splice(1, 0, 'source');
+      window.localStorage.setItem('neuink.entryLibrarySourceColumnMigrated.v1', '1');
+      window.localStorage.setItem(ENTRY_LIBRARY_COLUMNS_STORAGE_KEY, JSON.stringify(selected));
+    }
     return selected.length > 0 ? new Set(selected) : defaults;
   } catch {
     return defaults;

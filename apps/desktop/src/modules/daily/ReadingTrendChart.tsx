@@ -106,6 +106,7 @@ export function ReadingTrendChart({ entries, states, date, onSelectDate }: {
               <div key={label} className="flex justify-between gap-3"><dt className="text-muted-foreground">{label}</dt><dd>{formatSessionDuration(value)}</dd></div>)}
           </dl> : day.activeMs > 0 ? <p className="mt-2 text-[11px] text-muted-foreground">分段记录不完整，保留每日总时长，不推算 K 线。</p> : null : null}
           <p className="mt-2 border-t pt-1.5 text-[10px] leading-4 text-muted-foreground">{descriptions[hint.mode]}</p>
+          <p className="mt-1 text-[10px] leading-4 text-muted-foreground">滚轮滚动页面 · Ctrl + 滚轮缩放图表</p>
         </> : <><p className="font-medium">{READING_CHART_MODES[hint.mode]}</p><p className="mt-1 text-[11px] text-muted-foreground">{previewDescriptions[hint.mode]}</p></>}
       </ReadingChartTooltip> : null}
     </div>

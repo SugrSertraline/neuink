@@ -133,6 +133,7 @@ export type TrashItemKind =
   | 'highlight';
 
 export type TrashItem = {
+  source_managed?: boolean;
   trash_id: string;
   entry_id: EntryId;
   entry_title: string;

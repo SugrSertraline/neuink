@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import type { CreateEntryRequest, CreateEntryResult } from '@/shared/hooks/useWorkspace';
 import type { ToastContextValue } from '@/shared/hooks/useToast';
+import { DuplicatePdfError, PdfDuplicateCancelledError } from '@/shared/lib/pdfDuplicate';
 
 type NativeDropPosition = { x: number; y: number };
 
@@ -93,6 +94,7 @@ export function usePdfDropImport(options: PdfDropImportOptions) {
       let completed = 0;
       let succeeded = 0;
       const failed: string[] = [];
+      const duplicates: string[] = [];
       setProgress({ ...identity, completed, total: files.length });
       const toastId = current.notify({
         title: `正在导入 ${files.length} 个 PDF`,
@@ -112,7 +114,13 @@ export function usePdfDropImport(options: PdfDropImportOptions) {
             );
             if (!result?.createdWithPdf) throw new Error('PDF 未附加到条目');
             succeeded += 1;
-          } catch {
+          } catch (error) {
+            if (error instanceof DuplicatePdfError || error instanceof PdfDuplicateCancelledError) {
+              duplicates.push(`${file.title} → ${error.duplicate.title}${error.duplicate.inTrash ? '（回收站）' : ''}`);
+              completed += 1;
+              if (!closed) setProgress({ ...identity, completed, total: files.length });
+              continue;
+            }
             // The create API can leave an empty entry if attaching the PDF fails.
             // Report this explicitly instead of silently retrying and duplicating it.
             failed.push(file.title);
@@ -131,14 +139,15 @@ export function usePdfDropImport(options: PdfDropImportOptions) {
           const interrupted = completed < files.length;
           const summary = [`成功 ${succeeded} 个`];
           if (failed.length) summary.push(`失败 ${failed.length} 个：${failed.slice(0, 3).join('、')}${failed.length > 3 ? '等' : ''}`);
+          if (duplicates.length) summary.push(`内容重复 ${duplicates.length} 个：${duplicates.slice(0, 3).join('、')}${duplicates.length > 3 ? '等' : ''}`);
           if (skipped) summary.push(`跳过 ${skipped} 个非 PDF 或重复文件`);
           if (interrupted) summary.push('资料库已切换，剩余文件未导入');
           if (failed.length) summary.push('失败项可能留下空条目，请在条目库核对');
           current.notify({
-            title: interrupted ? 'PDF 导入已中断' : failed.length ? 'PDF 导入部分失败' : 'PDF 导入完成',
+            title: interrupted ? 'PDF 导入已中断' : failed.length ? 'PDF 导入部分失败' : duplicates.length ? '发现本地已有 PDF' : 'PDF 导入完成',
             description: summary.join('；'),
-            tone: failed.length || interrupted ? 'danger' : 'success',
-            durationMs: failed.length || interrupted ? Infinity : undefined
+            tone: failed.length || interrupted ? 'danger' : duplicates.length ? 'default' : 'success',
+            durationMs: failed.length || interrupted || duplicates.length ? Infinity : undefined
           });
         }
       }

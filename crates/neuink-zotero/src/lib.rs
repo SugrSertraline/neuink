@@ -59,6 +59,14 @@ pub struct Paper {
     pub tags: Vec<String>,
     pub collection_ids: Vec<String>,
     pub attachments: Vec<Attachment>,
+    #[serde(skip)]
+    pub notes: Vec<ZoteroNote>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ZoteroNote {
+    pub key: String,
+    pub html: String,
 }
 
 #[derive(Clone, Debug, Serialize)]

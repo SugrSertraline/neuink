@@ -30,7 +30,7 @@ function Showcase() {
     </header>
     <div className="min-w-0 border-b" style={{ width: narrow ? 360 : '100%' }}>
       <WorkspaceTabsBar layout={layout} entries={[]}
-        onNewBrowser={() => { setBrowserError(null); openNewBrowserTab(); }}
+        onNewTab={() => { setBrowserError(null); openNewBrowserTab(); }}
         onClose={(pane, surface) => dispatch({ type: 'close', pane, key: surfaceKey(surface) })}
         onCloseOthers={(pane, surface) => dispatch({ type: 'closeOthers', pane, key: surfaceKey(surface) })}
         onClosePane={pane => dispatch({ type: 'closePane', pane })}

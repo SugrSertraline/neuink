@@ -132,6 +132,7 @@ type EntryWorkspaceViewProps = EntryPdfHandlers & {
     entryId: string,
     request: { fields: Record<string, string>; tagPaths: string[]; title: string }
   ) => Promise<unknown> | unknown;
+  onRefreshEntries: () => Promise<void>;
   onCreateMarkdownSourceLink: (
     entryId: string,
     noteId: string,
@@ -236,6 +237,7 @@ export function EntryWorkspaceView({
   onOpenContent,
   onApplyEntryTagPaths,
   onUpdateEntry,
+  onRefreshEntries,
   onFetchPdf,
   onAttachPdf,
   onCreatePdfVersion,
@@ -333,6 +335,7 @@ export function EntryWorkspaceView({
                   onImportMarkdownNoteSegmentAsset={onImportMarkdownNoteSegmentAsset}
                   onReadMarkdownNote={onReadMarkdownNote}
                   onReadPdfReader={onReadPdfReader}
+                  onRefreshEntries={onRefreshEntries}
                   onRetryPdfParse={onRetryPdfParse}
                   onStartPdfParse={onStartPdfParse}
 	                  onCloseSidePane={onCloseSidePane}
@@ -439,6 +442,8 @@ export function EntryWorkspaceView({
                 onApplyEntryTagPaths={onApplyEntryTagPaths}
                 onOpenContent={onOpenContent}
                 onUpdateEntry={onUpdateEntry}
+                onRefreshEntries={onRefreshEntries}
+                titleCheckReloadKey={pdfReaderReloadKey}
               />
             ) : null}
             {activeContentId === 'segment-notes' ? (

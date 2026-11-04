@@ -20,7 +20,8 @@ use tauri::{AppHandle, Runtime};
 pub(crate) mod mineru_source;
 #[cfg(test)]
 mod mineru_import_tests;
-use mineru_source::{read_mineru_source, source_pdf, validate_single_result};
+use mineru_source::{read_mineru_source, source_pdf, source_pdf_hash, validate_single_result};
+use neuink_workspace::pdf_duplicate::{hash_pdf_file, PdfDuplicate};
 
 #[derive(Debug, Deserialize)]
 pub struct CreateEntryRequest {
@@ -223,6 +224,8 @@ pub struct ImportAndParsePdfRequest {
     pub pdf_path: PathBuf,
     pub endpoint: String,
     pub api_key: Option<String>,
+    #[serde(default)]
+    pub confirmed_duplicate_hash: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -232,6 +235,47 @@ pub struct QueuePdfParseRequest {
     pub pdf_path: PathBuf,
     #[serde(default)]
     pub enqueue: bool,
+    #[serde(default)]
+    pub confirmed_duplicate_hash: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PdfDuplicateSource {
+    Pdf,
+    Mineru,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CheckPdfDuplicateRequest {
+    pub root: PathBuf,
+    pub path: PathBuf,
+    pub source: PdfDuplicateSource,
+}
+
+#[tauri::command]
+pub fn check_pdf_duplicate(request: CheckPdfDuplicateRequest) -> Result<Option<PdfDuplicate>, String> {
+    let workspace = neuink_workspace::Workspace::open_existing(&request.root)
+        .map_err(|error| error.to_string())?;
+    let hash = match request.source {
+        PdfDuplicateSource::Pdf => hash_pdf_file(&request.path).map_err(|error| error.to_string())?,
+        PdfDuplicateSource::Mineru => {
+            let bytes = read_mineru_source(&request.path)?;
+            let name = source_pdf(&bytes)?
+                .ok_or_else(|| "新建条目时，MinerU 结果还需包含原 PDF。".to_string())?;
+            source_pdf_hash(&bytes, &name)?
+        }
+    };
+    workspace.find_pdf_duplicate(&hash).map_err(|error| error.to_string())
+}
+
+fn reject_duplicate_pdf(workspace: &neuink_workspace::Workspace, hash: &str, confirmed_hash: Option<&str>) -> Result<(), String> {
+    if confirmed_hash == Some(hash) { return Ok(()); }
+    if let Some(found) = workspace.find_pdf_duplicate(hash).map_err(|error| error.to_string())? {
+        let location = if found.in_trash { "回收站" } else { "条目库" };
+        return Err(format!("相同内容的 PDF 已在{location}：“{}”。未重复保存。", found.title));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -250,6 +294,8 @@ pub struct CreateFromMineruClientResultRequest {
     #[serde(default)]
     pub tags: Vec<TagId>,
     pub zip_path: PathBuf,
+    #[serde(default)]
+    pub confirmed_duplicate_hash: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -306,6 +352,32 @@ pub fn list_entries(request: ListEntriesRequest) -> Result<Vec<EntryMeta>, Strin
 }
 
 #[tauri::command]
+pub fn list_entry_sources(request: ListEntriesRequest) -> Result<std::collections::HashMap<String, neuink_workspace::entry_sources::EntrySourceInfo>, String> {
+    let workspace = neuink_workspace::Workspace::open_existing(request.root).map_err(|error| error.to_string())?;
+    workspace.entry_source_kinds().map_err(|error| error.to_string())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetEntrySourceHiddenRequest { pub root: PathBuf, pub entry_id: EntryId, pub hidden: bool }
+
+#[tauri::command]
+pub fn set_entry_source_hidden(request: SetEntrySourceHiddenRequest) -> Result<(), String> {
+    let workspace = neuink_workspace::Workspace::open_existing(request.root).map_err(|error| error.to_string())?;
+    workspace.set_source_entry_hidden(&request.entry_id, request.hidden).map_err(|error| error.to_string())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CopySourceToLocalRequest { pub root: PathBuf, pub entry_id: EntryId, #[serde(default)] pub force_new: bool }
+
+#[tauri::command]
+pub async fn copy_source_to_local(request: CopySourceToLocalRequest) -> Result<neuink_workspace::local_copy::LocalCopyResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let workspace = neuink_workspace::Workspace::open_existing(request.root).map_err(|error| error.to_string())?;
+        workspace.copy_source_to_local(&request.entry_id, request.force_new).map_err(|error| error.to_string())
+    }).await.map_err(|_| "导入本地副本的任务被中断，请检查条目库后重试。".to_owned())?
+}
+
+#[tauri::command]
 pub fn list_trashed_entries(request: ListTrashedEntriesRequest) -> Result<Vec<EntryMeta>, String> {
     let workspace =
         neuink_workspace::Workspace::open(request.root).map_err(|error| error.to_string())?;
@@ -326,6 +398,63 @@ pub fn update_entry_meta(request: UpdateEntryMetaRequest) -> Result<EntryMeta, S
             request.tags,
         )
         .map_err(|error| error.to_string())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TitleConsistencyRequest {
+    pub root: PathBuf,
+    pub entry_id: EntryId,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ApplyTitleConsistencyRequest {
+    pub root: PathBuf,
+    pub entry_id: EntryId,
+    pub expected_title: String,
+    pub expected_pdf_file_name: String,
+    pub expected_source_revision: String,
+    pub suggested_title: String,
+    pub update_entry_title: bool,
+    pub update_pdf_file_name: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ConfirmTitleConsistencyRequest {
+    pub root: PathBuf,
+    pub entry_id: EntryId,
+    pub expected_title: String,
+    pub expected_pdf_file_name: String,
+    pub expected_source_revision: String,
+}
+
+#[tauri::command]
+pub fn inspect_title_consistency(
+    request: TitleConsistencyRequest,
+) -> Result<Option<neuink_workspace::title_consistency::TitleConsistency>, String> {
+    let workspace = neuink_workspace::Workspace::open(request.root).map_err(|error| error.to_string())?;
+    workspace.inspect_title_consistency(&request.entry_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn confirm_title_consistency(request: ConfirmTitleConsistencyRequest) -> Result<(), String> {
+    let workspace =
+        neuink_workspace::Workspace::open(request.root).map_err(|error| error.to_string())?;
+    workspace
+        .confirm_title_consistency(
+            &request.entry_id,
+            &request.expected_title,
+            &request.expected_pdf_file_name,
+            &request.expected_source_revision,
+        )
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn apply_title_consistency(request: ApplyTitleConsistencyRequest) -> Result<EntryMeta, String> {
+    let workspace = neuink_workspace::Workspace::open(request.root).map_err(|error| error.to_string())?;
+    workspace.apply_title_consistency(&request.entry_id, &request.expected_title,
+        &request.expected_pdf_file_name, &request.expected_source_revision, &request.suggested_title,
+        request.update_entry_title, request.update_pdf_file_name).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -920,8 +1049,10 @@ pub async fn import_and_parse_pdf(
 
     let workspace =
         neuink_workspace::Workspace::open(request.root).map_err(|error| error.to_string())?;
+    let hash = hash_pdf_file(&request.pdf_path).map_err(|error| error.to_string())?;
+    reject_duplicate_pdf(&workspace, &hash, request.confirmed_duplicate_hash.as_deref())?;
     workspace
-        .import_pdf(&request.entry_id, &request.pdf_path)
+        .import_pdf_with_confirmation(&request.entry_id, &request.pdf_path, request.confirmed_duplicate_hash.as_deref())
         .map_err(|error| error.to_string())?;
     workspace
         .clear_segments(&request.entry_id)
@@ -937,8 +1068,10 @@ pub async fn import_and_parse_pdf(
 pub fn queue_pdf_parse(request: QueuePdfParseRequest) -> Result<EntryMeta, String> {
     let workspace =
         neuink_workspace::Workspace::open(request.root).map_err(|error| error.to_string())?;
+    let hash = hash_pdf_file(&request.pdf_path).map_err(|error| error.to_string())?;
+    reject_duplicate_pdf(&workspace, &hash, request.confirmed_duplicate_hash.as_deref())?;
     workspace
-        .import_pdf(&request.entry_id, &request.pdf_path)
+        .import_pdf_with_confirmation(&request.entry_id, &request.pdf_path, request.confirmed_duplicate_hash.as_deref())
         .map_err(|error| error.to_string())?;
     workspace
         .clear_segments(&request.entry_id)
@@ -1005,11 +1138,16 @@ pub(crate) fn create_from_mineru_source_bytes(
     request: CreateFromMineruClientResultRequest,
     zip_bytes: Vec<u8>,
 ) -> Result<ImportAndParsePdfResponse, String> {
+    let source_id = request.zip_path.canonicalize().ok()
+        .map(|path| blake3::hash(path.to_string_lossy().as_bytes()).to_hex().to_string());
+    let source_hash = blake3::hash(&zip_bytes).to_hex().to_string();
     let workspace =
         neuink_workspace::Workspace::open_existing(&request.root).map_err(|error| error.to_string())?;
     validate_single_result(&zip_bytes)?;
     let origin_pdf = source_pdf(&zip_bytes)?
         .ok_or_else(|| "新建条目时，MinerU 结果还需包含原 PDF。".to_string())?;
+    let pdf_hash = source_pdf_hash(&zip_bytes, &origin_pdf)?;
+    reject_duplicate_pdf(&workspace, &pdf_hash, request.confirmed_duplicate_hash.as_deref())?;
     let document = normalize_mineru_zip(&zip_bytes).map_err(|error| error.to_string())?;
     if document.segments.is_empty() {
         return Err("所选结果未包含可导入的 MinerU content_list。".to_string());
@@ -1026,12 +1164,16 @@ pub(crate) fn create_from_mineru_source_bytes(
             .entry_mineru_output_dir(&entry.id)
             .join(origin_pdf);
         workspace
-            .import_pdf(&entry.id, &extracted_pdf)
+            .import_pdf_with_confirmation(&entry.id, &extracted_pdf, request.confirmed_duplicate_hash.as_deref())
             .map_err(|error| error.to_string())?;
         workspace
             .write_segments(&entry.id, &document.segments)
             .map_err(|error| error.to_string())?;
-        mark_mineru_client_import_succeeded(&workspace, &entry.id, document.segments.len())
+        let complete = mark_mineru_client_import_succeeded(&workspace, &entry.id, document.segments.len())?;
+        if let Some(item_id) = source_id.clone() {
+            workspace.record_mineru_source(&entry.id, item_id, source_hash.clone()).map_err(|error| error.to_string())?;
+        }
+        Ok(complete)
     })();
     let entry = match imported {
         Ok(entry) => entry,

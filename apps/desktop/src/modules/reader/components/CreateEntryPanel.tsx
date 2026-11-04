@@ -30,6 +30,7 @@ import { cn } from '@/lib/utils';
 import { useToast } from '@/shared/hooks/useToast';
 import type { CreateEntryRequest, CreateEntryResult } from '@/shared/hooks/useWorkspace';
 import { getEffectiveParserEndpoint } from '@/shared/lib/parserSettings';
+import { DuplicatePdfError, PdfDuplicateCancelledError } from '@/shared/lib/pdfDuplicate';
 import type { TagMeta } from '@/shared/types/domain';
 
 import {
@@ -276,14 +277,20 @@ export function CreateEntryPanel({
           });
         }
         onCreateEntryFinished(result);
+      } else {
+        setCreateState('ready');
       }
     } catch (caught) {
       if (pendingToastId) {
         dismiss(pendingToastId);
       }
+      if (caught instanceof PdfDuplicateCancelledError) {
+        setCreateState('ready');
+        return;
+      }
       setCreateState('failed');
       notify({
-        title: '创建条目失败',
+        title: caught instanceof DuplicatePdfError ? 'PDF 已在本地' : '创建条目失败',
         description: caught instanceof Error ? caught.message : String(caught),
         tone: 'danger',
         durationMs: Infinity
