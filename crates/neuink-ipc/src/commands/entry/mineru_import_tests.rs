@@ -28,6 +28,8 @@ fn creates_entry_from_result_directory() {
         tags: Vec::new(),
         zip_path: source,
         confirmed_duplicate_hash: None,
+        pdf_path: None,
+        pdf_verification: None,
     })
     .unwrap();
     assert_eq!(result.segment_count, 1);
@@ -54,6 +56,8 @@ fn invalid_result_does_not_create_entry() {
         tags: Vec::new(),
         zip_path: source,
         confirmed_duplicate_hash: None,
+        pdf_path: None,
+        pdf_verification: None,
     });
     assert!(result.is_err());
     assert!(workspace.list_entries().unwrap().is_empty());
@@ -123,6 +127,8 @@ fn detects_renamed_pdf_and_refuses_duplicate_mineru_creation() {
         root: workspace_root.clone(), title: "Duplicate".into(), fields: BTreeMap::new(),
         tags: Vec::new(), zip_path: source.clone(),
         confirmed_duplicate_hash: None,
+        pdf_path: None,
+        pdf_verification: None,
     });
     assert!(result.unwrap_err().contains("Existing"));
     assert_eq!(workspace.list_entries().unwrap().len(), 2);
@@ -135,6 +141,8 @@ fn detects_renamed_pdf_and_refuses_duplicate_mineru_creation() {
         root: workspace_root, title: "Deliberate copy".into(), fields: BTreeMap::new(),
         tags: Vec::new(), zip_path: source,
         confirmed_duplicate_hash: Some(duplicate.content_hash),
+        pdf_path: None,
+        pdf_verification: None,
     }).unwrap();
     assert_eq!(imported.entry.title, "Deliberate copy");
     assert_eq!(workspace.list_entries().unwrap().len(), 3);

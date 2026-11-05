@@ -28,6 +28,9 @@ pub mod pdf_duplicate;
 #[cfg(test)]
 mod pdf_parse_queue_tests;
 pub mod pdf_text;
+pub mod reading_pdf;
+#[cfg(test)]
+mod reading_pdf_tests;
 pub mod reading_state;
 pub mod search;
 pub mod source_availability;

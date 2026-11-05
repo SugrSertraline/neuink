@@ -312,6 +312,7 @@ export function ReaderPane({
   onAttachPdf,
   onCreatePdfVersion,
   onImportMineruClientResult,
+  onReplaceReadingPdf,
   onExportTranslationNote,
   onSaveSegmentNote,
   onDeleteSegmentNote,
@@ -839,6 +840,7 @@ export function ReaderPane({
         onFetchPdf={onFetchPdf} onAttachPdf={onAttachPdf}
         onCreatePdfVersion={onCreatePdfVersion}
         onImportMineruClientResult={onImportMineruClientResult}
+        onReplaceReadingPdf={onReplaceReadingPdf}
         onCreateMarkdownSourceLink={onCreateMarkdownSourceLink}
         onImportMarkdownNoteSegmentAsset={onImportMarkdownNoteSegmentAsset}
         onReadMarkdownNote={onReadMarkdownNote}

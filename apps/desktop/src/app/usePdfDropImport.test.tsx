@@ -130,8 +130,13 @@ it('leaves the existing create-entry drop zone alone', async () => {
   act(() => emit({ type: 'drop', position: { x: 20, y: 20 }, paths: ['result.zip'] }));
   expect(configured.createEntry).not.toHaveBeenCalled();
   expect(configured.onMineruSourceDrop).not.toHaveBeenCalled();
+  // A PDF dropped inside the MinerU zone belongs to the panel, not to a standalone import.
   act(() => emit({ type: 'drop', position: { x: 20, y: 20 }, paths: ['paper.pdf'] }));
-  await waitFor(() => expect(configured.createEntry).toHaveBeenCalledOnce());
+  act(() => emit({ type: 'drop', position: { x: 20, y: 20 }, paths: ['result.rar', 'original.pdf'] }));
+  act(() => emit({ type: 'drop', position: { x: 20, y: 20 }, paths: ['C:\\results\\paper', 'original.pdf'] }));
+  await act(async () => {});
+  expect(configured.createEntry).not.toHaveBeenCalled();
+  expect(configured.onMineruSourceDrop).not.toHaveBeenCalled();
   view.unmount();
   zone.remove();
 });

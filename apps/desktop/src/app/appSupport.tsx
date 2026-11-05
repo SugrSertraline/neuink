@@ -245,6 +245,7 @@ export function toLibraryEntry(entry: EntryMeta, tagPathById: Map<string, string
     createdAt: entry.created_at,
     updatedAt: entry.updated_at,
     pdfFileName: entry.pdf?.file_name ?? null,
+    pdfContentHash: entry.pdf?.content_hash ?? null,
     parseMessage: entry.pdf?.parse.message ?? null,
     parseEndpoint: entry.pdf?.parse.endpoint ?? null,
     status,

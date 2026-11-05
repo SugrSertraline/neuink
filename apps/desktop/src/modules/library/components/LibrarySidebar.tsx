@@ -53,6 +53,8 @@ export type LibraryEntry = {
   createdAt: string;
   updatedAt: string;
   pdfFileName: string | null;
+  /** BLAKE3 hash of the reading PDF; changes when the file is replaced in place. */
+  pdfContentHash?: string | null;
   parseMessage: string | null;
   parseEndpoint: string | null;
   status: LibraryEntryStatus;

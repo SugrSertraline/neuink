@@ -1,5 +1,6 @@
 import { useCallback, useRef, type Dispatch, type SetStateAction } from 'react';
 import { listTagArchives, restoreTagArchive } from '@/shared/ipc/tagReadingApi';
+import type { PdfPairSummary } from '@/shared/pdf/readingPdfVerification';
 import { updateTagDescription } from '@/shared/ipc/noteCatalogApi';
 
 import {
@@ -8,6 +9,7 @@ import {
   applyEntryMetaProposal,
   createAnnotation,
   createEntry,
+  checkMineruZipReadingPdf,
   createFromMineruClientResult,
   createNote,
   createNoteSourceLink,
@@ -19,6 +21,7 @@ import {
   importNoteSegmentAsset,
   importMineruClientResult,
   listAnnotations,
+  replaceEntryReadingPdf,
   listEntries,
   listTrashedEntries,
   openNoteFile,
@@ -232,12 +235,21 @@ export function useWorkspaceResourceActions({
       }
       const fields = cleanFields(request.fields ?? {});
 
-      const confirmedDuplicateHash = request.mineruZipPath
-        ? await checkPdfDuplicateWithReview(request.mineruZipPath, 'mineru', title)
-        : request.pdfPath ? await checkPdfDuplicateWithReview(request.pdfPath, 'pdf', title) : undefined;
+      const confirmedDuplicateHash = request.pdfPath
+        ? await checkPdfDuplicateWithReview(request.pdfPath, 'pdf', title)
+        : request.mineruZipPath ? await checkPdfDuplicateWithReview(request.mineruZipPath, 'mineru', title) : undefined;
 
       let createdEntryId: string | null = null;
       try {
+        // A combined import checks its PDF before any tag is written. A rejected
+        // PDF then leaves the workspace unchanged, with no tags or entries added.
+        let pdfVerification: PdfPairSummary | undefined;
+        if (request.mineruZipPath && request.pdfPath) {
+          const { verifyMineruZipReadingPdf } = await import('@/shared/pdf/readingPdfVerification');
+          pdfVerification = await verifyMineruZipReadingPdf(request.mineruZipPath, request.pdfPath);
+          await checkMineruZipReadingPdf(request.mineruZipPath, request.pdfPath, pdfVerification);
+        }
+
         let nextTags = tags;
         const tagIds: TagId[] = [];
         for (const tagPath of cleanTagPaths(request.tagPaths ?? [])) {
@@ -250,7 +262,9 @@ export function useWorkspaceResourceActions({
         setTags(nextTags);
 
         if (request.mineruZipPath) {
-          const imported = await createFromMineruClientResult(root, title, fields, tagIds, request.mineruZipPath, confirmedDuplicateHash);
+          const imported = await createFromMineruClientResult(
+            root, title, fields, tagIds, request.mineruZipPath, request.pdfPath, pdfVerification, confirmedDuplicateHash
+          );
           setEntries((current) => [imported.entry, ...current.filter((entry) => entry.id !== imported.entry.id)]);
           setSelectedEntryId(imported.entry.id);
           return { createdWithPdf: true, entryId: imported.entry.id, importedMineruClientResult: true, parseSubmissionFailed: false, parseMessage: imported.entry.pdf?.parse.message ?? null };
@@ -381,6 +395,40 @@ export function useWorkspaceResourceActions({
       return response;
     },
     [root]
+  );
+
+  /**
+   * Replaces the reading PDF after the MinerU origin check passes. Verification runs
+   * before the write, and any failure throws before `replaceEntryReadingPdf` is called.
+   * On failure the entries are reloaded, so a hash changed by a concurrent edit is
+   * visible and the user can retry against the current content.
+   */
+  const replaceReadingPdfForEntry = useCallback(
+    async (entryId: string, pdfPath: string) => {
+      if (!root) throw new Error('请先打开资料库');
+      try {
+        const current = entries.find((entry) => entry.id === entryId);
+        if (!current?.pdf) throw new Error('条目还没有阅读 PDF，无法替换。');
+        if (current.pdf.parse.status !== 'succeeded') {
+          throw new Error('替换阅读 PDF 需要已完成解析的 MinerU 结构，当前条目暂不可用。');
+        }
+        const { verifyEntryReadingPdfReplacement } = await import('@/shared/pdf/readingPdfVerification');
+        const verification = await verifyEntryReadingPdfReplacement(root, entryId, pdfPath);
+        const updated = await replaceEntryReadingPdf(
+          root, entryId, pdfPath, current.pdf.content_hash, verification
+        );
+        if (currentRoot.current === root) {
+          setEntries((items) => items.map((entry) => (entry.id === updated.id ? updated : entry)));
+          setError(null);
+        }
+        return updated;
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : String(caught));
+        await refreshEntries(root);
+        throw caught;
+      }
+    },
+    [entries, refreshEntries, root, setEntries, setError]
   );
 
   const createMarkdownNote = useCallback(
@@ -904,6 +952,7 @@ export function useWorkspaceResourceActions({
     retryPdfParseForEntry,
     startQueuedPdfParseForEntry,
     importMineruClientResultForEntry,
+    replaceReadingPdfForEntry,
     createMarkdownNote,
     deleteMarkdownNote,
     createTagPath,

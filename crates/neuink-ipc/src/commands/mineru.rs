@@ -281,6 +281,8 @@ fn execute<R: Runtime>(app: &AppHandle<R>, request: MineruRequest) -> Result<Val
                     tags: Vec::new(),
                     zip_path: source,
                     confirmed_duplicate_hash,
+                    pdf_path: None,
+                    pdf_verification: None,
                 },
                 zip_bytes,
             )?;

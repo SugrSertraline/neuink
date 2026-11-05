@@ -91,6 +91,45 @@ fn imports_pdf_once() {
 }
 
 #[test]
+fn import_pdf_bytes_writes_the_given_bytes_hash_and_file_name() {
+    let root = std::env::temp_dir().join(format!("neuink_workspace_{}", unique_suffix()));
+    let workspace = Workspace::create(&root).unwrap();
+    let entry = workspace.create_entry("A paper").unwrap();
+    let bytes = b"%PDF-1.7 verified candidate";
+
+    let updated = workspace
+        .import_pdf_bytes(&entry.id, "paper-final.pdf", bytes)
+        .unwrap();
+
+    let pdf = updated.pdf.as_ref().unwrap();
+    assert_eq!(pdf.file_name, "paper-final.pdf");
+    assert_eq!(pdf.content_hash, blake3::hash(bytes).to_hex().to_string());
+    assert_eq!(fs::read(workspace.layout.entry_pdf_file(&entry.id)).unwrap(), bytes);
+    assert!(workspace.import_pdf_bytes(&entry.id, "again.pdf", bytes).is_err());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn verified_pdf_bytes_preserve_duplicate_confirmation() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = Workspace::create(root.path()).unwrap();
+    let first = workspace.create_entry("Existing paper").unwrap();
+    let second = workspace.create_entry("Confirmed copy").unwrap();
+    let bytes = b"%PDF-1.7 verified candidate";
+    workspace.import_pdf_bytes(&first.id, "original.pdf", bytes).unwrap();
+
+    let error = workspace.import_pdf_bytes(&second.id, "copy.pdf", bytes).unwrap_err();
+    assert!(matches!(error, WorkspaceError::PdfContentDuplicate(_)));
+    assert!(!workspace.layout.entry_pdf_file(&second.id).exists());
+    let hash = blake3::hash(bytes).to_hex().to_string();
+    let updated = workspace.import_pdf_bytes_with_confirmation(
+        &second.id, "copy.pdf", bytes, Some(&hash),
+    ).unwrap();
+    assert_eq!(updated.pdf.unwrap().content_hash, hash);
+    assert_eq!(fs::read(workspace.layout.entry_pdf_file(&second.id)).unwrap(), bytes);
+}
+
+#[test]
 fn renames_pdf_display_name_without_moving_the_pdf_or_parse_state() {
     let root = std::env::temp_dir().join(format!("neuink_workspace_{}", unique_suffix()));
     let source_pdf = root.with_extension("pdf");

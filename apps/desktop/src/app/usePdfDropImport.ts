@@ -162,14 +162,15 @@ export function usePdfDropImport(options: PdfDropImportOptions) {
         setDragActive(!insideCreateEntryDropZone(payload.position) && !importingRef.current);
       } else if (payload.type === 'drop') {
         setDragActive(false);
+        // The panel owns drops inside its MinerU zone, including companion PDFs.
+        // Elsewhere retain the app-wide archive/folder flow and PDF import queue.
+        if (insideCreateEntryDropZone(payload.position)) return;
         const mineruSource = droppedMineruSource(payload.paths);
         if (mineruSource) {
-          if (!insideCreateEntryDropZone(payload.position)) {
-            if (optionsRef.current.workspaceReady && optionsRef.current.workspaceRoot) {
-              optionsRef.current.onMineruSourceDrop(mineruSource);
-            } else {
-              optionsRef.current.notify({ title: '无法导入 MinerU 结果', description: '请先打开资料库。', tone: 'danger' });
-            }
+          if (optionsRef.current.workspaceReady && optionsRef.current.workspaceRoot) {
+            optionsRef.current.onMineruSourceDrop(mineruSource);
+          } else {
+            optionsRef.current.notify({ title: '无法导入 MinerU 结果', description: '请先打开资料库。', tone: 'danger' });
           }
         } else {
           void importPaths(payload.paths);

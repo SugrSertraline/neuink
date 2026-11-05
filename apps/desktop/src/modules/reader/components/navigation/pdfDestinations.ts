@@ -3,6 +3,8 @@ import type { ReadingTarget } from './ReadingNavigation';
 
 export type NativePdfLink = { id: string; label: string; dest: string | unknown[]; rect: [number, number, number, number] };
 const destinations = new WeakMap<PDFDocumentProxy, Map<string, Promise<ReadingTarget>>>();
+export const MISSING_NAMED_DESTINATION_MESSAGE =
+  '当前 PDF 缺少内部跳转目标表（MinerU 导出副本常见）。请改用原始 PDF 重新导入条目以恢复文内引用。';
 
 export async function readNativePdfLinks(document: PDFDocumentProxy, pageIdx: number): Promise<NativePdfLink[]> {
   const page = await document.getPage(pageIdx + 1);
@@ -31,7 +33,12 @@ export function resolvePdfDestination(document: PDFDocumentProxy, dest: NativePd
 
 async function resolve(document: PDFDocumentProxy, dest: NativePdfLink['dest']): Promise<ReadingTarget> {
   const values = typeof dest === 'string' ? await document.getDestination(dest) : dest;
-  if (!Array.isArray(values) || values.length < 2) throw new Error('PDF 中没有可用的跳转目标');
+  if (!Array.isArray(values) || values.length < 2) {
+    // A named destination that the file does not define is typical of MinerU
+    // export copies, which keep the link annotations but drop the name table.
+    if (typeof dest === 'string') throw new Error(MISSING_NAMED_DESTINATION_MESSAGE);
+    throw new Error('PDF 中没有可用的跳转目标');
+  }
   const ref = values[0];
   const pageIdx = typeof ref === 'number' ? ref : ref && typeof ref === 'object' && 'num' in ref && 'gen' in ref
     ? await document.getPageIndex(ref as { num: number; gen: number }) : -1;

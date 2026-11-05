@@ -1,0 +1,396 @@
+{
+  "origin": {
+    "sha256": "0e641076b289441756494067f7431fc29564c66cca492f683ca22ebb47d41e9b",
+    "page_count": 2,
+    "geometry_proof": "independent",
+    "pages": [
+      {
+        "view_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "media_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "crop_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "rotate": 0,
+        "user_unit": 1,
+        "text_anchor": "Attention Anchor One"
+      },
+      {
+        "view_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "media_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "crop_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "rotate": 0,
+        "user_unit": 1,
+        "text_anchor": "Second Page Anchor"
+      }
+    ]
+  },
+  "resaved": {
+    "sha256": "64878ba62e239a09e0b71b7e2fa9f2544f388d9bbedd70e78b9a093a4b89c979",
+    "page_count": 2,
+    "geometry_proof": "independent",
+    "pages": [
+      {
+        "view_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "media_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "crop_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "rotate": 0,
+        "user_unit": 1,
+        "text_anchor": "Attention Anchor One"
+      },
+      {
+        "view_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "media_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "crop_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "rotate": 0,
+        "user_unit": 1,
+        "text_anchor": "Second Page Anchor"
+      }
+    ]
+  },
+  "page_count": {
+    "sha256": "c4db65cebeb92d3a98e8b4d7bf3cd7a1721d4fd8856b1f2ad4b6a58ebd79759a",
+    "page_count": 3,
+    "geometry_proof": "independent",
+    "pages": [
+      {
+        "view_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "media_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "crop_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "rotate": 0,
+        "user_unit": 1,
+        "text_anchor": "Attention Anchor One"
+      },
+      {
+        "view_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "media_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "crop_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "rotate": 0,
+        "user_unit": 1,
+        "text_anchor": "Second Page Anchor"
+      },
+      {
+        "view_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "media_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "crop_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "rotate": 0,
+        "user_unit": 1,
+        "text_anchor": "Extra Trailing Page"
+      }
+    ]
+  },
+  "rotate": {
+    "sha256": "674eada884f61348f9a5f168bd17a42eb2d2c431f8d5ea618f87dc02d912fcef",
+    "page_count": 2,
+    "geometry_proof": "independent",
+    "pages": [
+      {
+        "view_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "media_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "crop_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "rotate": 0,
+        "user_unit": 1,
+        "text_anchor": "Attention Anchor One"
+      },
+      {
+        "view_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "media_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "crop_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "rotate": 90,
+        "user_unit": 1,
+        "text_anchor": "Second Page Anchor"
+      }
+    ]
+  },
+  "media_box": {
+    "sha256": "3f0c4160ba62a4d8dc1536b5ee3bc0be445670b88637d075b5dd837004c62062",
+    "page_count": 2,
+    "geometry_proof": "independent",
+    "pages": [
+      {
+        "view_box": [
+          0,
+          0,
+          595,
+          842
+        ],
+        "media_box": [
+          0,
+          0,
+          595,
+          842
+        ],
+        "crop_box": [
+          0,
+          0,
+          595,
+          842
+        ],
+        "rotate": 0,
+        "user_unit": 1,
+        "text_anchor": "Attention Anchor One"
+      },
+      {
+        "view_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "media_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "crop_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "rotate": 0,
+        "user_unit": 1,
+        "text_anchor": "Second Page Anchor"
+      }
+    ]
+  },
+  "crop_box": {
+    "sha256": "9f5d88bf6c14e2262aee96f99985d8a41ed46f0feeb0ade57a9a6267023056b9",
+    "page_count": 2,
+    "geometry_proof": "independent",
+    "pages": [
+      {
+        "view_box": [
+          36,
+          36,
+          576,
+          756
+        ],
+        "media_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "crop_box": [
+          36,
+          36,
+          576,
+          756
+        ],
+        "rotate": 0,
+        "user_unit": 1,
+        "text_anchor": "Attention Anchor One"
+      },
+      {
+        "view_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "media_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "crop_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "rotate": 0,
+        "user_unit": 1,
+        "text_anchor": "Second Page Anchor"
+      }
+    ]
+  },
+  "text": {
+    "sha256": "ee6f0a0e9ae392ff7fb47b9e46b921fa382dbeba91d6e46aa4cef4558580ee51",
+    "page_count": 2,
+    "geometry_proof": "independent",
+    "pages": [
+      {
+        "view_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "media_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "crop_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "rotate": 0,
+        "user_unit": 1,
+        "text_anchor": "Attention Anchor One"
+      },
+      {
+        "view_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "media_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "crop_box": [
+          0,
+          0,
+          612,
+          792
+        ],
+        "rotate": 0,
+        "user_unit": 1,
+        "text_anchor": "Different Second Page"
+      }
+    ]
+  }
+}

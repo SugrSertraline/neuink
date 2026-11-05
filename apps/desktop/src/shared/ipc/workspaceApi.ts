@@ -22,6 +22,7 @@ import type {
 } from '../types/domain';
 import type { AssistantEntryMetaProposal, AssistantTagProposal } from '../types/assistant';
 import { decideAssistantProposal, type AssistantProposalConfirmation } from './assistantProposalApi';
+import type { PdfPairSummary } from '../pdf/readingPdfVerification';
 
 export type SearchMode = 'keyword' | 'semantic' | 'hybrid';
 
@@ -876,10 +877,56 @@ export async function importMineruClientResult(
 }
 
 export async function createFromMineruClientResult(
-  root: string, title: string, fields: Record<string, string>, tags: string[], zipPath: string, confirmedDuplicateHash?: string
+  root: string, title: string, fields: Record<string, string>, tags: string[], zipPath: string,
+  pdfPath?: string, pdfVerification?: PdfPairSummary, confirmedDuplicateHash?: string
 ): Promise<ImportAndParsePdfResponse> {
   return invoke<ImportAndParsePdfResponse>('create_from_mineru_client_result', {
-    request: { root, title, fields, tags, zip_path: zipPath, confirmed_duplicate_hash: confirmedDuplicateHash ?? null }
+    request: {
+      root, title, fields, tags, zip_path: zipPath,
+      pdf_path: pdfPath ?? null,
+      pdf_verification: pdfVerification ?? null,
+      confirmed_duplicate_hash: confirmedDuplicateHash ?? null
+    }
+  });
+}
+
+/**
+ * Checks a reading PDF against a MinerU ZIP without writing anything. Rejects
+ * with the Rust verifier's reason when the PDF does not match.
+ */
+export async function checkMineruZipReadingPdf(
+  zipPath: string, pdfPath: string, pdfVerification: PdfPairSummary
+): Promise<void> {
+  await invoke<void>('check_mineru_zip_reading_pdf', {
+    request: { zip_path: zipPath, pdf_path: pdfPath, pdf_verification: pdfVerification }
+  });
+}
+
+/** Returns `paper_origin.pdf` from a MinerU client ZIP, for PDF.js verification before import. */
+export async function readMineruZipOriginPdf(zipPath: string): Promise<ArrayBuffer> {
+  return invoke<ArrayBuffer>('read_mineru_zip_origin_pdf', { request: { zip_path: zipPath } });
+}
+
+/** Returns the `paper_origin.pdf` already stored for an entry. */
+export async function readEntryMineruOriginPdf(root: string, entryId: string): Promise<ArrayBuffer> {
+  return invoke<ArrayBuffer>('read_entry_mineru_origin_pdf', { request: { root, entry_id: entryId } });
+}
+
+/**
+ * Replaces the reading PDF of an entry. `expectedContentHash` is the BLAKE3 hash
+ * of the current PDF; the backend rejects the call if it changed.
+ */
+export async function replaceEntryReadingPdf(
+  root: string, entryId: string, pdfPath: string, expectedContentHash: string, verification: PdfPairSummary
+): Promise<EntryMeta> {
+  return invoke<EntryMeta>('replace_entry_reading_pdf', {
+    request: {
+      root,
+      entry_id: entryId,
+      pdf_path: pdfPath,
+      expected_content_hash: expectedContentHash,
+      verification
+    }
   });
 }
 

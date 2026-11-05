@@ -196,7 +196,7 @@ function ReflowEntryReaderBody({
     workspaceRoot
   });
   const pdfPath = loadState.status === 'ready' ? loadState.data.pdf_path : null;
-  const pdfBytesState = usePdfBytes(pdfDocumentRequested ? pdfPath : null);
+  const pdfBytesState = usePdfBytes(pdfDocumentRequested ? pdfPath : null, entry.pdfContentHash);
   const pdfState = usePdfDocument(pdfBytesState.status === 'ready' ? pdfBytesState.bytes : null);
   const notesBySegmentUid = useMemo(() => buildSegmentNoteLookup(segmentNotes, segments), [segmentNotes, segments]);
   const annotationCountBySegmentUid = useMemo(() => {
