@@ -1,4 +1,5 @@
-import { useId, type ReactNode } from 'react';
+import { forwardRef, useId, type ReactNode } from 'react';
+import { ChevronDown } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -20,6 +21,21 @@ export function SettingsGroup({ id, title, description, children, action }: { id
     <div className="mt-2">{children}</div>
   </section>;
 }
+
+/** Native disclosure keeps forms mounted and excludes collapsed controls from keyboard navigation. */
+export const SettingsDisclosure = forwardRef<HTMLDetailsElement, {
+  id?: string; title: string; description?: string; status: string; attention?: boolean; children: ReactNode;
+}>(function SettingsDisclosure({ id, title, description, status, attention, children }, ref) {
+  return <details ref={ref} data-setting-id={id} className="group min-w-0 border-b border-border last:border-b-0">
+    <summary className="flex min-w-0 cursor-pointer list-none items-center gap-3 rounded-sm px-3 py-3 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+      <ChevronDown aria-hidden className="size-4 shrink-0 -rotate-90 group-open:rotate-0" />
+      <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium" title={title}>{title}</span>
+        {description && <span className="mt-0.5 block truncate text-xs text-muted-foreground" title={description}>{description}</span>}</span>
+      <span className={`shrink-0 text-xs ${attention ? 'text-warning' : 'text-muted-foreground'}`}>{status}</span>
+    </summary>
+    <div className="min-w-0 border-t border-border px-3 py-3">{children}</div>
+  </details>;
+});
 
 /** Settings are always expanded; the surrounding settings viewport owns scrolling. */
 export function SettingsServiceSection({ id, title, description, status, children }: {

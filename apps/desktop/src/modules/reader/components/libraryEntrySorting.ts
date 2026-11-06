@@ -17,10 +17,9 @@ export function defaultLibrarySortDirection(by: LibraryEntrySortKey): LibraryEnt
   return ['title', 'source', 'tags', 'file', 'parser'].includes(by) ? 'asc' : 'desc';
 }
 
-export function nextLibraryEntrySort(by: LibraryEntrySortKey, current?: LibraryEntrySort): LibraryEntrySort {
-  return { by, direction: current?.by === by
-    ? current.direction === 'asc' ? 'desc' : 'asc'
-    : defaultLibrarySortDirection(by) };
+export function nextLibraryEntrySort(by: LibraryEntrySortKey, current?: LibraryEntrySort): LibraryEntrySort | null {
+  if (current?.by !== by) return { by, direction: 'asc' };
+  return current.direction === 'asc' ? { by, direction: 'desc' } : null;
 }
 
 export function libraryEntrySourceLabel(kinds?: readonly ('zotero' | 'mineru')[]) {

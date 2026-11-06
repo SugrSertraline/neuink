@@ -1,4 +1,4 @@
-import { Eye, EyeOff, RotateCcw, Trash2, type LucideIcon } from 'lucide-react';
+import { BookOpen, Eye, EyeOff, RotateCcw, Trash2, type LucideIcon } from 'lucide-react';
 import { TooltipIconButton } from '@/shared/components/TooltipIconButton';
 import { ContextMenuItem, ContextMenuLabel, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
@@ -12,7 +12,7 @@ export const libraryPaperMenuClassName = 'w-56 [&_[role=menuitem]]:min-h-8 [&_[r
 type ActionMode = 'context' | 'dropdown' | 'inline';
 
 /** Inline controls and context menus share availability and source-only actions. */
-export function LibraryPaperMenuItems({ entry, mode, reparseDisabled, deleteDisabled, onOpen, onReparse, onDelete, externalEntryIds, sourceHiddenByEntry, onToggleSourceHidden, onSelect, pdfParseAction }: LibraryPaperActions & { entry: LibraryEntry; mode: ActionMode; pdfParseAction?: PdfParseAction }) {
+export function LibraryPaperMenuItems({ entry, mode, reparseDisabled, deleteDisabled, onOpen, onRead, onReparse, onDelete, externalEntryIds, sourceHiddenByEntry, onToggleSourceHidden, onSelect, pdfParseAction }: LibraryPaperActions & { entry: LibraryEntry; mode: ActionMode; pdfParseAction?: PdfParseAction }) {
   const Label = mode === 'context' ? ContextMenuLabel : DropdownMenuLabel;
   const Separator = mode === 'context' ? ContextMenuSeparator : DropdownMenuSeparator;
   const inline = mode === 'inline';
@@ -23,6 +23,7 @@ export function LibraryPaperMenuItems({ entry, mode, reparseDisabled, deleteDisa
   const showReparse = entry.status === 'Parsed' || entry.status === 'Failed' && (!inline || !pdfParseAction || !entry.pdfFileName);
   return <>
     {!inline && <><Label className="truncate px-2 py-1.5" title={entry.title}>{entry.title}</Label><Separator /></>}
+    {onRead && <PaperAction mode={mode} label="开始阅读" icon={BookOpen} onActivate={() => onRead(entry.id)} />}
     <PaperAction mode={mode} label="查看详情" icon={Eye} onActivate={() => onOpen(entry.id)} />
     {inline && pdfParseAction && <PdfParseButton entry={entry} action={pdfParseAction} iconOnly />}
     {showReparse && <PaperAction mode={mode} label="重新解析" icon={RotateCcw} disabled={reparseDisabled} onActivate={() => { select(); onReparse(entry); }} />}

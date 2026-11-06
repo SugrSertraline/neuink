@@ -20,6 +20,29 @@ fn pairs() -> Vec<SentenceTranslation> {
 }
 const SOURCE: &str = "Dr. Lee measured 3.5 cm [1].  It worked.";
 
+#[test]
+fn legacy_sentence_failure_never_schedules_another_translation() {
+    let fixture = Fixture::new();
+    let mut record = fixture.record.clone();
+    record.paragraph = TranslationPart { status: Status::Succeeded, value: Some("完整译文".into()), error: None, timing: None };
+    record.sentences.status = Status::Failed;
+    assert_eq!(requests_to_run(&record, true), (false, false));
+    assert_eq!(requests_to_run(&record, false), (true, false));
+}
+
+#[test]
+fn stale_segment_result_cannot_replace_canonical_translation() {
+    let fixture = Fixture::new();
+    let original = document_translation(&fixture);
+    fixture.workspace.write_entry_translation(&fixture.request.entry_id, &original).unwrap();
+    let mut changed = fixture.segment.clone(); changed.text = "Edited source.".into();
+    fixture.workspace.write_segments(&fixture.request.entry_id, &[changed]).unwrap();
+    let old_result = original.segments[0].clone();
+    assert!(single_segment::save(&fixture.workspace, &fixture.request.entry_id, old_result).is_err());
+    let stored = fixture.workspace.read_entry_translation(&fixture.request.entry_id).unwrap().unwrap();
+    assert_eq!(stored.updated_at, original.updated_at);
+}
+
 struct Fixture {
     root: PathBuf,
     workspace: Workspace,
@@ -150,7 +173,7 @@ fn incremental_sentences_reuse_document_paragraph_and_survive_completion_and_reo
             Ok(record)
         })
         .unwrap();
-    assert_eq!(requests_to_run(&saved, true), (false, true));
+    assert_eq!(requests_to_run(&saved, true), (false, false));
     save_result(
         &fixture.request,
         &saved,
@@ -162,7 +185,7 @@ fn incremental_sentences_reuse_document_paragraph_and_survive_completion_and_reo
     assert_eq!(reopened.paragraph.value.as_deref(), Some("已有整段译文"));
     assert_eq!(reopened.sentences.value, Some(pairs()));
     assert_eq!(requests_to_run(&reopened, true), (false, false));
-    assert_eq!(requests_to_run(&reopened, false), (true, true));
+    assert_eq!(requests_to_run(&reopened, false), (true, false));
 }
 
 #[test]
@@ -179,7 +202,7 @@ fn document_reuse_rejects_wrong_source_uid_language_failed_and_empty_results() {
         }
         let mut record = fixture.record.clone();
         reuse_document_paragraph(&mut record, Some(&document));
-        assert_eq!(requests_to_run(&record, true), (true, true));
+        assert_eq!(requests_to_run(&record, true), (true, false));
     }
     let mut record = fixture.record.clone();
     record.paragraph.status = Status::Succeeded;
@@ -188,7 +211,7 @@ fn document_reuse_rejects_wrong_source_uid_language_failed_and_empty_results() {
     record.sentences.value = Some(vec![]);
     reuse_document_paragraph(&mut record, Some(&document_translation(&fixture)));
     assert_eq!(record.paragraph.value.as_deref(), Some("独立段落译文"));
-    assert_eq!(requests_to_run(&record, true), (false, true));
+    assert_eq!(requests_to_run(&record, true), (false, false));
 }
 
 #[test]
@@ -258,7 +281,7 @@ fn independent_completion_and_view_updates_survive_reopening_without_lost_writes
     assert_eq!(legacy.paragraph.value, saved.paragraph.value);
     assert_eq!(saved.view, ParagraphView::Paragraph);
     assert_eq!(requests_to_run(&saved, true), (false, false));
-    assert_eq!(requests_to_run(&saved, false), (true, true));
+    assert_eq!(requests_to_run(&saved, false), (true, false));
 }
 
 #[test]
@@ -281,7 +304,7 @@ fn one_failure_keeps_the_other_result_and_retries_only_failed_part() {
     let saved = fixture.read();
     assert_eq!(saved.paragraph.status, Status::Succeeded);
     assert_eq!(saved.sentences.status, Status::Failed);
-    assert_eq!(requests_to_run(&saved, true), (false, true));
+    assert_eq!(requests_to_run(&saved, true), (false, false));
     assert!(save_result(
         &fixture.request,
         &fixture.record,
@@ -346,7 +369,7 @@ fn interrupted_requests_can_be_retried_without_losing_completed_part() {
     let record = records.remove(fixture.segment.uid.as_str()).unwrap();
     assert_eq!(record.paragraph.status, Status::Succeeded);
     assert_eq!(record.sentences.status, Status::Failed);
-    assert_eq!(requests_to_run(&record, true), (false, true));
+    assert_eq!(requests_to_run(&record, true), (false, false));
 }
 
 #[tokio::test]

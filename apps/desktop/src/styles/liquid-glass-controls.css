@@ -16,6 +16,7 @@
   -webkit-backdrop-filter: var(--glass-control-filter);
   backdrop-filter: var(--glass-control-filter);
 }
+
 :root[data-appearance="liquid-glass"] [data-ui="button"][data-variant="default"] {
   --glass-face: var(--glass-tinted-face);
   --glass-specular: var(--glass-tinted-specular);

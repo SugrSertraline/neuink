@@ -15,15 +15,25 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
+it('sets a default service without overwriting individual scenarios or requiring a model', async () => {
+  render(<TranslationSourcesSettings {...props} profiles={[]} defaultProfileId={null} unavailable />);
+  fireEvent.keyDown(await screen.findByRole('combobox', { name: '默认翻译来源' }), { key: 'ArrowDown' });
+  fireEvent.click(await screen.findByRole('option', { name: '小牛翻译' }));
+  const service = { kind: 'service', provider: 'niutrans' };
+  await waitFor(() => expect(saveTranslationRouting).toHaveBeenCalledWith({
+    ...DEFAULT_TRANSLATION_ROUTING, default_source: service,
+  }));
+});
+
 it('keeps the five sources separate and saves a keyboard-selected model', async () => {
   render(<TranslationSourcesSettings {...props} />);
   const select = await screen.findByRole('combobox', { name: '段落逐句对照来源' });
-  expect(screen.getAllByRole('combobox')).toHaveLength(5);
+  expect(screen.getAllByRole('combobox')).toHaveLength(6);
   fireEvent.keyDown(select, { key: 'ArrowDown' });
   fireEvent.click(await screen.findByRole('option', { name: '精细模型 · precise' }));
   await waitFor(() => expect(saveTranslationRouting).toHaveBeenCalledWith({ ...DEFAULT_TRANSLATION_ROUTING, paragraph: { kind: 'profile', profile_id: 'precise' } }));
   fireEvent.keyDown(select, { key: 'ArrowDown' });
-  fireEvent.click(await screen.findByRole('option', { name: '统一默认模型 · 快速模型' }));
+  fireEvent.click(await screen.findByRole('option', { name: '跟随默认来源 · 快速模型 · fast' }));
   await waitFor(() => expect(saveTranslationRouting).toHaveBeenLastCalledWith(DEFAULT_TRANSLATION_ROUTING));
 });
 it('preserves a failed draft across tab changes and retries without clearing other sources', async () => {

@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState } from 'react';
-import type { CSSProperties, KeyboardEvent, MouseEvent } from 'react';
+import type { CSSProperties, KeyboardEvent, MouseEvent, ReactNode } from 'react';
 import { Link2, MessageCircle, StickyNote } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -35,6 +35,9 @@ function SegmentRegionImpl({
   pageIdx,
   previewPosition,
   previewNotice,
+  previewActions,
+  previewOriginalText,
+  previewTranslatedText,
   previewFontSize = 100,
   previewSize = 100,
   previewShowRegion,
@@ -76,6 +79,9 @@ function SegmentRegionImpl({
   pageIdx: number;
   previewPosition: { x: number; segmentRight?: number; segmentTop: number; segmentBottom: number } | null;
   previewNotice?: string | null;
+  previewActions?: ReactNode;
+  previewOriginalText?: string;
+  previewTranslatedText?: string | null;
   previewFontSize?: PdfHoverPreviewFontSize;
   previewSize?: PdfHoverPreviewSize;
   previewShowRegion: boolean;
@@ -268,11 +274,12 @@ function SegmentRegionImpl({
 
       {!interactionSuppressed && active && previewPosition ? (
         <SegmentPreview
+          actions={previewActions}
           isContinuation={isContinuation}
           listItemRegions={listItemRegions}
           pageIdx={pageIdx}
           position={previewPosition}
-          notice={previewNotice}
+          notice={[previewNotice, translatedSegment?.error ? `本段翻译提示：${translatedSegment.error}` : null].filter(Boolean).join('；') || null}
           previewFontSize={previewFontSize}
           previewSize={previewSize}
           showOriginal={previewShowOriginal}
@@ -283,8 +290,8 @@ function SegmentRegionImpl({
           annotations={previewAnnotations}
           relatedImagePath={relatedImagePath}
           relatedCaptionText={relatedCaptionText}
-          segment={segment}
-          translatedText={translatedText}
+          segment={previewOriginalText === undefined ? segment : { ...segment, text: previewOriginalText, markdown: previewOriginalText }}
+          translatedText={previewTranslatedText === undefined ? translatedText : previewTranslatedText}
           translationStatus={translationStatus}
           translationMode={translationMode}
           translationVisible={translationVisible}
@@ -412,6 +419,7 @@ function shouldMaskInTranslationMode(segment: SourceSegment) {
 }
 
 function SegmentPreview({
+  actions,
   position,
   notice,
   isContinuation,
@@ -441,6 +449,7 @@ function SegmentPreview({
 }: {
   position: { x: number; segmentRight?: number; segmentTop: number; segmentBottom: number };
   notice?: string | null;
+  actions?: ReactNode;
   isContinuation: boolean;
   listItemRegions: ListItemRegion[];
   pageIdx: number;
@@ -532,6 +541,7 @@ function SegmentPreview({
       onClick={event => event.stopPropagation()}
       onKeyDown={event => { if (event.key !== 'Escape') event.stopPropagation(); }}
     >
+      {actions ? <div className="px-2 pb-2">{actions}</div> : null}
       {notice ? <p role="status" className="px-2 pt-2 text-xs leading-4 text-muted-foreground">{notice}</p> : null}
       <div className="mb-1 flex items-center gap-2 px-2 pt-2">
         <Badge variant="secondary">

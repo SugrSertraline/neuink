@@ -5,6 +5,8 @@ import type { NoteDocument, SourceLink } from '@/shared/types/domain';
 import { registerSegmentEditorCloseHandler, setSegmentEditorDirty } from '@/modules/reader/components/segmentEditorDirtyRegistry';
 import { registerMarkdownNoteSaveHandler, setMarkdownNoteDirty } from '../editor/noteDirtyRegistry';
 import { getSharedNoteSession, retainSharedNoteSession, type NoteConflict, type NoteSaveOptions } from '../editor/sharedNoteSession';
+import { useEditRecovery } from '@/shared/hooks/useEditRecovery';
+import { checkpointEditRecovery, isRecoveryExit, recoveryDraftKey } from '@/shared/lib/editRecovery';
 
 export type MarkdownNoteConflict = NoteConflict;
 type SessionOptions = {
@@ -34,6 +36,12 @@ export function useMarkdownNoteSession({ editorScopeKey, editor, editorRef, entr
   const originalTitle = useRef(fallbackTitle);
   const suppressTitleBlur = useRef(false);
   const owner = useRef('note-view-' + crypto.randomUUID()).current;
+  const recoveryPayload = session.recoverySnapshot();
+  const recovery = useEditRecovery({ root: workspaceRoot, dirty: state.dirty, ready: !state.loading && !state.loadFailed,
+    draft: recoveryPayload ? { key: recoveryDraftKey('note', entryId, noteId), kind: 'note', label: state.title,
+      ownerId: entryId, targetId: noteId, scopeKey: editorScopeKey ?? `note:${entryId}:${noteId}`, payload: recoveryPayload } : null,
+    restore: draft => session.restoreRecovery(draft.payload) });
+  const recoveryRef = useRef(recovery); recoveryRef.current = recovery;
 
   useEffect(() => retainSharedNoteSession(key, session), [key, session]);
   useEffect(() => {
@@ -45,7 +53,7 @@ export function useMarkdownNoteSession({ editorScopeKey, editor, editorRef, entr
     return () => { detach(); if (editorRef.current === editor) editorRef.current = null; };
   }, [session, editor, editorRef, noteLinksRef, setNoteLinks]);
   useEffect(() => { void session.load(true); }, [session, refreshKey]);
-  useEffect(() => { editor?.setEditable(!state.loading && !state.loadFailed); }, [editor, state.loading, state.loadFailed]);
+  useEffect(() => { editor?.setEditable(!state.loading && !state.loadFailed && !recovery.loading && !recovery.pending, false); }, [editor, state.loading, state.loadFailed, recovery.loading, recovery.pending]);
 
   const save = async (options: NoteSaveOptions = {}) => {
     const success = await session.save(options);
@@ -64,37 +72,46 @@ export function useMarkdownNoteSession({ editorScopeKey, editor, editorRef, entr
     return () => { unsubscribe(); setMarkdownNoteDirty(entryId, noteId, owner, false); };
   }, [entryId, noteId, owner, session]);
   useEffect(() => {
-    if (!editorScopeKey) return;
-    const unregister = registerSegmentEditorCloseHandler(editorScopeKey, owner, {
-      save: () => saveRef.current({ quiet: true }), discard: () => { session.discard(); setTitleEditing(false); },
+    const scope = editorScopeKey ?? `note:${entryId}:${noteId}`;
+    const unregister = registerSegmentEditorCloseHandler(scope, owner, {
+      label: () => `文档笔记 · ${session.getSnapshot().title}`,
+      reveal: () => editorRef.current?.commands.focus(), recovery: () => recoveryRef.current.reference,
+      isBusy: () => session.getSnapshot().saving,
+      checkpoint: () => {
+        const reference = recoveryRef.current.reference, payload = session.recoverySnapshot();
+        if (reference && payload && session.getSnapshot().dirty) checkpointEditRecovery(reference.root, {
+          key: reference.key, kind: 'note', label: session.getSnapshot().title, ownerId: entryId, targetId: noteId, scopeKey: scope, payload });
+      },
+      save: () => saveRef.current({ quiet: true }), discard: () => { session.discard(); recoveryRef.current.discard(); setTitleEditing(false); },
       isDirty: () => { const s = session.getSnapshot(); return s.dirty || s.saving; }
     });
-    return () => { unregister(); setSegmentEditorDirty(editorScopeKey, owner, false); };
-  }, [editorScopeKey, owner, session]);
+    return () => { unregister(); setSegmentEditorDirty(scope, owner, false); };
+  }, [editorScopeKey, entryId, noteId, owner, session]);
   useEffect(() => {
-    if (!editorScopeKey) return;
-    const update = () => { const s = session.getSnapshot(); setSegmentEditorDirty(editorScopeKey, owner, s.dirty || s.saving); };
+    const scope = editorScopeKey ?? `note:${entryId}:${noteId}`;
+    const update = () => { const s = session.getSnapshot(); setSegmentEditorDirty(scope, owner, s.dirty || s.saving); };
     update(); const unsubscribe = session.subscribe(update);
-    return () => { unsubscribe(); setSegmentEditorDirty(editorScopeKey, owner, false); };
-  }, [editorScopeKey, owner, session]);
+    return () => { unsubscribe(); setSegmentEditorDirty(scope, owner, false); };
+  }, [editorScopeKey, entryId, noteId, owner, session]);
   useEffect(() => {
-    if (!state.dirty || state.loading || state.loadFailed || state.saving || state.error || state.conflict) return;
+    if (!state.dirty || state.loading || state.loadFailed || state.saving || state.error || state.conflict || recovery.recovered || recovery.pending || recovery.loading) return;
     const timeout = window.setTimeout(() => void session.save({ quiet: true }), 1000);
     return () => window.clearTimeout(timeout);
-  }, [session, state]);
+  }, [session, state, recovery.recovered, recovery.pending, recovery.loading]);
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
       const current = session.getSnapshot();
-      if (current.dirty || current.saving) { event.preventDefault(); event.returnValue = ''; }
+      if (!isRecoveryExit() && (current.dirty || current.saving)) { event.preventDefault(); event.returnValue = ''; }
     };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [session]);
 
   return {
+    recovery,
     runInsertionOnce: session.runInsertionOnce,
     acceptRemoteConflict: () => { session.acceptRemote(); setTitleEditing(false); },
-    canEdit: !state.loadFailed,
+    canEdit: !state.loadFailed && !recovery.loading && !recovery.pending,
     cancelTitleEdit: () => { suppressTitleBlur.current = true; session.setTitle(originalTitle.current); setTitleEditing(false); },
     changeVersion: state.version,
     conflict: state.conflict,

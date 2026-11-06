@@ -1,5 +1,6 @@
 import { getLlmSettings } from '@/shared/ipc/assistantApi';
-import { getTranslationRouting } from '@/shared/ipc/translationRoutingApi';
+import { translateSelectionService } from '@/shared/ipc/selectionTranslationApi';
+import { getTranslationRouting, resolvedTranslationSource } from '@/shared/ipc/translationRoutingApi';
 import { saveFoldTranslation, type FoldRecord } from '@/shared/ipc/foldingApi';
 import { runLocalBackgroundJob } from '@/shared/lib/localBackgroundJobs';
 import { translateSelectionWithProfile } from '../translation/modelSelectionTranslation';
@@ -46,13 +47,24 @@ export function translateFoldLevel(root: string, entryId: string, title: string,
       execute: taskSignal => runLocalBackgroundJob({ kind: 'folding', scope: { kind: 'entry', root, entry_id: entryId },
         idPrefix: 'fold-translation', message: `正在翻译阅读详略：${title}`, successMessage: `阅读详略译文已保存：${title}`,
         failureMessage: '阅读详略译文未完成。' }, async () => {
-        const [settings, routing] = await Promise.all([getLlmSettings(), getTranslationRouting()]);
+        const routing = await getTranslationRouting();
         if (taskSignal.aborted) throw abortError();
-        const profile = translationSourceProfile(settings, routing.paragraph);
-        const translated = await translateSelectionWithProfile(profile, { sourceText: source, entryTitle: title }, { signal: taskSignal });
+        const origin = resolvedTranslationSource(routing, 'paragraph');
+        let translated: string | null = null, model = '';
+        if (origin.kind === 'service' || origin.kind === 'selection_service') {
+          translated = await translateSelectionService(source, origin.kind === 'service' ? origin.provider : undefined, taskSignal);
+          model = origin.kind === 'service' ? origin.provider : 'translation-service';
+          if (origin.kind === 'service' && translated === null) throw new Error('翻译服务未返回译文。');
+        }
+        if (translated === null) {
+          const settings = await getLlmSettings();
+          const profile = translationSourceProfile(settings, origin.kind === 'selection_service' ? { kind: 'default_model' } : origin);
+          model = profile.model;
+          translated = await translateSelectionWithProfile(profile, { sourceText: source, entryTitle: title }, { signal: taskSignal });
+        }
         if (taskSignal.aborted) throw abortError();
         await saveFoldTranslation(root, entryId, record.segment_uid, level, {
-          source_text: source, translated_text: translated, model: profile.model, generated_at: new Date().toISOString()
+          source_text: source, translated_text: translated, model, generated_at: new Date().toISOString()
         });
         notifyFoldUpdated(root, entryId);
       }) };

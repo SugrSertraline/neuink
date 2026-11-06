@@ -66,7 +66,7 @@ function ParagraphTranslationSession({ root, entryId, children }: { root: string
     }).then(stop => { if (stopped) stop(); else stopProgress = stop; }).catch(() => { /* Completed results still arrive through the job event and polling. */ });
     const timer = window.setInterval(() => {
       // Read while a request runs, or retry an initial read failure. No idle polling.
-      if (pendingRef.current.size || !readyRef.current || Object.values(recordsRef.current).some(r => r.paragraph.status === 'running' || r.sentences.status === 'running')) void refresh();
+      if (pendingRef.current.size || !readyRef.current || Object.values(recordsRef.current).some(r => r.paragraph.status === 'running')) void refresh();
     }, 1200);
     return () => { stopped = true; alive.current = false; unlisten?.(); stopProgress?.(); window.clearInterval(timer); };
   }, [root, entryId, notify]);

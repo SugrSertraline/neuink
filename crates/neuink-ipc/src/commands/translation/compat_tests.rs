@@ -139,7 +139,7 @@ async fn malformed_paper_context_falls_back_to_direct_model_translation() {
         entry_id: EntryId::new(),
         force: false,
         job_total: 1,
-        profile: client.profile.clone(),
+        client: client.profile.clone().into(),
         root: PathBuf::new(),
         selected_segment_uids: None,
         strategy: RunTranslationStrategy::Restart,

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { LibraryEntry } from '../../library/components/LibrarySidebar';
 import type { EntryReadingState } from '@/shared/types/domain';
 import { filterEntries } from './libraryEntryFilters';
-import { sortLibraryEntries, type LibraryEntrySortDirection, type LibraryEntrySortKey } from './libraryEntrySorting';
+import { nextLibraryEntrySort, sortLibraryEntries, type LibraryEntrySortDirection, type LibraryEntrySortKey } from './libraryEntrySorting';
 
 const entry = (id: string, overrides: Partial<LibraryEntry> = {}): LibraryEntry => ({
   id, title: id, contents: [], fields: {}, tags: [], tagIds: [], createdAt: '', updatedAt: '',
@@ -56,4 +56,12 @@ describe('library column ordering', () => {
     expect(ids(filterEntries(entries, 'recent', null, '', 'title', ['Beta', 'Alpha'], {}, { direction: 'asc' }))).toEqual(['Alpha', 'Beta']);
     expect(ids(filterEntries(entries, 'recent', null, '', 'title', ['Beta', 'Alpha'], {}, { direction: 'desc' }))).toEqual(['Beta', 'Alpha']);
   });
+});
+
+it.each(['title', 'updated', 'reading-progress'] as const)('starts %s ascending and clears the third header click', by => {
+  const ascending = nextLibraryEntrySort(by);
+  expect(ascending).toEqual({ by, direction: 'asc' });
+  const descending = nextLibraryEntrySort(by, ascending!);
+  expect(descending).toEqual({ by, direction: 'desc' });
+  expect(nextLibraryEntrySort(by, descending!)).toBeNull();
 });

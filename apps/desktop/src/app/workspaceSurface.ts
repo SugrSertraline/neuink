@@ -24,7 +24,7 @@ export type WorkspaceSurface = { viewId?: string } & (
   | { kind: 'tag-reading'; tagId: string; label?: string }
   | { kind: 'tag-details'; tagId: string; label?: string; view?: 'overview' | 'papers' | 'notes' }
   | { kind: 'owned-note'; target: NoteTarget; label?: string }
-  | { kind: 'entry-overview'; entryId: string; contextTagId?: string }
+  | { kind: 'entry-overview'; entryId: string; contextTagId?: string; editRequestId?: string }
   | { kind: 'pdf'; entryId: string; contextTagId?: string }
   | { kind: 'reflow'; entryId: string; contextTagId?: string }
   | { kind: 'note'; entryId: string; noteId: string }

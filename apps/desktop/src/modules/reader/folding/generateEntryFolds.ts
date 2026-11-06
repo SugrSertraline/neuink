@@ -7,6 +7,8 @@ import { generateFoldBatch } from './foldGeneration';
 import { foldViewsForSource } from './foldViews';
 import { FoldGenerationError, foldErrorCode, foldErrorMessage, type FoldErrorCode } from './foldErrors';
 import type { FoldPauseGate } from './foldPauseGate';
+import { missingFoldTranslations } from './foldTranslations';
+import { translateFoldLevel } from './translateFoldLevel';
 import { buildFoldContexts } from './foldPrompt';
 
 export type FoldGenerationProgress = {
@@ -14,6 +16,7 @@ export type FoldGenerationProgress = {
   completed: number; failed: number; total: number;
   activeSegmentUids: string[]; completedSegmentUids: string[]; failedSegmentUids: string[]; cachedSegmentUids: string[];
   savingSegmentUids?: string[];
+  translatingSegmentUids?: string[];
   canceledSegmentUids: string[];
   segmentErrors?: Record<string, string>;
 };
@@ -30,6 +33,7 @@ export async function generateEntryFolds({
   signal,
   force = false,
   canceledSegments = new Set<string>(),
+  translationControllers = new Map<string, AbortController>(),
   concurrency = FOLD_CONCURRENCY,
   pauseGate,
   onProgress
@@ -42,6 +46,7 @@ export async function generateEntryFolds({
   signal?: AbortSignal;
   force?: boolean;
   canceledSegments?: Set<string>;
+  translationControllers?: Map<string, AbortController>;
   concurrency?: number;
   pauseGate?: FoldPauseGate;
   onProgress?: (progress: FoldGenerationProgress) => void;
@@ -53,7 +58,7 @@ export async function generateEntryFolds({
   const cachedSegmentUids: string[] = [];
   const pending = prepared.batches.flat().filter(item => {
     const record = existing[item.segmentUid];
-    const needsGeneration = force || !record || !foldViewsForSource(record, item.source);
+    const needsGeneration = force || !record || !foldViewsForSource(record, item.source) || missingFoldTranslations(record).length > 0;
     if (!needsGeneration) cachedSegmentUids.push(item.segmentUid);
     return needsGeneration;
   });
@@ -63,6 +68,7 @@ export async function generateEntryFolds({
   const segmentErrors: Record<string, string> = {};
   const generating = new Set<string>();
   const saving = new Set<string>();
+  const translating = new Set<string>();
   let failureCode: FoldErrorCode | undefined;
   const fail = (uid: string, code: FoldErrorCode) => {
     failedSegmentUids.push(uid);
@@ -71,20 +77,21 @@ export async function generateEntryFolds({
   };
   const progress = () => onProgress?.({
     phase: generating.size ? 'generating' : saving.size ? 'saving' : 'preparing', completed: completedSegmentUids.length, failed: failedSegmentUids.length, total,
-    activeSegmentUids: [...generating, ...saving], savingSegmentUids: [...saving], completedSegmentUids: [...completedSegmentUids], failedSegmentUids: [...failedSegmentUids], cachedSegmentUids,
+    activeSegmentUids: [...generating, ...saving], savingSegmentUids: [...saving], translatingSegmentUids: [...translating], completedSegmentUids: [...completedSegmentUids], failedSegmentUids: [...failedSegmentUids], cachedSegmentUids,
     canceledSegmentUids: [...canceledSegments],
     ...(failedSegmentUids.length ? { segmentErrors: { ...segmentErrors } } : {})
   });
   progress();
   if (!total) return { failedSegmentUids: [], skipped: prepared.skipped };
-  const settings = await getLlmSettings();
+  const needsSource = pending.some(item => force || !existing[item.segmentUid] || !foldViewsForSource(existing[item.segmentUid], item.source));
+  const settings = needsSource ? await getLlmSettings() : null;
   checkStopped();
   if (pending.every(item => canceledSegments.has(item.segmentUid))) {
     progress();
     return { failedSegmentUids: [], skipped: prepared.skipped };
   }
-  const profile = settings.assistant_profile;
-  if (!profile) throw new FoldGenerationError('configuration');
+  const profile = settings?.assistant_profile;
+  if (needsSource && !profile) throw new FoldGenerationError('configuration');
   const contexts = buildFoldContexts(title, documentSegments);
   const controller = new AbortController();
   const stopRequests = () => controller.abort();
@@ -107,21 +114,38 @@ export async function generateEntryFolds({
       // drains existing requests/saves but cannot dispatch another paragraph.
       const item = pending[cursor++];
       const uid = item.segmentUid;
+      const translationController = new AbortController();
+      const abortTranslation = () => translationController.abort();
+      translationControllers.set(uid, translationController);
+      controller.signal.addEventListener('abort', abortTranslation, { once: true });
+      if (controller.signal.aborted) abortTranslation();
       generating.add(uid); progress();
       try {
-        const output = await generateFoldBatch({ batch: [item], profile, context: contexts.get(uid), signal: controller.signal });
-        generating.delete(uid);
-        if (signal?.aborted || halted || canceledSegments.has(uid)) { progress(); continue; }
-        const results = output.results.filter(result => result.segmentUid === uid);
-        if (results.length !== 1 || output.failedSegmentUids.includes(uid)) {
-          fail(uid, 'validation'); progress(); continue;
+        let record = existing[uid];
+        if (force || !record || !foldViewsForSource(record, item.source)) {
+          if (!profile) throw new FoldGenerationError('configuration');
+          const output = await generateFoldBatch({ batch: [item], profile, context: contexts.get(uid), signal: controller.signal });
+          if (signal?.aborted || halted || canceledSegments.has(uid)) { progress(); continue; }
+          const results = output.results.filter(result => result.segmentUid === uid);
+          if (results.length !== 1 || output.failedSegmentUids.includes(uid)) {
+            fail(uid, 'validation'); progress(); continue;
+          }
+          const result = results[0];
+          record = { segment_uid: uid, source: result.source, evidence: result.evidence,
+            brief: result.brief, key: result.key, takeaway: result.takeaway, topic: result.topic,
+            model: profile.model, generated_at: new Date().toISOString() };
+          generating.delete(uid); saving.add(uid); progress();
+          await upsertEntryFolds(root, entryId, [record]).catch(() => { throw new FoldGenerationError('save'); });
+          saving.delete(uid);
         }
-        const result = results[0];
-        const record: FoldRecord = { segment_uid: uid, source: result.source, evidence: result.evidence,
-          brief: result.brief, key: result.key, takeaway: result.takeaway, topic: result.topic,
-          model: profile.model, generated_at: new Date().toISOString() };
-        saving.add(uid); progress();
-        await upsertEntryFolds(root, entryId, [record]).catch(() => { throw new FoldGenerationError('save'); });
+        generating.add(uid); translating.add(uid); progress();
+        for (const level of missingFoldTranslations(record)) {
+          if (signal?.aborted || halted || canceledSegments.has(uid)) break;
+          // Use the same routed paragraph translator and de-duplicated queue as visible readers.
+          await translateFoldLevel(root, entryId, title, record, level, translationController.signal)
+            .catch(error => { if (translationController.signal.aborted) throw error; throw new FoldGenerationError('translation'); });
+        }
+        if (signal?.aborted || halted || canceledSegments.has(uid)) continue;
         completedSegmentUids.push(uid);
       } catch (error) {
         const failedWhileSaving = saving.has(uid);
@@ -129,14 +153,16 @@ export async function generateEntryFolds({
           const code = foldErrorCode(error);
           fail(uid, code);
           // Output-specific failures stay local. Shared service/storage failures stop dispatch.
-          if (!halted && (failedWhileSaving || !['truncated', 'context', 'empty', 'format', 'validation', 'filtered'].includes(code))) {
+          if (!halted && (failedWhileSaving || !['truncated', 'context', 'empty', 'format', 'validation', 'filtered', 'translation'].includes(code))) {
             fatalError = error;
             halted = true;
             controller.abort();
           }
         }
       } finally {
-        generating.delete(uid); saving.delete(uid); progress();
+        controller.signal.removeEventListener('abort', abortTranslation);
+        translationControllers.delete(uid);
+        generating.delete(uid); saving.delete(uid); translating.delete(uid); progress();
       }
     }
   };

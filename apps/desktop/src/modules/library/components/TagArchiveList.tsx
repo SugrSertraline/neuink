@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { listTagArchives, notifyTagArchivesChanged, purgeTagArchive, type TagArchive } from '@/shared/ipc/tagReadingApi';
+import { listTagArchives, TAG_ARCHIVES_CHANGED, notifyTagArchivesChanged, purgeTagArchive, type TagArchive } from '@/shared/ipc/tagReadingApi';
 import { registerSegmentEditorCloseHandler, setSegmentEditorDirty } from '@/modules/reader/components/segmentEditorDirtyRegistry';
 
 export function TagArchiveList({ root, refreshKey, onRestore, scope = 'library', query = '' }: {
@@ -21,6 +21,11 @@ export function TagArchiveList({ root, refreshKey, onRestore, scope = 'library',
   const liveRoot = useRef(root);
   liveRoot.current = root;
   useEffect(() => setPendingPurge(null), [root]);
+  useEffect(() => {
+    const changed = (event: Event) => { if ((event as CustomEvent<string>).detail === root) setReload(value => value + 1); };
+    window.addEventListener(TAG_ARCHIVES_CHANGED, changed);
+    return () => window.removeEventListener(TAG_ARCHIVES_CHANGED, changed);
+  }, [root]);
   useEffect(() => {
     let cancelled = false;
     setLoading(true);

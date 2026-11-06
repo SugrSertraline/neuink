@@ -1,4 +1,4 @@
-//! Short-text translation. Credentials stay in the OS vault; no provider fallback or retries.
+//! Translation service configuration and vault credentials. Credentials stay in the OS vault; no provider fallback or retries.
 use super::settings::{read_settings, write_settings};
 use neuink_config::{
     SelectionTranslationProvider as Provider, SelectionTranslationSettings as Settings,
@@ -9,6 +9,14 @@ use serde_json::{json, Value};
 use std::sync::OnceLock;
 use std::time::Duration;
 use tauri::{AppHandle, Runtime};
+
+mod transport;
+pub(crate) mod cancellation;
+mod text;
+pub(crate) mod registry;
+use transport::translate;
+#[cfg(test)]
+use transport::{payload, extract};
 
 // Keep pooled connections warm for repeated short selections.
 static HTTP: OnceLock<Result<Client, String>> = OnceLock::new();
@@ -55,7 +63,7 @@ fn state(settings: Settings) -> State {
         .is_ok();
     State { settings, has_key }
 }
-fn validate(settings: &Settings) -> Result<(), String> {
+pub(crate) fn validate(settings: &Settings) -> Result<(), String> {
     if settings.provider == Provider::ReadingModel {
         return Ok(());
     }
@@ -79,7 +87,7 @@ fn validate(settings: &Settings) -> Result<(), String> {
     }
     Ok(())
 }
-fn key(settings: &Settings, supplied: Option<&str>) -> Result<String, String> {
+pub(crate) fn key(settings: &Settings, supplied: Option<&str>) -> Result<String, String> {
     if let Some(value) = supplied.filter(|value| !value.trim().is_empty()) {
         if value.len() > 4096 {
             return Err("翻译密钥过长".into());
@@ -89,7 +97,7 @@ fn key(settings: &Settings, supplied: Option<&str>) -> Result<String, String> {
     if let Ok(value) = credential(settings)?.get_password() {
         return Ok(value);
     }
-    Err("请在设置 → 翻译 → 选区翻译服务中填写 API Key".into())
+    Err("请在设置 → 翻译 → 翻译服务中填写 API Key".into())
 }
 
 #[tauri::command]
@@ -121,6 +129,7 @@ pub fn save_selection_translation_settings<R: Runtime>(
         }
     }
     let mut settings = read_settings(&app)?;
+    registry::upsert(&mut settings, request.settings.clone());
     settings.selection_translation = request.settings;
     write_settings(&app, &settings)?;
     Ok(state(settings.selection_translation))
@@ -129,13 +138,21 @@ pub fn save_selection_translation_settings<R: Runtime>(
 pub async fn translate_selection_service<R: Runtime>(
     app: AppHandle<R>,
     text: String,
+    provider: Option<Provider>,
+    request_id: Option<String>,
 ) -> Result<Option<String>, String> {
-    let settings = read_settings(&app)?.selection_translation;
+    let control = request_id.map(cancellation::Request::register).transpose()?;
+    let app_settings = read_settings(&app)?;
+    let settings = match provider {
+        Some(provider) => registry::configured(&app_settings, provider)?,
+        None => app_settings.selection_translation,
+    };
     if settings.provider == Provider::ReadingModel {
         return Ok(None);
     }
-    let api_key = key(&settings, None)?;
-    translate(&settings, &api_key, &text).await.map(Some)
+    let client = registry::ServiceClient::new(settings)?;
+    if let Some(control) = control { control.run(client.translate(&text)).await.map(Some) }
+    else { client.translate(&text).await.map(Some) }
 }
 #[tauri::command]
 pub async fn test_selection_translation_service(request: Save) -> Result<String, String> {
@@ -152,88 +169,7 @@ pub async fn test_selection_translation_service(request: Save) -> Result<String,
     .await
 }
 
-fn payload(settings: &Settings, text: &str) -> Value {
-    match settings.provider {
-        Provider::Azure => json!([{ "Text": text }]),
-        Provider::Deepl => json!({ "text": [text], "target_lang": "ZH-HANS" }),
-        Provider::QwenMt => {
-            json!({ "model": settings.model.trim(), "messages": [{"role":"user", "content":text}],
-            "translation_options": {"source_lang":"auto", "target_lang":"Chinese"}, "stream":false })
-        }
-        Provider::ReadingModel => Value::Null,
-    }
-}
-fn extract(provider: Provider, body: &Value) -> Result<String, String> {
-    let text = match provider {
-        Provider::Azure => body.pointer("/0/translations/0/text"),
-        Provider::Deepl => body.pointer("/translations/0/text"),
-        Provider::QwenMt => body.pointer("/choices/0/message/content"),
-        Provider::ReadingModel => None,
-    }
-    .and_then(Value::as_str)
-    .unwrap_or_default()
-    .trim();
-    if text.is_empty() {
-        Err("翻译服务未返回译文，请检查服务类型与模型名称".into())
-    } else {
-        Ok(text.to_string())
-    }
-}
-async fn translate(settings: &Settings, api_key: &str, text: &str) -> Result<String, String> {
-    validate(settings)?;
-    let text = text.trim();
-    if text.is_empty() || text.chars().count() > 12000 {
-        return Err("请选择 1–12000 个字符进行快速翻译".into());
-    }
-    let mut url = Url::parse(settings.endpoint.trim()).map_err(|_| "翻译地址无效")?;
-    if settings.provider == Provider::Azure {
-        url.set_query(None);
-        url.query_pairs_mut()
-            .append_pair("api-version", "3.0")
-            .append_pair("to", "zh-Hans");
-    }
-    let mut request = client()?.post(url).json(&payload(settings, text));
-    request = match settings.provider {
-        Provider::Azure => {
-            let mut request = request.header("Ocp-Apim-Subscription-Key", api_key);
-            if !settings.region.trim().is_empty() {
-                request = request.header("Ocp-Apim-Subscription-Region", settings.region.trim());
-            }
-            request
-        }
-        Provider::Deepl => request.header("Authorization", format!("DeepL-Auth-Key {api_key}")),
-        Provider::QwenMt => request.bearer_auth(api_key),
-        Provider::ReadingModel => return Err("请使用整体翻译模型进行翻译".into()),
-    };
-    let mut response = request.send().await.map_err(|error| {
-        if error.is_timeout() {
-            "翻译服务响应超时（30 秒），请重试或更换服务"
-        } else {
-            "无法连接翻译服务，请检查地址和网络"
-        }
-    })?;
-    if !response.status().is_success() {
-        return Err(format!(
-            "翻译服务请求失败（HTTP {}），请检查密钥、额度和请求地址",
-            response.status().as_u16()
-        ));
-    }
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|_| "读取翻译结果失败或超时")?
-    {
-        if bytes.len() + chunk.len() > 512 * 1024 {
-            return Err("翻译响应过大".into());
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    let body = serde_json::from_slice(&bytes)
-        .map_err(|_| "翻译服务返回格式不匹配，请检查服务类型和地址")?;
-    extract(settings.provider, &body)
-}
 
 #[cfg(test)]
 #[path = "selection_translation_tests.rs"]
-mod tests;
+pub(crate) mod tests;

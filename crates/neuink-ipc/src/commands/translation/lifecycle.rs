@@ -120,14 +120,7 @@ pub fn resume_entry_translation<R: Runtime>(
         .lock()
         .map_err(|error| error.to_string())?;
     let (workspace, mut translation, snapshot) = load_paused_task(&request)?;
-    let profile = super::super::settings::read_settings(&app)?
-        .llm_profiles
-        .into_iter()
-        .find(|profile| profile.id == snapshot.profile_id)
-        .ok_or("此任务使用的模型配置已删除，请恢复配置，或取消任务后重新翻译。")?;
-    if translation.model.as_deref() != Some(profile.model.as_str()) {
-        return Err("此任务使用的模型已更改，请恢复配置，或取消任务后重新翻译。".into());
-    }
+    let client = TranslationClient::resume(&super::super::settings::read_settings(&app)?, &snapshot.profile_id, translation.model.as_deref())?;
     restore_paused_job(&request.root, &translation)?;
     translation.status = TranslationStatus::Running;
     translation.error = None;
@@ -148,7 +141,7 @@ pub fn resume_entry_translation<R: Runtime>(
         control,
         entry_id: request.entry_id,
         root: request.root,
-        profile,
+        client,
         force: snapshot.force,
         job_total: snapshot.source_hashes.len(),
         selected_segment_uids: Some(snapshot.source_hashes.into_keys().collect()),

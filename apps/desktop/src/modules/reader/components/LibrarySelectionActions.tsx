@@ -52,11 +52,11 @@ export function LibrarySelectionActions({ active, context, selected, total, hidd
     else { setPlan(null); notify({ tone: 'success', title: `已${actionNames[plan.action]} ${done.length} 篇条目` }); }
   };
   return <>
-    {active && <div role="region" aria-label="批量操作" className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-accent/40 px-3 py-2 text-xs">
+    {active && <div role="region" aria-label="批量操作" className="flex shrink-0 flex-nowrap items-center gap-1.5 whitespace-nowrap text-xs">
       <span role="status" className="tabular-nums">已选 {selected.length} / {total} 篇</span>
-      <Button size="xs" variant="ghost" disabled={!total || busy} onClick={onSelectAll}>全选当前结果</Button>
+      <Button size="xs" variant="ghost" disabled={!total || busy} onClick={onSelectAll}>{total > 0 && selected.length === total ? '取消全选' : '全选当前结果'}</Button>
       <Button size="xs" variant="ghost" disabled={!selected.length || busy} onClick={onClear}>清空选择</Button>
-      <div className="ml-auto flex flex-wrap gap-1">
+      <div className="flex shrink-0 flex-nowrap gap-1">
         <Button size="xs" variant="outline" disabled={!selected.length || !onAddTags || busy} onClick={() => begin('tags', selected)}><Tags aria-hidden="true" />添加标签</Button>
         {sources.length > 0 && <Button size="xs" variant="outline" disabled={!onSetHidden || sourceUnavailable || busy} onClick={() => begin(hidden ? 'restore' : 'hide', sources)}>{hidden ? <Eye aria-hidden="true" /> : <EyeOff aria-hidden="true" />}{hidden ? '恢复来源' : '隐藏来源'} {sources.length} 篇</Button>}
         {locals.length > 0 && <Button size="xs" variant="outline" disabled={sourceUnavailable || busy} onClick={() => begin('trash', locals)}><Trash2 aria-hidden="true" />移入回收站 {locals.length} 篇</Button>}

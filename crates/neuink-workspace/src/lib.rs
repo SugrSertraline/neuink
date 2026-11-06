@@ -7,6 +7,7 @@ pub mod daily_note;
 pub mod entertainment;
 pub mod recommendations;
 pub mod entry_meta;
+pub mod edit_recovery;
 pub mod entry_sources;
 pub mod local_copy;
 mod downloaded_pdf;
@@ -23,6 +24,7 @@ pub mod note_catalog;
 mod note_catalog_tests;
 pub mod onboarding;
 pub mod paragraph_translation;
+pub mod translation_chunk_cache;
 pub mod pdf_parse_queue;
 pub mod pdf_duplicate;
 #[cfg(test)]
@@ -56,3 +58,5 @@ pub use workspace::{
     EntryTranslation, TranslatedSegment, TranslatedSegmentStatus, TranslationPaperContext,
     TranslationProgress, TranslationStatus, TranslationTaskSnapshot, TranslationTerm, Workspace,
 };
+
+pub mod sentence_translation;

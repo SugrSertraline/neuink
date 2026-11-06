@@ -16,6 +16,7 @@ pub mod job;
 pub mod mineru;
 mod llm_http;
 pub mod note_catalog;
+pub mod edit_recovery;
 pub mod onboarding;
 pub mod pdf_parse_queue;
 #[cfg(test)]
@@ -40,3 +41,5 @@ pub mod recommendations;
 pub mod zotero;
 
 pub mod import_preview;
+
+pub mod sentence_translation;

@@ -35,8 +35,10 @@ import { ModelMetadataSummary } from './ModelMetadataSummary';
 import { ProviderCatalogPicker } from './ProviderCatalogPicker';
 import { useModelAutoSync } from '../useModelAutoSync';
 import type { ProviderOption } from '../providerCatalog';
+import type { useFormRecovery } from '@/shared/hooks/useFormRecovery';
 
-export function ModelProfileEditor({ props, open, onOpenChange }: { props: SettingsPanelLayoutProps; open: boolean; onOpenChange: (open: boolean) => void }) {
+export function ModelProfileEditor({ props, open, onOpenChange, recovery, onSaved, onDiscard }: { props: SettingsPanelLayoutProps; open: boolean; onOpenChange: (open: boolean) => void;
+  recovery?: ReturnType<typeof useFormRecovery>; onSaved?: () => void; onDiscard?: () => void }) {
   const [saveError, setSaveError] = useState(false);
   const publicCatalog = usePublicModelCatalog(open);
   const [chosen, setChosen] = useState<ModelPreset>();
@@ -73,7 +75,7 @@ export function ModelProfileEditor({ props, open, onOpenChange }: { props: Setti
     temperature,
     topP
   } = props;
-  const modelSync = useModelAutoSync({ open: open && !busy && !protocolPending, baseUrl, apiKey, apiProtocol, sync: onRefreshModels });
+  const modelSync = useModelAutoSync({ open: open && !busy && !protocolPending && !recovery?.blocked && !recovery?.recovered, baseUrl, apiKey, apiProtocol, sync: onRefreshModels });
   const catalogModels = publicCatalog.catalog?.models ?? [];
   const localPreset = modelPresets.find(preset => preset.id === model);
   const chosenMetadata = chosen?.id === model && chosen.metadataSource
@@ -93,7 +95,7 @@ export function ModelProfileEditor({ props, open, onOpenChange }: { props: Setti
                       <DialogTitle className="min-w-0 break-words pr-6">{editingProfile ? `模型配置：${editingProfile.name}` : '新增模型配置'}</DialogTitle>
                       <DialogDescription>修改后点击保存。取消会放弃本次编辑。</DialogDescription>
                     </DialogHeader>
-                    <div className="min-h-0 overflow-y-auto px-4 py-4"><fieldset disabled={busy} className="min-w-0">
+                    <div className="min-h-0 overflow-y-auto px-4 py-4">{recovery?.notice}<fieldset disabled={busy || recovery?.blocked} className="min-w-0">
                 <div className="border-b pb-4">
                   <h3 className="mb-2 text-sm font-semibold">模型提供商</h3>
                   <ProviderCatalogPicker catalog={catalogModels} baseUrl={baseUrl} busy={busy} selectedLabel={manualProvider?.label}
@@ -246,17 +248,15 @@ export function ModelProfileEditor({ props, open, onOpenChange }: { props: Setti
                   <DialogFooter className="mx-0 mb-0 flex-wrap items-center justify-end rounded-none bg-muted px-4 py-3 sm:justify-end">
                         {saveError && <p role="alert" className="w-full text-xs text-destructive">保存失败，修改已保留。请检查配置后重试。</p>}
                         <Button disabled={busy || protocolPending || !baseUrl || !model} size="sm" type="button" variant="outline" onClick={props.onTest}>测试连接与翻译</Button>
-                        <DialogClose asChild>
-                          <Button disabled={busy} size="sm" type="button" variant="outline">
+                          <Button disabled={busy} size="sm" type="button" variant="outline" onClick={() => (onDiscard ?? (() => onOpenChange(false)))()}>
                             取消
                           </Button>
-                        </DialogClose>
                         {editingProfile ? (
                           <Button
                             disabled={busy || protocolPending || !baseUrl || !model}
                             size="sm"
                             type="button"
-                            onClick={async () => { setSaveError(false); if (await onSaveProfile()) onOpenChange(false); else setSaveError(true); }}
+                            onClick={async () => { if (recovery?.blocked) return; setSaveError(false); if (await onSaveProfile()) (onSaved ?? (() => onOpenChange(false)))(); else setSaveError(true); }}
                           >
                             <Save />
                             保存
@@ -266,7 +266,7 @@ export function ModelProfileEditor({ props, open, onOpenChange }: { props: Setti
                             disabled={busy || protocolPending || !baseUrl || !model}
                             size="sm"
                             type="button"
-                            onClick={async () => { setSaveError(false); if (await onCreateProfile()) onOpenChange(false); else setSaveError(true); }}
+                            onClick={async () => { if (recovery?.blocked) return; setSaveError(false); if (await onCreateProfile()) (onSaved ?? (() => onOpenChange(false)))(); else setSaveError(true); }}
                           >
                             <Plus />
                             创建配置

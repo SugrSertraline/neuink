@@ -47,18 +47,18 @@ export type LibraryPaperCollectionProps = LibraryPaperActions & {
 };
 type LibraryPaperTableProps = LibraryPaperCollectionProps & {
   sort?: LibraryEntrySort;
-  onSortChange?: (sort: LibraryEntrySort) => void;
+  onSortChange?: (sort: LibraryEntrySort | null) => void;
   visibleColumns: ReadonlySet<EntryLibraryColumnId>;
   pinnedEdges: ReadonlySet<'left' | 'right'>;
 };
 
-const headCellClass = 'h-8 overflow-hidden border-b border-border bg-muted px-3 text-center text-[11px] font-medium text-muted-foreground';
-const bodyCellClass = 'h-12 overflow-hidden border-b border-border/60 px-3 py-1 text-left align-middle';
+const headCellClass = 'h-8 overflow-hidden border-b border-border border-r border-r-border/20 last:border-r-0 bg-muted px-3 text-center text-[11px] font-medium text-muted-foreground';
+const bodyCellClass = 'h-12 overflow-hidden border-b border-border/60 border-r border-r-border/20 last:border-r-0 px-3 py-1 text-left align-middle';
 const numericColumns = new Set<EntryLibraryColumnId>(['last-read', 'reading-time', 'updated']);
 
 /** Both library layouts keep this table mounted, including its column and scroll state. */
-export function LibraryPaperTable({ active, entries, status, emptyMessage, readingStates, selectedEntryId, draggingEntryId, visibleColumns, pinnedEdges, reparseDisabled, getRowProps, onOpen, onOpenInSidePane, onReparse, onDelete, onToggleSourceHidden, externalEntryIds, sourceHiddenByEntry, sourceKindsByEntry, sourceChangedEntryIds, onReviewSourceChanges, pdfParseAction, deleteDisabled, onSelect, selection, sort, onSortChange }: LibraryPaperTableProps) {
-  const actions = { reparseDisabled, deleteDisabled, onOpen, onOpenInSidePane, onReparse, onDelete, onToggleSourceHidden, externalEntryIds, sourceHiddenByEntry, onSelect };
+export function LibraryPaperTable({ active, entries, status, emptyMessage, readingStates, selectedEntryId, draggingEntryId, visibleColumns, pinnedEdges, reparseDisabled, getRowProps, onOpen, onRead, onOpenInSidePane, onReparse, onDelete, onToggleSourceHidden, externalEntryIds, sourceHiddenByEntry, sourceKindsByEntry, sourceChangedEntryIds, onReviewSourceChanges, pdfParseAction, deleteDisabled, onSelect, selection, sort, onSortChange }: LibraryPaperTableProps) {
+  const actions = { reparseDisabled, deleteDisabled, onOpen, onRead, onOpenInSidePane, onReparse, onDelete, onToggleSourceHidden, externalEntryIds, sourceHiddenByEntry, onSelect };
   const shownColumns = ENTRY_LIBRARY_COLUMNS.filter(column => visibleColumns.has(column.id));
   const leftPinnedColumnId = pinnedEdges.has('left') ? shownColumns[0]?.id ?? null : null;
   const lastColumnId = shownColumns[shownColumns.length - 1]?.id ?? null;
@@ -67,7 +67,7 @@ export function LibraryPaperTable({ active, entries, status, emptyMessage, readi
   const { getColumnWidth, getResizeHandleProps, hasHorizontalOverflow, tableShellRef } = useEntryLibraryColumnWidths({ active, leftPinnedColumnId, rightPinnedColumnId, visibleColumns, reservedWidth: selectionWidth });
   const tableWidth = selectionWidth + Math.round(shownColumns.reduce((total, column) => total + getColumnWidth(column.id), 0));
   const getPin = (id: EntryLibraryColumnId) => !hasHorizontalOverflow ? undefined : id === leftPinnedColumnId ? 'left' : id === rightPinnedColumnId ? 'right' : undefined;
-  const alignment = (id: EntryLibraryColumnId) => numericColumns.has(id) ? 'text-right tabular-nums' : id === 'actions' ? 'text-right' : 'text-left';
+  const alignment = (id: EntryLibraryColumnId) => numericColumns.has(id) ? 'text-right tabular-nums' : id === 'actions' ? 'text-center' : 'text-left';
 
   return <div ref={tableShellRef}
     style={{
@@ -91,19 +91,20 @@ export function LibraryPaperTable({ active, entries, status, emptyMessage, readi
       </colgroup>
       <TableHeader className="sticky top-0 z-20 bg-muted">
         <TableRow>
-          {selection?.enabled && <TableHead className="h-8 border-b border-border bg-muted px-3 text-center [&:has([role=checkbox])]:pr-3" pin={hasHorizontalOverflow && pinnedEdges.has('left') ? 'left' : undefined}><Checkbox aria-label="全选当前结果" checked={selection.all || selection.some && 'indeterminate'} disabled={status !== 'ready' || !entries.length} onCheckedChange={selection.toggleAll} /></TableHead>}
+          {selection?.enabled && <TableHead className="h-8 border-b border-border border-r border-r-border/20 last:border-r-0 bg-muted px-3 text-center [&:has([role=checkbox])]:pr-3" pin={hasHorizontalOverflow && pinnedEdges.has('left') ? 'left' : undefined}><Checkbox aria-label="全选当前结果" checked={selection.all || selection.some && 'indeterminate'} disabled={status !== 'ready' || !entries.length} onCheckedChange={selection.toggleAll} /></TableHead>}
           {shownColumns.map(column => {
             const sortable = column.id !== 'actions' && Boolean(onSortChange);
             const direction = sortable && sort?.by === column.id ? sort.direction : undefined;
             const nextSort = column.id === 'actions' ? null : nextLibraryEntrySort(column.id, sort);
+            const nextLabel = nextSort ? `按${column.label}${nextSort.direction === 'asc' ? '升序' : '降序'}排列` : '恢复默认排序';
             const SortIcon = direction === 'asc' ? ArrowUp : direction === 'desc' ? ArrowDown : ArrowUpDown;
             return <TableHead key={column.id} aria-label={column.label} scope="col"
               aria-sort={sortable ? direction === 'asc' ? 'ascending' : direction === 'desc' ? 'descending' : 'none' : undefined}
               className={cn(headCellClass, sortable && 'px-1', !getPin(column.id) && 'relative')} pin={getPin(column.id)} style={getPin(column.id) === 'left' ? { left: selectionWidth } : undefined}>
-              {sortable && nextSort ? <Button type="button" size="xs" variant="ghost" disabled={status !== 'ready'}
+              {sortable ? <Button type="button" size="xs" variant="ghost" disabled={status !== 'ready'}
                 className={cn('relative h-7 w-full px-5 text-[11px] focus-visible:ring-inset', direction && 'text-foreground')}
-                aria-label={`按${column.label}${nextSort.direction === 'asc' ? '升序' : '降序'}排列`}
-                title={`按${column.label}${nextSort.direction === 'asc' ? '升序' : '降序'}排列`}
+                aria-label={nextLabel}
+                title={nextLabel}
                 onClick={() => onSortChange?.(nextSort)}>
                 <span className="truncate">{column.label}</span>
                 <SortIcon aria-hidden="true" className={cn('absolute right-1 size-3', !direction && 'text-muted-foreground/60')} />
@@ -127,7 +128,7 @@ export function LibraryPaperTable({ active, entries, status, emptyMessage, readi
               {selection?.enabled && <TableCell className={cn(bodyCellClass, 'px-3')} pin={hasHorizontalOverflow && pinnedEdges.has('left') ? 'left' : undefined}><LibrarySelectionCheckbox entryId={item.id} title={item.title} selection={selection} /></TableCell>}
               {shownColumns.map(column =>
                 <TableCell key={column.id} className={cn(bodyCellClass, alignment(column.id), column.id === 'actions' && 'px-4 py-2')} pin={getPin(column.id)} style={getPin(column.id) === 'left' ? { left: selectionWidth } : undefined}>
-                  {column.id === 'actions' ? <div role="group" aria-label={`条目操作：${item.title}`} className="flex flex-wrap items-center justify-end gap-1.5"
+                  {column.id === 'actions' ? <div role="group" aria-label={`条目操作：${item.title}`} className="flex flex-wrap items-center justify-center gap-1.5"
                     onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}
                     onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') event.stopPropagation(); }}>
                     <LibraryPaperMenuItems entry={item} mode="inline" pdfParseAction={pdfParseAction} {...actions} />

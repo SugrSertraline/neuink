@@ -9,6 +9,9 @@ pub enum TranslationSource {
         profile_id: String,
     },
     SelectionService,
+    Service {
+        provider: crate::SelectionTranslationProvider,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -23,6 +26,8 @@ pub enum TranslationKind {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct TranslationRoutingSettings {
+    /// DefaultModel here preserves the legacy translation profile; in routes it follows this source.
+    pub default_source: TranslationSource,
     pub word: TranslationSource,
     pub selection: TranslationSource,
     pub segment: TranslationSource,
@@ -34,6 +39,7 @@ pub struct TranslationRoutingSettings {
 impl Default for TranslationRoutingSettings {
     fn default() -> Self {
         Self {
+            default_source: TranslationSource::DefaultModel,
             // Preserve the existing selection-service choice for older installations.
             word: TranslationSource::SelectionService,
             selection: TranslationSource::SelectionService,
@@ -47,19 +53,37 @@ impl Default for TranslationRoutingSettings {
 
 impl TranslationRoutingSettings {
     pub fn source(&self, kind: TranslationKind) -> &TranslationSource {
-        match kind {
+        let source = match kind {
             TranslationKind::Word => &self.word,
             TranslationKind::Selection => &self.selection,
             TranslationKind::Segment => &self.segment,
             TranslationKind::Paragraph => &self.paragraph,
             TranslationKind::Document => &self.document,
-        }
+        };
+        if matches!(source, TranslationSource::DefaultModel) { &self.default_source } else { source }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_services_follow_live_changes_without_overwriting_overrides() {
+        let mut routing = TranslationRoutingSettings::default();
+        routing.default_source = TranslationSource::Service { provider: crate::SelectionTranslationProvider::Niutrans };
+        routing.word = TranslationSource::DefaultModel;
+        routing.selection = TranslationSource::DefaultModel;
+        for kind in [TranslationKind::Word, TranslationKind::Selection, TranslationKind::Segment, TranslationKind::Paragraph, TranslationKind::Document] {
+            assert_eq!(routing.source(kind), &routing.default_source);
+        }
+        routing.paragraph = TranslationSource::Profile { profile_id: "precise".into() };
+        routing.default_source = TranslationSource::Profile { profile_id: "fast".into() };
+        assert_eq!(routing.source(TranslationKind::Document), &routing.default_source);
+        assert_eq!(routing.source(TranslationKind::Paragraph), &routing.paragraph);
+        let restored: TranslationRoutingSettings = serde_json::from_str(&serde_json::to_string(&routing).unwrap()).unwrap();
+        assert_eq!(restored, routing);
+    }
 
     #[test]
     fn old_settings_keep_existing_translation_sources() {

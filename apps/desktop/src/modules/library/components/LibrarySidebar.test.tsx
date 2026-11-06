@@ -8,6 +8,7 @@ import { TagPreferencesProvider } from '@/shared/components/TagPreferencesProvid
 import { ToastContext } from '@/shared/hooks/useToast';
 import { beginEntryTagDrag, cancelEntryTagDrag, finishEntryTagDrag } from '@/shared/lib/entryDragData';
 
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { LibrarySidebar, type LibraryEntry } from './LibrarySidebar';
 
 const entry: LibraryEntry = {
@@ -41,7 +42,7 @@ afterEach(() => {
 function renderSidebar(props: Partial<ComponentProps<typeof LibrarySidebar>> = {}, notify = vi.fn(() => 'toast')) {
   return render(
     <ToastContext.Provider value={{ dismiss: vi.fn(), notify }}>
-      <TagPreferencesProvider>
+      <TooltipProvider><TagPreferencesProvider>
         <LibrarySidebar
           activeContentId={null}
           activeTag={null}
@@ -70,7 +71,7 @@ function renderSidebar(props: Partial<ComponentProps<typeof LibrarySidebar>> = {
           onUpdateEntry={vi.fn()}
           {...props}
         />
-      </TagPreferencesProvider>
+      </TagPreferencesProvider></TooltipProvider>
     </ToastContext.Provider>
   );
 }
@@ -211,4 +212,13 @@ it('keeps tag search, edit and directory navigation independent from the panel c
   expect(onOpenTagDetails).not.toHaveBeenCalled();
   fireEvent.click(view.getByRole('button', { name: '打开标签 研究' }));
   expect(onOpenTagDetails).toHaveBeenCalledWith('research');
+});
+
+it('opens the selected entry editor from the details header', () => {
+  const onEditEntry = vi.fn();
+  const view = renderSidebar({ entryExplorerOpen: true, selectedEntry: entry, onEditEntry });
+  const button = view.getByRole('button', { name: '编辑条目' });
+  expect(button.closest('.side-head')).toBeTruthy();
+  fireEvent.click(button);
+  expect(onEditEntry).toHaveBeenCalledExactlyOnceWith(entry.id);
 });

@@ -80,6 +80,16 @@ describe('PDF sentence hover', () => {
       const geometry = pdfSentenceGeometry(layer, region, page);
       expect(geometry).toHaveLength(2);
       expect(geometry?.map(sentence => sentence.linkedSentenceIndex)).toEqual([null, null]);
+      expect(geometry?.map(sentence => sentence.textRange?.toString())).toEqual([
+        'Traffic flow changes rapidly.', 'The model predicts future traffic.',
+      ]);
+      document.body.append(layer);
+      const selection = window.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(geometry![1].textRange!.cloneRange());
+      expect(selection.toString()).toBe('The model predicts future traffic.');
+      selection.removeAllRanges();
+      layer.remove();
       expect(sentenceAtPoint(geometry!, page, 100, 70)?.index).toBe(1);
     } finally { delete (Range.prototype as { getClientRects?: () => DOMRectList }).getClientRects; }
   });

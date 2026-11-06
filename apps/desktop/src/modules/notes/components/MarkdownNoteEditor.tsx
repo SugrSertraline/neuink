@@ -21,6 +21,7 @@ import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/shared/hooks/useToast';
+import { EditRecoveryNotice } from '@/shared/components/EditRecoveryNotice';
 import { getZoteroNoteOrigin, type ZoteroNoteOrigin } from '@/shared/ipc/zoteroApi';
 import { NoteReviewBanner } from '@/modules/assistant/review/NoteReviewBanner';
 import { ReadingExportDialog } from '@/modules/reader/export/ReadingExportDialog';
@@ -309,6 +310,7 @@ export function MarkdownNoteEditor({
 
   const {
     acceptRemoteConflict,
+    recovery,
     runInsertionOnce,
     canEdit,
     cancelTitleEdit,
@@ -607,6 +609,7 @@ export function MarkdownNoteEditor({
         )}
       >
         <div className="min-w-0">
+        <EditRecoveryNotice recovery={recovery} />
         <NoteReviewBanner entryId={entryId} noteId={noteId} />
         <MarkdownNoteHeader
           canEdit={canEdit}

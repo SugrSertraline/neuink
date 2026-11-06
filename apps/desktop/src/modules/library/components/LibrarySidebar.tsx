@@ -1,3 +1,4 @@
+import { TooltipIconButton } from '@/shared/components/TooltipIconButton';
 import { AppearanceIcon } from '@/shared/components/AppearanceIcon';
 import {
   AlertTriangle,
@@ -7,6 +8,7 @@ import {
   FilterX,
   History,
   Plus,
+  Pencil,
   RefreshCw,
   Trash2
 } from 'lucide-react';
@@ -89,6 +91,7 @@ type LibrarySidebarProps = {
   onOpenContentInRight: (contentId: string) => void;
   onRenameMarkdownNote: (entryId: string, noteId: string, title: string) => Promise<unknown> | unknown;
   onRenamePdfDisplayName: (entryId: string, fileName: string) => Promise<unknown> | unknown;
+  onEditEntry?: (entryId: string) => void;
   onOpenCreateEntryTab: () => void;
   onOpenTagEditorTab: () => void;
   onSelectContent: (contentId: string) => void;
@@ -147,6 +150,7 @@ export function LibrarySidebar({
   onRenameMarkdownNote,
   onRenamePdfDisplayName,
   onOpenCreateEntryTab,
+  onEditEntry,
   onOpenTagEditorTab,
   onSelectContent,
   onOpenTagDetails,
@@ -206,6 +210,8 @@ export function LibrarySidebar({
           <span>{entryExplorerOpen ? '条目详情' : '条目库'}</span>
         </div>
         <div className="flex items-center gap-1">
+          {entryExplorerOpen && selectedEntry && onEditEntry ? <TooltipIconButton label="编辑条目" variant="ghost"
+            disabled={status !== 'ready'} onClick={() => onEditEntry(selectedEntry.id)}><Pencil size={15} aria-hidden="true" /></TooltipIconButton> : null}
           {entryExplorerOpen && Boolean(selectedEntry?.sourceInfo?.kinds.length) && selectedEntry && onToggleSourceHidden ? <Button size="xs" variant="ghost"
             disabled={hiddenActionEntryId === selectedEntry.id} onClick={() => onToggleSourceHidden(selectedEntry.id)}
             aria-label={isEntrySourceHidden(selectedEntry.sourceInfo) ? '恢复显示当前来源论文' : '从条目库隐藏当前来源论文'}>

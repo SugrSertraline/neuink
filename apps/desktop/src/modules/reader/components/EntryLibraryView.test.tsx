@@ -4,6 +4,10 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { useState, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as trashApi from '@/shared/ipc/workspaceApi';
+import * as tagApi from '@/shared/ipc/tagReadingApi';
+import * as catalogApi from '@/shared/ipc/noteCatalogApi';
+
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { ToastContext } from '@/shared/hooks/useToast';
 import { AppearanceProvider, APP_APPEARANCE_STORAGE_KEY } from '@/shared/components/AppearanceProvider';
@@ -44,6 +48,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 function SelectedLibraryView(props: ComponentProps<typeof EntryLibraryView>) {
@@ -192,12 +197,22 @@ it('selects the exact row when opening its context menu and keeps selection afte
   expect(props.onOpenEntryExplorer).not.toHaveBeenCalled();
 });
 
+it('opens reading and overview through separate centered inline actions', () => {
+  const { props } = renderLibrary();
+  const actions = screen.getByRole('group', { name: `条目操作：${entry.title}` });
+  fireEvent.click(within(actions).getByRole('button', { name: '开始阅读' }));
+  expect(props.onOpenEntryExplorer).toHaveBeenLastCalledWith(entry.id);
+  fireEvent.click(within(actions).getByRole('button', { name: '查看详情' }));
+  expect(props.onOpenEntryExplorer).toHaveBeenLastCalledWith(entry.id, 'overview');
+  expect(props.onOpenEntryExplorer).toHaveBeenCalledTimes(2);
+});
+
 it('shows actions directly and selects only the target entry before confirming deletion', () => {
   const other = { ...entry, id: 'entry-2', title: '另一篇论文' };
   const { props } = renderLibrary({ entries: [entry, other], selectedEntryId: entry.id }, true);
   const actions = screen.getByRole('group', { name: `条目操作：${other.title}` });
   const target = screen.getByRole('row', { name: /另一篇论文/ });
-  expect(within(actions).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['查看详情', '重新解析', '移到回收站']);
+  expect(within(actions).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['开始阅读', '查看详情', '重新解析', '移到回收站']);
   expect(within(actions).queryByRole('button', { name: /操作：|在右侧打开/ })).toBeNull();
   fireEvent.click(within(actions).getByRole('button', { name: '移到回收站' }));
   expect(props.onSelectEntry).toHaveBeenCalledExactlyOnceWith(other.id);
@@ -314,13 +329,16 @@ it('lists and restores hidden MinerU copies with the same source visibility cont
 
 it('skips legacy source entries and their children when emptying the trash', async () => {
   const base = { deleted_at: '', entry_title: 'Source', title: 'Source', preview: '', parent_entry_trashed: true, restorable: true, stored_trash_item: false };
-  const { props } = renderLibrary({ libraryView: 'trash', trashItems: [
+  const { props } = renderLibrary({ workspaceRoot: 'workspace', libraryView: 'trash', trashItems: [
     { ...base, trash_id: 'source', entry_id: 'source', item_id: 'source', kind: 'entry', source_managed: true },
     { ...base, trash_id: 'source-note', entry_id: 'source', item_id: 'note', kind: 'markdown_note' },
     { ...base, trash_id: 'local', entry_id: 'local', item_id: 'local', kind: 'entry' },
   ] });
-  fireEvent.click(screen.getByRole('button', { name: '清空条目与记录' }));
+  vi.spyOn(trashApi, 'listTrashItems').mockResolvedValue(props.trashItems);
+  vi.spyOn(tagApi, 'listTagArchives').mockResolvedValue([]);
+  vi.spyOn(catalogApi, 'readNoteCatalog').mockResolvedValue({ notes: [], errors: [] });
   fireEvent.click(screen.getByRole('button', { name: '清空回收站' }));
+  fireEvent.click(await screen.findByRole('button', { name: '确认清空' }));
   await act(async () => undefined);
   expect(props.onPurgeEntry).toHaveBeenCalledExactlyOnceWith('local');
   expect(props.onPurgeTrashItem).not.toHaveBeenCalled();
@@ -602,8 +620,8 @@ describe('EntryLibraryView pinned columns', () => {
     const cells = within(table).getAllByRole('cell');
     expect(headers.map((cell) => cell.dataset.pinned)).toEqual(['left', ...Array(8).fill(undefined), 'right']);
     expect(cells.map((cell) => cell.dataset.pinned)).toEqual(['left', ...Array(8).fill(undefined), 'right']);
-    expect(headers.every(cell => !cell.classList.contains('border-r'))).toBe(true);
-    expect(cells.every(cell => !cell.classList.contains('border-r'))).toBe(true);
+    expect(headers.every(cell => cell.classList.contains('border-r-border/20'))).toBe(true);
+    expect(cells.every(cell => cell.classList.contains('border-r-border/20'))).toBe(true);
     expect(headers[0].className).toContain('sticky');
     expect(headers[0].className).not.toContain('relative');
     expect(headers[1].className).toContain('relative');
@@ -1128,4 +1146,17 @@ describe('EntryLibraryView tag navigation visibility', () => {
     expect(screen.getByRole('columnheader', { name: '来源' })).toBeTruthy();
     expect(JSON.parse(window.localStorage.getItem('neuink.entryLibraryColumns.v1')!)).toEqual(['title', 'source', 'actions']);
   });
+});
+
+it('cycles a header through ascending, descending and the original default order', () => {
+  renderLibrary({ libraryView: 'recent', entries: [{ ...entry, id: 'b', title: 'B' }, { ...entry, id: 'a', title: 'A' }, { ...entry, id: 'c', title: 'C' }], recentReadingEntryIds: ['b', 'c', 'a'] });
+  const order = () => Array.from(screen.getByRole('table').querySelectorAll('tbody tr')).map(row => row.getAttribute('data-entry-id'));
+  fireEvent.click(screen.getByRole('button', { name: '按标题升序排列' }));
+  expect(order()).toEqual(['a', 'b', 'c']);
+  fireEvent.click(screen.getByRole('button', { name: '按标题降序排列' }));
+  expect(order()).toEqual(['c', 'b', 'a']);
+  fireEvent.click(screen.getByRole('button', { name: '恢复默认排序' }));
+  expect(order()).toEqual(['b', 'c', 'a']);
+  expect(screen.getByRole('columnheader', { name: '标题' }).getAttribute('aria-sort')).toBe('none');
+  expect(screen.getByRole('button', { name: '按标题升序排列' })).toBeTruthy();
 });

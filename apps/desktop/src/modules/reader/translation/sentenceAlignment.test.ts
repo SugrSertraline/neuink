@@ -93,3 +93,22 @@ describe('local sentence reading', () => {
       [pair.sourceStartIndex, pair.sourceEndIndex])).toEqual([[0, 1], [1, 2], [2, 4]]);
   });
 });
+
+it('aligns the six LightST abstract sentences with translated speedup multipliers', () => {
+  const source = "Graph neural networks (GNNs) have gained considerable attention in recent years for traffc fow prediction due to their ability to learn spatio-temporal pattern representations through a graph-based message-passing framework. Although GNNs have shown great promise in handling traffc datasets, their deployment in real-life applications has been hindered by scalability constraints arising from high-order message passing. Additionally, the over-smoothing problem of GNNs may lead to indistinguishable region representations as the number of layers increases, resulting in performance degradation. To address these challenges, we propose a new knowledge distillation paradigm termed LightST that transfers spatial and temporal knowledge from a highcapacity teacher to a lightweight student. Specifcally, we introduce a spatio-temporal knowledge distillation framework that helps student MLPs capture graph-structured global spatio-temporal patterns while alleviating the over-smoothing effect with adaptive knowledge distillation. Extensive experiments verify that LightST signifcantly speeds up traffc fow predictions by 5X to 40X compared to state-of-the-art spatiotemporal GNNs, all while maintaining superior accuracy.";
+  const translation = "图神经网络（GNN）近年来在交通fow预测方面获得了相当大的关注，因为它们能够通过基于图的消息传递框架学习时空模式表示。尽管GNN在处理traffc数据集方面显示出巨大的前景，但它们在现实生活中的部署受到了高阶消息传递引起的可扩展性约束的阻碍。此外，随着层数的增加，GNN的过平滑问题可能导致不可区分的区域表示，从而导致性能下降。为了应对这些挑战，我们提出了一种新的知识蒸馏范式，称为LightST，它将空间和时间知识从高能力教师转移到轻量级学生。具体来说，我们引入了一个时空知识蒸馏框架，该框架帮助学生MLP捕获图形结构的全局时空模式，同时通过自适应知识蒸馏减轻过度平滑效应。广泛的实验证实，与最先进的时空GNN相比，LightST将交通fow预测显著加快了5倍至40倍，同时保持了卓越的准确性。";
+  expect(splitAcademicSentences(source)).toHaveLength(6);
+  expect(splitAcademicSentences(translation, true)).toHaveLength(6);
+  const aligned = alignSavedTranslation(source, translation);
+  expect(aligned).toHaveLength(6);
+  expect(aligned?.map(pair => pair.source)).toEqual(splitAcademicSentences(source));
+  expect(aligned?.map(pair => pair.translation)).toEqual(splitAcademicSentences(translation, true));
+});
+
+it('recognizes explicit multiplier equivalence without ignoring numeric errors or variables', () => {
+  expect(alignSavedTranslation('It is 2.5x faster. Accuracy remains.', '速度提升2.5倍。准确率保持不变。')).toHaveLength(2);
+  expect(alignSavedTranslation('It is 5X faster. Accuracy remains.', '速度提升6倍。准确率保持不变。')).toBeNull();
+  expect(alignSavedTranslation('Use 5x here. Continue.', '这里使用5。继续。')).toBeNull();
+  expect(alignSavedTranslation('Model 5a works. Continue.', '模型5有效。继续。')).toBeNull();
+  expect(alignSavedTranslation('Speed increases 5倍. Continue.', 'It is 5X faster. Continue.')).not.toBeNull();
+});

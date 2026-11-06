@@ -11,7 +11,7 @@ it('opens paragraph selection without generating or changing the reading level',
   const fold = { level: 'off', running: false, loadState: 'ready', start } as unknown as FoldReader;
   render(<TooltipProvider><FoldControls fold={fold} onLevelChange={change} onShowProgress={progress} /></TooltipProvider>);
   expect(screen.queryByRole('button', { name: '生成当前章节' })).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '生成详略' }));
+  fireEvent.click(screen.getByRole('button', { name: '阅读详略' }));
   expect(start).not.toHaveBeenCalled(); expect(change).not.toHaveBeenCalled(); expect(progress).toHaveBeenCalledOnce();
 });
 

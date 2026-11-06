@@ -1,3 +1,4 @@
+import { HoverContentSwitch } from './HoverContentSwitch';
 import {
   Columns2,
   ChevronDown,
@@ -22,6 +23,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -664,7 +666,7 @@ export function HoverPreviewControls({
           className="shrink-0"
           aria-pressed={active}
           size="sm"
-          title="配置片段、逐句译文与批注悬停"
+          title="配置原文、译文粒度与批注悬停"
           type="button"
           variant={active ? 'secondary' : 'outline'}
         >
@@ -694,11 +696,18 @@ export function HoverPreviewControls({
               <div className="ml-2 grid gap-0.5 border-l pl-2">
                 {mode === 'pdf' ? <HoverPreviewToggle checked={preferences.hoverPreviewShowRegion} disabled={!enabled}
                   label="区域高亮" onClick={() => update({ hoverPreviewShowRegion: !preferences.hoverPreviewShowRegion })} /> : null}
-                <HoverPreviewToggle checked={preferences.hoverPreviewShowOriginal} disabled={!enabled}
-                  label="解析后原文" onClick={() => update({ hoverPreviewShowOriginal: !preferences.hoverPreviewShowOriginal })} />
-                <HoverPreviewToggle checked={preferences.hoverPreviewShowTranslation} disabled={!enabled}
-                  label={mode === 'pdf' ? '整段译文' : '译文'}
-                  onClick={() => update({ hoverPreviewShowTranslation: !preferences.hoverPreviewShowTranslation })} />
+                <HoverContentSwitch label="解析后原文" checked={preferences.hoverPreviewShowOriginal} disabled={!enabled}
+                  sentence={preferences.pdfSentenceHoverEnabled && preferences.pdfSentenceHoverShowOriginal}
+                  onVisibilityChange={checked => update({ hoverPreviewShowOriginal: checked })}
+                  onSentenceChange={mode === 'pdf' ? checked => update({ pdfSentenceHoverEnabled: true,
+                    pdfSentenceHoverShowTranslation: preferences.pdfSentenceHoverEnabled && preferences.pdfSentenceHoverShowTranslation,
+                    pdfSentenceHoverShowOriginal: checked }) : undefined} />
+                <HoverContentSwitch label="译文" checked={preferences.hoverPreviewShowTranslation} disabled={!enabled}
+                  sentence={preferences.pdfSentenceHoverEnabled && preferences.pdfSentenceHoverShowTranslation}
+                  onVisibilityChange={checked => update({ hoverPreviewShowTranslation: checked })}
+                  onSentenceChange={mode === 'pdf' ? checked => update({ pdfSentenceHoverEnabled: true,
+                    pdfSentenceHoverShowOriginal: preferences.pdfSentenceHoverEnabled && preferences.pdfSentenceHoverShowOriginal,
+                    pdfSentenceHoverShowTranslation: checked }) : undefined} />
                 <HoverPreviewToggle checked={preferences.hoverPreviewShowNote} disabled={!enabled}
                   label="片段笔记" onClick={() => update({ hoverPreviewShowNote: !preferences.hoverPreviewShowNote })} />
                 <HoverPreviewToggle checked={preferences.hoverPreviewShowAnnotation} disabled={!enabled}
@@ -706,19 +715,6 @@ export function HoverPreviewControls({
               </div>
             </section>
             {mode === 'pdf' && <PdfPreviewSizeControls preferences={preferences} onChange={onChange} />}
-            {mode === 'pdf' ? <section aria-label="PDF 逐句悬停" className="border-t pt-2">
-              <p className="px-2 text-xs font-medium text-muted-foreground">PDF 逐句</p>
-              <HoverPreviewToggle checked={preferences.pdfSentenceHoverEnabled} label="整句悬停"
-                onClick={() => update({ pdfSentenceHoverEnabled: !preferences.pdfSentenceHoverEnabled })} />
-              <div className="ml-2 grid gap-0.5 border-l pl-2">
-                <HoverPreviewToggle checked={preferences.pdfSentenceHoverShowOriginal}
-                  disabled={!preferences.pdfSentenceHoverEnabled} label="句子原文"
-                  onClick={() => update({ pdfSentenceHoverShowOriginal: !preferences.pdfSentenceHoverShowOriginal })} />
-                <HoverPreviewToggle checked={preferences.pdfSentenceHoverShowTranslation}
-                  disabled={!preferences.pdfSentenceHoverEnabled} label="逐句译文"
-                  onClick={() => update({ pdfSentenceHoverShowTranslation: !preferences.pdfSentenceHoverShowTranslation })} />
-              </div>
-            </section> : null}
             <section aria-label="其他悬停" className="border-t pt-2">
               {mode === 'pdf' ? <HoverPreviewToggle checked={preferences.inlineAnnotationHoverEnabled}
                 label="行内批注" onClick={() => update({ inlineAnnotationHoverEnabled: !preferences.inlineAnnotationHoverEnabled })} /> : null}

@@ -3,10 +3,13 @@ import { calculateFloatingToolbarLayout, type FloatingToolbarLayout } from './se
 import type { PendingPdfTextSelection } from './PdfTextSelectionToolbar';
 
 type Point = { x: number; y: number };
-type Drag = { id: number; start: Point; origin: Point; element: HTMLElement; moved: boolean };
+type Size = { width: number; height: number };
+type Drag = { side?: 'left' | 'right'; size: Size; scale: number; previousSize: Size | null; id: number; start: Point; origin: Point; previousPoint: Point | null; element: HTMLElement; moved: boolean };
 
 /** Positions are stored in viewport pixels and converted once for CSS zoom. */
 export function useSelectionToolbarPosition(ref: RefObject<HTMLDivElement>, pending: PendingPdfTextSelection | null, visible: boolean, contentKey: string) {
+  const [size, setSize] = useState<Size | null>(null);
+  const [pinned, setPinned] = useState(false);
   const [point, setPoint] = useState<Point | null>(null);
   const [layout, setLayout] = useState<FloatingToolbarLayout | null>(null);
   const drag = useRef<Drag | null>(null);
@@ -22,12 +25,11 @@ export function useSelectionToolbarPosition(ref: RefObject<HTMLDivElement>, pend
     window.cancelAnimationFrame(dragFrame.current);
     restoreStyles.current?.();
     restoreStyles.current = null;
-    if (cancel) setPoint(current.origin);
+    if (cancel) { setPoint(current.previousPoint); setSize(current.previousSize); }
     if (current.element.hasPointerCapture?.(current.id)) current.element.releasePointerCapture(current.id);
   }, []);
 
   useEffect(() => {
-    if (!pointRef.current) return;
     const cancel = () => finish(true);
     const escape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || !drag.current) return;
@@ -46,7 +48,16 @@ export function useSelectionToolbarPosition(ref: RefObject<HTMLDivElement>, pend
       restoreStyles.current?.();
       if (current?.element.hasPointerCapture?.(current.id)) current.element.releasePointerCapture(current.id);
     };
-  }, [finish, point !== null]);
+  }, [finish]);
+
+  const selectionKey = pending ? JSON.stringify([pending.segment.uid, pending.selection.page_idx, pending.selection.text, pending.selection.rects]) : '';
+  const previousSelectionKey = useRef(selectionKey);
+  useLayoutEffect(() => {
+    if (previousSelectionKey.current === selectionKey) return;
+    previousSelectionKey.current = selectionKey;
+    finish(true);
+    if (!pinned) setPoint(null);
+  }, [selectionKey, pinned, finish]);
 
   useEffect(() => { if (!visible) finish(true); }, [visible, finish]);
 
@@ -67,7 +78,7 @@ export function useSelectionToolbarPosition(ref: RefObject<HTMLDivElement>, pend
         if (pointRef.current) {
           const margin = 8;
           const width = Math.min(bounds.width, Math.max(0, area.width - margin * 2));
-          const height = Math.min(ref.current.scrollHeight * cssScale, Math.max(0, area.height - margin * 2));
+          const height = Math.min(size ? size.height * cssScale : ref.current.scrollHeight * cssScale, Math.max(0, area.height - margin * 2));
           const left = Math.max(area.left + margin, Math.min(pointRef.current.x, area.left + area.width - margin - width));
           const top = Math.max(area.top + margin, Math.min(pointRef.current.y, area.top + area.height - margin - height));
           setLayout({ left: left / cssScale, top: top / cssScale, maxHeight: (area.height - margin * 2) / cssScale,
@@ -93,13 +104,30 @@ export function useSelectionToolbarPosition(ref: RefObject<HTMLDivElement>, pend
       window.visualViewport?.removeEventListener('resize', update);
       window.visualViewport?.removeEventListener('scroll', update);
     };
-  }, [pending, visible, point, contentKey, ref]);
+  }, [pending, visible, point, size, contentKey, ref]);
 
-  const reset = useCallback(() => { finish(true); setPoint(null); setLayout(null); }, [finish]);
+  const reset = useCallback(() => { finish(true); setPinned(false); setSize(null); setPoint(null); setLayout(null); }, [finish]);
   const toggle = () => {
     finish(true);
     const bounds = ref.current?.getBoundingClientRect();
-    setPoint(current => current ? null : bounds ? { x: bounds.left, y: bounds.top } : null);
+    setPinned(!pinned);
+    setPoint(pinned ? null : bounds ? { x: bounds.left, y: bounds.top } : null);
+  };
+  const applyGesture = (current: Drag, x: number, y: number) => {
+    const dx = x - current.start.x, dy = y - current.start.y;
+    if (!current.side) { setPoint({ x: current.origin.x + dx, y: current.origin.y + dy }); return; }
+    const viewport = window.visualViewport;
+    const leftEdge = (viewport?.offsetLeft ?? 0) + 8;
+    const rightEdge = (viewport?.offsetLeft ?? 0) + (viewport?.width ?? window.innerWidth) - 8;
+    const bottomEdge = (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight) - 8;
+    const right = current.origin.x + current.size.width;
+    const availableWidth = Math.max(1, current.side === 'left' ? right - leftEdge : rightEdge - current.origin.x);
+    const availableHeight = Math.max(1, bottomEdge - current.origin.y);
+    const width = Math.min(availableWidth, Math.max(Math.min(280 * current.scale, availableWidth),
+      current.size.width + (current.side === 'left' ? -dx : dx)));
+    const height = Math.min(availableHeight, Math.max(Math.min(160 * current.scale, availableHeight), current.size.height + dy));
+    setPoint({ x: current.side === 'left' ? right - width : current.origin.x, y: current.origin.y });
+    setSize({ width: width / current.scale, height: height / current.scale });
   };
   const move = (event: ReactPointerEvent<HTMLElement>) => {
     const current = drag.current;
@@ -111,19 +139,20 @@ export function useSelectionToolbarPosition(ref: RefObject<HTMLDivElement>, pend
     if (!restoreStyles.current) {
       const { userSelect, cursor } = document.body.style;
       document.body.style.userSelect = 'none';
-      document.body.style.cursor = 'grabbing';
+      document.body.style.cursor = current.side ? (current.side === 'left' ? 'nesw-resize' : 'nwse-resize') : 'grabbing';
       restoreStyles.current = () => { document.body.style.userSelect = userSelect; document.body.style.cursor = cursor; };
     }
     window.cancelAnimationFrame(dragFrame.current);
-    dragFrame.current = window.requestAnimationFrame(() => setPoint({ x: current.origin.x + dx, y: current.origin.y + dy }));
+    dragFrame.current = window.requestAnimationFrame(() => applyGesture(current, event.clientX, event.clientY));
   };
-  return { pinned: point !== null, layout, reset, toggle, handleProps: {
+  const gestureProps = (side?: 'left' | 'right') => ({
     onPointerDown: (event: ReactPointerEvent<HTMLElement>) => {
-      if (!point || event.button !== 0 || event.isPrimary === false || drag.current) return;
+      if (event.button !== 0 || event.isPrimary === false || drag.current) return;
       event.preventDefault();
       const bounds = ref.current?.getBoundingClientRect();
       if (!bounds) return;
-      drag.current = { id: event.pointerId, start: { x: event.clientX, y: event.clientY }, origin: { x: bounds.left, y: bounds.top }, element: event.currentTarget, moved: false };
+      drag.current = { side, size: { width: bounds.width, height: bounds.height },
+        scale: ref.current!.offsetWidth > 0 ? bounds.width / ref.current!.offsetWidth : 1, previousSize: size, id: event.pointerId, start: { x: event.clientX, y: event.clientY }, origin: { x: bounds.left, y: bounds.top }, previousPoint: pointRef.current, element: event.currentTarget, moved: false };
       event.currentTarget.setPointerCapture(event.pointerId);
     },
     onPointerMove: move,
@@ -131,19 +160,29 @@ export function useSelectionToolbarPosition(ref: RefObject<HTMLDivElement>, pend
       if (drag.current?.id !== event.pointerId) return;
       // Commit the final coordinates even if the last animation frame is pending.
       const current = drag.current;
-      if (current.moved) setPoint({ x: current.origin.x + event.clientX - current.start.x, y: current.origin.y + event.clientY - current.start.y });
+      if (current.moved) applyGesture(current, event.clientX, event.clientY);
       finish(false);
     },
     onPointerCancel: (event: ReactPointerEvent<HTMLElement>) => { if (drag.current?.id === event.pointerId) finish(true); },
     onLostPointerCapture: (event: ReactPointerEvent<HTMLElement>) => { if (drag.current?.id === event.pointerId) finish(true); },
     onKeyDown: (event: React.KeyboardEvent<HTMLElement>) => {
-      if (!point || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+      if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
       event.preventDefault(); event.stopPropagation();
       const bounds = ref.current?.getBoundingClientRect();
       if (!bounds) return;
       const step = event.shiftKey ? 20 : 5;
+      if (side) {
+        applyGesture({ side, size: { width: bounds.width, height: bounds.height },
+          scale: ref.current!.offsetWidth > 0 ? bounds.width / ref.current!.offsetWidth : 1,
+          origin: { x: bounds.left, y: bounds.top }, start: { x: 0, y: 0 },
+          previousPoint: point, previousSize: size, element: event.currentTarget, id: 0, moved: true },
+          event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0,
+          event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0);
+        return;
+      }
       setPoint({ x: bounds.left + (event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0),
         y: bounds.top + (event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0) });
     },
-  } };
+  });
+  return { pinned, layout, size, reset, toggle, handleProps: gestureProps(), resizeProps: gestureProps };
 }

@@ -4,6 +4,7 @@ import { useToast } from "@/shared/hooks/useToast";
 import type { SegmentBlockNote, SourceSegment } from "@/shared/types/domain";
 import { logicalSegmentUid } from "./readerUtils";
 import { segmentNoteErrorMessage } from "./segmentNoteError";
+import { checkpointEditRecovery, forgetEditRecovery, recoveryAvailable, recoveryDraftKey } from '@/shared/lib/editRecovery';
 import {
   getSegmentNoteValidation,
   getSegmentNoteVisibleText,
@@ -15,6 +16,8 @@ import {
 
 export function useSegmentNoteDraft({
   entryId,
+  workspaceRoot = null,
+  onReveal,
   draftScopeKey,
   notesBySegmentUid,
   onSegmentNotesSaved,
@@ -23,6 +26,8 @@ export function useSegmentNoteDraft({
   sharedDrafts,
 }: {
   entryId: string;
+  workspaceRoot?: string | null;
+  onReveal?: () => void;
   draftScopeKey?: string;
   notesBySegmentUid: Map<string, SegmentBlockNote>;
   onSegmentNotesSaved?: (notes: SegmentBlockNote[]) => void;
@@ -59,9 +64,10 @@ export function useSegmentNoteDraft({
   const discardNote = useCallback(() => {
     if (selectedSegment) {
       onSharedDraftChange?.(logicalSegmentUid(selectedSegment), savedNoteText);
+      if (workspaceRoot && recoveryAvailable()) forgetEditRecovery(workspaceRoot, recoveryDraftKey('segment-note', entryId, logicalSegmentUid(selectedSegment)));
     }
     setNoteText(savedNoteText);
-  }, [onSharedDraftChange, savedNoteText, selectedSegment]);
+  }, [onSharedDraftChange, savedNoteText, selectedSegment, workspaceRoot, entryId]);
 
   const saveNote = useCallback(
     async () => {
@@ -210,6 +216,16 @@ export function useSegmentNoteDraft({
   useEffect(() => {
     if (!draftScopeKey) return;
     return registerSegmentEditorCloseHandler(draftScopeKey, ownerId, {
+      label: () => `片段笔记${selectedSegment ? ` · 第 ${selectedSegment.page_idx + 1} 页` : ''}`,
+      reveal: onReveal,
+      isBusy: () => savingRef.current,
+      checkpoint: () => {
+        if (workspaceRoot && selectedSegment && recoveryAvailable() && isDirty()) checkpointEditRecovery(workspaceRoot, {
+          key: recoveryDraftKey('segment-note', entryId, logicalSegmentUid(selectedSegment)), kind: 'segment-note',
+          label: `片段笔记 · 第 ${selectedSegment.page_idx + 1} 页`, ownerId: entryId, targetId: logicalSegmentUid(selectedSegment),
+          scopeKey: `segment-records:${entryId}`, payload: { text: liveDraft.current.text } });
+      },
+      recovery: () => workspaceRoot && selectedSegment && recoveryAvailable() ? { root: workspaceRoot, key: recoveryDraftKey('segment-note', entryId, logicalSegmentUid(selectedSegment)) } : undefined,
       discard: discardNote,
       save: async () => {
         if (!isDirty()) return true;
@@ -217,7 +233,7 @@ export function useSegmentNoteDraft({
       },
       isDirty,
     });
-  }, [discardNote, draftScopeKey, noteDirty, ownerId, saveNote]);
+  }, [discardNote, draftScopeKey, noteDirty, ownerId, saveNote, onReveal, workspaceRoot, entryId, selectedSegment]);
 
   return {
     noteBusy,

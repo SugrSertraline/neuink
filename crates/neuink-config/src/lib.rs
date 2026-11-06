@@ -23,6 +23,9 @@ pub struct AppSettings {
     pub translation_routing: TranslationRoutingSettings,
     #[serde(default, deserialize_with = "read_selection_translation")]
     pub selection_translation: SelectionTranslationSettings,
+    /// Independently configured services; credentials remain in the OS vault.
+    #[serde(default)]
+    pub translation_services: Vec<SelectionTranslationSettings>,
     #[serde(default)]
     pub sciverse: SciverseSettings,
     #[serde(default)]
@@ -77,6 +80,7 @@ pub enum SelectionTranslationProvider {
     Azure,
     Deepl,
     QwenMt,
+    Niutrans,
 }
 
 // Migrate only persisted settings; removed providers remain invalid IPC input.

@@ -2,7 +2,7 @@ import { alignSavedTranslation, splitAcademicSentences, splitPdfTextSentences } 
 import type { SegmentRegionItem } from './types';
 
 export type PdfSentenceRect = readonly [number, number, number, number];
-export type PdfSentenceGeometry = { index: number; source: string; linkedSentenceIndex: number | null; rects: PdfSentenceRect[] };
+export type PdfSentenceGeometry = { index: number; source: string; linkedSentenceIndex: number | null; rects: PdfSentenceRect[]; textRange?: Range };
 
 type TextRun = { node: Text; start: number; end: number };
 
@@ -122,9 +122,16 @@ export function pdfSentenceGeometry(layer: HTMLElement, region: SegmentRegionIte
       range.detach();
     }
     if (!rects.length) return null;
+    const first = runs.find(run => run.end > start && run.start < end);
+    const last = [...runs].reverse().find(run => run.end > start && run.start < end);
+    const textRange = first && last ? document.createRange() : undefined;
+    if (textRange && first && last) {
+      textRange.setStart(first.node, Math.max(0, start - first.start));
+      textRange.setEnd(last.node, Math.min(last.node.length, end - last.start));
+    }
     const linkedSentenceIndex = match?.sourceIndexes[index] ?? null;
     result.push({ index, source: linkedSentenceIndex !== null ? match!.sourceSentences[linkedSentenceIndex] : sentence,
-      linkedSentenceIndex, rects: mergeLineRects(rects) });
+      linkedSentenceIndex, rects: mergeLineRects(rects), textRange });
   }
   return result;
 }
@@ -164,9 +171,8 @@ export function translatedSentenceGeometry(layer: HTMLElement, region: SegmentRe
     range.setEnd(end.node, end.offset + 1);
     const rects = Array.from(range.getClientRects()).map(rect => normalizedRect(rect, page, bounds))
       .filter((rect): rect is PdfSentenceRect => rect !== null);
-    range.detach();
     if (!rects.length) return null;
-    result.push({ index, source: pair.source, linkedSentenceIndex: pair.sourceStartIndex, rects: mergeLineRects(rects) });
+    result.push({ index, source: pair.source, linkedSentenceIndex: pair.sourceStartIndex, rects: mergeLineRects(rects), textRange: range });
     cursor += length;
   }
   return result;

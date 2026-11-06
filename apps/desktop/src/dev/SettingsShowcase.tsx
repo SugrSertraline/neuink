@@ -14,6 +14,7 @@ import { readStoredReaderPreferences } from '@/shared/lib/readerPreferences';
 import { APP_THEME_PRESETS, type AppThemePresetId } from '@/shared/lib/themePresets';
 import type { UiScale } from '@/shared/lib/uiScale';
 import type { LlmSettingsState } from '@/shared/ipc/assistantApi';
+import type { SelectionTranslationSettings } from '@/shared/ipc/selectionTranslationApi';
 import { DEFAULT_TRANSLATION_ROUTING } from '@/shared/ipc/translationRoutingApi';
 import '../styles/globals.css';
 
@@ -29,11 +30,26 @@ if (state === 'empty') llm = { ...llm, profiles: [], assistant_profile_id: null,
 let workspace = { data_root: 'E:\\Neuink\\data', root: 'settings-showcase', default_root: 'settings-showcase', recent_workspaces: [], translation_automation: { auto_translate_pdf: false, segment_types: ['paragraph', 'heading'] } };
 let research = { papers_enabled: true, web_enabled: true, use_tavily: false, has_web_key: false };
 let sciverse = { enabled: false, base_url: 'https://api.sciverse.space', has_api_token: false, token_source: 'none' };
-let translationRouting = structuredClone(DEFAULT_TRANSLATION_ROUTING);
+let translationRouting: import('@/shared/ipc/translationRoutingApi').TranslationRouting = { ...structuredClone(DEFAULT_TRANSLATION_ROUTING), word: { kind: 'default_model' as const }, selection: { kind: 'default_model' as const } };
+// Explicit type preserves service routes when the mock is changed through the UI.
+let services: SelectionTranslationSettings[] = [
+  { provider: 'niutrans', endpoint: 'https://api.niutrans.com/NiuTransServer/translation', model: '', region: '', has_key: false },
+  { provider: 'deepl', endpoint: 'https://api-free.deepl.com/v2/translate', model: '', region: '', has_key: true },
+  { provider: 'azure', endpoint: 'https://api.cognitive.microsofttranslator.com/translate', model: '', region: '', has_key: false },
+  { provider: 'qwen_mt', endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', model: 'qwen-mt-flash', region: '', has_key: false },
+];
 // Every IPC is intercepted. This page cannot read or write an actual library.
 mockIPC(async (command, payload) => {
   if (state === 'loading' && command.startsWith('get_')) return new Promise(() => undefined);
   if (state === 'error' && (command.startsWith('get_') || command.startsWith('save_') || command.startsWith('update_'))) throw new Error('示例：暂时无法读取或保存配置');
+  if (command === 'get_translation_services') return structuredClone(services);
+  if (command === 'test_selection_translation_service') { if (state === 'service-error') throw '小牛翻译：API Key 无效或未授权，请检查密钥。'; return '实验成功了。（隔离示例）'; }
+  if (command === 'save_translation_service') {
+    const { api_key: _, ...request } = (payload as { request: SelectionTranslationSettings & { api_key?: string } }).request;
+    const saved = { ...request, has_key: true };
+    services = services.map(value => value.provider === saved.provider ? saved : value);
+    return saved;
+  }
   if (command === 'get_llm_settings') return structuredClone(llm);
   if (command === 'get_translation_routing') return structuredClone(translationRouting);
   if (command === 'save_translation_routing') {
@@ -74,7 +90,7 @@ function SettingsShowcase() {
   const [key, setKey] = useState('');
   const [search, setSearch] = useState(false);
   const [sidebar, setSidebar] = useState(false);
-  const [target, setTarget] = useState<SettingsNavigationTarget | undefined>(params.has('data') ? { id: 'data-workspace', nonce: 1 } : params.has('tools') ? { id: 'tools-research', nonce: 1 } : undefined);
+  const [target, setTarget] = useState<SettingsNavigationTarget | undefined>(params.has('translation') ? { id: 'translation-service', nonce: 1 } : params.has('data') ? { id: 'data-workspace', nonce: 1 } : params.has('tools') ? { id: 'tools-research', nonce: 1 } : undefined);
   const nonce = useRef(0);
   const navigate = (id: string) => setTarget({ id, nonce: ++nonce.current });
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);

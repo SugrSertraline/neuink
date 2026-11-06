@@ -752,7 +752,8 @@ export function ReaderPane({
     pane: WorkspacePaneId = 'left',
     focusedSegmentUid?: string,
     initialRecordMode: 'note' | 'annotation' = 'note',
-    editorScopeOverride?: string
+    editorScopeOverride?: string,
+    editRequestId?: string
   ) => {
     if (!tabId) {
       return standalone ? <EmptyPane /> : null;
@@ -798,6 +799,7 @@ export function ReaderPane({
     return (
       <Suspense fallback={<div className="grid h-full min-h-0 place-items-center text-sm text-muted-foreground" role="status">正在载入阅读器…</div>}>
       <EntryWorkspaceView
+        editRequestId={editRequestId}
         activeContentId={parsed.contentId}
         entry={openEntry}
         standalone={standalone}
@@ -1098,7 +1100,8 @@ export function ReaderPane({
         surface.kind === 'segment-notes'
             ? surface.mode ?? 'note'
             : 'note',
-        surfaceKey(surface)
+        surfaceKey(surface),
+        surface.kind === 'entry-overview' ? surface.editRequestId : undefined
       );
       const entry = entries.find((entry) => entry.id === surface.entryId);
       if (!entry || !['pdf', 'reflow', 'entry-overview'].includes(surface.kind)) return reader;

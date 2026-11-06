@@ -78,6 +78,7 @@ export function DailyDashboardView({ active = true, entries, states, loading, er
     </header>
     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]" role="region" aria-label="每日看板内容" tabIndex={0}>
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-5 pb-5 pt-1">
+        {daily?.recoveryNotice}
         {ready ? <DailyReadPapers key={date} papers={papers} hasEntries={entries.length > 0} onOpenEntry={onOpenEntry} onOpenLibrary={onOpenLibrary} /> : null}
         <section className="min-w-0 space-y-4" aria-label="阅读统计">
         {loading ? <p role="status" className="text-sm text-muted-foreground">正在读取阅读记录…</p> : null}

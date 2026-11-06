@@ -63,6 +63,7 @@ export function reflowGroupEstimateScale(
   }
 
   const size = reflowGroupVisualSize(group, preferences);
+  if (typeof size === 'number') return size;
   return size === 'compact' ? 0.75 : size === 'large' ? 1.5 : size === 'full' ? 1.8 : 1;
 }
 
@@ -76,6 +77,7 @@ export function reflowGroupVisualSize(
   }
   if (key === 'table') {
     const size = preferences.table.size;
+    if (typeof size === 'number') return size;
     return size === 'small' ? 'compact' : size === 'large' ? 'large' : 'standard';
   }
   return 'standard';

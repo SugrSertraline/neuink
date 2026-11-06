@@ -4,18 +4,20 @@ import type { SourceSegment } from '@/shared/types/domain';
 const mocks = vi.hoisted(() => ({ read: vi.fn(), save: vi.fn(), settings: vi.fn(), generate: vi.fn() }));
 vi.mock('@/shared/ipc/foldingApi', () => ({ readEntryFolds: mocks.read, upsertEntryFolds: mocks.save }));
 vi.mock('@/shared/ipc/assistantApi', () => ({ getLlmSettings: mocks.settings }));
+vi.mock('./translateFoldLevel', () => ({ translateFoldLevel: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('./foldGeneration', () => ({ generateFoldBatch: mocks.generate }));
 
+import { translateFoldLevel } from './translateFoldLevel';
 import { generateEntryFolds } from './generateEntryFolds';
 import { FoldGenerationError } from './foldErrors';
 
 const source: SourceSegment = { uid: 'a', segment_type: 'paragraph', page_idx: 0, bbox: null, text: `A finding. ${Array(38).fill('Context').join(' ')}.`, markdown: null };
 const result = { segmentUid: 'a', source: source.text, evidence: [0], brief: ['A finding.'],
-  key: 'A finding. A reason.', takeaway: 'A finding.', topic: 'finding' };
+  key: 'A finding. A reason.', takeaway: 'A finding.', topic: 'finding', translations: Object.fromEntries(Object.entries({ brief: 'A finding.', key: 'A finding. A reason.', takeaway: 'A finding.', topic: 'finding' }).map(([level, text]) => [level, { source_text: text, translated_text: '译文', model: 'test', generated_at: '2026' }])) };
 
 describe('entry folding generation', () => {
   beforeEach(() => {
-    vi.resetAllMocks();
+    vi.resetAllMocks(); vi.mocked(translateFoldLevel).mockResolvedValue(undefined);
     mocks.read.mockResolvedValue({});
     mocks.save.mockResolvedValue(undefined);
     mocks.settings.mockResolvedValue({ assistant_profile: { model: 'test-model' } });
@@ -34,6 +36,8 @@ describe('entry folding generation', () => {
     expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({ phase: 'generating', activeSegmentUids: ['a'] }));
     expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({ phase: 'saving', activeSegmentUids: ['a'] }));
     expect(onProgress).toHaveBeenLastCalledWith(expect.objectContaining({ completed: 1, failed: 0, total: 1, completedSegmentUids: ['a'] }));
+    expect(vi.mocked(translateFoldLevel).mock.calls.map(call => call[4])).toEqual(['brief', 'key', 'takeaway', 'topic']);
+    expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({ translatingSegmentUids: ['a'], completed: 0 }));
   });
 
   it('passes paper and section context without generating unselected paragraphs', async () => {
@@ -63,6 +67,55 @@ describe('entry folding generation', () => {
     await generateEntryFolds({ root: 'root', entryId: 'entry', segments: [source], force: true });
     expect(mocks.generate).toHaveBeenCalledTimes(1);
     expect(mocks.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('only fills missing or stale Chinese levels without requiring an assistant or overwriting source results', async () => {
+    const translations = { ...result.translations, topic: { ...result.translations.topic, source_text: 'outdated' } };
+    mocks.read.mockResolvedValue({ a: { ...result, translations, segment_uid: 'a', model: 'test', generated_at: '2026' } });
+    await generateEntryFolds({ root: 'root', entryId: 'entry', segments: [source] });
+    expect(mocks.settings).not.toHaveBeenCalled();
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(vi.mocked(translateFoldLevel).mock.calls.map(call => call[4])).toEqual(['topic']);
+  });
+
+  it('retains source results and continues other paragraphs after a Chinese translation failure', async () => {
+    vi.mocked(translateFoldLevel).mockRejectedValueOnce(new Error('provider secret'));
+    const onProgress = vi.fn();
+    const outcome = await generateEntryFolds({ root: 'root', entryId: 'entry', segments: [source, { ...source, uid: 'b' }], concurrency: 1, onProgress });
+    expect(outcome).toMatchObject({ failedSegmentUids: ['a'], failureCode: 'translation' });
+    expect(mocks.save).toHaveBeenCalledTimes(2);
+    expect(onProgress).toHaveBeenLastCalledWith(expect.objectContaining({ completedSegmentUids: ['b'], failedSegmentUids: ['a'],
+      segmentErrors: { a: expect.stringContaining('中文详略尚未补齐') } }));
+    expect(JSON.stringify(onProgress.mock.calls)).not.toContain('provider secret');
+  });
+
+  it('does not dispatch further levels after stopping during translation', async () => {
+    const controller = new AbortController();
+    vi.mocked(translateFoldLevel).mockImplementationOnce(async () => { controller.abort(); });
+    const onProgress = vi.fn();
+    await expect(generateEntryFolds({ root: 'root', entryId: 'entry', segments: [source], signal: controller.signal, onProgress }))
+      .rejects.toMatchObject({ name: 'AbortError' });
+    expect(translateFoldLevel).toHaveBeenCalledTimes(1);
+    expect(mocks.save).toHaveBeenCalledTimes(1);
+    expect(onProgress).toHaveBeenLastCalledWith(expect.objectContaining({ completed: 0 }));
+  });
+
+  it('cancels an active Chinese request independently and continues the next paragraph', async () => {
+    const canceledSegments = new Set<string>();
+    const translationControllers = new Map<string, AbortController>();
+    vi.mocked(translateFoldLevel).mockImplementationOnce(async (_root, _entry, _title, record, _level, signal) => {
+      canceledSegments.add(record.segment_uid);
+      translationControllers.get(record.segment_uid)?.abort();
+      expect(signal?.aborted).toBe(true);
+      throw new DOMException('Canceled', 'AbortError');
+    });
+    const onProgress = vi.fn();
+    const result = await generateEntryFolds({ root: 'root', entryId: 'entry', segments: [source, { ...source, uid: 'b' }],
+      concurrency: 1, canceledSegments, translationControllers, onProgress });
+    expect(result.failedSegmentUids).toEqual([]);
+    expect(onProgress).toHaveBeenLastCalledWith(expect.objectContaining({ completedSegmentUids: ['b'], canceledSegmentUids: ['a'] }));
+    expect(translationControllers.size).toBe(0);
   });
 
   it('does not save a result after cancellation', async () => {
@@ -122,7 +175,7 @@ describe('entry folding generation', () => {
     expect(mocks.generate).not.toHaveBeenCalled();
   });
 
-  it('reports a completed write before honoring a stop requested during saving', async () => {
+  it('preserves the source write but does not complete bilingual work when stopped during saving', async () => {
     let finish!: () => void;
     let started!: () => void;
     const saving = new Promise<void>(resolve => { started = resolve; });
@@ -133,7 +186,7 @@ describe('entry folding generation', () => {
     await saving;
     controller.abort(); finish();
     await expect(operation).rejects.toMatchObject({ name: 'AbortError' });
-    expect(onProgress).toHaveBeenLastCalledWith(expect.objectContaining({ completed: 1, completedSegmentUids: ['a'] }));
+    expect(onProgress).toHaveBeenLastCalledWith(expect.objectContaining({ completed: 0, completedSegmentUids: [] }));
     expect(mocks.generate).toHaveBeenCalledTimes(1);
   });
 
@@ -241,8 +294,8 @@ describe('entry folding generation', () => {
     await failure;
     expect(gates.size).toBe(3);
     expect(mocks.save).toHaveBeenCalledTimes(1);
-    expect(onProgress).toHaveBeenLastCalledWith(expect.objectContaining({ completed: 1, failed: 1,
-      completedSegmentUids: ['p1'], failedSegmentUids: ['p0'], activeSegmentUids: [] }));
+    expect(onProgress).toHaveBeenLastCalledWith(expect.objectContaining({ completed: 0, failed: 1,
+      completedSegmentUids: [], failedSegmentUids: ['p0'], activeSegmentUids: [] }));
   });
 
   it('cancels individual in-flight and queued paragraphs without affecting parallel neighbors', async () => {
@@ -288,7 +341,7 @@ describe('entry folding generation', () => {
     await stopped;
     expect(gates.has('p3')).toBe(false);
     expect(mocks.save).toHaveBeenCalledTimes(1);
-    expect(onProgress).toHaveBeenLastCalledWith(expect.objectContaining({ completed: 1, completedSegmentUids: ['p0'], activeSegmentUids: [] }));
+    expect(onProgress).toHaveBeenLastCalledWith(expect.objectContaining({ completed: 0, completedSegmentUids: [], activeSegmentUids: [] }));
   });
 
   it.each(['truncated', 'format', 'empty'] as const)('continues after a paragraph has %s output and preserves its failure reason', async code => {

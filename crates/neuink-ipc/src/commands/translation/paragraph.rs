@@ -17,9 +17,11 @@ mod progress;
 mod sentences;
 #[cfg(test)]
 use model::validate_sentences;
-use model::{translate, TranslationResult};
+#[cfg(test)]
+use model::translate;
+use model::TranslationResult;
 
-const MAX_PARAGRAPH_CHARS: usize = 8_000;
+const MAX_PARAGRAPH_CHARS: usize = 200_000;
 
 #[derive(Deserialize)]
 pub struct ParagraphRequest {
@@ -60,11 +62,7 @@ fn requests_to_run(record: &ParagraphTranslation, retry_failed: bool) -> (bool, 
                 .value
                 .as_ref()
                 .is_none_or(|text| text.trim().is_empty()),
-        !retry_failed
-            || record.sentences.status != Status::Succeeded
-            || record.sentences.value.as_ref().is_none_or(|pairs| {
-                pairs.is_empty() || pairs.iter().any(|pair| pair.translation.trim().is_empty())
-            }),
+        false, // Sentence view is derived locally from the canonical segment translation.
     )
 }
 
@@ -136,7 +134,7 @@ pub async fn translate_paragraph<R: Runtime>(
     app: AppHandle<R>,
     request: ParagraphRequest,
 ) -> Result<ParagraphTranslation, String> {
-    let profile = read_translation_profile(&app, neuink_config::TranslationKind::Paragraph)?.ok_or("请先在设置中配置翻译模型。")?;
+    let client = TranslationClient::read(&app, neuink_config::TranslationKind::Paragraph)?;
     let workspace = Workspace::open(request.root.clone()).map_err(|error| error.to_string())?;
     let segment = workspace
         .read_segments(&request.entry_id)
@@ -149,7 +147,7 @@ pub async fn translate_paragraph<R: Runtime>(
     }
     let source = source_text(&segment);
     if source.trim().is_empty() || source.chars().count() > MAX_PARAGRAPH_CHARS {
-        return Err("请选择非空且不超过 8000 字符的正文段落，避免翻译上下文过长。".into());
+        return Err("请选择非空且不超过 200000 字符的正文片段。".into());
     }
     // Incremental requests may reuse the document translation, but never stale source text.
     let document_translation = if request.retry_failed {
@@ -175,10 +173,10 @@ pub async fn translate_paragraph<R: Runtime>(
                     source_hash: source_hash(&source),
                     source_text: source.clone(),
                     job_id: String::new(),
-                    model: profile.model.clone(),
+                    model: client.label(),
                     view: ParagraphView::Sentences,
                     paragraph: TranslationPart::default(),
-                    sentences: TranslationPart::default(),
+                    sentences: TranslationPart { status: Status::Succeeded, value: None, error: None, timing: None },
                 });
             if request.retry_failed {
                 reuse_document_paragraph(&mut record, document_translation.as_ref());
@@ -196,7 +194,7 @@ pub async fn translate_paragraph<R: Runtime>(
                 usize::from(paragraph) + usize::from(sentences),
             );
             record.job_id = event.job.id.clone();
-            record.model = profile.model.clone();
+            record.model = client.label();
             if paragraph {
                 record.paragraph.status = Status::Running;
                 record.paragraph.error = None;
@@ -232,7 +230,7 @@ pub async fn translate_paragraph<R: Runtime>(
                 app,
                 request,
                 task_record,
-                LlmClient::new(profile),
+                client,
                 paragraph,
                 sentences,
             )
@@ -246,69 +244,39 @@ async fn run<R: Runtime>(
     app: AppHandle<R>,
     request: ParagraphRequest,
     record: ParagraphTranslation,
-    client: LlmClient,
+    client: TranslationClient,
     paragraph: bool,
     sentences: bool,
 ) {
     let job_id = &record.job_id;
-    emit_started(&app, job_id, "翻译当前段落：整段／逐句");
-    let completed = AtomicUsize::new(0);
-    let total = usize::from(paragraph) + usize::from(sentences);
-    let execute = |sentence_mode: bool, enabled: bool| {
-        let app = &app;
-        let request = &request;
-        let record = &record;
-        let client = &client;
-        let completed = &completed;
-        async move {
-            if !enabled {
-                return Ok(());
-            }
-            let progress = progress::ParagraphProgress::new(request, record, sentence_mode);
-            let streaming_client = progress.client(client, app);
-            let result = translate(&streaming_client, &record.source_text, sentence_mode).await;
-            let mut finished = record.clone();
-            if sentence_mode {
-                finished.sentences.timing = Some(progress.timing());
-            } else {
-                finished.paragraph.timing = Some(progress.timing());
-            }
-            let saved = save_result(request, &finished, sentence_mode, result);
-            let done = completed.fetch_add(1, Ordering::SeqCst) + 1;
-            if let Some(event) = job_manager().progress(
-                &record.job_id,
-                done,
-                total,
-                if sentence_mode {
-                    "逐句请求已结束"
-                } else {
-                    "整段请求已结束"
-                },
-                json!({"segment_uid": record.segment_uid}),
-            ) {
-                emit_job_event(app, event);
-            }
-            saved
+    let _ = (paragraph, sentences); // Preserve compatibility with existing request snapshots.
+    emit_started(&app, job_id, "翻译当前片段");
+    let progress = progress::ParagraphProgress::new(&request, &record, false);
+    let client = match client {
+        TranslationClient::Model(client) => {
+            let mut client = progress.client(&client, &app);
+            // Segment JSON is committed only when complete, never parsed as paragraph JSON.
+            client.output = None;
+            TranslationClient::Model(client)
         }
+        client => { progress.service_started(&app); client }
     };
-    let (whole, aligned) =
-        futures_util::future::join(execute(false, paragraph), execute(true, sentences)).await;
-    let errors = [whole.err(), aligned.err()]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
-    let event = if errors.is_empty() {
-        job_manager().succeed(
-            job_id,
-            "段落翻译完成",
-            json!({"segment_uid": record.segment_uid}),
-        )
-    } else {
-        job_manager().fail(
-            job_id,
-            errors.join("；"),
-            json!({"segment_uid": record.segment_uid}),
-        )
+    let result = single_segment::translate(TranslateEntrySegmentRequest {
+        root: request.root.clone(), entry_id: request.entry_id.clone(),
+        segment_uid: request.segment_uid.clone(), source_language: default_source_language(),
+        target_language: default_target_language(),
+    }, client).await.and_then(|response| {
+        response.translation.and_then(|value| value.segments.into_iter()
+            .find(|segment| segment.segment_uid == request.segment_uid)
+            .and_then(|segment| segment.translated_text))
+            .map(TranslationResult::Paragraph).ok_or_else(|| "片段译文为空，请重试。".to_string())
+    });
+    let mut finished = record.clone();
+    finished.paragraph.timing = Some(progress.timing());
+    let result = save_result(&request, &finished, false, result);
+    let event = match result {
+        Ok(()) => job_manager().succeed(job_id, "片段翻译完成", json!({"segment_uid":record.segment_uid})),
+        Err(error) => job_manager().fail(job_id, error, json!({"segment_uid":record.segment_uid})),
     };
     if let Some(event) = event {
         emit_job_event(&app, event);

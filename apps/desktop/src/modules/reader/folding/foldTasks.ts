@@ -6,7 +6,7 @@ import { buildFoldInputs } from './foldInput';
 import { FoldGenerationError, foldErrorMessage } from './foldErrors';
 import { createFoldPauseGate, type FoldPauseGate } from './foldPauseGate';
 
-type Task = { controller: AbortController; promise: Promise<void>; canceledSegments: Set<string>; pauseGate: FoldPauseGate; title: string; report?: LocalJobReporter };
+type Task = { controller: AbortController; promise: Promise<void>; canceledSegments: Set<string>; translationControllers: Map<string, AbortController>; pauseGate: FoldPauseGate; title: string; report?: LocalJobReporter };
 export type FoldTaskSnapshot = {
   error?: string;
   status: 'running' | 'pausing' | 'paused' | 'stopping' | 'succeeded' | 'failed' | 'canceled';
@@ -73,7 +73,7 @@ export function cancelFoldSegments(root: string, entryId: string, segmentUids: r
   let changed = false;
   for (const uid of segmentUids) {
     if (eligible.has(uid) && !finished.has(uid) && !saving.has(uid) && !task.canceledSegments.has(uid)) {
-      task.canceledSegments.add(uid); changed = true;
+      task.canceledSegments.add(uid); task.translationControllers.get(uid)?.abort(); changed = true;
     }
   }
   if (!changed) return;
@@ -96,7 +96,7 @@ export function startFoldTask(root: string, entryId: string, title: string, segm
   const current = tasks.get(key);
   if (current) return current.promise;
   const controller = new AbortController();
-  const task: Task = { controller, promise: Promise.resolve(), canceledSegments: new Set(), pauseGate: createFoldPauseGate(), title };
+  const task: Task = { controller, promise: Promise.resolve(), canceledSegments: new Set(), translationControllers: new Map(), pauseGate: createFoldPauseGate(), title };
   tasks.set(key, task);
   snapshots.delete(key);
   snapshots.set(key, { status: 'running', segments: [...segments], force, progress: {
@@ -113,7 +113,7 @@ export function startFoldTask(root: string, entryId: string, title: string, segm
     failureMessage: '阅读详略未完成，已有结果保留。' }, async report => {
     task.report = report;
     let lastCompleted = 0;
-    const outcome = await generateEntryFolds({ root, entryId, segments, title, documentSegments, signal: controller.signal, force, canceledSegments: task.canceledSegments, pauseGate: task.pauseGate, onProgress: progress => {
+    const outcome = await generateEntryFolds({ root, entryId, segments, title, documentSegments, signal: controller.signal, force, canceledSegments: task.canceledSegments, translationControllers: task.translationControllers, pauseGate: task.pauseGate, onProgress: progress => {
       const snapshot = snapshots.get(key);
       if (snapshot) {
         const status = task.pauseGate.paused && snapshot.status !== 'stopping' ?

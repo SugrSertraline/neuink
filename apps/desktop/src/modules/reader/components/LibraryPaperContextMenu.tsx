@@ -8,6 +8,7 @@ export type LibraryPaperActions = {
   deleteDisabled?: boolean;
   reparseDisabled: boolean;
   onOpen: (entryId: string) => void;
+  onRead?: (entryId: string) => void;
   onOpenInSidePane: (entryId: string) => void;
   onReparse: (entry: LibraryEntry) => void;
   onDelete: (entry: LibraryEntry) => void;

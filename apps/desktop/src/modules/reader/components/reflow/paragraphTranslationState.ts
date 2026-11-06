@@ -8,7 +8,7 @@ export function hasSentenceTranslation(record?: ParagraphTranslation) {
 }
 
 export function paragraphTranslationRunning(record?: ParagraphTranslation) {
-  return record?.paragraph.status === 'running' || record?.sentences.status === 'running';
+  return record?.paragraph.status === 'running';
 }
 
 export function hasParagraphTranslation(record?: ParagraphTranslation) {

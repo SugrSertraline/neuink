@@ -7,13 +7,13 @@ import { saveSegmentEditorsBeforeClose, hasAnyUnsavedSegmentEditors } from '@/mo
 import type { DailyState } from '@/shared/types/daily';
 import { DailyTodos } from './DailyTodos';
 import { newWidget } from './dailyWidgets';
-const ipc = vi.hoisted(() => ({ invoke: vi.fn() }));
-vi.mock('@tauri-apps/api/core', () => ({ invoke: ipc.invoke }));
+const ipc = vi.hoisted(() => ({ invoke: vi.fn(), native: false }));
+vi.mock('@tauri-apps/api/core', () => ({ invoke: ipc.invoke, isTauri: () => ipc.native }));
 let saved: DailyState, revision: number, fail: boolean, model: DailyModel;
 const widget = { ...newWidget('todos'), id: 'todo-widget' };
 function Probe() { model = useDaily()!; return <><span>{model.error}</span><span>{model.date}</span><TodoWidget widget={model.state?.widgets[0] ?? widget} /><button onClick={model.retry}>retry</button></>; }
 beforeEach(() => {
-  revision = 0; fail = false;
+  revision = 0; fail = false; ipc.native = false;
   saved = { version: 1, widgets: [widget], lists: [{ id: 'inbox', title: 'Inbox' }], todos: [], recommendation_preferences: { interests: [], exclusions: [], enabled: false } };
   ipc.invoke.mockReset().mockImplementation(async (command, { request }) => {
     if (command === 'daily_recommendations') return { version: 1, batches: [], feedback: [], last_attempt_at: null, last_error: null };

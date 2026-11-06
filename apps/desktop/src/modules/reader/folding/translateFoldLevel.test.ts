@@ -1,8 +1,9 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { FoldRecord } from '@/shared/ipc/foldingApi';
-const m = vi.hoisted(() => ({ settings: vi.fn(), routing: vi.fn(), save: vi.fn(), translate: vi.fn(), notify: vi.fn() }));
+const m = vi.hoisted(() => ({ settings: vi.fn(), routing: vi.fn(), service: vi.fn(), save: vi.fn(), translate: vi.fn(), notify: vi.fn() }));
+vi.mock('@/shared/ipc/selectionTranslationApi', () => ({ translateSelectionService: m.service }));
 vi.mock('@/shared/ipc/assistantApi', () => ({ getLlmSettings: m.settings }));
-vi.mock('@/shared/ipc/translationRoutingApi', () => ({ getTranslationRouting: m.routing }));
+vi.mock('@/shared/ipc/translationRoutingApi', async original => ({ ...await original<typeof import('@/shared/ipc/translationRoutingApi')>(), getTranslationRouting: m.routing }));
 vi.mock('@/shared/ipc/foldingApi', () => ({ saveFoldTranslation: m.save }));
 vi.mock('@/shared/lib/localBackgroundJobs', () => ({ runLocalBackgroundJob: (_: unknown, run: () => Promise<void>) => run() }));
 vi.mock('../translation/modelSelectionTranslation', () => ({ translateSelectionWithProfile: m.translate }));
@@ -14,6 +15,16 @@ const record: FoldRecord = { segment_uid: 'p', source: 'Source.', evidence: [0],
   key: 'A result. A reason.', takeaway: 'A result.', topic: 'result', model: 'm', generated_at: '2026' };
 beforeEach(() => { vi.clearAllMocks(); m.settings.mockResolvedValue({}); m.routing.mockResolvedValue({ paragraph: { kind: 'default_model' } });
   m.save.mockResolvedValue(undefined); m.translate.mockResolvedValue('结果。'); });
+
+it('uses the paragraph service for detail translations without loading a model', async () => {
+  m.routing.mockResolvedValue({ paragraph: { kind: 'service', provider: 'niutrans' } });
+  m.service.mockResolvedValue('小牛译文。');
+  await translateFoldLevel('root', 'service-entry', 'Title', record, 'takeaway');
+  expect(m.service).toHaveBeenCalledWith('A result.', 'niutrans', expect.any(AbortSignal));
+  expect(m.settings).not.toHaveBeenCalled();
+  expect(m.translate).not.toHaveBeenCalled();
+  expect(m.save).toHaveBeenCalledWith('root', 'service-entry', 'p', 'takeaway', expect.objectContaining({ model: 'niutrans', translated_text: '小牛译文。' }));
+});
 
 it('translates the selected level and writes its exact source before notifying readers', async () => {
   await translateFoldLevel('root', 'entry', 'Title', record, 'takeaway');
@@ -64,4 +75,12 @@ it('does not save a response after the last reader leaves', async () => {
   finish('迟到的译文。');
   await new Promise(resolve => setTimeout(resolve, 0));
   expect(m.save).not.toHaveBeenCalled();
+});
+
+it('follows the default service for detail translations', async () => {
+  m.routing.mockResolvedValue({ default_source: { kind: 'service', provider: 'niutrans' }, paragraph: { kind: 'default_model' } });
+  m.service.mockResolvedValue('默认详略译文。');
+  await translateFoldLevel('root', 'default-service-entry', 'Title', record, 'takeaway');
+  expect(m.service).toHaveBeenCalledWith('A result.', 'niutrans', expect.any(AbortSignal));
+  expect(m.settings).not.toHaveBeenCalled();
 });

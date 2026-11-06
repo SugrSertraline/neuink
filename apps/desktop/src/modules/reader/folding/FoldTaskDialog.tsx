@@ -11,6 +11,7 @@ import type { SourceSegment } from '@/shared/types/domain';
 import { buildFoldInputs, FOLD_MIN_CJK, FOLD_MIN_WORDS } from './foldInput';
 import { FoldTaskPreview } from './FoldTaskPreview';
 import { FOLD_TASK_FILTERS, foldTaskFilterForStatus, type FoldTaskFilter, type FoldTaskRowStatus } from './foldTaskFilters';
+import { missingFoldTranslations } from './foldTranslations';
 import { foldViewsForSource } from './foldViews';
 import { FOLD_CONCURRENCY } from './generateEntryFolds';
 import type { FoldReader } from './useFoldReader';
@@ -32,14 +33,16 @@ export function FoldTaskDialog({ open, onOpenChange, fold }: { open: boolean; on
     const eligible = new Set(inputs.batches.flat().map(item => item.segmentUid));
     return fold.segments.filter(segment => eligible.has(segment.uid));
   }, [inputs, fold.segments]);
-  const saved = useMemo(() => new Set(inputs.batches.flat().filter(item => {
+  const sourceSaved = useMemo(() => new Set(inputs.batches.flat().filter(item => {
     const record = fold.records[item.segmentUid];
     return record && foldViewsForSource(record, item.source);
   }).map(item => item.segmentUid)), [inputs, fold.records]);
+  const saved = new Set([...sourceSaved].filter(uid => missingFoldTranslations(fold.records[uid]).length === 0));
   const currentSources = new Map(fold.segments.map(segment => [segment.uid, segment.text.trim()]));
   const scope = new Set(task?.segments.filter(segment => currentSources.get(segment.uid) === segment.text.trim()).map(segment => segment.uid) ?? []);
   const active = new Set(progress?.activeSegmentUids ?? []);
   const saving = new Set(progress?.savingSegmentUids ?? (progress?.phase === 'saving' ? progress.activeSegmentUids : []));
+  const translating = new Set(progress?.translatingSegmentUids ?? []);
   const completed = new Set(progress?.completedSegmentUids ?? []);
   const failed = new Set(progress?.failedSegmentUids ?? []);
   const cached = new Set(progress?.cachedSegmentUids ?? []);
@@ -59,8 +62,8 @@ export function FoldTaskDialog({ open, onOpenChange, fold }: { open: boolean; on
   const canCancel = (uid: string) => Boolean(controllable && scope.has(uid) && progress?.total && !completed.has(uid) && !failed.has(uid) &&
     !cached.has(uid) && !canceled.has(uid) && !saving.has(uid));
   const stateLabel = (uid: string): FoldTaskRowStatus => scope.has(uid) && canceled.has(uid) ? '已取消' : scope.has(uid) && failed.has(uid) ? '失败' : scope.has(uid) && active.has(uid) ?
-    (saving.has(uid) ? '保存中' : '生成中') : scope.has(uid) && completed.has(uid) ? '已完成' : hasResult(uid) ? '已缓存' :
-      scope.has(uid) ? (paused ? '已暂停' : locked ? '待处理' : '未完成') : '未生成';
+    (saving.has(uid) ? '保存中' : translating.has(uid) ? '翻译中' : '生成中') : scope.has(uid) && completed.has(uid) ? '已完成' : hasResult(uid) ? '已缓存' :
+      scope.has(uid) ? (paused ? '已暂停' : locked ? '待处理' : '未完成') : fold.records[uid] && foldViewsForSource(fold.records[uid], currentSources.get(uid) ?? '') ? '待补译' : '未生成';
   const selectedRows = rows.filter(segment => selected.has(segment.uid));
   const pendingSelected = selectedRows.filter(segment => !hasResult(segment.uid));
   const cancelable = selectedRows.filter(segment => canCancel(segment.uid));
@@ -101,7 +104,7 @@ export function FoldTaskDialog({ open, onOpenChange, fold }: { open: boolean; on
       }}>
       <DialogHeader>
         <DialogTitle>阅读详略任务</DialogTitle>
-        <DialogDescription>勾选正文段落后开始生成，最多同时处理 {FOLD_CONCURRENCY} 段。关闭窗口不会停止任务。</DialogDescription>
+        <DialogDescription>同时生成原文详略与中文详略；已有原文只补缺失译文。勾选正文段落后开始生成，最多同时处理 {FOLD_CONCURRENCY} 段。关闭窗口不会停止任务。</DialogDescription>
       </DialogHeader>
       <div className="grid shrink-0 gap-2 rounded-md border border-primary/20 bg-primary/5 px-3 py-2" role="status" aria-live="polite">
         <div className="flex flex-wrap justify-between gap-2 text-sm"><span>{title}{progress?.total ? ` · 已处理 ${done}/${progress.total} 段` : ''}</span>{progress?.total || allCached ? <span>{percent}%</span> : null}</div>
@@ -150,7 +153,7 @@ export function FoldTaskDialog({ open, onOpenChange, fold }: { open: boolean; on
               <span role="cell"><Checkbox aria-label={`选择第 ${segment.page_idx + 1} 页第 ${ordinal} 段`} disabled={loading} checked={selected.has(segment.uid)} onCheckedChange={checked => setSelected(current => { const next = new Set(current); if (checked === true) next.add(segment.uid); else next.delete(segment.uid); return next; })} /></span>
               <span role="cell">{segment.page_idx + 1}</span>
               <span role="cell" className="flex min-w-0 items-center gap-1"><span className="min-w-0 flex-1 truncate">{segment.text}</span>
-                <FoldTaskPreview segment={segment} ordinal={ordinal} status={status} record={saved.has(segment.uid) ? fold.records[segment.uid] : undefined}
+                <FoldTaskPreview segment={segment} ordinal={ordinal} status={status} record={sourceSaved.has(segment.uid) ? fold.records[segment.uid] : undefined}
                   error={scope.has(segment.uid) ? progress?.segmentErrors?.[segment.uid] : undefined} />
               </span>
               <span role="cell" title={scope.has(segment.uid) ? progress?.segmentErrors?.[segment.uid] : undefined} aria-label={scope.has(segment.uid) && progress?.segmentErrors?.[segment.uid] ? `失败：${progress.segmentErrors[segment.uid]}` : undefined} className={status === '失败' ? 'text-destructive' : 'text-muted-foreground'}>{status}</span>

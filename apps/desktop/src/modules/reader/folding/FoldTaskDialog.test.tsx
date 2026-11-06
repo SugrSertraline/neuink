@@ -14,6 +14,27 @@ function FoldTaskDialog(props: React.ComponentProps<typeof TaskDialog>) {
 }
 afterEach(cleanup);
 
+it('offers source-only saved results for Chinese completion without forcing regeneration', () => {
+  const segment = paragraph('a'), start = vi.fn();
+  const fold = { segments: [segment], start, records: { a: { segment_uid: 'a', source: segment.text, evidence: [0],
+    brief: [segment.text], key: 'content', takeaway: 'content', topic: 'content', model: 'test', generated_at: '' } } } as unknown as FoldReader;
+  const view = render(<FoldTaskDialog open onOpenChange={vi.fn()} fold={fold} />);
+  expect(view.getByText('待补译')).toBeTruthy();
+  fireEvent.click(view.getByRole('checkbox', { name: '全选当前列表' }));
+  fireEvent.click(view.getByRole('button', { name: '开始生成（1）' }));
+  expect(start).toHaveBeenCalledExactlyOnceWith([segment], false);
+});
+
+it('shows translation as in progress rather than completed after the source is saved', () => {
+  const segment = paragraph('a');
+  const fold = { segments: [segment], task: { status: 'running', segments: [segment], force: false,
+    progress: { phase: 'generating', total: 1, completed: 0, failed: 0, activeSegmentUids: ['a'],
+      translatingSegmentUids: ['a'], completedSegmentUids: [], failedSegmentUids: [], cachedSegmentUids: [], canceledSegmentUids: [] } } } as unknown as FoldReader;
+  const view = render(<FoldTaskDialog open onOpenChange={vi.fn()} fold={fold} />);
+  expect(view.getByText('翻译中')).toBeTruthy();
+  expect(view.queryByText('已完成')).toBeNull();
+});
+
 it('requires explicit selection and start, excludes unsupported text, and supports partial/all selection', () => {
   const segments = [paragraph('a'), paragraph('b'), { ...paragraph('short'), text: 'Short.' }, { ...paragraph('title'), segment_type: 'heading' as const }];
   const start = vi.fn(), cancel = vi.fn(), close = vi.fn();
@@ -48,6 +69,7 @@ it('keeps unselected document paragraphs available after a partial task', () => 
 it('skips valid cached content before starting and keeps edited source eligible for generation', () => {
   const original = paragraph('a'), second = paragraph('b'), start = vi.fn();
   const fold = { segments: [original, second], start, records: { a: { segment_uid: 'a', source: original.text, evidence: [0],
+    translations: Object.fromEntries(Object.entries({ brief: original.text, key: 'content', takeaway: 'content', topic: 'content' }).map(([level, text]) => [level, { source_text: text, translated_text: '译文', model: 'test', generated_at: '' }])),
     brief: [original.text], key: 'content', takeaway: 'content', topic: 'content', model: 'test', generated_at: '' } } } as unknown as FoldReader;
   const view = render(<FoldTaskDialog open onOpenChange={vi.fn()} fold={fold} />);
   expect(view.getByText('已缓存')).toBeTruthy();

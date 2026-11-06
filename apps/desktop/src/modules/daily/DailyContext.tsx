@@ -5,6 +5,8 @@ import { formatLocalDate } from '@/modules/reader/components/libraryReading';
 import { saveSegmentEditorsBeforeClose } from '@/modules/reader/components/segmentEditorDirtyRegistry';
 import { RecommendationProvider } from './RecommendationContext';
 import { DailyModelContext as Context, type DailyModel } from './dailyModel';
+import { useFormRecovery } from '@/shared/hooks/useFormRecovery';
+import { registerSegmentEditorCloseHandler, setSegmentEditorDirty } from '@/modules/reader/components/segmentEditorDirtyRegistry';
 export { useDaily, type DailyModel } from './dailyModel';
 
 /** App-wide data owner: a view closing never discards pending preference writes. */
@@ -19,6 +21,12 @@ export function DailyProvider({ root, openNote, openSource, children }: { root: 
   const [dateError, setDateError] = useState<string | null>(null);
   const current = useRef({ root, snapshot, draft, busy }); current.current = { root, snapshot, draft, busy };
   const generation = useRef(0);
+  const recovery = useFormRecovery({ kind: 'daily-state', id: 'daily-state', ownerId: 'daily', root, scope: 'daily-widgets/state', label: '每日看板 · 未保存的修改',
+    value: { draft, baseline: snapshot }, dirty: Boolean(draft), ready: !loading && Boolean(snapshot), restore: value => {
+      if (!value.draft || JSON.stringify(value.baseline) !== JSON.stringify(current.current.snapshot)) throw new Error('看板已更新');
+      current.current.draft = value.draft; setDraft(value.draft); setError('已恢复看板修改，请重试保存。');
+    } });
+  const recoveryRef = useRef(recovery); recoveryRef.current = recovery;
   useEffect(() => {
     let pending = false, stopped = false;
     const tick = async () => {
@@ -67,7 +75,16 @@ export function DailyProvider({ root, openNote, openSource, children }: { root: 
     setDateError(null);
     if (!Number.isNaN(parsed.getTime()) && formatLocalDate(parsed) === date && date <= today) setChosenDate(date === today ? null : date);
   };
+  useEffect(() => {
+    const off = registerSegmentEditorCloseHandler('daily-widgets/state', 'daily-state', { ...recovery.handlers,
+      isDirty: () => Boolean(current.current.draft), isBusy: () => current.current.busy,
+      save: () => current.current.busy ? Promise.resolve(false) : current.current.draft ? write(current.current.draft) : Promise.resolve(true),
+      discard: () => { if (!current.current.busy) { current.current.draft = null; setDraft(null); setError(null); recoveryRef.current.discard(); } } });
+    return () => { off(); setSegmentEditorDirty('daily-widgets/state', 'daily-state', false); };
+  }, [write]);
+  useEffect(() => setSegmentEditorDirty('daily-widgets/state', 'daily-state', Boolean(draft) || busy), [draft, busy]);
   return <Context.Provider value={{ root, state: draft ?? snapshot?.state ?? null, date: chosenDate ?? today, today, selectDate, loading, busy: busy || Boolean(draft), error: error ?? dateError, mutate,
+    recoveryNotice: recovery.notice,
     retry: () => { const pending = current.current.draft; if (pending) void write(pending); else setAttempt(n => n + 1); },
     reload: () => setAttempt(n => n + 1), openNote, openSource }}><RecommendationProvider key={root}>{children}</RecommendationProvider></Context.Provider>;
 }

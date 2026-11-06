@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { ArrowDown, ArrowUp, Columns3, FolderTree, ListChecks, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -22,7 +23,8 @@ const tagScopes = [
 ] as const;
 
 /** Display controls never change the paper collection or its scope. */
-export function LibraryPaperToolbar({ query, sortBy, sortDirection, recentOrderAvailable, scope, visibleColumns, pinnedEdges, tagNavigation, refresh, sourceFilter, selection, onQueryChange, onSortChange, onSortDirectionChange, onScopeChange, onColumnChange, onPinChange }: {
+export function LibraryPaperToolbar({ query, sortBy, sortDirection, recentOrderAvailable, scope, visibleColumns, pinnedEdges, tagNavigation, refresh, sourceFilter, selection, selectionActions, onQueryChange, onSortChange, onSortDirectionChange, onScopeChange, onColumnChange, onPinChange }: {
+  selectionActions?: ReactNode;
   selection?: { enabled: boolean; disabled: boolean; onToggle: () => void };
   query: string;
   sortBy: LibraryEntrySortKey;
@@ -46,10 +48,17 @@ export function LibraryPaperToolbar({ query, sortBy, sortDirection, recentOrderA
     .filter(([value]) => value === 'all' || value === 'local' || ((value === 'zotero' || value === 'mineru') && sourceFilter?.enabledSources[value]));
   const activeSourceIndex = sourceOptions.findIndex(([value]) => value === sourceFilter?.value);
   return <div data-material="workspace-toolbar" className="@container/library-toolbar min-w-0 shrink-0 border-b px-3 py-2">
-    <div aria-label="条目库筛选与操作" className="flex min-w-0 flex-wrap items-center gap-2">
+    <div aria-label="条目库筛选与操作" className="flex h-10 min-w-0 flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden overscroll-x-contain [scrollbar-width:thin]">
       <SearchInput label="搜索条目" placeholder="搜索标题、标签、PDF…" value={query} onValueChange={onQueryChange}
-        className="w-48 max-w-48 shrink-0 @max-[700px]/library-toolbar:w-full @max-[700px]/library-toolbar:max-w-none" />
-      {selection && <Button size="default" variant={selection.enabled ? 'secondary' : 'outline'} disabled={selection.disabled} aria-pressed={selection.enabled} className="gap-1.5 text-xs" onClick={selection.onToggle}><ListChecks size={14} aria-hidden="true" />{selection.enabled ? '退出选择' : '选择模式'}</Button>}
+        className="w-48 max-w-48 shrink-0" />
+      <div role={selection?.enabled ? 'group' : undefined} aria-label={selection?.enabled ? '选择模式操作' : undefined}
+        className={selection?.enabled ? 'flex h-8 shrink-0 flex-nowrap items-center gap-2 whitespace-nowrap rounded-md border border-primary/30 bg-primary/5 px-2' : 'contents'}>
+        {selectionActions}
+        {selection && <Button size={selection.enabled ? 'sm' : 'default'} variant={selection.enabled ? 'ghost' : 'outline'}
+          disabled={selection.disabled} aria-pressed={selection.enabled} className="shrink-0 gap-1.5 text-xs" onClick={selection.onToggle}>
+          <ListChecks size={14} aria-hidden="true" />{selection.enabled ? '退出选择' : '选择模式'}
+        </Button>}
+      </div>
       {scope ? <ToggleGroup aria-label="论文范围" className={libraryToolbarGroup} size="sm" spacing={0} type="single" value={scope}
         onValueChange={value => { if (tagScopes.some(option => option.value === value)) onScopeChange(value as PaperScope); }}>
         {tagScopes.map(option => <ToggleGroupItem key={option.value} aria-label={option.label} value={option.value} title={option.title}
@@ -65,7 +74,7 @@ export function LibraryPaperToolbar({ query, sortBy, sortDirection, recentOrderA
           style={{ width: `calc((100% - 4px) / ${sourceOptions.length})`, transform: `translateX(${Math.max(activeSourceIndex, 0) * 100}%)` }} />
         {sourceOptions.map(([value, label]) => <ToggleGroupItem key={value} value={value} aria-label={label} className={cn(libraryToolbarGroupItem, 'relative z-10 min-w-14 px-2 data-[state=on]:bg-transparent', sourceFilter.value !== value && 'text-muted-foreground')}>{label}</ToggleGroupItem>)}
       </ToggleGroup>}
-      <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1.5">
+      <div className="ml-auto flex shrink-0 flex-nowrap items-center justify-end gap-1.5">
       <Select value={sortBy} onValueChange={value => onSortChange(value as LibraryEntrySortKey)}>
         <SelectTrigger aria-label="条目排序" className={cn(libraryToolbarControl, 'w-32 @max-[700px]/library-toolbar:w-28')} size="default"><SelectValue placeholder="排序" /></SelectTrigger>
         <SelectContent viewportAligned>

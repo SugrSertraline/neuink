@@ -227,7 +227,7 @@ function ReflowEntryReaderBody({
     () =>
       new Map(
         (translation?.segments ?? [])
-          .filter((segment) => segment.status === 'translated' && segment.translated_text)
+          .filter((segment) => segment.status === 'failed' || segment.translated_text)
           .map((segment) => [segment.segment_uid, segment])
       ),
     [translation]
@@ -251,6 +251,8 @@ function ReflowEntryReaderBody({
     selectSegment,
     updateNoteText
   } = useSegmentNoteDraft({
+    workspaceRoot,
+    onReveal: () => setSegmentOverlayOpen(true),
     draftScopeKey: editorScopeKey,
     entryId: entry.id,
     notesBySegmentUid,
@@ -606,6 +608,7 @@ function ReflowEntryReaderBody({
       >
         {fold.level !== 'off' && storedDisplayOptions.original === 'sentences' ? <span className="text-xs text-muted-foreground">折叠期间暂停逐句对照</span> : null}
         <ReflowComponentControls
+          getReadingBoundary={() => foldSurfaceRef.current}
           preferences={readerPreferences}
           onChange={onReaderPreferencesChange}
           onTranslationViewChange={view => fold.setLevel(foldLevelAfterOriginalChange(fold.level, view === 'sentences' ? 'sentences' : 'original'))}

@@ -1,5 +1,4 @@
 import {
-  AlertTriangle,
   CalendarDays,
   EyeOff,
   FilePlus2,
@@ -14,14 +13,6 @@ import {
 } from 'react';
 
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle
-} from '@/components/ui/dialog';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import type { NoteTarget, TagMeta, TrashItem } from '@/shared/types/domain';
@@ -39,6 +30,7 @@ import {
 import { EntryActionDialog } from './EntryActionDialog';
 import { TrashItemsView } from './TrashItemsView';
 import { WorkspaceTrashView } from './WorkspaceTrashView';
+import { EmptyWorkspaceTrashButton } from './EmptyWorkspaceTrashButton';
 import { LibraryHeading } from './LibraryHeading';
 import { TagNotesList } from '@/modules/notes/components/TagNotesList';
 import { CreateTagNoteButton } from '@/modules/notes/components/CreateTagNoteButton';
@@ -183,8 +175,6 @@ export function EntryLibraryView({
   const { draggingEntryId, entryDragPreview, entryDragHandlers, consumeDragClick } = useLibraryEntryDrag(
     `${workspaceRoot}:${activeTag}:${libraryView}:${section}:${status}:${appearance}:${libraryDisplay}`
   );
-  const [emptyTrashConfirmOpen, setEmptyTrashConfirmOpen] = useState(false);
-  const [emptyTrashBusy, setEmptyTrashBusy] = useState(false);
   const { notify } = useToast();
   const isTrashView = libraryView === 'trash';
   useEffect(() => {
@@ -201,8 +191,6 @@ export function EntryLibraryView({
     [libraryView, readingStates, recentReadingEntryIds, visibleEntries, entrySources, enabledSources.zotero, enabledSources.mineru]
   );
   const externalEntryIds = useMemo(() => new Set(Object.entries(entrySources).filter(([, source]) => source.kinds.length > 0).map(([id]) => id)), [entrySources]);
-  const protectedTrashEntries = new Set(trashItems.filter(item => item.kind === 'entry' && (item.source_managed || externalEntryIds.has(item.entry_id))).map(item => item.entry_id));
-  const purgeableTrashItems = trashItems.filter(item => !protectedTrashEntries.has(item.entry_id));
   const hiddenEntryCount = entries.filter(item => isEntrySourceHidden(entrySources[item.id]) && isSourceEntryVisible(entrySources[item.id], enabledSources)).length;
   const sourceKindsByEntry = useMemo(() => Object.fromEntries(Object.entries(entrySources).map(([id, source]) => [id, source.kinds.filter(kind => enabledSources[kind])])), [entrySources, enabledSources.zotero, enabledSources.mineru]);
   const sourceHiddenByEntry = useMemo(() => Object.fromEntries(Object.entries(entrySources).map(([id, source]) => [id, isEntrySourceHidden(source)])), [entrySources]);
@@ -270,27 +258,6 @@ export function EntryLibraryView({
       // The workspace hook owns the user-facing error state.
     } finally {
       setActionBusy(false);
-    }
-  };
-
-  const confirmEmptyTrash = async () => {
-    if (purgeableTrashItems.length === 0) {
-      setEmptyTrashConfirmOpen(false);
-      return;
-    }
-    setEmptyTrashBusy(true);
-    try {
-      for (const item of purgeableTrashItems.filter((item) => item.kind === 'entry')) {
-        await onPurgeEntry(item.entry_id);
-      }
-      for (const item of purgeableTrashItems.filter((item) => item.kind !== 'entry' && item.restorable)) {
-        await onPurgeTrashItem(item.entry_id, item.trash_id);
-      }
-      setEmptyTrashConfirmOpen(false);
-    } catch {
-      // The workspace hook owns the user-facing error state.
-    } finally {
-      setEmptyTrashBusy(false);
     }
   };
 
@@ -375,7 +342,8 @@ export function EntryLibraryView({
           <LibraryHeading title={pageTitle} summary={pageSummary} tag={activeTagMeta} ancestors={folderBreadcrumb.slice(0, -1)} workspaceRoot={workspaceRoot}
             hasTagContext={!isTrashView && Boolean(activeTag)} view={libraryView} onSelectView={onSelectView} onClearFilters={onClearFilters} onManageTags={onManageTags}
             disabled={status !== 'ready'} onNavigate={onSelectTag} onDescription={onUpdateTagDescription}
-            actions={isTrashView ? <Button disabled={!purgeableTrashItems.length || emptyTrashBusy} size="default" variant="destructive" onClick={() => setEmptyTrashConfirmOpen(true)}>清空条目与记录</Button> : <>
+            actions={isTrashView ? <EmptyWorkspaceTrashButton root={workspaceRoot} externalIds={externalEntryIds}
+              onPurgeEntry={onPurgeEntry} onPurgeItem={onPurgeTrashItem} /> : <>
               {(enabledSources.zotero || enabledSources.mineru) && <Button size="default" variant={isHiddenView ? 'secondary' : 'ghost'} className="gap-1.5 text-xs" aria-label={`已隐藏 ${hiddenEntryCount}`} onClick={() => onSelectView('hidden')}>
                 <EyeOff size={14} aria-hidden="true" />已隐藏{hiddenEntryCount > 0 ? ` ${hiddenEntryCount}` : ''}
               </Button>}
@@ -408,6 +376,11 @@ export function EntryLibraryView({
             {!isTrashView ? <LibraryPaperToolbar query={query} sortBy={sortBy} sortDirection={sortDirection}
               recentOrderAvailable={libraryView === 'recent'}
               onSortDirectionChange={direction => setSort({ by: sortBy, direction })}
+              selectionActions={<LibrarySelectionActions active={selection.enabled && !isTrashView && section === 'papers'} context={selectionContext}
+              selected={filteredEntries.filter(entry => selection.ids.has(entry.id)).map(entry => ({ ...entry, sourceInfo: entrySources[entry.id] ?? entry.sourceInfo }))}
+              total={filteredEntries.length} hidden={isHiddenView} sourceUnavailable={Boolean(librarySourceCatalog?.loading || librarySourceCatalog?.error)}
+              tagPaths={[...buildTagPathById(tags).values()]} onClear={selection.clear} onSelectAll={selection.toggleAll} onComplete={selection.remove}
+              onDelete={onDeleteEntry} onSetHidden={workspaceRoot ? librarySourceCatalog?.setHidden : undefined} onAddTags={onApplyEntryTagPaths} />}
               selection={{ enabled: selection.enabled, disabled: status !== 'ready', onToggle: selection.enabled ? selection.exit : selection.enter }}
               sourceFilter={sourceAvailable && !isHiddenView ? { value: selectedSource, onChange: setSourceFilter, enabledSources, loading: librarySourceCatalog?.loading ?? false } : undefined}
               scope={activeTagMeta ? tagScope : null}
@@ -416,11 +389,7 @@ export function EntryLibraryView({
               onQueryChange={setQuery} onSortChange={by => setSort({ by, direction: defaultLibrarySortDirection(by) })} onColumnChange={toggleColumn} onPinChange={togglePinnedEdge}
               onScopeChange={changeTagScope}
               refresh={libraryView === 'parsing' ? { busy: isRefreshingParseStatus, disabled: activeJobs === 0, onRefresh: () => void onRefreshParseStatus() } : undefined} /> : null}
-            <LibrarySelectionActions active={selection.enabled && !isTrashView && section === 'papers'} context={selectionContext}
-              selected={filteredEntries.filter(entry => selection.ids.has(entry.id)).map(entry => ({ ...entry, sourceInfo: entrySources[entry.id] ?? entry.sourceInfo }))}
-              total={filteredEntries.length} hidden={isHiddenView} sourceUnavailable={Boolean(librarySourceCatalog?.loading || librarySourceCatalog?.error)}
-              tagPaths={[...buildTagPathById(tags).values()]} onClear={selection.clear} onSelectAll={selection.toggleAll} onComplete={selection.remove}
-              onDelete={onDeleteEntry} onSetHidden={workspaceRoot ? librarySourceCatalog?.setHidden : undefined} onAddTags={onApplyEntryTagPaths} />
+
             {librarySourceSync?.running && <p role="status" className="border-b border-border px-4 py-1 text-xs text-muted-foreground">{librarySourceSync.current || '正在检查来源'} · {librarySourceSync.completed}/{librarySourceSync.total}</p>}
 
           {isTrashView ? (
@@ -472,6 +441,7 @@ export function EntryLibraryView({
                   }
                 }
               })}
+              onRead={entryId => openEntry(entryId)}
               onOpen={entryId => { onSelectEntry(entryId); onOpenEntryExplorer(entryId, 'overview'); }} onOpenInSidePane={onOpenEntryInSidePane}
               onDelete={item => { if (externalEntryIds.has(item.id) || item.sourceInfo?.kinds.length) void toggleSourceHidden(item); else setDialog({ action: 'move-to-trash', entry: item }); }}
               onReparse={item => {
@@ -498,45 +468,6 @@ export function EntryLibraryView({
           }
         }}
       />
-      <Dialog open={emptyTrashConfirmOpen} onOpenChange={(open) => {
-        if (!open && !emptyTrashBusy) {
-          setEmptyTrashConfirmOpen(false);
-        }
-      }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <AlertTriangle size={16} aria-hidden="true" />
-              清空条目与记录
-            </DialogTitle>
-            <DialogDescription>
-              将永久删除回收站中的 {purgeableTrashItems.length} 个条目与记录，来源条目和标签保留在回收站中。此操作无法撤销。
-            </DialogDescription>
-          </DialogHeader>
-          <div className="rounded-md border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-            条目的 PDF、笔记、解析结果和元数据都会被移除。
-          </div>
-          <DialogFooter>
-            <Button
-              disabled={emptyTrashBusy}
-              type="button"
-              variant="outline"
-              onClick={() => setEmptyTrashConfirmOpen(false)}
-            >
-              取消
-            </Button>
-            <Button
-              disabled={emptyTrashBusy || purgeableTrashItems.length === 0}
-              type="button"
-              variant="destructive"
-              onClick={() => void confirmEmptyTrash()}
-            >
-              <Trash2 size={14} aria-hidden="true" />
-              清空回收站
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
       {entryDragPreview ? <PointerPreview aria-hidden="true" data-entry-tag-drag-preview="true"
         anchor={{ x: entryDragPreview.x, top: entryDragPreview.y, bottom: entryDragPreview.y }} width={260}
         className="flex h-8 items-center px-2.5 py-1 text-xs font-medium">

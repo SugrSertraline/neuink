@@ -2,10 +2,22 @@ type SegmentEditorCloseHandler = {
   discard: () => void;
   save: () => Promise<boolean>;
   isDirty?: () => boolean;
+  isBusy?: () => boolean;
+  label?: () => string;
+  reveal?: () => void;
+  recovery?: () => { root: string; key: string } | undefined;
+  checkpoint?: () => void;
+  settingsTargetId?: string;
 };
 
 const dirtyOwnersByScope = new Map<string, Set<string>>();
 const closeHandlersByScope = new Map<string, Map<string, SegmentEditorCloseHandler>>();
+
+export function listUnsavedEditors() {
+  return [...dirtyOwnersByScope].flatMap(([scopeKey, owners]) => [...owners].map(ownerId => ({
+    scopeKey, ownerId, handler: closeHandlersByScope.get(scopeKey)?.get(ownerId)
+  })));
+}
 
 // Older reader wrappers still pass a content-tab value. Normalize at every boundary,
 // including cleanup, so a mounted legacy editor cannot disappear from safety checks.

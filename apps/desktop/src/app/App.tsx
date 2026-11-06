@@ -101,6 +101,10 @@ import { hasUnsavedSurface, saveEditsBeforeWorkspaceChange } from './editSafety'
 import { useSurfaceCloseGuard } from './useSurfaceCloseGuard';
 import { useSidebarResize } from './useSidebarResize';
 import { useUnsavedWindowCloseGuard } from './useUnsavedWindowCloseGuard';
+import { UnsavedWindowDialog } from './UnsavedWindowDialog';
+import { RecoveryCenter } from './useRecoveryCenter';
+import { EditRecoveryRoot } from '@/shared/hooks/useFormRecovery';
+import { recoverySurface, unsavedSurface } from './editRecoveryNavigation';
 import type { PdfJumpRequest, SidePaneState, SidePaneTarget } from '../modules/reader/types';
 import { SearchDialog } from '../modules/search/components/SearchDialog';
 import { AssistantReplyActionsContext } from '../modules/assistant/components/AssistantReplyActionsContext';
@@ -1738,7 +1742,11 @@ export function App() {
     return () => window.clearInterval(interval);
   }, [hasActiveParseTasks, refreshParseStatus]);
 
-  useUnsavedWindowCloseGuard();
+  const windowCloseGuard = useUnsavedWindowCloseGuard({ onReveal: target => {
+    const surface = unsavedSurface(target, surfaceLayout);
+    if (surface) openWorkspaceSurface(surface);
+    requestAnimationFrame(() => target.handler?.reveal?.());
+  } });
   const closeGuard = useSurfaceCloseGuard({
     root: workspace.root,
     onClose: (targets) => targets.forEach(({ pane, surface }) => dispatchSurface({ type: 'close', pane, key: surfaceKey(surface) }))
@@ -1832,12 +1840,16 @@ export function App() {
 
   return (
     <PdfDuplicateReviewContext.Provider value={duplicateReview.confirm}>
+    <EditRecoveryRoot.Provider value={workspace.root}>
     <SourceLocalCopyProvider key={workspace.root ?? 'no-workspace'} root={workspace.root} entries={entries} refreshEntries={workspace.refreshEntries}
       setHidden={librarySourceCatalog.setHidden} onOpenEntry={openEntryTab} beforeCopy={async entryId => {
         if (!await saveMarkdownNotesForOwner(entryId) || !await saveEntrySegmentEditorsBeforeCopy(entryId)) throw new Error('来源条目仍有未保存内容。请保存笔记或条目信息后再导入本地副本。');
       }}>
     <div className="app gap-0">
-      <TitleBar onOpenSearch={() => setSearchDialogOpen(true)} />
+      <TitleBar onOpenSearch={() => setSearchDialogOpen(true)} recoveryAction={<RecoveryCenter root={workspace.root} onOpen={draft => {
+        const surface = recoverySurface(draft);
+        openWorkspaceSurface(['note', 'owned-note', 'segment-notes', 'entry-overview'].includes(surface.kind) ? { ...surface, viewId: `recovery:${crypto.randomUUID()}` } : surface);
+      }} />} />
       {duplicateReview.dialog}
       {pdfDropImport.dragActive ? (
         <div
@@ -1892,6 +1904,7 @@ export function App() {
         }}
         onApplyPdfName={async (entryId, name) => { await workspace.renameWorkspacePdfDisplayName(entryId, name); }} />
       {closeGuard.dialog}
+      <UnsavedWindowDialog {...windowCloseGuard} />
       <Dialog
         open={Boolean(pendingMarkdownNoteDelete)}
         onOpenChange={(open) => {
@@ -2072,6 +2085,8 @@ export function App() {
             onRenamePdfDisplayName={workspace.renameWorkspacePdfDisplayName}
             onOpenCreateEntryTab={openCreateEntryTab}
             onOpenTagEditorTab={openTagEditorTab}
+            onEditEntry={entryId => openWorkspaceSurface({ kind: 'entry-overview', entryId,
+              contextTagId: sidebarContext?.contextTagId, editRequestId: crypto.randomUUID() }, sidebarContext?.pane)}
             onSelectContent={selectEntryContent}
             onOpenTagDetails={(tagId) => selectLibraryTag(tagId, 'papers', true)}
             onSelectView={selectLibraryView}
@@ -2384,6 +2399,7 @@ export function App() {
       </footer>
     </div>
     </SourceLocalCopyProvider>
+    </EditRecoveryRoot.Provider>
     </PdfDuplicateReviewContext.Provider>
   );
 }

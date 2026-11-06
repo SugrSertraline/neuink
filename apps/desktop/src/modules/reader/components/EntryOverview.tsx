@@ -8,7 +8,8 @@ import {
   StickyNote,
   Tags
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { subscribeEditRecovery, editRecoveryVersion, recoveryState } from '@/shared/lib/editRecovery';
 
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from './EntryDisplay';
@@ -38,6 +39,7 @@ export function EntryOverview({
   onUpdateEntry,
   onRefreshEntries,
   titleCheckReloadKey = 0,
+  editRequestId,
   sourceBacklinksBySegmentUid,
   tags,
   workspaceRoot,
@@ -57,6 +59,7 @@ export function EntryOverview({
   ) => Promise<unknown> | unknown;
   onRefreshEntries?: () => Promise<void>;
   titleCheckReloadKey?: number;
+  editRequestId?: string;
   sourceBacklinksBySegmentUid: SourceBacklinksBySegmentUid;
   tags: TagMeta[];
   workspaceRoot?: string | null;
@@ -64,7 +67,12 @@ export function EntryOverview({
   onApplyEntryTagPaths?: (entryId: string, tagPaths: string[]) => Promise<unknown> | unknown;
   onOpenContent: (contentId: 'pdf' | 'reflow' | 'segment-notes' | 'source-links') => void;
 } & EntryPdfHandlers) {
-  const [editOpen, setEditOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(Boolean(editRequestId));
+  useEffect(() => { if (editRequestId) setEditOpen(true); }, [editRequestId]);
+  useSyncExternalStore(subscribeEditRecovery, editRecoveryVersion, editRecoveryVersion);
+  const recoveryStore = workspaceRoot ? recoveryState(workspaceRoot) : null;
+  const requestedDraft = recoveryStore?.requested ? recoveryStore.drafts.get(recoveryStore.requested) : undefined;
+  useEffect(() => { if (requestedDraft?.kind === 'entry' && requestedDraft.ownerId === entry.id) setEditOpen(true); }, [requestedDraft?.key, entry.id]);
   const editButton = useRef<HTMLButtonElement>(null);
   const wasEditing = useRef(false);
   useEffect(() => {

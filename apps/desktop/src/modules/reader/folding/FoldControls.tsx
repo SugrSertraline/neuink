@@ -22,7 +22,7 @@ export function FoldControls({ fold, onLevelChange, onShowProgress }: { fold: Fo
         : '原文表示完整、未压缩的内容；不改变源语言和中文译文的显示设置。'}</TooltipContent></Tooltip>
       <SelectContent>{FOLD_LEVELS.map(item => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent>
     </Select>
-    <Button size="sm" variant="outline" onClick={onShowProgress}>{fold.running ? (progress?.total ? `查看进度 ${completed}/${progress.total}` : '查看进度') : '生成详略'}</Button>
+    <Button size="sm" variant="outline" onClick={onShowProgress}>{fold.running ? (progress?.total ? `查看进度 ${completed}/${progress.total}` : '查看进度') : '阅读详略'}</Button>
     <span role="status" className="text-xs text-muted-foreground">{fold.task?.status === 'paused' ? '已暂停' : fold.task?.status === 'pausing' ? '正在暂停…' : fold.task?.status === 'stopping' ? '正在停止…' : fold.running ? '' : fold.loadState === 'loading' ? '正在读取' : fold.error ?? ''}</span>
     {fold.loadState === 'error' ? <Button size="sm" variant="ghost" onClick={() => void fold.reload()}>重试读取</Button> : null}
   </div>;

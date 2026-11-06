@@ -66,6 +66,7 @@ import {
   readerSelectableItemClass
 } from './ReaderSurfacePrimitives';
 import { SegmentNoteEditor } from './pdf-reader/SegmentNoteEditor';
+import { checkpointEditRecovery, forgetEditRecovery, recoveryAvailable, recoveryDraftKey } from '@/shared/lib/editRecovery';
 import { mergePdfAnnotationAnchorSegments } from './pdf-reader/pdfPageAnnotations';
 import { hasNoteText, logicalSegmentUid } from './pdf-reader/readerUtils';
 import { buildSegmentNoteLookup } from './pdf-reader/segmentNoteLookup';
@@ -84,6 +85,7 @@ import {
 } from './segmentEditorDirtyRegistry';
 
 type EntryWorkspaceViewProps = EntryPdfHandlers & {
+  editRequestId?: string;
   activeContentId: string | null;
   entry: LibraryEntry;
   standalone?: boolean;
@@ -207,6 +209,7 @@ type EntryWorkspaceViewProps = EntryPdfHandlers & {
 };
 
 export function EntryWorkspaceView({
+  editRequestId,
   activeContentId,
   entry,
   standalone = false,
@@ -429,6 +432,7 @@ export function EntryWorkspaceView({
             ) : null}
             {activeContentId === 'overview' ? (
               <EntryOverview
+                editRequestId={editRequestId}
                 key={`${workspaceRoot}:${entry.id}`}
                 editorScopeKey={editorScopeKey}
                 entry={entry}
@@ -726,6 +730,16 @@ function SegmentNotesOverview({
   };
 
   const externalSegmentUid = linkedSegment?.segmentUid ?? focusedSegmentUid ?? null;
+  const explicitRecordRequest = useRef('');
+  useEffect(() => {
+    if (!focusedSegmentUid || loading || hasUnsavedSegmentEditors(editorScopeKey)) return;
+    const request = JSON.stringify([focusedSegmentUid, initialMode]);
+    if (explicitRecordRequest.current === request) return;
+    explicitRecordRequest.current = request;
+    // Recovery/source navigation must update the shared cursor before linked
+    // readers can override it with their previously selected segment and mode.
+    onFocusSegment(focusedSegmentUid, initialMode);
+  }, [focusedSegmentUid, initialMode, loading, dirty]);
   useEffect(() => {
     if (!externalSegmentUid || !followPdf) {
       return;
@@ -825,6 +839,7 @@ function SegmentNotesOverview({
   const discardDraft = () => {
     if (selectedLogicalUid) {
       onSharedDraftChange(selectedLogicalUid, baseline);
+      if (workspaceRoot && recoveryAvailable()) forgetEditRecovery(workspaceRoot, recoveryDraftKey('segment-note', entry.id, selectedLogicalUid));
     }
     setDraft(baseline);
   };
@@ -864,7 +879,15 @@ function SegmentNotesOverview({
   useEffect(() => registerSegmentEditorCloseHandler(
     editorScopeKey,
     noteDraftOwnerId,
-    { discard: discardDraft, save, isDirty: isNoteDirty }
+    { discard: discardDraft, save, isDirty: isNoteDirty, isBusy: () => savingNoteRef.current,
+      label: () => `片段笔记${selectedSegment ? ` · 第 ${selectedSegment.page_idx + 1} 页` : ''}`,
+      reveal: () => setDetailMode('note'),
+      checkpoint: () => {
+        if (workspaceRoot && selectedLogicalUid && recoveryAvailable() && isNoteDirty()) checkpointEditRecovery(workspaceRoot, {
+          key: recoveryDraftKey('segment-note', entry.id, selectedLogicalUid), kind: 'segment-note', label: `片段笔记 · 第 ${(selectedSegment?.page_idx ?? 0) + 1} 页`,
+          ownerId: entry.id, targetId: selectedLogicalUid, scopeKey: `segment-records:${entry.id}`, payload: { text: liveNote.current.draft } });
+      },
+      recovery: () => workspaceRoot && selectedLogicalUid && recoveryAvailable() ? { root: workspaceRoot, key: recoveryDraftKey('segment-note', entry.id, selectedLogicalUid) } : undefined }
   ), [discardDraft, editorScopeKey, noteDraftOwnerId, save]);
 
   const locateSelectedSegment = () => {
@@ -1101,7 +1124,7 @@ function SegmentNotesOverview({
                 onClose={() => undefined}
                 onDelete={(annotationId) => void deleteAnnotation(annotationId)}
                 onModeChange={(mode) => changeDetailMode(mode === 'segment' ? 'note' : 'annotation')}
-                onSave={(annotation) => void saveAnnotation(annotation)}
+                onSave={(annotation) => saveAnnotation(annotation)}
                 onSelectAnnotation={locateSelectedAnnotation}
               />
             ) : (

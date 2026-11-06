@@ -17,7 +17,6 @@ import { FoldTranslatedParagraph } from '../../folding/FoldTranslatedParagraph';
 import type { FoldLevel } from '../../folding/useFoldReader';
 import { SegmentFoldControls } from '../../folding/SegmentFoldControls';
 import { FOLD_GESTURE_HINT, useFoldLevelGesture } from '../../folding/useFoldLevelGesture';
-import { foldLevelAfterOriginalChange } from '../../folding/foldDisplay';
 import { foldViewsForSource } from '../../folding/foldViews';
 import { buildFoldInputs } from '../../folding/foldInput';
 import { FoldTranslationButton } from '../../folding/FoldTranslationButton';
@@ -39,12 +38,12 @@ import {
 } from "../pdf-reader/readerUtils";
 import { SegmentActionMenu } from "../pdf-reader/SegmentActionMenu";
 import { useParagraphTranslation } from './ParagraphTranslationContext';
-import { hasMatchingDocumentTranslation, hasSentenceTranslation, paragraphTranslationRunning } from './paragraphTranslationState';
-import { ParagraphTranslationActions, ParagraphTranslationContent } from './ParagraphTranslationControls';
+import { hasMatchingDocumentTranslation, paragraphTranslationRunning } from './paragraphTranslationState';
+import { ParagraphTranslationActions } from './ParagraphTranslationControls';
 import { SentenceAlignedTranslationContent } from './SentenceAlignedTranslationContent';
 import { isVisualReflowComponent, resolveReflowContent, type ReflowContentPreference } from '@/shared/lib/reflowContentPreferences';
 import { useReflowSegmentPreferences } from './ReflowSegmentPreferences';
-import { ReflowSegmentContentActions } from './ReflowContentControls';
+import { ReflowSegmentContentActions, ReflowSegmentViewControls } from './ReflowContentControls';
 import { ReflowContentLayers, parsedReflowMarkdown } from './ReflowContentLayers';
 import type { ParagraphTranslation } from '@/shared/ipc/paragraphTranslationApi';
 import { SegmentRail } from "../pdf-reader/SegmentRail";
@@ -157,7 +156,7 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
   const resolvedContent = resolveReflowContent(componentKey, reflowTranslationMode, {
     ...componentContent,
   }, segmentPreferences.override);
-  const foldActive = Boolean(fold && fold.level !== 'off');
+  const foldActive = Boolean(fold && fold.level !== 'off' && segmentPreferences.override?.translationView !== 'sentences');
   const content = foldActive ? { ...resolvedContent, translationView: 'paragraph' as const } : resolvedContent;
   const foldRecord = segmentGroup.body.segment_type === 'paragraph' ? fold?.records[segmentGroup.body.uid] : undefined;
   const foldLevel = foldActive ? (fold?.overrides[segmentGroup.body.uid] ?? fold?.level ?? 'off') : 'off';
@@ -364,6 +363,10 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
             {segmentDisplayLabel(segmentGroup.body)}
           </Badge>
           <span className="shrink-0 whitespace-nowrap">第 {segmentGroup.body.page_idx + 1} 页</span>
+          {componentKey === 'paragraph' && <ReflowSegmentViewControls
+            value={segmentPreferences.override?.translationView ?? 'inherit'} onInteraction={() => onPreviewChange(null)}
+            onChange={view => segmentPreferences.update(view === 'inherit' ? { translationView: undefined }
+              : { translationView: view })} />}
           {foldActive && segmentGroup.body.segment_type === 'paragraph' && <SegmentFoldControls
             value={fold?.overrides[segmentGroup.body.uid] ?? 'inherit'} globalLevel={fold?.level ?? 'off'}
             eligible={foldEligible || foldAvailable} available={foldAvailable} onChange={value => fold?.setOverride(segmentGroup.body.uid, value)}
@@ -398,7 +401,6 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
             focusedSentenceIndex={focusedSentenceIndex}
             onEnhance={paragraphTranslation.context?.ready ? () => {
               if (paragraphTranslation.context?.pending.has(segmentGroup.body.uid) || paragraphTranslationRunning(paragraphTranslation.record)) return;
-              fold?.setLevel('off');
               segmentPreferences.update({ translation: true, translationView: 'sentences' });
               paragraphTranslation.context?.translate(segmentGroup.body.uid, true);
             } : undefined}
@@ -453,13 +455,12 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
           onTranslateSegment={onTranslateSegment}
           displayActions={listItemAddress(menuSegment.uid) ? undefined : <ReflowSegmentContentActions component={componentKey} value={content} overridden={Boolean(segmentPreferences.override)}
             onChange={patch => {
-              if (patch?.translationView && fold) fold.setLevel(foldLevelAfterOriginalChange(fold.level, patch.translationView === 'sentences' ? 'sentences' : 'original'));
               segmentPreferences.update(patch);
               setMenuPosition(null);
             }} />}
           translationActions={paragraphTranslation.context ? <ParagraphTranslationActions segment={segmentGroup.body} close={() => setMenuPosition(null)}
             hasDocumentTranslation={hasMatchingDocumentTranslation(segmentGroup.body, translationBySegmentUid.get(segmentGroup.body.uid))}
-            viewControls={false} onTranslate={view => { if (fold) fold.setLevel(foldLevelAfterOriginalChange(fold.level, (view ?? 'sentences') === 'sentences' ? 'sentences' : 'original')); segmentPreferences.update({ translation: true, translationView: view ?? 'sentences' }); }} /> : undefined}
+            viewControls={false} onTranslate={view => { segmentPreferences.update({ translation: true, translationView: view ?? 'sentences' }); }} /> : undefined}
           onHideSegment={listItemAddress(menuSegment.uid) ? undefined : onHideSegment}
           onOpenSourceBacklink={onOpenSourceBacklink}
         />
@@ -522,19 +523,17 @@ function ReflowGroupContent({
   const savedTranslation = hasMatchingDocumentTranslation(segment, documentTranslation)
     ? documentTranslation?.translated_text
     : paragraphRecord?.paragraph.status === 'succeeded' ? paragraphRecord.paragraph.value : null;
-  const aiSentencesAvailable = paragraphRecord && hasSentenceTranslation(paragraphRecord);
   const pairedContent = segment.segment_type !== 'paragraph' ? undefined : content.translationView === 'sentences'
-    ? content.translation && aiSentencesAvailable ? <ParagraphTranslationContent record={paragraphRecord} entryId={entryId} root={workspaceRoot}
-      showOriginal={content.parsed} view="sentences" segmentUid={segment.uid} focusedSentenceIndex={focusedSentenceIndex} />
-      : <SentenceAlignedTranslationContent source={segment.markdown ?? segment.text} savedTranslation={savedTranslation}
+    ? <SentenceAlignedTranslationContent source={segment.markdown ?? segment.text} savedTranslation={savedTranslation}
         showOriginal={content.parsed} showTranslation={content.translation} entryId={entryId} workspaceRoot={workspaceRoot}
         segmentUid={segment.uid} focusedSentenceIndex={focusedSentenceIndex}
-        onEnhance={content.translation ? onEnhance : undefined} enhancing={enhancing}
-        aiError={paragraphRecord?.sentences.status === 'failed' ? paragraphRecord.sentences.error : null} />
+        onEnhance={content.translation && !savedTranslation ? onEnhance : undefined} enhancing={enhancing}
+        aiError={paragraphRecord?.paragraph.status === 'failed' ? paragraphRecord.paragraph.error : null} />
     : undefined;
 
   return (
     <div className="grid min-w-0 gap-3">
+      {content.translation && documentTranslation?.status === 'failed' && <p role="status" className="text-xs text-warning">本段翻译未完成：{documentTranslation.error ?? '请重试本段'}。其他段落继续处理，可在翻译任务中重试。</p>}
       <ReflowContentLayers
         entryId={entryId}
         content={content}

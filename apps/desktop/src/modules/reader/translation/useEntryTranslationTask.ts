@@ -203,6 +203,17 @@ export function useEntryTranslationTask({
         return;
       }
       const nextEvent = event.payload;
+      // Paragraph actions now write the same canonical segment result as full translation.
+      if (nextEvent.job.kind === 'paragraph_translation' && nextEvent.job.status === 'succeeded' &&
+        nextEvent.job.scope?.kind === 'entry' && nextEvent.job.scope.root === workspaceRoot && nextEvent.job.scope.entry_id === entryId) {
+        const version = ++revisionRef.current;
+        void readEntryTranslation(workspaceRoot, entryId).then(response => {
+          if (!disposed && version === revisionRef.current && response.translation) setTranslation(response.translation);
+        }).catch(() => {
+          if (!disposed) setTranslationDetail('片段译文已保存，但刷新失败；请重新打开条目。');
+        });
+        return;
+      }
       if (!isTranslationJobForEntry(nextEvent.job, workspaceRoot, entryId)) {
         return;
       }

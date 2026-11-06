@@ -30,8 +30,8 @@ export const REFLOW_FONT_SIZE_MAX = 24;
 export const REFLOW_FONT_SIZE_DEFAULT = 16;
 export const REFLOW_BACKGROUND_COLOR_DEFAULT = '#ffffff';
 
-export type ReflowComponentTextSize = 'small' | 'standard' | 'large';
-export type ReflowVisualSize = 'compact' | 'standard' | 'large' | 'full';
+export type ReflowComponentTextSize = 'small' | 'standard' | 'large' | number;
+export type ReflowVisualSize = 'compact' | 'standard' | 'large' | 'full' | number;
 export type ReflowTextComponentPreference = {
   visible: boolean;
   size: ReflowComponentTextSize;
@@ -356,6 +356,7 @@ export function normalizeReflowBackgroundColor(value: unknown) {
 }
 
 export function reflowTextSizeScale(size: ReflowComponentTextSize) {
+  if (typeof size === 'number') return Number.isFinite(size) ? Math.min(2, Math.max(0.5, size)) : 1;
   return size === 'small' ? 0.86 : size === 'large' ? 1.18 : 1;
 }
 
@@ -399,6 +400,7 @@ function normalizeTextComponent(
   return {
     visible: typeof candidate.visible === 'boolean' ? candidate.visible : fallback.visible,
     size:
+      typeof candidate.size === 'number' && Number.isFinite(candidate.size) ? Math.min(2, Math.max(0.5, candidate.size)) :
       candidate.size === 'small' || candidate.size === 'large'
         ? candidate.size
         : fallback.size
@@ -415,6 +417,7 @@ function normalizeVisualComponent(
   return {
     visible: typeof candidate.visible === 'boolean' ? candidate.visible : fallback.visible,
     size:
+      typeof candidate.size === 'number' && Number.isFinite(candidate.size) ? Math.min(2, Math.max(0.5, candidate.size)) :
       candidate.size === 'compact' ||
       candidate.size === 'large' ||
       candidate.size === 'full'
@@ -428,4 +431,9 @@ function equalReflowComponentPreferences(
   right: ReflowComponentPreferences
 ) {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+export function reflowVisualSizeScale(size: ReflowVisualSize) {
+  if (typeof size === 'number') return Number.isFinite(size) ? Math.min(2, Math.max(0.5, size)) : 1;
+  return size === 'compact' ? 0.6 : size === 'large' ? 1.6 : size === 'full' ? 1.2 : 1;
 }

@@ -16,6 +16,7 @@ import { TagQuickPicker } from './TagQuickPicker';
 import { parseTagInput } from '../utils/tagSelection';
 import type { LibraryEntry } from './LibrarySidebar';
 import { ZoteroOrganizationInfo } from './ZoteroOrganizationInfo';
+import { useFormRecovery } from '@/shared/hooks/useFormRecovery';
 
 export type EntryUpdate = { fields: Record<string, string>; tagPaths: string[]; title: string };
 function draftFrom(entry: LibraryEntry) {
@@ -44,6 +45,12 @@ export function EntryEditPage({ entry, tags, workspaceRoot, scopeKey, onUpdateEn
   const live = useRef(true), pending = useRef<Promise<boolean> | null>(null);
   const latest = useRef({ entry, draft, baseline }); latest.current = { entry, draft, baseline };
   const dirty = JSON.stringify(draft) !== JSON.stringify(baseline);
+  const recovery = useFormRecovery({ kind: 'entry', id: scopeKey, ownerId: entry.id, targetId: 'metadata', scope: scopeKey,
+    root: workspaceRoot, label: `条目信息 · ${entry.title}`, dirty, value: { draft, baseline, version: baseVersion.current },
+    restore: value => { if (!value.draft || typeof value.draft.title !== 'string') throw new Error('无效草稿');
+      baseVersion.current = value.version; latest.current.draft = value.draft; latest.current.baseline = value.baseline; setDraft(value.draft); setBaseline(value.baseline); },
+    reveal: () => document.getElementById(`${id}-title`)?.focus() });
+  const recoveryRef = useRef(recovery); recoveryRef.current = recovery;
   const selectedPaths = parseTagInput(draft.tagInput);
   const update = (patch: Partial<Draft>) => {
     const next = { ...latest.current.draft, ...patch }; latest.current.draft = next; setDraft(next);
@@ -56,6 +63,7 @@ export function EntryEditPage({ entry, tags, workspaceRoot, scopeKey, onUpdateEn
     latest.current.draft = next; latest.current.baseline = next; setDraft(next); setBaseline(next);
   }, [entry]);
   const discard = () => {
+    recoveryRef.current.discard();
     const next = draftFrom(latest.current.entry); latest.current.draft = next; latest.current.baseline = next;
     baseVersion.current = fingerprint(latest.current.entry); setDraft(next); setBaseline(next); setError(null);
   };
@@ -82,6 +90,7 @@ export function EntryEditPage({ entry, tags, workspaceRoot, scopeKey, onUpdateEn
   const handlers = useRef({ save, discard }); handlers.current = { save, discard };
   useEffect(() => {
     const unregister = registerSegmentEditorCloseHandler(scopeKey, owner, {
+      ...recovery.handlers, isBusy: () => Boolean(pending.current),
       save: () => handlers.current.save(), discard: () => handlers.current.discard(),
       isDirty: () => JSON.stringify(latest.current.draft) !== JSON.stringify(latest.current.baseline),
     });
@@ -104,8 +113,9 @@ export function EntryEditPage({ entry, tags, workspaceRoot, scopeKey, onUpdateEn
       <Button size="sm" disabled={saving || !dirty || !draft.title.trim()} onClick={saveAndBack}>{saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}保存修改</Button>
     </EntryContentHeader>}>
       <ReaderSurfaceBody width="reading">
+        {recovery.notice}
         {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
-        <fieldset disabled={saving} className="grid min-w-0 gap-5">
+        <fieldset disabled={saving || recovery.blocked} className="grid min-w-0 gap-5">
           <div className="grid gap-2"><Label htmlFor={`${id}-title`}>标题</Label><Input autoFocus id={`${id}-title`} value={draft.title} onChange={event => update({ title: event.target.value })} /></div>
           <div className="grid gap-2"><Label htmlFor={`${id}-description`}>描述</Label><Textarea id={`${id}-description`} className="min-h-28 resize-y leading-6" value={draft.description} onChange={event => update({ description: event.target.value })} /></div>
           {entry.sourceInfo?.zotero_organization?.length ? <ZoteroOrganizationInfo draft organization={entry.sourceInfo.zotero_organization} tags={tags} tagPaths={selectedPaths}

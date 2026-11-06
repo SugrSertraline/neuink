@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { StrictMode } from 'react';
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -15,6 +16,17 @@ import {
 afterEach(cleanup);
 
 describe('PdfTextSelectionToolbar', () => {
+  it('shows the first automatic translation under StrictMode without duplicate requests', async () => {
+    const onTranslate = vi.fn().mockResolvedValue('首次选句译文');
+    const ui = render(<StrictMode>
+      <ToastContext.Provider value={{ dismiss: vi.fn(), notify: vi.fn(() => 'toast-id') }}>
+        <PdfTextSelectionToolbar pending={pending} autoTranslate onTranslate={onTranslate} onClose={vi.fn()} />
+      </ToastContext.Provider>
+    </StrictMode>);
+    expect(await ui.findByText('首次选句译文')).toBeTruthy();
+    expect(onTranslate).toHaveBeenCalledTimes(1);
+  });
+
   it('hands the exact selection to the assistant without writing an annotation or starting translation', () => {
     const onAsk = vi.fn(), onApply = vi.fn(), onTranslate = vi.fn();
     const ui = renderToolbar({ onAsk, onApply, onTranslate });

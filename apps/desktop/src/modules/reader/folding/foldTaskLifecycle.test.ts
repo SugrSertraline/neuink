@@ -4,7 +4,9 @@ import type { SourceSegment } from '@/shared/types/domain';
 const mocks = vi.hoisted(() => ({ read: vi.fn(), save: vi.fn(), settings: vi.fn(), generate: vi.fn() }));
 vi.mock('@/shared/ipc/foldingApi', () => ({ readEntryFolds: mocks.read, upsertEntryFolds: mocks.save }));
 vi.mock('@/shared/ipc/assistantApi', () => ({ getLlmSettings: mocks.settings }));
+vi.mock('./translateFoldLevel', () => ({ translateFoldLevel: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('./foldGeneration', () => ({ generateFoldBatch: mocks.generate }));
+import { translateFoldLevel } from './translateFoldLevel';
 import { cancelFoldSegments, cancelFoldTask, foldTaskRunning, getFoldTaskSnapshot, pauseFoldTask, resumeFoldTask, startFoldTask } from './foldTasks';
 import { getLocalBackgroundJobs } from '@/shared/lib/localBackgroundJobs';
 
@@ -17,7 +19,7 @@ function deferred() {
   return { promise, resolve };
 }
 beforeEach(() => {
-  vi.resetAllMocks(); gates.clear();
+  vi.resetAllMocks(); vi.mocked(translateFoldLevel).mockResolvedValue(undefined); gates.clear();
   mocks.read.mockResolvedValue({}); mocks.save.mockResolvedValue(undefined);
   mocks.settings.mockResolvedValue({ assistant_profile: { model: 'test' } });
   mocks.generate.mockImplementation(({ batch, signal }: { batch: Array<{ segmentUid: string; source: string }>; signal: AbortSignal }) => {

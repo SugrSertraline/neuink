@@ -1,4 +1,5 @@
 import katex from 'katex';
+import { repairSplitEquationDelimiters } from './sourceSnapshotMathDelimiters';
 
 import type { SegmentType } from '@/shared/types/domain';
 import { repairOcrArrayMath } from './sourceSnapshotArrayMath';
@@ -9,7 +10,7 @@ export function normalizeMathMarkdown(value: string, segmentType?: SegmentType) 
   }
 
   if (segmentType === 'math') {
-    return normalizeDisplayMathMarkdown(value);
+    return normalizeDisplayMathMarkdown(repairSplitEquationDelimiters(value));
   }
 
   // Code is literal even when it contains math delimiters or LaTeX examples.
@@ -19,7 +20,7 @@ export function normalizeMathMarkdown(value: string, segmentType?: SegmentType) 
 }
 
 function normalizeParagraphMath(value: string) {
-  const input = stripBrokenParagraphMath(repairOcrArrayMath(value));
+  const input = stripBrokenParagraphMath(repairOcrArrayMath(repairSplitEquationDelimiters(value)));
   const normalized = input
     .replace(/\\\[([\s\S]+?)\\\]/g, (_match, body: string) => `\n$$\n${body.trim()}\n$$\n`)
     .replace(/\\\(([\s\S]+?)\\\)/g, (_match, body: string) => `$${body.trim()}$`);

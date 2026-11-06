@@ -24,6 +24,25 @@ const chooseAll = () => fireEvent.click(screen.getByRole('button', { name: '全�
 const row = (title: string) => screen.getByRole('row', { name: new RegExp(title) });
 const sources = () => ({ sources: { 'paper-1': { kinds: ['zotero'] as ('zotero' | 'mineru')[], hidden: false, zotero_hidden: false } }, loading: false, error: false, setHidden: vi.fn(async () => undefined) });
 
+it('keeps selection actions in the existing toolbar and adds only the checkbox column', () => {
+  setup();
+  const toolbar = screen.getByLabelText('条目库筛选与操作');
+  const headerCount = screen.getAllByRole('columnheader').length;
+  chooseMode();
+  expect(toolbar.contains(screen.getByRole('region', { name: '批量操作' }))).toBe(true);
+  expect(toolbar.contains(screen.getByRole('button', { name: '退出选择' }))).toBe(true);
+  expect(screen.queryByRole('button', { name: '选择模式' })).toBeNull();
+  expect(screen.getAllByRole('columnheader')).toHaveLength(headerCount + 1);
+  fireEvent.click(within(toolbar).getByRole('button', { name: '全选当前结果' }));
+  expect(screen.getByRole('region', { name: '批量操作' }).textContent).toContain('已选 3 / 3 篇');
+  fireEvent.click(within(toolbar).getByRole('button', { name: '取消全选' }));
+  expect(screen.getByRole('region', { name: '批量操作' }).textContent).toContain('已选 0 / 3 篇');
+  fireEvent.click(within(toolbar).getByRole('button', { name: '退出选择' }));
+  expect(screen.getAllByRole('columnheader')).toHaveLength(headerCount);
+  expect(screen.queryByRole('region', { name: '批量操作' })).toBeNull();
+  expect(within(toolbar).getByRole('button', { name: '选择模式' })).toBeTruthy();
+});
+
 it('adds checkboxes, supports Shift ranges and Escape, and prevents selection clicks from opening or dragging papers', () => {
   const { props } = setup();
   expect(screen.queryByRole('checkbox', { name: '选择 论文甲' })).toBeNull();

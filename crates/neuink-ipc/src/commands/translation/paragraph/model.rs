@@ -1,9 +1,11 @@
 use super::*;
 
+#[cfg(test)]
 #[derive(Deserialize)]
 struct ParagraphJson {
     translation: String,
 }
+#[cfg(test)]
 #[derive(Deserialize)]
 struct SentencesJson {
     sentences: Vec<sentences::AlignedSentence>,
@@ -13,6 +15,19 @@ pub(super) enum TranslationResult {
     Sentences(Vec<SentenceTranslation>),
 }
 
+#[cfg(test)]
+pub(super) async fn translate_service(client: &crate::commands::selection_translation::registry::ServiceClient, source: &str, sentence_mode: bool) -> Result<TranslationResult, String> {
+    if !sentence_mode { return client.translate(source).await.map(TranslationResult::Paragraph); }
+    let sources = sentences::split_sentences(source);
+    let mut aligned = Vec::new();
+    for (index, text) in sources.iter().enumerate() {
+        aligned.push(SentenceTranslation { id: index + 1, source: text.clone(), translation: client.translate(text).await? });
+    }
+    validate_sentences(source, &aligned)?;
+    Ok(TranslationResult::Sentences(aligned))
+}
+
+#[cfg(test)]
 pub(super) async fn translate(
     client: &LlmClient,
     source: &str,
@@ -56,6 +71,7 @@ pub(super) async fn translate(
     result
 }
 
+#[cfg(test)]
 pub(super) fn validate_sentences(
     source: &str,
     sentences: &[SentenceTranslation],
@@ -80,4 +96,23 @@ pub(super) fn validate_sentences(
         return Err("逐句结果遗漏了原文，请重试。".into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod service_tests {
+    use super::*;
+    #[tokio::test]
+    async fn service_sentence_translation_preserves_exact_source_and_ids() {
+        use crate::commands::selection_translation::{registry::{preset, ServiceClient}, tests::server};
+        let (endpoint, request) = server("200 OK", r#"{"translations":[{"text":"实验成功。"}]}"#);
+        let mut settings = preset(neuink_config::SelectionTranslationProvider::Deepl);
+        settings.endpoint = endpoint;
+        let result = translate_service(&ServiceClient::for_test(settings), "The experiment worked.", true).await.unwrap();
+        let TranslationResult::Sentences(sentences) = result else { panic!("expected aligned sentences") };
+        assert_eq!(sentences.len(), 1);
+        assert_eq!(sentences[0].source, "The experiment worked.");
+        assert_eq!(sentences[0].id, 1);
+        assert_eq!(sentences[0].translation, "实验成功。");
+        request.join().unwrap();
+    }
 }
