@@ -70,7 +70,7 @@ export function IdeationCanvas({ nodes, links, slots = [], activeSlot, viewport,
     }
     for (const slot of slots) {
       const from = byId.get(slot.sourceId);
-      if (from) result.set(slotKey(slot), routeBetween(from, { ...slot, height: slotHeight }, rectangles));
+      if (from) result.set(slotKey(slot), routeBetween(from, { ...slot, height: slotHeight }, rectangles, undefined, -32));
     }
     return result;
   }, [nodes, links, slots, moving, routes]);

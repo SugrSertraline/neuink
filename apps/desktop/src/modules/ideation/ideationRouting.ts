@@ -22,11 +22,15 @@ function pathResult(points: Point[], label?: Point) {
 }
 
 /** Keep Dagre's routes; after a manual move, route through free rectangular gutters. */
-export function routeBetween(from: NodeRect, to: NodeRect, nodes: NodeRect[], cached?: LayoutRoute) {
+export function routeBetween(from: NodeRect, to: NodeRect, nodes: NodeRect[], cached?: LayoutRoute, sourcePortOffset = 0) {
   const clear = (points: Point[], padding = 0) => points.slice(1).every((p, i) => !nodes.some(node => crossesNode(points[i], p, node, padding)));
-  if (cached && same(from, cached.from) && same(to, cached.to) && clear(cached.points)) return pathResult(cached.points, cached);
+  if (!sourcePortOffset && cached && same(from, cached.from) && same(to, cached.to) && clear(cached.points)) return pathResult(cached.points, cached);
   const forward = to.x >= from.x + nodeWidth, backward = from.x >= to.x + nodeWidth;
   const source: Point = { x: from.x + (forward ? nodeWidth : backward ? 0 : nodeWidth / 2), y: from.y + (forward || backward ? (from.height ?? nodeHeight) / 2 : to.y > from.y ? (from.height ?? nodeHeight) : 0) };
+  // A temporary suggestion uses a separate port so its dashed edge is not hidden
+  // by an existing semantic arrow. Offset along the face, never into a card.
+  if (forward || backward) source.y = Math.max(from.y + 16, Math.min(from.y + (from.height ?? nodeHeight) - 16, source.y + sourcePortOffset));
+  else source.x = Math.max(from.x + 16, Math.min(from.x + nodeWidth - 16, source.x + sourcePortOffset));
   const target: Point = { x: to.x + (forward ? 0 : backward ? nodeWidth : nodeWidth / 2), y: to.y + (forward || backward ? (to.height ?? nodeHeight) / 2 : to.y > from.y ? 0 : (to.height ?? nodeHeight)) };
   const middleX = (source.x + target.x) / 2, middleY = (source.y + target.y) / 2;
   const direct = forward || backward

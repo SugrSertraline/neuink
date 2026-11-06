@@ -37,7 +37,7 @@ export function useIdeationLayout(state: IdeationState | null, boardId: string |
     const slots = positionBranchSlots(state, sourceId, retained, consumed.sourceId === sourceId ? consumed.ids : [], stacked);
     cached.current = { boardId, sourceId, slots, stacked };
     return slots;
-  }, [state?.placements, state?.cards, boardId, sourceId, consumed, result, stacked]);
+  }, [state?.placements, state?.cards, state?.links, boardId, sourceId, consumed, result, stacked]);
   const current = result?.boardId === boardId ? result : null;
   return { branchSlots, setCanvasWidth, layoutRoutes: current?.routes ?? {}, layoutVersion: current?.version ?? 0,
     consumeSlot: (slot: BranchSlot) => { if (slot.sourceId === sourceId) setConsumed(current => ({ sourceId, ids: [...(current.sourceId === sourceId ? current.ids : []), slot.id] })); },

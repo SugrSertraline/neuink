@@ -13,8 +13,12 @@ export function positionBranchSlots(state: IdeationState, sourceId: string | nul
   const rules = branchRules[kind].filter(rule => !hidden.includes(rule.id));
   const free = ({ x, y }: { x: number; y: number }) => x >= 0 && y >= 0 && x <= 10000 && y <= 10000 &&
     !state.placements.some(p => x < p.x + nodeWidth + 24 && x + nodeWidth + 24 > p.x && y < p.y + nodeHeight + 24 && y + nodeHeight + 24 > p.y);
+  // Related siblings define the existing branch column, regardless of semantic arrow direction.
+  const relatedIds = new Set((state.links ?? []).flatMap(link => link.from === source.id ? [link.to] : link.to === source.id ? [link.from] : []));
+  const related = state.placements.filter(p => relatedIds.has(p.id) && p.x >= source.x + nodeWidth + 48 && p.x <= source.x + 2 * (nodeWidth + 96));
+  const alignedXs = stacked ? [] : [...new Set(related.map(p => p.x))];
   const preferredX = source.x + nodeWidth + 96;
-  const xs = [...new Set([preferredX, source.x, preferredX + nodeWidth + 96, source.x - nodeWidth - 96])].filter(x => x >= 0 && x <= 10000);
+  const xs = [...new Set([...alignedXs, preferredX, source.x, preferredX + nodeWidth + 96, source.x - nodeWidth - 96])].filter(x => x >= 0 && x <= 10000);
   const ys = [...new Set([source.y, 0, ...state.placements.flatMap(p => [p.y + nodeHeight + 32, p.y - nodeHeight - 32])])].filter(y => y >= 0 && y <= 10000);
   const distance = ({ x, y }: { x: number; y: number }) => {
     const dx = Math.abs(x - source.x), dy = Math.abs(y - source.y);
@@ -23,10 +27,12 @@ export function positionBranchSlots(state: IdeationState, sourceId: string | nul
   };
   // Prefer a short right-hand branch, or a nearby row when that column is occupied.
   const candidates = xs.flatMap(x => ys.map(y => ({ x, y }))).sort((a, b) => distance(a) - distance(b));
-  const nearest = candidates.find(free);
+  // Favor alignment only in a nearby free row; never send an empty slot far away.
+  const aligned = candidates.find(p => alignedXs.includes(p.x) && Math.abs(p.y - source.y) <= nodeHeight + 32 && free(p));
+  const nearest = aligned ?? candidates.find(free);
   return rules.flatMap(rule => {
     const old = previous.find(slot => slot.id === rule.id && slot.sourceId === sourceId);
-    const position = old && free(old) ? old : nearest;
+    const position = old && free(old) && (!aligned || old.x === aligned.x) ? old : nearest;
     return position ? [{ ...rule, sourceId: source.id, x: position.x, y: position.y }] : [];
   });
 }

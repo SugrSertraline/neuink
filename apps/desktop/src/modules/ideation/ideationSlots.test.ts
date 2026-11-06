@@ -50,3 +50,23 @@ it('handles missing selection, board boundaries, and true overlaps separately fr
   expect(hasNodeOverlap([{ ...state.placements[0], x: 0, y: 0 }, { ...state.placements[1], x: nodeWidth, y: 0 }])).toBe(false);
   expect(hasNodeOverlap([{ ...state.placements[0], x: 0, y: 0 }, { ...state.placements[1], x: 1, y: nodeHeight - 1 }])).toBe(true);
 });
+
+it('aligns a new next-step slot with an existing related card instead of a separate staggered column', () => {
+  const graph: IdeationState = { ...state, placements: [state.placements[0], { id: 'method', card_id: 'c', x: 528, y: 438 }],
+    links: [{ id: 'addresses', from: 'method', to: 'p', kind: 'addresses' }] };
+  const slot = positionBranchSlots(graph, 'p')[0];
+  expect(slot.x).toBe(528);
+  expect(slot.y).toBe(80);
+  expect(hasNodeOverlap([...graph.placements, { ...slot, card_id: 'c' }])).toBe(false);
+});
+
+it('repairs stale slot alignment but preserves existing node coordinates', () => {
+  const graph: IdeationState = { ...state, placements: [state.placements[0], { id: 'method', card_id: 'c', x: 528, y: 438 }], links: [] };
+  const old = positionBranchSlots(graph, 'p');
+  const linked = { ...graph, links: [{ id: 'edge', from: 'method', to: 'p', kind: 'addresses' as const }] };
+  const before = structuredClone(linked);
+  expect(positionBranchSlots(linked, 'p', old)[0].x).toBe(528);
+  expect(linked).toEqual(before);
+  const narrow = positionBranchSlots(linked, 'p', [], [], true)[0];
+  expect(narrow.x).toBe(80);
+});
