@@ -1,3 +1,4 @@
+import { EntryPaperCards } from '@/modules/ideation/EntryPaperCards';
 import { withListItemSegments } from '@/shared/lib/listItemSegments';
 import { SegmentBookmarksProvider, usePublishSegmentNotes, type SetSegmentBookmark } from './SegmentBookmarks';
 import {
@@ -430,6 +431,10 @@ export function EntryWorkspaceView({
                 />
               </div>
             ) : null}
+            {activeContentId === 'paper-cards' ? <div className="flex h-full min-h-0 flex-col overflow-hidden">
+              <EntryContentHeader contentTitle="论文卡片" entryTitle={entry.title} />
+              <div className="min-h-0 flex-1 overflow-y-auto p-4"><div className="mx-auto max-w-4xl"><EntryPaperCards entryId={entry.id} parsed={entry.status === 'Parsed'} /></div></div>
+            </div> : null}
             {activeContentId === 'overview' ? (
               <EntryOverview
                 editRequestId={editRequestId}
@@ -491,7 +496,7 @@ export function EntryWorkspaceView({
                 </div>
               </div>
             ) : null}
-            {!activeContentId || (!note && !['pdf', 'reflow', 'overview', 'segment-notes', 'entry-trash'].includes(activeContentId)) ? (
+            {!activeContentId || (!note && !['pdf', 'reflow', 'overview', 'paper-cards', 'segment-notes', 'entry-trash'].includes(activeContentId)) ? (
               <div className="p-4">
                 <EmptyWorkspace entry={entry} />
               </div>

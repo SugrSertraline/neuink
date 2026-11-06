@@ -1,6 +1,5 @@
-import { EntryPaperCards } from '@/modules/ideation/EntryPaperCards';
 import { open } from '@tauri-apps/plugin-dialog';
-import { FilePlus2, FileText, FileType, LayoutDashboard, Link2, Loader2, PanelRightOpen, Plus, ScrollText, StickyNote, Trash2 } from 'lucide-react';
+import { Layers, FilePlus2, FileText, FileType, LayoutDashboard, Link2, Loader2, PanelRightOpen, Plus, ScrollText, StickyNote, Trash2 } from 'lucide-react';
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -266,8 +265,6 @@ export function EntryContentSidebar({
               tags={tags} tagPaths={entry.tags} onAddTagPath={path => onApplyEntryTagPaths(entry.id, [path])} /> : null}
           </section>
 
-          <EntryPaperCards entryId={entry.id} parsed={entry.status === 'Parsed'} />
-
           <section className="min-w-0 space-y-1">
             <SidebarSectionHeader label="阅读内容" />
 
@@ -340,6 +337,8 @@ export function EntryContentSidebar({
               </div>
             )}
 
+            <ContentRow active={activeContentId === 'paper-cards'} icon={<Layers size={14} />} label="论文卡片" meta="方法与实例"
+              action={<OpenInRightButton onClick={() => onOpenContentInRight('paper-cards')} />} onClick={() => onSelectContent('paper-cards')} />
           </section>
 
           <section data-guide="entry-document-notes" className="min-w-0 space-y-1">

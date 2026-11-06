@@ -31,6 +31,7 @@ export type WorkspaceSurface = { viewId?: string } & (
   | { kind: 'note'; entryId: string; noteId: string }
   | { kind: 'segment-notes'; entryId: string; segmentUid?: string; mode?: 'note' | 'annotation' }
   | { kind: 'source-links'; entryId: string }
+  | { kind: 'paper-cards'; entryId: string }
   | { kind: 'entry-trash'; entryId: string });
 
 export type WorkspaceSurfaceLayout = {
@@ -377,6 +378,7 @@ export function entryContentSurface(entryId: string, contentId: string, contextT
   if (contentId === 'reflow') return { kind: 'reflow', entryId, ...context };
   if (contentId === 'overview') return { kind: 'entry-overview', entryId, ...context };
   if (contentId === 'segment-notes') return { kind: 'segment-notes', entryId };
+  if (contentId === 'paper-cards') return { kind: 'paper-cards', entryId };
   if (contentId === 'source-links') return { kind: 'source-links', entryId };
   if (contentId === 'entry-trash') return { kind: 'entry-trash', entryId };
   if (contentId.startsWith('note:')) return { kind: 'note', entryId, noteId: contentId.slice(5) };
@@ -390,6 +392,7 @@ export function entryContentId(surface: WorkspaceSurface) {
     case 'reflow': return 'reflow';
     case 'entry-overview': return 'overview';
     case 'segment-notes': return 'segment-notes';
+    case 'paper-cards': return 'paper-cards';
     case 'source-links': return 'source-links';
     case 'entry-trash': return 'entry-trash';
     case 'note': return `note:${surface.noteId}`;
@@ -427,6 +430,7 @@ export function workspaceSurfaceLabel(
     case 'reflow': return `${title} · 重排视图`;
     case 'note': return `${title} · 笔记`;
     case 'segment-notes': return `${title} · 片段记录`;
+    case 'paper-cards': return `${title} · 论文卡片`;
     case 'source-links': return `${title} · 引用此文`;
     case 'entry-trash': return `${title} · 回收站`;
   }

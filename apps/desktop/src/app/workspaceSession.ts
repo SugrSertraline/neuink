@@ -30,7 +30,7 @@ function savedSurface(value: unknown): WorkspaceSurface | null {
       return id(value.entryId) ? { kind: 'segment-notes', entryId: value.entryId, ...view,
         ...(id(value.segmentUid) ? { segmentUid: value.segmentUid } : {}),
         ...(value.mode === 'note' || value.mode === 'annotation' ? { mode: value.mode } : {}) } : null;
-    case 'source-links': case 'entry-trash':
+    case 'paper-cards': case 'source-links': case 'entry-trash':
       return id(value.entryId) ? { kind: value.kind, entryId: value.entryId } : null;
     case 'owned-note': {
       const target = value.target;

@@ -421,6 +421,7 @@ export type AssistantActiveSurfaceSnapshot = {
     | 'segment-notes'
     | 'settings'
     | 'source-links'
+    | 'paper-cards'
     | 'tag-editor'
     | 'tag-details'
     | 'owned-note'

@@ -1,4 +1,3 @@
-import { EntryPaperCards } from '@/modules/ideation/EntryPaperCards';
 import {
   FileText,
   FileType,
@@ -179,8 +178,6 @@ export function EntryOverview({
           />
           <OverviewStat icon={Link2} label="引用笔记" value={`${sourceLinkCount} 条`} />
         </div>
-
-        <EntryPaperCards entryId={entry.id} parsed={entry.status === 'Parsed'} />
 
         <ReaderSection className="entry-overview-section" title="标签" actions={<TagDisplaySettingsMenu />} description={hiddenAncestorCount > 0 ? `显示 ${visibleTagPaths.length} 个最具体标签，隐藏 ${hiddenAncestorCount} 个重复上级标签；实际归属不变。` : '显示条目当前关联的完整标签路径'}>
           {tagPaths.length > 0 ? (

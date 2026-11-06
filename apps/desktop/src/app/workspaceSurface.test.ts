@@ -509,3 +509,11 @@ describe('workspaceSurfaceReducer', () => {
     expect(next.right).toEqual(pdfB);
   });
 });
+
+it('routes paper cards as independent per-paper reading content', () => {
+  const surface = entryContentSurface('a', 'paper-cards');
+  expect(surface).toEqual({ kind: 'paper-cards', entryId: 'a' });
+  expect(entryContentId(surface)).toBe('paper-cards');
+  expect(surfaceKey(surface)).toBe('paper-cards:a');
+  expect(workspaceSurfaceLabel(surface, [{ id: 'a', title: '论文 A' }])).toBe('论文 A · 论文卡片');
+});

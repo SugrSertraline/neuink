@@ -100,3 +100,9 @@ it('restores tag reading and tag detail tabs only while their tags still exist',
   expect(readWorkspaceSession('a', catalog)).toEqual(value);
   expect(readWorkspaceSession('a', { ...catalog, tags: [] })).toEqual(layout());
 });
+
+it('restores a paper card tab in the correct pane', () => {
+  const value = workspaceSurfaceReducer(layout(), { type: 'open', pane: 'right', surface: { kind: 'paper-cards', entryId: 'paper' } });
+  saveWorkspaceSession('cards', value);
+  expect(readWorkspaceSession('cards', catalog)).toEqual(value);
+});

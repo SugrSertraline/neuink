@@ -75,3 +75,16 @@ it('keeps PDF rename validation inline and cancels with Escape', () => {
   expect(view.queryByRole('group', { name: '修改 PDF 文件名' })).toBeNull();
   expect(view.getByRole('button', { name: 'paper.pdf PDF' })).toBeTruthy();
 });
+
+it('opens paper cards from Reading Content without expanding a card list in the sidebar', () => {
+  const onSelectContent = vi.fn();
+  const view = render(<ToastContext.Provider value={{ dismiss: noop, notify: () => 'toast' }}><TagPreferencesProvider><EntryContentSidebar entry={entry} tags={[]} activeContentId="paper-cards"
+    onOpenTrash={noop} onCreateMarkdownNote={noop} onDeleteMarkdownNote={noop} onAttachPdf={noop}
+    onOpenMarkdownInPdfPane={noop} onOpenContentInRight={noop} onRenameMarkdownNote={noop}
+    onRenamePdfDisplayName={noop} onSelectContent={onSelectContent} /></TagPreferencesProvider></ToastContext.Provider>);
+  const button = view.getByRole('button', { name: '论文卡片 方法与实例' });
+  expect(button.closest('section')?.textContent).toContain('阅读内容');
+  fireEvent.click(button); expect(onSelectContent).toHaveBeenCalledWith('paper-cards');
+  expect(view.queryByRole('region', { name: '论文卡片' })).toBeNull();
+  expect(view.queryByText('整理卡片')).toBeNull();
+});
