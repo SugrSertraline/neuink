@@ -13,6 +13,8 @@ import { availableTurnTools, toolCallError } from './toolAvailability';
 import { researchFailureMessage } from './researchRecovery';
 import { TOOL_FAILURE_INSTRUCTIONS } from './toolFailurePolicy';
 import { canReplayAssistantTool } from '../runtime/durableExecution';
+import { arxivGateStatus, arxivGateMessage } from '@/shared/lib/arxivGateStatus';
+import { toolPaperSelections } from '../research/researchPaperSelection';
 import { isPotentialRawModelToolCall, isRawModelToolCall } from './modelToolCallMarkup';
 
 /** AI SDK is a single-turn provider adapter, never the owner of our agent loop. */
@@ -117,6 +119,9 @@ export function createAgentDriver(options: {
 function modelToolFailure(name: string, output: unknown): string {
   const failure = isAgentToolFailure(output) ? output : createAgentToolFailure('TOOL_EXECUTION_FAILED');
   // The core's fixed envelope also carries host-bounded partial imports or child evidence.
+  const gate=arxivGateStatus(failure.arxivGate);
+  if(gate) return JSON.stringify(failure)+'\n'+arxivGateMessage(gate)+'\n'+
+    'Explain this arXiv failure and the approximate retry delay in your final answer. Do not retry arXiv with another query or tool during cooldown. Use already retrieved results and disclose partial coverage.';
   const detail = failure.diagnostic ? `${failure.message}\n诊断分类：${failure.diagnostic}` : failure.message;
   return `${JSON.stringify(failure)}\n${researchFailureMessage(name, detail)}`;
 }
@@ -157,7 +162,8 @@ export function agentExecutors(tools: ToolSet, requestApproval?: RequestToolAppr
         if (!requestApproval) throw new AgentToolNotExecutedError('此操作需要用户确认，当前入口无法确认，未执行任何修改。', 'TOOL_APPROVAL_UNAVAILABLE');
         let approved: boolean;
         try {
-          approved = await requestApproval({ toolCallId: context.id, toolName: name, input: structuredClone(frozenInput) }, context.signal);
+          approved = await requestApproval({ toolCallId: context.id, toolName: name, input: structuredClone(frozenInput),
+            paperSelections: name === 'import_papers' ? toolPaperSelections(definition, frozenInput) : undefined }, context.signal);
         } catch (error) {
           context.signal?.throwIfAborted();
           if (error instanceof AgentStoppedError || error instanceof AgentToolNotExecutedError) throw error;

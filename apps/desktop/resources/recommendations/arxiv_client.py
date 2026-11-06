@@ -1,10 +1,9 @@
 """NeuInk adapter. Search, pagination and result parsing belong to upstream arxiv.py."""
+import base64
 import importlib.metadata
 import json
 import re
 import sys
-from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
 from urllib.parse import urlsplit
 from xml.etree import ElementTree
 
@@ -12,59 +11,72 @@ VERSION = "4.0.1"
 MAX_BYTES = 2 * 1024 * 1024
 
 
-class RateLimited(Exception):
-    def __init__(self, seconds):
-        self.seconds = seconds
+class GateFailure(Exception):
+    def __init__(self, detail):
+        self.detail = detail
 
 
-def retry_seconds(value):
-    try:
-        seconds = int(value)
-    except (ValueError, TypeError):
-        try:
-            seconds = int((parsedate_to_datetime(value) - datetime.now(timezone.utc)).total_seconds())
-        except (ValueError, TypeError, OverflowError):
-            seconds = 300
-    return max(60, min(seconds, 86400))
-
-
-def session():
+def session(endpoint, token):
     import requests
+    target = urlsplit(endpoint)
+    if (target.scheme != "http" or target.hostname != "127.0.0.1" or not target.port
+            or target.path != "/arxiv-request" or target.query or target.fragment
+            or target.username or not isinstance(token, str) or not 32 <= len(token) <= 256):
+        raise ValueError("invalid_gate")
 
-    class BoundedSession(requests.Session):
+    class GateSession(requests.Session):
         def __init__(self):
             super().__init__()
-            self.trust_env = False  # Do not inherit credentials, proxies or .netrc.
+            self.trust_env = False
+            self.host = requests.Session()
+            self.host.trust_env = False
 
         def request(self, method, url, **kwargs):
             target = urlsplit(url)
             if (method.upper() != "GET" or target.scheme != "https"
-                    or target.netloc != "export.arxiv.org" or target.path != "/api/query"):
+                    or target.netloc != "export.arxiv.org" or target.path != "/api/query"
+                    or target.fragment):
                 raise ValueError("unexpected_endpoint")
-            kwargs.update(timeout=(15, 45), allow_redirects=False, stream=True)
-            with super().request(method, url, **kwargs) as response:
-                # Stop immediately on 429; the host persists the retry deadline across restarts.
-                if response.status_code == 429:
-                    raise RateLimited(retry_seconds(response.headers.get("Retry-After")))
+            # No external HTTP escapes this adapter. The host owns pacing, retries and deadlines.
+            with self.host.post(endpoint, headers={"X-Proxy-Token": token},
+                                json={"url": url, "method": "GET"},
+                                timeout=(5, 120), allow_redirects=False, stream=True) as result:
+                result.raise_for_status()
                 data = bytearray()
-                for chunk in response.iter_content(16384):
+                for chunk in result.iter_content(16384):
                     data.extend(chunk)
-                    if len(data) > MAX_BYTES:
-                        raise ValueError("response_too_large")
-                if response.status_code == 200:
-                    # Upstream can tolerate malformed feeds; never cache an HTML error as an empty day.
-                    feed = ElementTree.fromstring(data)
-                    total = feed.find("{http://a9.com/-/spec/opensearch/1.1/}totalResults")
-                    if feed.tag != "{http://www.w3.org/2005/Atom}feed" or total is None:
-                        raise ValueError("invalid_feed")
-                    count = int(total.text or "")
-                    if count < 0 or (count > 0 and not feed.findall("{http://www.w3.org/2005/Atom}entry")):
-                        raise ValueError("invalid_feed")
-                response._content = bytes(data)
-                response._content_consumed = True
-                return response
+                    if len(data) > 3 * 1024 * 1024:
+                        raise ValueError("gate_response_too_large")
+                envelope = json.loads(data)
+            if envelope.get("ok") is not True:
+                detail = envelope.get("gate_error")
+                if not isinstance(detail, dict) or not isinstance(detail.get("code"), str):
+                    raise ValueError("invalid_gate_response")
+                raise GateFailure(detail)
+            content = base64.b64decode(envelope["body_base64"], validate=True)
+            if len(content) > MAX_BYTES:
+                raise ValueError("response_too_large")
+            response = requests.Response()
+            response.status_code = int(envelope["status"])
+            response.headers.update(envelope.get("headers", {}))
+            response.url = url
+            response._content = content
+            response._content_consumed = True
+            if response.status_code == 200:
+                feed = ElementTree.fromstring(content)
+                total = feed.find("{http://a9.com/-/spec/opensearch/1.1/}totalResults")
+                if feed.tag != "{http://www.w3.org/2005/Atom}feed" or total is None:
+                    raise ValueError("invalid_feed")
+                count = int(total.text or "")
+                if count < 0 or (count > 0 and not feed.findall("{http://www.w3.org/2005/Atom}entry")):
+                    raise ValueError("invalid_feed")
+            return response
 
-    return BoundedSession()
+        def close(self):
+            self.host.close()
+            super().close()
+
+    return GateSession()
 
 
 def paper(result):
@@ -97,17 +109,17 @@ def execute(payload):
     query = payload.get("query")
     if not isinstance(query, str) or not query.strip() or len(query) > 10000:
         return {"error": "invalid_query"}
-    client = arxiv.Client(page_size=40, delay_seconds=3, num_retries=1)
+    client = arxiv.Client(page_size=40, delay_seconds=0, num_retries=0)
     # Pinned upstream exposes its requests session here. No search/parser fork is maintained.
     client._session.close()
-    client._session = session()
+    client._session = session(payload.get("gate_url", ""), payload.get("gate_token", ""))
     try:
         search = arxiv.Search(query=query, max_results=40,
                               sort_by=arxiv.SortCriterion.SubmittedDate,
                               sort_order=arxiv.SortOrder.Descending)
         return {"papers": [paper(result) for result in client.results(search)]}
-    except RateLimited as error:
-        return {"error": "rate_limited", "retry_after_seconds": error.seconds}
+    except GateFailure as error:
+        return {"error": error.detail["code"], "gate_error": error.detail}
     except arxiv.HTTPError as error:
         return {"error": "http_error", "status": error.status}
     except requests.exceptions.Timeout:

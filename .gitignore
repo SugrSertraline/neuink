@@ -94,3 +94,5 @@ apps/desktop/src-tauri/resources/.browser-reader-backup-*/
 apps/desktop/src-tauri/resources/research-component/
 __pycache__/
 *.py[cod]
+# Local-only investigation reports and raw evidence.
+/.local-archive/

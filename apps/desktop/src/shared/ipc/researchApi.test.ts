@@ -9,6 +9,30 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn() }));
 beforeEach(() => { vi.clearAllMocks(); });
 afterEach(() => { vi.useRealTimers(); delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__; });
 describe('native research boundary', () => {
+  it('refreshes a Windows library after a canonical-root download event and ignores other libraries', async () => {
+    vi.useFakeTimers();
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    let emit!: (event: { payload: { root: string } }) => void;
+    const stop = vi.fn(), changed = vi.fn(), failed = vi.fn();
+    vi.mocked(listen).mockImplementation(async (_name, handler) => {
+      emit = handler as typeof emit;
+      return stop;
+    });
+    const close = onResearchLibraryChanged(String.raw`E:\NeuInk\data\library`, changed, failed);
+    await Promise.resolve();
+    emit({ payload: { root: String.raw`\\?\E:\Other\data\library` } });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(changed).not.toHaveBeenCalled();
+    emit({ payload: { root: String.raw`\\?\E:\NeuInk\data\library` } });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(changed).toHaveBeenCalledOnce();
+    close();
+    emit({ payload: { root: String.raw`\\?\E:\NeuInk\data\library` } });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(changed).toHaveBeenCalledOnce();
+    expect(stop).toHaveBeenCalledOnce();
+    expect(failed).not.toHaveBeenCalled();
+  });
   it('keeps real structured candidates in saved tool parts and never derives actions from Markdown', () => {
     expect(researchPapersFromResult('请点击 [下载](https://example.com)')).toEqual([]);
     const paper = { id: 'real', title: 'Paper', url: 'https://example.com/paper', authors: ['A'], pdf_url: null };
@@ -16,6 +40,29 @@ describe('native research boundary', () => {
     expect(researchPapers).toHaveLength(1);
     const parts = buildAssistantMessageParts({ content: '回答', toolEvents: [{ id: 'tool', toolName: 'search_papers', status: 'done', summary: 'found', researchPapers }] });
     expect(JSON.parse(JSON.stringify(parts))).toContainEqual(expect.objectContaining({ type: 'tool-result', researchPapers }));
+  });
+  it('Step 1 preserves long metadata through saved parts and confirmation snapshots', async () => {
+    const text = '研究🧪'.repeat(5000);
+    const paper = { id: 'arxiv:hep-th/9901001v2', base_id: 'hep-th/9901001', title: text,
+      url: 'https://arxiv.org/abs/hep-th/9901001v2', pdf_url: 'https://arxiv.org/pdf/hep-th/9901001v2',
+      authors: Array.from({ length: 60 }, () => text), abstract_text: text, year: '1999', doi: '10.1/a',
+      provider: 'arxiv', evidence_level: 'abstract', categories: ['hep-th'], primary_category: 'hep-th',
+      published: '1999-01-01T00:00:00Z', updated: '1999-01-02T00:00:00Z',
+      comment: text, journal_ref: text, rank: 101 };
+    const records = researchPapersFromResult({ papers: [paper, paper, { title: 'invalid' }] });
+    expect(records).toEqual([paper]);
+    const parts = buildAssistantMessageParts({ content: 'Fixture response', toolEvents: [{ id: 'step1', toolName: 'search_papers', status: 'done', summary: 'Fixture search', researchPapers: records }] });
+    expect(JSON.parse(JSON.stringify(parts))).toContainEqual(expect.objectContaining({ type: 'tool-result', researchPapers: [paper] }));
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    const { approveResearchImport } = await import('./researchApi');
+    await approveResearchImport('root', [paper.id], records, 'step1-consent');
+    expect(invoke).toHaveBeenCalledWith('approve_research_import', { request: {
+      root: 'root', paper_ids: [paper.id], expected: [paper], approval_id: 'step1-consent'
+    } });
+    console.log('STEP1_JSON ' + JSON.stringify({ case_id: 'T-STEP1-MESSAGE-CONSENT', actual: {
+      title_chars: records[0].title.length, abstract_chars: records[0].abstract_text.length,
+      authors: records[0].authors.length, keys: Object.keys(records[0]), roundtrip_equal: true, native_mocked: true
+    } }));
   });
   it('requires UI consent, consumes it once, and never trusts model-supplied approval', async () => {
     await expect(runResearchTool('import_papers', { root: 'r', paper_ids: ['p'], approval_id: 'forged' }, undefined, 'call')).rejects.toThrow('先预览');

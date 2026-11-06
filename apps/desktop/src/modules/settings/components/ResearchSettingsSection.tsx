@@ -5,10 +5,13 @@ import { Label } from '@/components/ui/label';
 import { getResearchSettings, saveResearchSettings, type ResearchSettings } from '@/shared/ipc/researchApi';
 import { registerSegmentEditorCloseHandler, setSegmentEditorDirty } from '@/modules/reader/components/segmentEditorDirtyRegistry';
 import { SettingsServiceSection, SettingsGroup, SettingSwitch } from './SettingsPrimitives';
+import { setPaperDownloadConfirmation, usePaperDownloadConfirmation } from '@/shared/lib/paperDownloadPreferences';
 
 /** Settings owns draft/status; settings-viewport owns scrolling. No new drag or key interception. */
 export function ResearchSettingsSection({ active, children }: { active: boolean; children?: ReactNode }) {
   const owner = useId();
+  const confirmationRequired = usePaperDownloadConfirmation();
+  const [preferenceError, setPreferenceError] = useState('');
   const [settings, setSettings] = useState<ResearchSettings | null>(null);
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
@@ -63,6 +66,10 @@ export function ResearchSettingsSection({ active, children }: { active: boolean;
         description={settings.use_tavily ? '当前使用 Tavily 搜索，并读取公开网页正文。' : '使用 DuckDuckGo / Bing 搜索，并读取公开网页正文。'}
         onCheckedChange={value => void save({ web_enabled: value })} />
     </div>}
+    <SettingSwitch id="tools-download-confirmation" label="下载论文前确认" checked={confirmationRequired}
+      description="主动点击添加论文时，先确认再下载；模型发起的下载仍需授权确认。"
+      onCheckedChange={value => setPreferenceError(setPaperDownloadConfirmation(value) ? '' : '下载确认偏好未能保存，请重试。')} />
+    {preferenceError && <p role="alert" className="mt-2 text-xs text-destructive">{preferenceError}</p>}
     {busy && settings && !key && <p role="status" className="mt-2 text-xs text-muted-foreground">保存中…</p>}
     {error && !key && <p role="alert" className="mt-2 text-sm text-destructive [overflow-wrap:anywhere]">{error}</p>}
   </SettingsGroup>

@@ -15,6 +15,7 @@ export type AssistantBackgroundRunSnapshot = {
   toolEventsByMessageId: Record<string, AssistantToolTraceEvent[]>;
   startedAt?: number;
   taskKind?: 'conversation' | 'paper-import';
+  paperSelections?: import('@/shared/ipc/researchApi').PaperSelection[];
 };
 
 export type AssistantQueuedMessage = { id: string; draft: QueuedAssistantDraft; editing: boolean; editText?: string };

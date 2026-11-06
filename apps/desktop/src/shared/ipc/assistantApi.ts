@@ -150,10 +150,13 @@ export function conversationSourceKey(source: ConversationSourceLink) {
 export type ConversationRole = 'user' | 'assistant';
 
 export type AssistantToolTraceEvent = {
+  arxivGate?: import('@/shared/lib/arxivGateStatus').ArxivGateStatus;
+  researchCacheSource?: import('./researchApi').PaperCacheSource;
   /** A rejected read was subsequently satisfied; the original failure remains in the trace. */
   recovered?: boolean;
   diagram?: import('@/modules/assistant/sdk/diagramArtifact').AssistantDiagramArtifact;
   researchPapers?: import('./researchApi').ResearchPaper[];
+  researchSearch?: import('@/modules/assistant/research/arxivSearchContext').ArxivSearchContext;
   error?: string;
   id: string;
   input?: unknown;
@@ -204,6 +207,9 @@ export type AssistantMessagePart =
       diagram?: import('@/modules/assistant/sdk/diagramArtifact').AssistantDiagramArtifact;
       sourceLinks?: ConversationSourceLink[];
       researchPapers?: import('./researchApi').ResearchPaper[];
+      arxivGate?: import('@/shared/lib/arxivGateStatus').ArxivGateStatus;
+      researchCacheSource?: import('./researchApi').PaperCacheSource;
+      researchSearch?: import('@/modules/assistant/research/arxivSearchContext').ArxivSearchContext;
       summary: string;
       toolName: string;
       type: 'tool-result';

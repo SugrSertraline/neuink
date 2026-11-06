@@ -93,6 +93,7 @@ pub fn run() {
                 return Err(std::io::Error::other(error).into());
             }
             neuink_ipc::translation_log::initialize(app.handle());
+            neuink_ipc::initialize_arxiv_gate(app.handle());
             if let Some(windows) = portable_windows {
                 let paths = app.state::<neuink_ipc::storage::PortablePaths>();
                 for window in windows {

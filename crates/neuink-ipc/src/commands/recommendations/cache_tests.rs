@@ -72,6 +72,7 @@ async fn failed_fetch_is_not_a_completed_day_and_persists_server_retry_deadline(
         Err(client::FetchError {
             message: "arXiv HTTP 429".into(),
             retry_after_seconds: 600,
+            gate: None,
         })
     })
     .await;

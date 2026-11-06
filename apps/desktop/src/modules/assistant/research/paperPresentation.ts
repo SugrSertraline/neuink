@@ -1,17 +1,21 @@
 import { isSciverseConversationSource, type ConversationSourceLink } from '@/shared/ipc/assistantApi';
 import type { ResearchPaper } from '@/shared/ipc/researchApi';
+import type { PaperCacheSource } from '@/shared/ipc/researchApi';
+import type { SelectedPaper } from './researchPaperSelection';
 
 export type PaperRecord = { ref: string } & (
-  | { kind: 'research'; paper: ResearchPaper }
+  | { kind: 'research'; paper: ResearchPaper; cacheSource: PaperCacheSource | null }
   | { kind: 'sciverse'; source: Extract<ConversationSourceLink, { provider: 'sciverse' }> }
 );
 export type PaperSelection = { ref: string; reason: string; group?: string };
 export type PaperFragment = { kind: 'text'; text: string } | { kind: 'papers'; items: PaperSelection[] }
   | { kind: 'invalid' } | { kind: 'pending' };
 
-export function paperRecords(papers: ResearchPaper[], sources: ConversationSourceLink[]) {
+export function paperRecords(papers: ResearchPaper[], sources: ConversationSourceLink[], selections?: readonly SelectedPaper[]) {
   const records = new Map<string, PaperRecord>();
-  for (const paper of papers) records.set(`research:${paper.id}`, { ref: `research:${paper.id}`, kind: 'research', paper });
+  for (const paper of papers) records.set(`research:${paper.id}`, { ref: `research:${paper.id}`, kind: 'research', paper, cacheSource: null });
+  for (const item of selections ?? []) records.set('research:' + item.paper.id,
+    { ref: 'research:' + item.paper.id, kind: 'research', paper: item.paper, cacheSource: item.cacheSource });
   for (const source of sources) if (isSciverseConversationSource(source)) {
     const ref = `sciverse:${source.doc_id}`;
     if (!records.has(ref)) records.set(ref, { ref, kind: 'sciverse', source });

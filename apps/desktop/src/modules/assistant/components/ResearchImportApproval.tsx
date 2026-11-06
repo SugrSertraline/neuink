@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { approveResearchImport, rememberResearchConsent } from '@/shared/ipc/researchApi';
+import { approveResearchImport, approveSelectedImport, rememberResearchConsent } from '@/shared/ipc/researchApi';
 import { decideToolApproval, getToolApprovals, type PendingToolApproval } from '../runtime/toolApproval';
 import { formatAssistantError, useAssistantDebug } from '@/shared/lib/assistantDebug';
 
@@ -22,10 +22,11 @@ export function ResearchImportApproval({ item }: { item: PendingToolApproval }) 
     inFlight.current = true;
     setBusy(true); setError('');
     try {
-      await approveResearchImport(item.root, papers.map(p => p.id), papers, item.id);
+      if (item.paperSelections) await approveSelectedImport(item.root, item.paperSelections, papers, item.id);
+      else await approveResearchImport(item.root, papers.map(p => p.id), papers, item.id);
       // The user may have stopped the run while the native preview was being approved.
       if (!getToolApprovals().some(pending => pending.id === item.id)) return;
-      rememberResearchConsent(item.root, item.toolCallId, item.id);
+      rememberResearchConsent(item.root, item.toolCallId, item.id, item.paperSelections);
       decideToolApproval(item.id, true);
     } catch (caught) { if (alive.current) setError(String(caught)); }
     finally { inFlight.current = false; if (alive.current) setBusy(false); }

@@ -24,6 +24,7 @@ pub mod pdf_parse_queue;
 mod pdf_parse_queue_tests;
 pub mod pdf_text;
 pub mod reading_state;
+mod read_only;
 pub mod search;
 pub mod source_availability;
 pub mod tag_archive;
@@ -41,6 +42,7 @@ pub use annotation_index::{
 pub use atomic_write::{atomic_write, atomic_write_json};
 pub use error::WorkspaceError;
 pub use layout::WorkspaceLayout;
+pub use read_only::validate_workspace_read_only;
 pub use search::{WorkspaceSearchOptions, WorkspaceSearchRecord, WorkspaceSearchRecordKind};
 pub use trash::{TrashItem, TrashItemKind};
 pub use workspace::{

@@ -1,11 +1,6 @@
 use super::{network, Paper};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::sync::OnceLock;
-use tokio::{
-    sync::Mutex,
-    time::{Duration, Instant},
-};
 
 pub fn short(value: &str, max: usize) -> String {
     value.chars().take(max).collect()
@@ -34,20 +29,10 @@ pub async fn arxiv_by_ids(ids: &[String]) -> Result<Vec<Paper>, String> {
     parse_arxiv(&arxiv_response(url).await?)
 }
 async fn arxiv_response(url: reqwest::Url) -> Result<String, String> {
-    let _slot = arxiv_request_slot().await;
-    let bytes = network::get(url.as_str(), 2 * 1024 * 1024).await?;
-    String::from_utf8(bytes).map_err(|_| "arXiv 编码无效".into())
-}
-pub struct ArxivRequestSlot(tokio::sync::MutexGuard<'static, Option<Instant>>);
-impl Drop for ArxivRequestSlot {
-    fn drop(&mut self) { *self.0 = Some(Instant::now()); }
-}
-pub async fn arxiv_request_slot() -> ArxivRequestSlot {
-    // All arXiv clients share a slot; spacing starts after the last request completes.
-    static LAST: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
-    let last = LAST.get_or_init(|| Mutex::new(None)).lock().await;
-    if let Some(at) = *last { tokio::time::sleep_until(at + Duration::from_secs(3)).await; }
-    ArxivRequestSlot(last)
+    let mut context=super::arxiv_gate::context("legacy_query");context.request_id=neuink_domain::NoteId::new().to_string();
+    let response = super::arxiv_gate::shared().map_err(|e|e.wire())?
+        .request(url, context).await.map_err(|e|e.wire())?;
+    String::from_utf8(response.bytes).map_err(|_| "arXiv 编码无效".into())
 }
 
 #[derive(Deserialize)]

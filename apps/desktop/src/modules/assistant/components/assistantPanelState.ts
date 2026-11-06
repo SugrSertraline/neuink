@@ -409,6 +409,9 @@ export function buildAssistantMessageParts({
         diagram: event.diagram,
         sourceLinks: event.sources,
         researchPapers: event.researchPapers,
+        researchCacheSource: event.researchCacheSource,
+        arxivGate: event.arxivGate,
+        researchSearch: event.researchSearch,
         summary: event.summary,
         toolName: event.toolName,
         type: 'tool-result'

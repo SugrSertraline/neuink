@@ -251,7 +251,8 @@ pub async fn deep_research<R: Runtime>(
                     }
                 }
             }
-            let papers = super::research::providers::arxiv_by_ids(&ids).await?;
+            let papers = super::research::arxiv_gate::scope("deep_research_ids",60,
+                super::research::providers::arxiv_by_ids(&ids)).await?;
             super::research::remember(&root, &papers)?;
             Ok(json!(papers))
         }

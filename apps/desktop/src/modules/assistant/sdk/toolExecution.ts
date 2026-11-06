@@ -22,6 +22,9 @@ import { formatReadEntryOutput } from './entryContext';
 import { isPdfTool, runPdfTool } from './pdfTools';
 import { researchImportResult } from './researchImportResult';
 import { researchOutput } from './researchOutput';
+import { arxivSearchContext } from '../research/arxivSearchContext';
+import { arxivGateStatus, arxivGateMessage } from '@/shared/lib/arxivGateStatus';
+import { createAgentToolFailure } from '../agent-core/toolFailure';
 import { formatSciverseSearchOutput } from './sciverseOutput';
 import { assertSuccessfulToolResult } from './toolFailurePolicy';
 import {
@@ -58,6 +61,11 @@ export async function executeTool(
     let result: unknown;
     try { result = await runResearchTool(toolName, input, signal, toolCallId); }
     catch (error) {
+      const gate = arxivGateStatus(error);
+      if (gate && ['arxiv_search','search_papers'].includes(toolName)) {
+        const code = ['rate_limited','cooldown'].includes(gate.code) ? 'TOOL_RATE_LIMITED' : 'TOOL_EXECUTION_FAILED';
+        return { modelOutput: { ...createAgentToolFailure(code), arxivGate: gate }, sources: [], summary: arxivGateMessage(gate) };
+      }
       if (error instanceof ResearchImportNotApprovedError) {
         throw new AgentToolNotExecutedError(error.message, 'TOOL_APPROVAL_UNAVAILABLE');
       }
@@ -65,8 +73,15 @@ export async function executeTool(
     }
     assertSuccessfulToolResult(result);
     if (toolName === 'import_papers') return researchImportResult(result, input.paper_ids);
-    return { modelOutput: researchOutput(result, contextBudget), sources: [], researchPapers: toolName === 'search_papers' ? researchPapersFromResult(result) : undefined,
-      summary: '已获取外部检索结果（不代表已读论文全文）。' };
+    const native = result as { errors?: Array<{gate?:unknown}>; source_errors?: {arxiv?:unknown} };
+    const gate = arxivGateStatus(native?.source_errors?.arxiv ?? (Array.isArray(native?.errors) ? native.errors.find(row => row.gate)?.gate : undefined));
+    const projected = researchOutput(result, contextBudget);
+    const modelOutput = gate && projected && typeof projected === 'object' ? { ...projected, arxivGate: gate } : projected;
+    return { modelOutput, sources: [], researchPapers: ['search_papers', 'arxiv_search'].includes(toolName) ? researchPapersFromResult(result) : undefined,
+      researchCacheSource: toolName === 'arxiv_search' ? 'arxiv_search' as const : toolName === 'search_papers' ? 'research' as const : undefined,
+      researchSearch: toolName === 'arxiv_search' ? arxivSearchContext(result) : undefined,
+      arxivGate: gate,
+      summary: gate ? arxivGateMessage(gate) : '已获取外部检索结果（不代表已读论文全文）。' };
   }
   if (toolName.startsWith('mcp.')) {
     const result = await invokeMcpTool(toolName, input, signal);

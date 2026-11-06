@@ -5,7 +5,7 @@ type Observation = { toolName: string; output: unknown };
 export function hasConfirmedPaperImportOnly(observations: readonly Observation[]): boolean {
   let confirmed = false;
   for (const { toolName, output } of observations) {
-    if (toolName === 'search_papers') continue;
+    if (toolName === 'search_papers' || toolName === 'arxiv_search') continue;
     if (toolName !== 'import_papers' || !output || typeof output !== 'object') return false;
     const value = output as { ok?: boolean; isError?: boolean; results?: unknown[] };
     if (value.ok === false || value.isError === true || !Array.isArray(value.results) || !value.results.length) return false;

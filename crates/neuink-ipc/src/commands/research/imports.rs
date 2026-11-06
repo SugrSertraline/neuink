@@ -69,6 +69,9 @@ fn consume(selection: &Selection, approval_id: &str) -> Result<Vec<Paper>, Strin
     Ok(g.remove(i).papers)
 }
 
+#[cfg(test)]
+pub(super) fn consume_for_test(selection: &Selection, id: &str) -> Result<Vec<Paper>, String> { consume(selection, id) }
+
 pub async fn run<R: Runtime>(
     app: &AppHandle<R>,
     selection: Selection,
@@ -76,7 +79,24 @@ pub async fn run<R: Runtime>(
     job: &mut ImportJob,
 ) -> Result<Value, String> {
     let papers = consume(&selection, approval_id)?;
-    job.queue(&selection.root, papers.len());
+    run_approved(app, selection.root, papers, job).await
+}
+
+pub(super) async fn run_approved<R: Runtime>(
+    app: &AppHandle<R>, root: PathBuf, papers: Vec<Paper>, job: &mut ImportJob,
+) -> Result<Value, String> {
+    run_approved_with(root.clone(), papers, job,
+        |url| async move { network::get(&url, 64 * 1024 * 1024).await },
+        || { let _ = app.emit("research-library-changed", json!({"root":root})); }).await
+}
+
+// One executor and semaphore for both caches. Tests replace only the HTTP bytes/event sink.
+pub(super) async fn run_approved_with<F, Fut>(
+    root: PathBuf, papers: Vec<Paper>, job: &mut ImportJob,
+    mut fetch: F, mut changed: impl FnMut(),
+) -> Result<Value, String>
+where F: FnMut(String) -> Fut, Fut: std::future::Future<Output = Result<Vec<u8>, String>> {
+    job.queue(&root, papers.len());
     // Bound peak PDF memory across conversations, not just within a batch.
     static DOWNLOAD: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
     let _permit = DOWNLOAD
@@ -85,7 +105,7 @@ pub async fn run<R: Runtime>(
         .await
         .map_err(|_| "下载队列不可用")?;
     let workspace =
-        neuink_workspace::Workspace::open(&selection.root).map_err(|_| "资料库不可用")?;
+        neuink_workspace::Workspace::open(&root).map_err(|_| "资料库不可用")?;
     let mut results = vec![];
     for paper in papers {
         job.start_paper(&paper);
@@ -93,10 +113,10 @@ pub async fn run<R: Runtime>(
             if let Some(id)=existing(&workspace,&paper)? {return Ok(json!({"id":paper.id,"entry_id":id,"status":"already_in_library"}));}
             let url=paper.pdf_url.as_deref().ok_or("没有可下载的公开 PDF，请打开原文网页手动获取")?;
             job.downloading();
-            let bytes=network::get(url,64*1024*1024).await?;
+            let bytes=fetch(url.to_string()).await?;
             // Network is awaited outside write lock. The synchronous commit cannot be dropped midway by cancellation.
             let persisted=persist(&workspace,&paper,&bytes);
-            let _=app.emit("research-library-changed",json!({"root":selection.root}));
+            changed();
             let (id,reused)=persisted?;
             Ok::<Value,String>(json!({"id":paper.id,"entry_id":id,"status":if reused {"already_in_library"}else{"imported"},"parsed":false}))
         }.await;
@@ -175,6 +195,10 @@ fn persist(
     })?;
     Ok((entry.id.to_string(), false))
 }
+
+#[cfg(test)]
+#[path = "download_probe.rs"]
+mod download_probe;
 
 #[cfg(test)]
 mod tests {
@@ -256,4 +280,5 @@ mod tests {
         assert_eq!(w.list_entries().unwrap().len(), 1);
         assert_eq!(w.list_entries().unwrap()[0].title, "Existing");
     }
+
 }

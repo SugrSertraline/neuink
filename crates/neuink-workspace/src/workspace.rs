@@ -1830,7 +1830,7 @@ fn non_empty(value: String) -> Option<String> {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct WorkspaceFile {
     #[serde(default)]
-    schema_version: u16,
+    pub(crate) schema_version: u16,
     #[serde(default)]
     pub(crate) tags: Vec<TagMeta>,
     #[serde(default)]

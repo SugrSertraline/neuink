@@ -281,7 +281,8 @@ describe('ChatMessage performance boundaries', () => {
     expect(getByText('Sciverse 检索记录 · 1 组（含未引用候选及不同版本）')).toBeTruthy();
     expect(getByRole('button', { name: 'S1 · p.1' })).toBeTruthy();
     expect(getByRole('button', { name: 'S2 · p.2' })).toBeTruthy();
-    expect(getAllByRole('button', { name: '一键加入文库' })).toHaveLength(1);
+    fireEvent.click(getByText('检索候选（1）'));
+    await waitFor(() => expect(getAllByRole('button', { name: '一键加入文库' })).toHaveLength(1));
 
     fireEvent.click(getByRole('button', { name: '一键加入文库' }));
     expect(onAddSciverseSource).not.toHaveBeenCalled();
@@ -344,7 +345,7 @@ describe('ChatMessage performance boundaries', () => {
     expect(queryByRole('button', { name: 'S1 · Sciverse 来源' })).toBeNull();
   });
 
-  it('keeps uncited agentic-search papers available as an import list', () => {
+  it('keeps uncited agentic-search papers available after opening the candidate list', async () => {
     const message = createMessage();
     message.content = '正文只引用第一篇 [S1]。';
     message.source_links = [{
@@ -378,7 +379,9 @@ describe('ChatMessage performance boundaries', () => {
       />,
     );
 
-    expect(queryByText('Uncited search result')).toBeTruthy();
+    expect(queryByText('Uncited search result')).toBeNull();
+    fireEvent.click(getByText('检索候选（2）'));
+    await waitFor(() => expect(queryByText('Uncited search result')).toBeTruthy());
     fireEvent.click(getByRole('button', { name: '查看来源 · 1 处引用' }));
     expect(getByText('Sciverse 检索记录 · 2 组（含未引用候选及不同版本）')).toBeTruthy();
     expect(getAllByRole('button', { name: 'Uncited search result' })).toHaveLength(2); // Candidate row and evidence detail.

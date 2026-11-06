@@ -50,7 +50,8 @@ it('renders the selected paper inside the answer with its own confirmed import a
   const other = { ...paper, id: 'other', title: '未被推荐的候选' };
   const message = { message_id: 'structured', role: 'assistant' as const, created_at: '', source_links: [],
     content: '推荐如下：\n```neuink-papers\n{"items":[{"ref":"research:paper","group":"视觉方向","reason":"与问题相关，但会议归属待核实。"}]}\n```\n覆盖范围有限。',
-    parts: [{ type: 'tool-result' as const, id: 'search', toolName: 'search_papers', summary: '', researchPapers: [other, paper] }] };
+    parts: [{ type: 'tool-call' as const, id: 'search', toolName: 'search_papers', status: 'done' as const },
+      { type: 'tool-result' as const, id: 'search', toolName: 'search_papers', summary: '', researchPapers: [other, paper] }] };
   const view = render(<ToastContext.Provider value={{ notify, dismiss: vi.fn() }}><ResearchPaperActionsProvider root="root">
     <ChatMessage message={message} streaming={false} onOpenSource={vi.fn()} />
   </ResearchPaperActionsProvider></ToastContext.Provider>);
@@ -116,7 +117,7 @@ it.each([{ papers: [] as ResearchPaper[] }, { papers: [{ ...paper, pdf_url: null
   await waitFor(() => expect(view.getByRole('alert')).toBeTruthy());
   expect(runResearchTool).not.toHaveBeenCalled();
 });
-it('shares Sciverse confirmation and completion across chat and reading views', async () => {
+it('shares Sciverse confirmation and completion across chat and reading views after opening candidates', async () => {
   const add = vi.fn().mockResolvedValue({ entryId: 'entry', status: 'created_metadata_only', message: '仅保存元数据，PDF 不可用。HTTP 503 Authorization: Bearer sk-private <html>REMOTE_BODY</html>' });
   const message = { message_id: 'reply', content: '论文 [S1]', role: 'assistant' as const, created_at: '',
     source_links: [{ provider: 'sciverse' as const, doc_id: 'remote', title: '论文', quote: '证据' }] };
@@ -124,6 +125,8 @@ it('shares Sciverse confirmation and completion across chat and reading views', 
     <ChatMessage message={message} streaming={false} onOpenSource={vi.fn()} onAddSciverseSource={add} />
     <ChatMessage message={message} streaming={false} reading onOpenSource={vi.fn()} onAddSciverseSource={add} />
   </ResearchPaperActionsProvider></ToastContext.Provider>);
+  for (const summary of view.getAllByText('检索候选（1）')) fireEvent.click(summary);
+  await waitFor(() => expect(view.getAllByRole('button', { name: '一键加入文库' })).toHaveLength(2));
   fireEvent.click(view.getAllByRole('button', { name: '一键加入文库' })[0]);
   expect(view.getAllByRole('button', { name: '确认添加' })).toHaveLength(2);
   expect(add).not.toHaveBeenCalled();

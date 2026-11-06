@@ -4,6 +4,8 @@ import type { ConversationMessage, ConversationSourceLink, SciverseLibraryImport
 import { paperRecords, parsePaperPresentation, type PaperRecord } from '../research/paperPresentation';
 import { ResearchPaperAction } from './ResearchPaperActions';
 import { SciverseImportButton } from './SciverseImportButton';
+import { PaperCandidates } from './PaperCandidates';
+import { researchPapersFromParts } from '../research/researchPaperSelection';
 
 export function PaperAnswerContent({ message, content, sources, discovered, streaming, renderMarkdown, onOpenSource, onImport }: {
   message: ConversationMessage; content: string; sources: ConversationSourceLink[];
@@ -12,11 +14,12 @@ export function PaperAnswerContent({ message, content, sources, discovered, stre
   onOpenSource: (source: ConversationSourceLink) => void;
   onImport?: (source: Extract<ConversationSourceLink, { provider: 'sciverse' }>) => Promise<SciverseLibraryImportResult>;
 }) {
-  const records = paperRecords((message.parts ?? []).flatMap(part => part.type === 'tool-result' ? part.researchPapers ?? [] : []), [...sources, ...discovered]);
+  const selections = researchPapersFromParts(message.parts ?? []);
+  const records = paperRecords(selections.map(item => item.paper), [...sources, ...discovered], selections);
   const fragments = parsePaperPresentation(content, streaming);
   const used = new Set<string>();
   const row = (record: PaperRecord, reason?: string) => record.kind === 'research'
-    ? <ResearchPaperAction key={record.ref} paper={record.paper}>{reason && renderMarkdown(reason)}</ResearchPaperAction>
+    ? <ResearchPaperAction key={record.ref} paper={record.paper} cacheSource={record.cacheSource}>{reason && renderMarkdown(reason)}</ResearchPaperAction>
     : <article key={record.ref} className="min-w-0 border-b py-3 text-sm [overflow-wrap:anywhere]">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 flex-1 basis-40">
@@ -50,10 +53,7 @@ export function PaperAnswerContent({ message, content, sources, discovered, stre
   const remaining = [...records.values()].filter(record => !used.has(record.ref));
   return <>
     {answer}
-    {!streaming && remaining.length > 0 && <details className="mt-3 min-w-0">
-      <summary className="cursor-pointer text-sm text-muted-foreground">{used.size ? '其他检索结果' : '检索候选'}（{remaining.length}）</summary>
-      <p className="mt-1 text-xs text-muted-foreground">候选不等于推荐，会议归属和相关性以可核验信息为准。</p>
-      {remaining.map(record => row(record))}
-    </details>}
+    {!streaming && remaining.length > 0 && <PaperCandidates key={JSON.stringify([message.conversation_id ?? null, message.message_id])}
+      records={remaining} label={used.size ? '其他检索结果' : '检索候选'} renderRecord={row} />}
   </>;
 }
