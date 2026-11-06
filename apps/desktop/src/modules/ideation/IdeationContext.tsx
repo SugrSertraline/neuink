@@ -8,6 +8,7 @@ import type { BranchSlot } from './ideationBranches';
 import { useIdeationLayout } from './useIdeationLayout';
 
 type IdeationContextValue = ReturnType<typeof useIdeation> & ReturnType<typeof useIdeationLayout> & {
+  updateCollection: (change: (current: IdeationState) => IdeationState) => void;
   workspaceRoot: string;
   collection: IdeationState | null;
   activeBoard: IdeationBoard | null;
@@ -78,7 +79,7 @@ function ActiveProvider({ root, children, entries, libraryReady, onShowSidebar }
   const completeBranchTarget = (slot?: BranchSlot | null) => { if (slot) layout.consumeSlot(slot); setBranchTarget(current => slot && current?.id === slot.id && current.sourceId === slot.sourceId ? null : current); };
   const requestBranch = (id: string) => { if (!branchSourceId) return; layout.revealSlot(id); setCandidateRequest(value => value + 1); setBranchTarget({ id, sourceId: branchSourceId }); setSidebarTab('cards'); onShowSidebar?.(); };
   const requestCard = (kind: CardKind) => { setCardRequest(current => ({ id: (current?.id ?? 0) + 1, kind })); setSidebarTab('cards'); onShowSidebar?.(); };
-  return <Context.Provider value={{ ...store, ...layout, workspaceRoot: root, collection: store.state, state, update, activeBoard, selectBoard, createBoard, editBoard, duplicateBoard,
+  return <Context.Provider value={{ ...store, ...layout, workspaceRoot: root, updateCollection: store.update, collection: store.state, state, update, activeBoard, selectBoard, createBoard, editBoard, duplicateBoard,
     sidebarTab, setSidebarTab, showSidebar: () => onShowSidebar?.(), entryId, setEntryId, selectedCardId, setSelectedCardId, selectionSource, selectCanvasCard, selectedSlot, selectSlot,
     branchSourceId, selectBranchSource, candidateRequest, branchTarget: currentBranchTarget, selectBranchTarget, completeBranchTarget, requestBranch, cardRequest, requestCard, background }}>{children}</Context.Provider>;
 }

@@ -55,6 +55,10 @@ Browsing saved cards, creating boards, manual editing, dragging, linking, zoomin
 
 This branch does not promise automatic judgments of academic novelty, proof of research claims or execution of experiments. Evidence links support checking rather than replacing source reading. Model drafts, personal ideas and reference patterns have different origins and should be assessed accordingly.
 
+### Managing paper cards
+
+Open Reading Content → Paper Cards to view independent cards for one paper. Create, search, filter by type, inspect, edit or delete individual cards. Faces emphasize abstractions; details retain paper examples and sources. Deletion confirms the affected canvas-node count before removing that card and its references. Other cards and papers remain, and local canvas overrides are not overwritten by library edits. An empty draft retains its processing record to prevent automatic regeneration after deleting the last card.
+
 ### Templates and processing limits
 
 Method/component cards now lead with a reusable abstract mechanism and place paper-specific implementations in a separate example field. Abstraction is not evidence of transferability; existing drafts require explicit regeneration. Card templates distinguish background/problems, method/component interfaces, constraints/assumptions, measured results, limitations and personal hypotheses. Missing paper facts remain explicitly unspecified. Manual template insertion never replaces existing card text; older cards remain editable.

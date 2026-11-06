@@ -271,3 +271,14 @@ fn batched_paper_drafts_allow_more_than_thirty_cards_and_preserve_previous_on_ov
     assert_eq!(workspace.read_ideation_draft("paper").unwrap().revision, saved.revision);
     assert!(workspace.read_ideation().unwrap().state.cards.is_empty());
 }
+#[test]
+fn user_can_delete_last_draft_card_without_triggering_automatic_regeneration() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Workspace::create(dir.path()).unwrap();
+    let draft = IdeationDraft { entry_id: "paper".into(), status: "ready".into(), partial: false, model: "model".into(), error_code: None, relations: Vec::new(), cards: Vec::new() };
+    workspace.save_ideation_draft("missing", draft).unwrap();
+    let records = workspace.list_ideation_drafts().unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].count, 0);
+    assert_eq!(records[0].status, "ready");
+}

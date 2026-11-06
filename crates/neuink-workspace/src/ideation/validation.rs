@@ -179,7 +179,6 @@ pub(super) fn validate_draft(draft: &IdeationDraft, entry_id: &str) -> Result<()
         || !["ready", "failed"].contains(&draft.status.as_str())
         || draft.cards.len() > 300
         || draft.model.len() > 500
-        || (draft.status == "ready" && draft.cards.is_empty())
         || (draft.status == "failed" && !draft.cards.is_empty())
         || draft.cards.iter().any(|c| c.entry_id != entry_id)
         || draft.relations.len() > 600
