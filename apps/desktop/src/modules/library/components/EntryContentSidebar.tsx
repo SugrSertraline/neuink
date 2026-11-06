@@ -1,3 +1,4 @@
+import { EntryPaperCards } from '@/modules/ideation/EntryPaperCards';
 import { open } from '@tauri-apps/plugin-dialog';
 import { FilePlus2, FileText, FileType, LayoutDashboard, Link2, Loader2, PanelRightOpen, Plus, ScrollText, StickyNote, Trash2 } from 'lucide-react';
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
@@ -264,6 +265,8 @@ export function EntryContentSidebar({
             {entry.sourceInfo?.zotero_organization?.length && onApplyEntryTagPaths ? <ZoteroOrganizationInfo compact onOpenDetails={() => onSelectContent('overview')} key={entry.id} organization={entry.sourceInfo.zotero_organization}
               tags={tags} tagPaths={entry.tags} onAddTagPath={path => onApplyEntryTagPaths(entry.id, [path])} /> : null}
           </section>
+
+          <EntryPaperCards entryId={entry.id} parsed={entry.status === 'Parsed'} />
 
           <section className="min-w-0 space-y-1">
             <SidebarSectionHeader label="阅读内容" />
