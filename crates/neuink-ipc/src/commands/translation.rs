@@ -31,12 +31,26 @@ mod batch_tests;
 mod compat_tests;
 mod control;
 mod diagrams;
+mod engine;
+#[cfg(test)]
+mod engine_tests;
+use engine::TranslationClient;
+
+pub(crate) async fn service_request_slot() -> Result<tokio::sync::OwnedSemaphorePermit, String> {
+    scheduler::request_scheduler().acquire(false).await
+}
+
 pub mod diagnostics;
 pub mod lifecycle;
 #[cfg(test)]
 mod live_tests;
 mod model_json;
 pub mod paragraph;
+pub(crate) mod chunks;
+pub(crate) mod chunk_cache;
+mod chunked_model;
+#[cfg(test)]
+mod chunk_resume_tests;
 mod prompts;
 mod rate_limit;
 mod response;
@@ -61,7 +75,6 @@ enum RequestActivity {
 
 use super::{
     job::{emit_job_event, job_manager},
-    translation_routing::read_profile as read_translation_profile,
 };
 
 const MAX_PAPER_CONTEXT_BUDGET: usize = 120_000;
@@ -252,8 +265,7 @@ pub async fn run_entry_translation<R: Runtime>(
     }) {
         return Err("此条目已有翻译任务，请等待完成或暂停／取消后再开始。".into());
     }
-    let profile = read_translation_profile(&app, neuink_config::TranslationKind::Document)?
-        .ok_or_else(|| "Please configure a translation model first.".to_string())?;
+    let client = TranslationClient::read(&app, neuink_config::TranslationKind::Document)?;
     let workspace = Workspace::open(request.root.clone()).map_err(|error| error.to_string())?;
     let segments = workspace
         .read_segments(&request.entry_id)
@@ -291,14 +303,14 @@ pub async fn run_entry_translation<R: Runtime>(
             request.entry_id.clone(),
             request.source_language.clone(),
             request.target_language.clone(),
-            Some(profile.model.clone()),
+            Some(client.label()),
             total,
         )
     } else {
         let mut translation = previous.ok_or_else(|| "translation missing".to_string())?;
         translation.status = TranslationStatus::Running;
         translation.error = None;
-        translation.model = Some(profile.model.clone());
+        translation.model = Some(client.label());
         translation.source_language = request.source_language.clone();
         translation.target_language = request.target_language.clone();
         translation.updated_at = Utc::now();
@@ -311,7 +323,7 @@ pub async fn run_entry_translation<R: Runtime>(
     let event = job_manager().create(JobKind::Translation, Some(scope), selected_total);
     translation.task = Some(TranslationTaskSnapshot {
         job_id: event.job.id.clone(),
-        profile_id: profile.id.clone(),
+        profile_id: client.id(),
         force: request.force,
         source_hashes: segments
             .iter()
@@ -348,7 +360,7 @@ pub async fn run_entry_translation<R: Runtime>(
         entry_id: request.entry_id,
         force: request.force,
         job_total: selected_total,
-        profile,
+        client,
         root: request.root,
         selected_segment_uids,
         strategy: request.strategy,
@@ -408,9 +420,8 @@ pub async fn translate_entry_segment<R: Runtime>(
     app: AppHandle<R>,
     request: TranslateEntrySegmentRequest,
 ) -> Result<EntryTranslationResponse, String> {
-    let profile = read_translation_profile(&app, neuink_config::TranslationKind::Segment)?
-        .ok_or_else(|| "Please configure a translation model first.".to_string())?;
-    single_segment::translate(request, profile).await
+    let client = TranslationClient::read(&app, neuink_config::TranslationKind::Segment)?;
+    single_segment::translate(request, client).await
 }
 
 #[tauri::command]
@@ -512,7 +523,7 @@ struct TranslationTask {
     entry_id: EntryId,
     force: bool,
     job_total: usize,
-    profile: LlmProfile,
+    client: TranslationClient,
     root: PathBuf,
     selected_segment_uids: Option<HashSet<SegmentUid>>,
     strategy: RunTranslationStrategy,
@@ -524,14 +535,14 @@ enum TranslationRunOutcome {
 }
 
 struct TranslationPipeline {
-    client: LlmClient,
+    client: TranslationClient,
     task: TranslationTask,
 }
 
 impl TranslationPipeline {
     fn new(task: TranslationTask) -> Self {
         Self {
-            client: LlmClient::new(task.profile.clone()),
+            client: task.client.clone(),
             task,
         }
     }
@@ -557,7 +568,7 @@ impl TranslationPipeline {
             lifecycle::pending_segments(&self.task, segments, &previous_translation).into_iter();
         let (candidates, skipped): (Vec<_>, Vec<_>) =
             selected_segments.partition(should_translate_segment);
-        emit_started(app, job_id, "准备论文背景");
+        emit_started(app, job_id, if self.client.is_service() { "准备翻译内容" } else { "准备论文背景" });
 
         if let Some(outcome) = self.pause_if_requested(app, job_id)? {
             return Ok(outcome);
@@ -643,7 +654,9 @@ impl TranslationPipeline {
             return Ok(TranslationRunOutcome::Completed);
         }
 
-        let context = if let Some(context) = previous_translation.paper_context.clone() {
+        let context = if self.client.is_service() {
+            empty_paper_context()
+        } else if let Some(context) = previous_translation.paper_context.clone() {
             self.update_translation(|translation| {
                 translation.paper_context = Some(context.clone());
                 translation.status = TranslationStatus::Running;
@@ -658,7 +671,7 @@ impl TranslationPipeline {
             let context_result = timeout(
                 CONTEXT_PREPARATION_TIMEOUT,
                 self.build_context(
-                    &self.client.clone().with_progress(self.live_progress_sink(
+                    &self.client.llm()?.clone().with_progress(self.live_progress_sink(
                         app,
                         job_id,
                         "正在生成论文背景（这一步较长，请耐心等待）".to_string(),
@@ -673,7 +686,7 @@ impl TranslationPipeline {
                 Ok(Ok(result)) => result,
                 Ok(Err(error)) => {
                     crate::translation_log::best_effort(
-                        &self.task.profile,
+                        &self.client.llm()?.profile,
                         crate::translation_log::Stage::ContextValidation,
                         &error,
                         crate::translation_log::Details::default(),
@@ -682,7 +695,7 @@ impl TranslationPipeline {
                 }
                 Err(_) => {
                     crate::translation_log::best_effort(
-                        &self.task.profile,
+                        &self.client.llm()?.profile,
                         crate::translation_log::Stage::ContextValidation,
                         "context preparation timed out",
                         crate::translation_log::Details {
@@ -716,11 +729,13 @@ impl TranslationPipeline {
             return Ok(outcome);
         }
 
-        let budgets = translation_budgets(
-            self.task.profile.max_context_length,
-            self.task.profile.max_output_tokens,
-        );
-        let batches = build_translation_batches(pending_candidates, budgets.batch);
+        let batches = if self.client.is_service() {
+            // Service responses are plain text, so each segment is independently
+            // dispatched and committed. A shared failure stops later dispatch.
+            pending_candidates.into_iter().map(|segment| vec![segment]).collect()
+        } else {
+            build_translation_batches(pending_candidates, self.client.batch_budget())
+        };
         self.emit_translation_progress(app, job_id, "正在翻译")?;
         // 串行化磁盘写与进度事件：并发批次都往同一个译文文件 upsert，
         // 不加锁会互相覆盖（读-改-写竞态）。
@@ -744,12 +759,13 @@ impl TranslationPipeline {
                     .partition(|segment| segment.segment_type == SegmentType::List);
 
                 if !ordinary_segments.is_empty() {
-                    let batch_client = self.client.clone().with_progress(self.live_progress_sink(
+                    let batch_client = self.client.clone().with_checkpoint(workspace.clone(), self.task.entry_id.clone()).with_progress(self.live_progress_sink(
                         app,
                         job_id,
                         "正在翻译".to_string(),
                         &done_counter,
                     ));
+                    let timeout_segments = ordinary_segments.clone();
                     let outcome = timeout(
                         TRANSLATION_BATCH_TIMEOUT,
                         batch_client.translate_batch_recovering(
@@ -758,15 +774,7 @@ impl TranslationPipeline {
                             ordinary_segments,
                             &self.task.control,
                             |completed| {
-                                let translated_count = completed
-                                    .iter()
-                                    .filter(|segment| {
-                                        matches!(
-                                            segment.status,
-                                            TranslatedSegmentStatus::Translated
-                                        )
-                                    })
-                                    .count();
+                                let translated_count = completed.len();
                                 let _io = io_lock.lock().unwrap_or_else(|error| error.into_inner());
                                 self.update_translation(|translation| {
                                     upsert_segments(translation, completed)
@@ -777,7 +785,15 @@ impl TranslationPipeline {
                         ),
                     )
                     .await
-                    .unwrap_or_else(|_| Err("翻译模型请求超时，请重试失败项".into()));
+                    .unwrap_or_else(|_| {
+                        let _io = io_lock.lock().unwrap_or_else(|error| error.into_inner());
+                        self.update_translation(|translation| {
+                            let unfinished = timeout_segments.iter().filter(|source| !translation.segments.iter().any(|saved|
+                                saved.segment_uid == source.uid && matches!(saved.status, TranslatedSegmentStatus::Translated | TranslatedSegmentStatus::Skipped)))
+                                .map(|source| failed_segment(source, "本段翻译超时，请重试；其他段落继续处理")).collect::<Vec<_>>();
+                            upsert_segments(translation, unfinished);
+                        }).map(|_| ())
+                    });
                     if let Err(error) = outcome {
                         record_fatal(&fatal_error, error);
                         return;
@@ -797,7 +813,6 @@ impl TranslationPipeline {
                     )
                     .await
                     .unwrap_or_else(|_| Err("翻译模型请求超时，请重试失败项".into()));
-                    let translated_successfully = outcome.is_ok();
                     let io = io_lock.lock().unwrap_or_else(|error| error.into_inner());
                     match outcome {
                         Ok(translated_text) => {
@@ -822,9 +837,7 @@ impl TranslationPipeline {
                             let _ = self.emit_translation_progress(app, job_id, &reason);
                         }
                     }
-                    if translated_successfully {
-                        done_counter.fetch_add(1, Ordering::Relaxed);
-                    }
+                    done_counter.fetch_add(1, Ordering::Relaxed);
                     if let Err(error) = self.emit_translation_progress(app, job_id, "正在翻译")
                     {
                         record_fatal(&fatal_error, error);
@@ -856,7 +869,7 @@ impl TranslationPipeline {
         })?;
         let message = if final_translation.progress.failed > 0 {
             format!(
-                "翻译失败：{} 个片段未完成，已有译文已保留，可在翻译任务中重试",
+                "本次翻译已结束：{} 个片段未完成，已有译文已保留，可逐项重试",
                 final_translation.progress.failed
             )
         } else if matches!(final_translation.status, TranslationStatus::Partial) {
@@ -864,9 +877,7 @@ impl TranslationPipeline {
         } else {
             "翻译完成".to_string()
         };
-        let event = if final_translation.progress.failed > 0 {
-            job_manager().fail(job_id, message, translation_payload(&final_translation))
-        } else {
+        let event = {
             job_manager().succeed_with_progress(
                 job_id,
                 self.completed_count(&final_translation),
@@ -883,7 +894,7 @@ impl TranslationPipeline {
 
     async fn translate_list_segment(
         &self,
-        client: &LlmClient,
+        client: &TranslationClient,
         entry_title: &str,
         context: &TranslationPaperContext,
         segment: &SourceSegment,
@@ -932,8 +943,8 @@ impl TranslationPipeline {
                 .collect::<Vec<_>>()
                 .join("\n\n"),
             translation_budgets(
-                self.task.profile.max_context_length,
-                self.task.profile.max_output_tokens,
+                client.profile.max_context_length,
+                client.profile.max_output_tokens,
             )
             .context,
         );
@@ -1047,11 +1058,12 @@ impl TranslationPipeline {
                                 segment.status,
                                 TranslatedSegmentStatus::Translated
                                     | TranslatedSegmentStatus::Skipped
+                                    | TranslatedSegmentStatus::Failed
                             )
                     })
                     .count()
             })
-            .unwrap_or(translation.progress.translated + translation.progress.skipped);
+            .unwrap_or(translation.progress.translated + translation.progress.skipped + translation.progress.failed);
         completed.min(self.task.job_total)
     }
 
@@ -1154,6 +1166,7 @@ type TranslationProgressSink = Arc<dyn Fn(usize) + Send + Sync>;
 
 #[derive(Clone)]
 struct LlmClient {
+    chunk_cache: Option<chunk_cache::ChunkCache>,
     client: Client,
     profile: LlmProfile,
     progress: Option<TranslationProgressSink>,
@@ -1167,6 +1180,7 @@ struct LlmClient {
 impl LlmClient {
     fn new(profile: LlmProfile) -> Self {
         Self {
+            chunk_cache: None,
             client: Client::new(),
             rate_limit: RateLimitGate::for_profile(&profile),
             profile,
@@ -1184,6 +1198,15 @@ impl LlmClient {
     }
 
     async fn translate_batch(
+        &self,
+        entry_title: &str,
+        context: &TranslationPaperContext,
+        batch: &[SourceSegment],
+    ) -> Result<HashMap<SegmentUid, String>, String> {
+        self.translate_chunked_batch(entry_title, context, batch).await
+    }
+
+    async fn translate_raw_batch(
         &self,
         entry_title: &str,
         context: &TranslationPaperContext,

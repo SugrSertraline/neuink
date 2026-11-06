@@ -30,9 +30,11 @@ export function useDailySidebarPreferences() {
     const next = normalizeDailySidebar(change(current.current));
     retainMenus(next, current.current);
     current.current = next; setPreferences(next);
-    try { localStorage.setItem(DAILY_SIDEBAR_KEY, JSON.stringify(next)); setSaveError(''); }
+    let saved = false;
+    try { localStorage.setItem(DAILY_SIDEBAR_KEY, JSON.stringify(next)); setSaveError(''); saved = true; }
     catch { setSaveError('本次设置已生效，但未能保存到本机。'); }
     window.dispatchEvent(new CustomEvent(changed, { detail: next }));
+    return saved;
   }, []);
   return { preferences, update, saveError };
 }

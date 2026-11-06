@@ -1,11 +1,12 @@
 import type { LibraryEntry } from '../components/LibrarySidebar';
 
-export type LibraryView = 'all' | 'recent' | 'pdf' | 'unparsed' | 'parsed' | 'parsing' | 'failed' | 'no_pdf' | 'trash';
+export type LibraryView = 'all' | 'recent' | 'hidden' | 'pdf' | 'unparsed' | 'parsed' | 'parsing' | 'failed' | 'no_pdf' | 'trash';
 
 // Sidebar navigation and the library page describe the same view.
 export const LIBRARY_VIEW_LABELS: Record<LibraryView, string> = {
   all: '全部',
   recent: '最近阅读',
+  hidden: '已隐藏',
   pdf: '全部',
   unparsed: '未解析',
   parsed: '已解析',

@@ -31,6 +31,14 @@ pub(super) fn scan_root_interruptible(
     root: &Path,
     cancelled: impl Fn() -> bool,
 ) -> Result<Catalog, String> {
+    scan_root_with_limit(root, cancelled, MAX_ITEMS)
+}
+
+pub(super) fn scan_root_with_limit(
+    root: &Path,
+    cancelled: impl Fn() -> bool,
+    max_items: usize,
+) -> Result<Catalog, String> {
     if !root.is_dir() {
         return Err("MinerU 结果目录不存在，请重新选择。".into());
     }
@@ -73,7 +81,7 @@ pub(super) fn scan_root_interruptible(
                 if is_content_list(&name) {
                     result_dirs.insert(directory.clone());
                 } else if name.ends_with(".zip") || name.ends_with(".rar") {
-                    if archives.len() < MAX_ARCHIVES {
+                    if archives.len() < MAX_ARCHIVES.max(max_items) {
                         archives.push(path);
                     } else {
                         catalog.truncated = true;
@@ -89,7 +97,7 @@ pub(super) fn scan_root_interruptible(
         if cancelled() {
             return Err("MinerU 查找已取消。".into());
         }
-        if catalog.items.len() >= MAX_ITEMS {
+        if catalog.items.len() >= max_items {
             catalog.truncated = true;
             break;
         }
@@ -101,7 +109,7 @@ pub(super) fn scan_root_interruptible(
         if cancelled() {
             return Err("MinerU 查找已取消。".into());
         }
-        if catalog.items.len() >= MAX_ITEMS {
+        if catalog.items.len() >= max_items {
             catalog.truncated = true;
             break;
         }
@@ -313,5 +321,22 @@ mod tests {
         assert!(scan_root_interruptible(root.path(), || true)
             .unwrap_err()
             .contains("已取消"));
+    }
+
+    #[test]
+    fn background_scan_can_include_more_results_than_the_manual_list() {
+        let root = tempfile::tempdir().unwrap();
+        for index in 0..3 {
+            let folder = root.path().join(format!("paper-{index}"));
+            fs::create_dir(&folder).unwrap();
+            fs::write(folder.join("paper_content_list.json"), b"[]").unwrap();
+            fs::write(folder.join("paper_origin.pdf"), b"%PDF-1.4").unwrap();
+        }
+        let limited = scan_root_with_limit(root.path(), || false, 2).unwrap();
+        assert_eq!(limited.items.len(), 2);
+        assert!(limited.truncated);
+        let full = scan_root_with_limit(root.path(), || false, 20_000).unwrap();
+        assert_eq!(full.items.len(), 3);
+        assert!(!full.truncated);
     }
 }

@@ -1,4 +1,5 @@
-import { Columns3, FolderTree, RefreshCw } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { ArrowDown, ArrowUp, Columns3, FolderTree, ListChecks, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { SearchInput } from '@/components/ui/search-input';
@@ -12,59 +13,90 @@ import type { EntryLibraryColumnId } from './useEntryLibraryColumnWidths';
 import { LibraryDisplayControl } from './LibraryDisplayControl';
 import { libraryToolbarControl, libraryToolbarGroup, libraryToolbarGroupItem } from './libraryToolbarStyles';
 import { useAppearance } from '@/shared/components/AppearanceProvider';
+import type { LibraryEntrySortDirection, LibraryEntrySortKey } from './libraryEntrySorting';
 
-type PaperScope = 'all' | 'unclassified' | 'direct' | 'descendants';
-const rootScopes = [
-  { value: 'all', label: '全部论文', title: '显示当前资料库范围内的全部论文' },
-  { value: 'unclassified', label: '未分类', title: '没有关联任何标签的论文' }
-] as const;
+type PaperScope = 'direct' | 'descendants';
+export type PaperSource = 'all' | 'local' | 'zotero' | 'mineru';
 const tagScopes = [
   { value: 'direct', label: '仅当前标签', title: '只显示直接归入当前标签的论文' },
   { value: 'descendants', label: '含子标签', title: '显示当前标签及所有子标签中的论文，每篇只出现一次' }
 ] as const;
 
 /** Display controls never change the paper collection or its scope. */
-export function LibraryPaperToolbar({ query, sortBy, scope, unclassifiedCount, visibleColumns, pinnedEdges, tagNavigation, refresh, onQueryChange, onSortChange, onScopeChange, onColumnChange, onPinChange }: {
+export function LibraryPaperToolbar({ query, sortBy, sortDirection, recentOrderAvailable, scope, visibleColumns, pinnedEdges, tagNavigation, refresh, sourceFilter, selection, selectionActions, onQueryChange, onSortChange, onSortDirectionChange, onScopeChange, onColumnChange, onPinChange }: {
+  selectionActions?: ReactNode;
+  selection?: { enabled: boolean; disabled: boolean; onToggle: () => void };
   query: string;
-  sortBy: string;
+  sortBy: LibraryEntrySortKey;
+  sortDirection: LibraryEntrySortDirection;
+  recentOrderAvailable: boolean;
   scope: PaperScope | null;
-  unclassifiedCount: number | null;
   visibleColumns: ReadonlySet<EntryLibraryColumnId>;
   pinnedEdges: ReadonlySet<'left' | 'right'>;
   tagNavigation: { shown: boolean; disabled: boolean; onShownChange: (shown: boolean) => void };
   refresh?: { busy: boolean; disabled: boolean; onRefresh: () => void };
+  sourceFilter?: { value: PaperSource; onChange: (value: PaperSource) => void; enabledSources: { zotero: boolean; mineru: boolean }; loading: boolean };
   onQueryChange: (query: string) => void;
-  onSortChange: (sort: string) => void;
+  onSortChange: (sort: LibraryEntrySortKey) => void;
+  onSortDirectionChange: (direction: LibraryEntrySortDirection) => void;
   onScopeChange: (scope: PaperScope) => void;
   onColumnChange: (column: EntryLibraryColumnId, visible: boolean) => void;
   onPinChange: (edge: 'left' | 'right', pinned: boolean) => void;
 }) {
-  const scopes = scope === 'direct' || scope === 'descendants' ? tagScopes : rootScopes;
   const { appearance, libraryDisplay } = useAppearance();
+  const sourceOptions = ([['all', '全部'], ['local', '本地'], ['zotero', 'Zotero'], ['mineru', 'MinerU']] as const)
+    .filter(([value]) => value === 'all' || value === 'local' || ((value === 'zotero' || value === 'mineru') && sourceFilter?.enabledSources[value]));
+  const activeSourceIndex = sourceOptions.findIndex(([value]) => value === sourceFilter?.value);
   return <div data-material="workspace-toolbar" className="@container/library-toolbar min-w-0 shrink-0 border-b px-3 py-2">
-    <div aria-label="条目库筛选与操作" className="flex min-w-0 flex-wrap items-center gap-2">
+    <div aria-label="条目库筛选与操作" className="flex h-10 min-w-0 flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden overscroll-x-contain [scrollbar-width:thin]">
       <SearchInput label="搜索条目" placeholder="搜索标题、标签、PDF…" value={query} onValueChange={onQueryChange}
-        className="min-w-40 max-w-md basis-52 @max-[700px]/library-toolbar:max-w-none @max-[700px]/library-toolbar:basis-full" />
+        className="w-48 max-w-48 shrink-0" />
+      <div role={selection?.enabled ? 'group' : undefined} aria-label={selection?.enabled ? '选择模式操作' : undefined}
+        className={selection?.enabled ? 'flex h-8 shrink-0 flex-nowrap items-center gap-2 whitespace-nowrap rounded-md border border-primary/30 bg-primary/5 px-2' : 'contents'}>
+        {selectionActions}
+        {selection && <Button size={selection.enabled ? 'sm' : 'default'} variant={selection.enabled ? 'ghost' : 'outline'}
+          disabled={selection.disabled} aria-pressed={selection.enabled} className="shrink-0 gap-1.5 text-xs" onClick={selection.onToggle}>
+          <ListChecks size={14} aria-hidden="true" />{selection.enabled ? '退出选择' : '选择模式'}
+        </Button>}
+      </div>
       {scope ? <ToggleGroup aria-label="论文范围" className={libraryToolbarGroup} size="sm" spacing={0} type="single" value={scope}
-        onValueChange={value => { if (scopes.some(option => option.value === value)) onScopeChange(value as PaperScope); }}>
-        {scopes.map(option => <ToggleGroupItem key={option.value} aria-label={option.label} value={option.value} title={option.title}
+        onValueChange={value => { if (tagScopes.some(option => option.value === value)) onScopeChange(value as PaperScope); }}>
+        {tagScopes.map(option => <ToggleGroupItem key={option.value} aria-label={option.label} value={option.value} title={option.title}
           className={cn(libraryToolbarGroupItem, scope !== option.value && 'text-muted-foreground')}>
           {option.value === 'direct' ? '仅当前' : option.label}
-          {option.value === 'unclassified' && unclassifiedCount !== null ? <span className="tabular-nums text-muted-foreground">{unclassifiedCount}</span> : null}
         </ToggleGroupItem>)}
       </ToggleGroup> : null}
-      <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1.5">
-      <Select value={sortBy} onValueChange={onSortChange}>
+      {sourceFilter && <ToggleGroup aria-label="条目来源筛选" className={cn(libraryToolbarGroup, 'relative grid')} size="sm" spacing={0} type="single" value={sourceFilter.value}
+        disabled={sourceFilter.loading}
+        style={{ gridTemplateColumns: `repeat(${sourceOptions.length}, minmax(0, 1fr))` }}
+        onValueChange={value => { if (sourceOptions.some(([option]) => option === value)) sourceFilter.onChange(value as PaperSource); }}>
+        <span aria-hidden="true" className="pointer-events-none absolute bottom-0.5 left-0.5 top-0.5 rounded-sm bg-accent transition-transform duration-200 ease-out motion-reduce:transition-none"
+          style={{ width: `calc((100% - 4px) / ${sourceOptions.length})`, transform: `translateX(${Math.max(activeSourceIndex, 0) * 100}%)` }} />
+        {sourceOptions.map(([value, label]) => <ToggleGroupItem key={value} value={value} aria-label={label} className={cn(libraryToolbarGroupItem, 'relative z-10 min-w-14 px-2 data-[state=on]:bg-transparent', sourceFilter.value !== value && 'text-muted-foreground')}>{label}</ToggleGroupItem>)}
+      </ToggleGroup>}
+      <div className="ml-auto flex shrink-0 flex-nowrap items-center justify-end gap-1.5">
+      <Select value={sortBy} onValueChange={value => onSortChange(value as LibraryEntrySortKey)}>
         <SelectTrigger aria-label="条目排序" className={cn(libraryToolbarControl, 'w-32 @max-[700px]/library-toolbar:w-28')} size="default"><SelectValue placeholder="排序" /></SelectTrigger>
         <SelectContent viewportAligned>
-          <SelectItem value="recent">最近更新</SelectItem>
+          {(recentOrderAvailable || sortBy === 'recent') && <SelectItem value="recent">最近访问</SelectItem>}
+          <SelectItem value="created">最近加入</SelectItem>
           <SelectItem value="title">标题</SelectItem>
+          <SelectItem value="source">来源</SelectItem>
           <SelectItem value="parser">解析状态</SelectItem>
           <SelectItem value="reading-progress">阅读进度</SelectItem>
           <SelectItem value="last-read">最近阅读</SelectItem>
           <SelectItem value="reading-time">阅读时长</SelectItem>
+          <SelectItem value="tags">标签</SelectItem>
+          <SelectItem value="file">文件</SelectItem>
+          <SelectItem value="updated">更新时间</SelectItem>
         </SelectContent>
       </Select>
+      <Button type="button" size="icon" variant="outline"
+        aria-label={sortDirection === 'asc' ? '升序排列，切换为降序' : '降序排列，切换为升序'}
+        title={sortDirection === 'asc' ? '升序排列，切换为降序' : '降序排列，切换为升序'}
+        onClick={() => onSortDirectionChange(sortDirection === 'asc' ? 'desc' : 'asc')}>
+        {sortDirection === 'asc' ? <ArrowUp size={14} aria-hidden="true" /> : <ArrowDown size={14} aria-hidden="true" />}
+      </Button>
       <LibraryDisplayControl />
       <Tooltip>
         <TooltipTrigger asChild>

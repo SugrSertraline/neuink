@@ -1,3 +1,4 @@
+import { reflowVisualSizeScale } from '@/shared/lib/readerPreferences';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogTrigger } from '@/components/ui/dialog';
@@ -19,6 +20,7 @@ export function SourceSnapshotImage({ alt, className, detailEnabled = false, fil
   const [open, setOpen] = useState(false);
   useEffect(() => setFailed(false), [src]);
   const image = <img key={attempt} alt={alt} src={src} loading="lazy" draggable={false}
+    style={typeof size === 'number' ? { maxHeight: `${20 * reflowVisualSizeScale(size)}rem`, maxWidth: `${Math.min(100, 100 * reflowVisualSizeScale(size))}%` } : undefined}
     onError={() => { setFailed(true); onError?.(); }}
     className={cn('mx-auto block h-auto max-w-full rounded-sm border object-contain',
       fillWidth || size === 'full' ? 'max-h-[min(40vh,24rem)] w-auto' : size === 'compact' ? 'max-h-48 max-w-[60%]' : size === 'large' ? 'max-h-[32rem]' : 'max-h-80', className)} />;

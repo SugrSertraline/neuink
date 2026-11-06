@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useReadingViewSession } from '../navigation/ReadingViewSession';
+import { useReadingViewSession } from '../navigation/readingViewContext';
 
 import { translateEntrySegment } from "@/shared/ipc/workspaceApi";
 import { useToast } from "@/shared/hooks/useToast";

@@ -1,7 +1,8 @@
+import { useReadingViewSession } from './readingViewContext';
 import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { SourceSegment } from '@/shared/types/domain';
 import { usePersistReadingSnapshot, useRetainedReadingSnapshot } from './ReadingStateRetention';
-import { useReadingViewSession, publishReadingView, publishReadingTarget, subscribeReadingView } from './ReadingViewSession';
+import { publishReadingView, publishReadingTarget, subscribeReadingView } from './ReadingViewSession';
 
 export type ReadingTarget = { pageIdx: number; segmentUid?: string; sentenceIndex?: number; rect?: readonly [number, number, number, number]; focus?: boolean };
 export type ReadingPosition = { pageIdx: number; segmentUid?: string; segmentOffset?: number; offset: number; left: number; zoom?: number; sourceKind?: 'pdf' | 'reflow' };

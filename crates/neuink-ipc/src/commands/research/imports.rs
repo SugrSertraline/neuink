@@ -145,6 +145,13 @@ fn persist(
     if let Some(id) = existing(w, p)? {
         return Ok((id, true));
     }
+    let hash = blake3::hash(bytes).to_hex().to_string();
+    if let Some(duplicate) = w.find_pdf_duplicate(&hash).map_err(|error| error.to_string())? {
+        if duplicate.in_trash {
+            return Err(format!("相同内容的 PDF 已在回收站：“{}”。请先恢复已有条目。", duplicate.title));
+        }
+        return Ok((duplicate.entry_id, true));
+    }
     let mut file = tempfile::Builder::new()
         .prefix("neuink-paper-")
         .suffix(".pdf")

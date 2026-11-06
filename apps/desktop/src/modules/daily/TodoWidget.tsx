@@ -6,12 +6,21 @@ import { Input } from '@/components/ui/input';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useDaily } from './DailyContext';
 import type { DailyWidget, DailyTodo } from '@/shared/types/daily';
+import { useFormRecovery } from '@/shared/hooks/useFormRecovery';
 
 export function TodoWidget({ widget, allLists = false }: { widget: DailyWidget; allLists?: boolean }) {
   const model = useDaily()!;
   const [text, setText] = useState(''), [date, setDate] = useState('');
   const [editing, setEditing] = useState<DailyTodo | null>(null);
   const draftId = useRef(crypto.randomUUID());
+  const recovery = useFormRecovery({ kind: 'todo', id: widget.id, ownerId: widget.id, targetId: widget.id, scope: `daily-widgets/${widget.id}`,
+    root: model.root, label: '每日看板 · 待办编辑', dirty: Boolean(text.trim() || editing), ready: !model.loading,
+    value: { text, date, editing, draftId: draftId.current }, restore: value => {
+      if (typeof value.text !== 'string' || typeof value.date !== 'string') throw new Error('无效草稿');
+      if (value.editing && !model.state?.todos.some(todo => todo.id === value.editing?.id && !todo.deleted)) throw new Error('待办已删除');
+      setText(value.text); setDate(value.date); setEditing(value.editing); draftId.current = value.draftId;
+    }, reveal: () => document.getElementById(`todo-draft-${widget.id}`)?.focus() });
+  const recoveryRef = useRef(recovery); recoveryRef.current = recovery;
   const todos = model.state?.todos.filter(todo => !todo.deleted && (allLists || todo.list_id === widget.list_id) && (widget.show_completed || !todo.completed) && (!widget.selected_date_only || todo.date === model.date)) ?? [];
   const visible = widget.expanded ? todos : todos.filter((todo, index) => index < 5 || todo.id === editing?.id);
   const deleted = model.state?.todos.filter(todo => todo.deleted && (allLists || todo.list_id === widget.list_id)) ?? [];
@@ -27,17 +36,19 @@ export function TodoWidget({ widget, allLists = false }: { widget: DailyWidget; 
   useEffect(() => {
     const scope = `daily-widgets/${widget.id}`, owner = `todos-${widget.id}`;
     const stop = registerSegmentEditorCloseHandler(scope, owner, {
+      ...recovery.handlers,
       isDirty: () => Boolean(pending.current.text.trim() || pending.current.editing),
-      discard: () => { setText(''); setDate(''); setEditing(null); },
+      discard: () => { recoveryRef.current.discard(); setText(''); setDate(''); setEditing(null); },
       save: async () => { const p = pending.current; if (p.editing && (!p.editing.text.trim() || !await p.update(p.editing))) return false; if (p.editing) { pending.current.editing = null; setEditing(null); } return p.submit(); }
     });
     return () => { stop(); setSegmentEditorDirty(scope, owner, false); };
   }, [widget.id]);
   useEffect(() => { setSegmentEditorDirty(`daily-widgets/${widget.id}`, `todos-${widget.id}`, Boolean(text.trim() || editing)); }, [widget.id, text, editing]);
   return <div className="space-y-2 text-xs">
+    {recovery.notice}
     <form onSubmit={event => { event.preventDefault(); void submit(); }} className="space-y-2">
       <div className="flex min-w-0 items-center gap-1">
-        <Input className="h-7 min-w-0 text-xs" aria-label="新待办" placeholder="添加待办…" value={text} maxLength={1000} disabled={model.busy} onChange={e => setText(e.target.value)} />
+        <Input id={`todo-draft-${widget.id}`} className="h-7 min-w-0 text-xs" aria-label="新待办" placeholder="添加待办…" value={text} maxLength={1000} disabled={model.busy || recovery.blocked} onChange={e => setText(e.target.value)} />
         <Button size="icon-sm" variant="plain" title="添加待办" aria-label="添加待办" type="submit" disabled={model.busy || !text.trim()}><Plus /></Button>
       </div>
       {text.trim() || date ? <div className="flex min-w-0 items-center gap-2 text-muted-foreground"><span className="shrink-0">计划日期</span><Input aria-label="待办计划日期（可选）" type="date" className="h-7 min-w-0 flex-1 text-xs" value={date} disabled={model.busy} onChange={e => setDate(e.target.value)} /></div> : null}

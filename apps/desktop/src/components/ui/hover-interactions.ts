@@ -35,8 +35,8 @@ export function useReaderSelectionPriority(active: boolean) {
   }, [active]);
 }
 
-export function hoverInteractionBlocked() {
-  return pointerDown || dragging || selectionOwners.size > 0 || hasReaderSelection() ||
+export function hoverInteractionBlocked(allowSelection = false) {
+  return pointerDown || dragging || (!allowSelection && (selectionOwners.size > 0 || hasReaderSelection())) ||
     (typeof document !== 'undefined' && document.visibilityState === 'hidden');
 }
 

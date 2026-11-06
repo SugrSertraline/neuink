@@ -9,12 +9,14 @@ export function resolveTagNoteSidebarContext(layout: WorkspaceSurfaceLayout) {
 }
 
 /** Keep the paper's sidebar available while its tag note is edited in the other pane. */
-export function resolveEntrySidebarContext(layout: WorkspaceSurfaceLayout) {
+export function resolveEntrySidebarContext(layout: WorkspaceSurfaceLayout, selection?: { entryId: string | null; tagId: string | null }) {
   const pane: WorkspacePaneId = layout.focusedPane === 'right' && layout.right ? 'right' : 'left';
   const focused = layout[pane]!;
   const otherPane = pane === 'left' ? 'right' : 'left';
   const other = layout[otherPane];
-  const surface: EntrySurface | null = 'entryId' in focused ? focused
+  const surface: EntrySurface | null = focused.kind === 'library' && selection?.entryId
+    ? { kind: 'entry-overview', entryId: selection.entryId, contextTagId: selection.tagId ?? undefined }
+    : 'entryId' in focused ? focused
     : focused.kind === 'owned-note' && focused.target.owner.kind === 'entry'
       ? { kind: 'note', entryId: focused.target.owner.entry_id, noteId: focused.target.note_id }
       : focused.kind === 'owned-note' && other && 'entryId' in other ? other : null;

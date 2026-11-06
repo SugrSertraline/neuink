@@ -18,6 +18,19 @@ function deferred<T>() {
 beforeEach(() => vi.resetModules());
 
 describe('window-local background task projection', () => {
+  it('projects pause and resume without creating another job or losing progress', async () => {
+    const registry = await import('./localBackgroundJobs');
+    await registry.runLocalBackgroundJob(options, async report => {
+      const id = registry.getLocalBackgroundJobs()[0].id;
+      const progress = { current: 2, total: 5, percent: 40 };
+      report(progress, { status: 'paused', message: '阅读详略已暂停' });
+      expect(registry.getLocalBackgroundJobs()[0]).toMatchObject({ id, status: 'paused', progress });
+      report(progress, { status: 'processing', message: '正在生成阅读详略' });
+      expect(registry.getLocalBackgroundJobs()).toHaveLength(1);
+      expect(registry.getLocalBackgroundJobs()[0]).toMatchObject({ id, status: 'processing', progress });
+    });
+    expect(registry.getLocalBackgroundJobs()[0].status).toBe('succeeded');
+  });
   it('reports measured batch progress and distinguishes cancellation from failure', async () => {
     const registry = await import('./localBackgroundJobs');
     await expect(registry.runLocalBackgroundJob(options, async report => {
@@ -26,6 +39,13 @@ describe('window-local background task projection', () => {
       throw new DOMException('Canceled', 'AbortError');
     })).rejects.toMatchObject({ name: 'AbortError' });
     expect(registry.getLocalBackgroundJobs()[0]).toMatchObject({ status: 'canceled', error: null, progress: { current: 1, total: 3 } });
+  });
+  it('records a declined duplicate PDF as cancellation', async () => {
+    const registry = await import('./localBackgroundJobs');
+    const error = new Error('已取消添加重复的 PDF');
+    error.name = 'PdfDuplicateCancelledError';
+    await expect(registry.runLocalBackgroundJob(options, async () => { throw error; })).rejects.toBe(error);
+    expect(registry.getLocalBackgroundJobs()[0]).toMatchObject({ status: 'canceled', error: null, message: '已取消添加重复的 PDF' });
   });
   it('tracks real lifetime with stable snapshots, scoped identity and no guessed percentage', async () => {
     const registry = await import('./localBackgroundJobs');

@@ -27,7 +27,7 @@ function refreshJob() {
 }
 function record(): api.ParagraphTranslation {
   return { segment_uid: 'p1', source_text: segment.text, source_hash: 'hash', job_id: 'job', model: 'model', view: 'sentences',
-    paragraph: { status: 'succeeded', value: '完整的段落译文。', error: null },
+    paragraph: { status: 'succeeded', value: '第一句。第二句。', error: null },
     sentences: { status: 'succeeded', value: [{ id: 1, source: 'First sentence.', translation: '第一句。' }, { id: 2, source: 'Second sentence.', translation: '第二句。' }], error: null } };
 }
 function Surface({ source = segment }: { source?: SourceSegment }) {
@@ -43,14 +43,14 @@ describe('paragraph translation', () => {
     let resolve!: (value: api.ParagraphTranslation) => void;
     vi.mocked(api.translateParagraph).mockImplementation(() => new Promise(done => { resolve = done; }));
     render(wrap());
-    const button = screen.getByRole('menuitem', { name: 'AI 翻译此段' });
+    const button = screen.getByRole('menuitem', { name: '翻译此段' });
     expect(button.hasAttribute('disabled')).toBe(true);
     await waitFor(() => expect(button.hasAttribute('disabled')).toBe(false));
     fireEvent.click(button); fireEvent.click(button);
     expect(api.translateParagraph).toHaveBeenCalledExactlyOnceWith('root', 'entry', 'p1', false);
     const running = record(); running.paragraph.status = 'running'; running.sentences.status = 'running';
     await act(async () => resolve(running));
-    expect(screen.getByRole('menuitem', { name: '正在 AI 翻译此段…' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('menuitem', { name: '正在翻译此段…' }).hasAttribute('disabled')).toBe(true);
   });
   it('renders sentence pairs inside one paragraph and switches cached views without translating', async () => {
     const saved = record();
@@ -62,23 +62,23 @@ describe('paragraph translation', () => {
     expect(container.querySelectorAll('[lang]')).toHaveLength(4);
     expect(container.querySelector('[lang="en"]')?.nextElementSibling?.textContent).toBe('第一句。');
     fireEvent.click(screen.getByRole('menuitemradio', { name: '整段对照' }));
-    await screen.findByText('完整的段落译文。');
+    await screen.findByText('第一句。第二句。');
     expect(api.setParagraphTranslationView).toHaveBeenCalledExactlyOnceWith('root', 'entry', 'p1', 'paragraph');
     expect(api.translateParagraph).not.toHaveBeenCalled();
     expect(screen.queryByText('第一句。')).toBeNull();
     expect(screen.getByRole('menuitemradio', { name: '整段对照' }).getAttribute('aria-checked')).toBe('true');
   });
-  it('shows each request status and offers failed-only retry without losing completed output', async () => {
-    const saved = record(); saved.view = 'paragraph'; saved.sentences = { status: 'failed', value: null, error: '模拟断网' };
+  it('ignores legacy sentence failures and retries only a failed segment', async () => {
+    const saved = record(); saved.view = 'paragraph';
+    saved.sentences = { status: 'failed', value: null, error: '旧逐句失败' };
+    saved.paragraph.status = 'failed'; saved.paragraph.error = '模拟断网';
     vi.mocked(api.readParagraphTranslations).mockResolvedValue({ p1: saved });
-    vi.mocked(api.translateParagraph).mockResolvedValue({ ...saved, sentences: { ...saved.sentences, status: 'running', error: null } });
-    render(wrap());
-    await screen.findByText('完整的段落译文。');
-    expect(screen.getByRole('status').textContent).toContain('逐句翻译失败：模拟断网');
-    expect(screen.getByRole('menuitem', { name: 'AI 增强逐句翻译' })).toBeTruthy();
+    vi.mocked(api.translateParagraph).mockResolvedValue({ ...saved, paragraph: { ...saved.paragraph, status: 'running', error: null } });
+    render(wrap()); await screen.findByText('第一句。第二句。');
+    expect(screen.getByRole('status').textContent).toContain('片段翻译失败：模拟断网');
+    expect(screen.queryByText(/旧逐句失败/)).toBeNull();
     fireEvent.click(screen.getByRole('menuitem', { name: '重试失败的翻译' }));
     await waitFor(() => expect(api.translateParagraph).toHaveBeenCalledExactlyOnceWith('root', 'entry', 'p1', true));
-    expect(screen.getByText('完整的段落译文。')).toBeTruthy();
   });
   it('switches to sentence view without silently starting AI work', async () => {
     const saved = record(); saved.view = 'paragraph'; saved.sentences = { status: 'failed', value: null, error: '未完成' };
@@ -86,7 +86,7 @@ describe('paragraph translation', () => {
     vi.mocked(api.readParagraphTranslations).mockResolvedValue({ p1: saved });
     vi.mocked(api.translateParagraph).mockResolvedValue(running);
     vi.mocked(api.setParagraphTranslationView).mockResolvedValue({ ...running, view: 'sentences' });
-    render(wrap()); await screen.findByText('完整的段落译文。');
+    render(wrap()); await screen.findByText('第一句。第二句。');
     fireEvent.click(screen.getByRole('menuitemradio', { name: '逐句对照' }));
     await waitFor(() => expect(api.setParagraphTranslationView).toHaveBeenCalledExactlyOnceWith('root', 'entry', 'p1', 'sentences'));
     expect(api.translateParagraph).not.toHaveBeenCalled();
@@ -97,7 +97,7 @@ describe('paragraph translation', () => {
     await screen.findByText('第一句。');
     rerender(wrap('entry', { ...segment, text: 'Changed.' }));
     expect(screen.queryByText('第一句。')).toBeNull();
-    expect(screen.getByRole('menuitem', { name: 'AI 翻译此段' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: '翻译此段' })).toBeTruthy();
     rerender(wrap('entry', { ...segment, segment_type: 'heading' }));
     expect(screen.queryByRole('menuitem')).toBeNull();
   });
@@ -141,7 +141,7 @@ describe('paragraph translation', () => {
   it('shows partial paragraph text, ignores stale events and clears a failed attempt preview', async () => {
     const saved = record(); saved.view = 'paragraph'; saved.paragraph.status = 'running';
     vi.mocked(api.readParagraphTranslations).mockResolvedValue({ p1: saved });
-    render(wrap()); await screen.findByText('完整的段落译文。');
+    render(wrap()); await screen.findByText('第一句。第二句。');
     sendProgress();
     expect(screen.getByText('正在出现的译文')).toBeTruthy();
     expect(screen.getByText(segment.text)).toBeTruthy();
@@ -150,37 +150,32 @@ describe('paragraph translation', () => {
     expect(screen.queryByText('旧任务错误内容')).toBeNull(); expect(screen.queryByText('过时顺序')).toBeNull();
     sendProgress({ sequence: 2, paragraph: null, phase: 'queued' });
     expect(screen.queryByText('正在出现的译文')).toBeNull();
-    expect(screen.getByText('完整的段落译文。')).toBeTruthy();
-    expect(screen.getByRole('status').textContent).toContain('整段排队中');
+    expect(screen.getByText('第一句。第二句。')).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toContain('片段排队中');
     sendProgress({ sequence: 3, phase: 'rate_limited', paragraph: null, retry_after_ms: 2000 });
     expect(screen.getByRole('status').textContent).toContain('限流等待');
     sendProgress({ sequence: 4, paragraph: '未校验的临时内容' });
     vi.mocked(api.readParagraphTranslations).mockResolvedValue({ p1: { ...saved, paragraph: { ...saved.paragraph, status: 'failed', error: '模拟失败' } } });
     refreshJob();
     await waitFor(() => expect(screen.queryByText('未校验的临时内容')).toBeNull());
-    expect(screen.getByText('完整的段落译文。')).toBeTruthy();
+    expect(screen.getByText('第一句。第二句。')).toBeTruthy();
   });
-  it('shows complete pairs progressively while retaining untranslated originals and cached view switching', async () => {
+  it('ignores legacy sentence streams and derives both views from the same saved segment', async () => {
     const saved = record(); saved.sentences = { status: 'running', value: null, error: null };
     vi.mocked(api.readParagraphTranslations).mockResolvedValue({ p1: saved });
     vi.mocked(api.setParagraphTranslationView).mockResolvedValue({ ...saved, view: 'paragraph' });
-    const { container } = render(wrap()); await screen.findByRole('menuitemradio', { name: '整段对照' });
-    sendProgress({ part: 'sentences', paragraph: null, sentences: [{ id: 1, source: 'First sentence.', translation: '第一句预览。' }] });
-    expect(screen.getByText('第一句预览。')).toBeTruthy();
-    expect(screen.getByText('Second sentence.')).toBeTruthy();
-    expect(container.querySelectorAll('[data-paragraph-translation]')).toHaveLength(1);
+    render(wrap()); await screen.findByText('第一句。');
+    sendProgress({ part: 'sentences', paragraph: null, sentences: [{ id: 1, source: 'First sentence.', translation: '过时的独立译文。' }] });
+    expect(screen.queryByText('过时的独立译文。')).toBeNull();
     fireEvent.click(screen.getByRole('menuitemradio', { name: '整段对照' }));
-    await screen.findByText('完整的段落译文。');
+    await screen.findByText('第一句。第二句。');
     expect(api.translateParagraph).not.toHaveBeenCalled();
-    vi.mocked(api.setParagraphTranslationView).mockResolvedValue(saved);
-    fireEvent.click(screen.getByRole('menuitemradio', { name: '逐句对照' }));
-    await screen.findByText('第一句预览。');
   });
   it('displays saved timings after completion without requiring a live stream', async () => {
     const saved = record(); saved.paragraph.timing = { queued_ms: 1000, rate_limit_ms: 2000, generation_ms: 3000, total_ms: 6000 };
     vi.mocked(api.readParagraphTranslations).mockResolvedValue({ p1: saved });
     render(wrap()); await screen.findByText('第一句。');
-    expect(screen.getByRole('status').textContent).toContain('整段已完成 · 6.0 秒');
+    expect(screen.getByRole('status').textContent).toContain('片段已完成 · 6.0 秒');
     expect(screen.getByTitle('排队 1.0 秒，限流等待 2.0 秒，生成与传输 3.0 秒')).toBeTruthy();
   });
 });

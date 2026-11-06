@@ -84,3 +84,10 @@ describe('OCR matrix rendering', () => {
     expect(container.querySelector('.katex-error')).not.toBeNull();
   });
 });
+
+it('renders the reported split graph equation as one complete inline formula', () => {
+  const { container } = render(<SourceSnapshotPreview markdown={String.raw`$\mathcal { G } =$$( \nu , \mathcal { E } )`} segmentType="paragraph" />);
+  expect(container.querySelector('.katex-error')).toBeNull();
+  expect(container.querySelectorAll('.katex')).toHaveLength(1);
+  expect(container.querySelector('annotation')?.textContent).toContain(String.raw`\mathcal { E }`);
+});

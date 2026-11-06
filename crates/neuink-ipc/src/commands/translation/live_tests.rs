@@ -58,7 +58,7 @@ async fn live_selected_model_single_and_batch_translation() {
                 source_language: "en".into(),
                 target_language: "zh-CN".into(),
             },
-            profile.clone(),
+            profile.clone().into(),
         )
         .await,
     );

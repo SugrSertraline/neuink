@@ -15,16 +15,17 @@ export type WorkspaceSurface = { viewId?: string } & (
   | { kind: 'daily-dashboard' }
   | { kind: 'ideation' }
   | { kind: 'empty' }
+  | { kind: 'new-tab'; id: string }
   | { kind: 'relations' }
   | { kind: 'settings'; target?: SettingsNavigationTarget }
   | { kind: 'create-entry' }
-  | { kind: 'external-import' }
+  | { kind: 'external-import'; source?: 'zotero' | 'mineru'; navigationId?: string }
   | { kind: 'mineru-client-guide' }
   | { kind: 'tag-editor' }
   | { kind: 'tag-reading'; tagId: string; label?: string }
   | { kind: 'tag-details'; tagId: string; label?: string; view?: 'overview' | 'papers' | 'notes' }
   | { kind: 'owned-note'; target: NoteTarget; label?: string }
-  | { kind: 'entry-overview'; entryId: string; contextTagId?: string }
+  | { kind: 'entry-overview'; entryId: string; contextTagId?: string; editRequestId?: string }
   | { kind: 'pdf'; entryId: string; contextTagId?: string }
   | { kind: 'reflow'; entryId: string; contextTagId?: string }
   | { kind: 'note'; entryId: string; noteId: string }
@@ -62,6 +63,7 @@ export type WorkspaceSurfaceAction =
   | { type: 'reset' }
   | { type: 'focus'; pane: WorkspacePaneId }
   | { type: 'open'; pane?: WorkspacePaneId; surface: WorkspaceSurface }
+  | { type: 'replaceNewTab'; key: string; surface: WorkspaceSurface }
   | { type: 'close'; pane: WorkspacePaneId; key: string }
   | { type: 'closeOthers'; pane: WorkspacePaneId; key: string }
   | { type: 'closePane'; pane: WorkspacePaneId }
@@ -127,6 +129,26 @@ export function workspaceSurfaceReducer(
         return { ...state, focusedPane: 'right', right: action.surface, rightTabs: nextTabs };
       }
       return { ...state, focusedPane: 'left', left: action.surface, leftTabs: nextTabs };
+    }
+    case 'replaceNewTab': {
+      const pane = findSurfacePane(state, action.key);
+      if (!pane) return state;
+      const tabs = pane === 'left' ? state.leftTabs : state.rightTabs;
+      const index = tabs.findIndex(tab => surfaceKey(tab) === action.key);
+      if (index < 0 || tabs[index].kind !== 'new-tab' || action.surface.kind === 'empty' || action.surface.kind === 'new-tab') return state;
+      const targetKey = surfaceKey(action.surface);
+      if ([...state.leftTabs, ...state.rightTabs].some(tab => surfaceKey(tab) === targetKey)) {
+        const closed = workspaceSurfaceReducer(state, { type: 'close', pane, key: action.key });
+        return workspaceSurfaceReducer(closed, { type: 'open', surface: action.surface });
+      }
+      const nextTabs = [...tabs];
+      nextTabs[index] = action.surface;
+      const pinnedTabKeys = state.pinnedTabKeys?.includes(action.key)
+        ? [...(state.pinnedTabKeys ?? []).filter(key => key !== action.key), targetKey]
+        : state.pinnedTabKeys;
+      return pane === 'left'
+        ? { ...state, focusedPane: 'left', left: action.surface, leftTabs: nextTabs, pinnedTabKeys }
+        : { ...state, focusedPane: 'right', right: action.surface, rightTabs: nextTabs, pinnedTabKeys };
     }
     case 'close': {
       // A confirmed batch can collapse a pane before its remaining targets close.
@@ -332,6 +354,7 @@ export function canDuplicateSurface(surface: WorkspaceSurface) {
 export function surfaceContentKey(surface: WorkspaceSurface) {
   switch (surface.kind) {
     case 'browser': return `browser:${surface.id}`;
+    case 'new-tab': return `new-tab:${surface.id}`;
     case 'assistant-reply': return `assistant-reply:${surface.message.message_id}`;
     case 'note-review': return `note-review:${surface.proposalId}`;
     case 'tag-reading': return `tag-reading:${surface.tagId}`;
@@ -386,6 +409,7 @@ export function workspaceSurfaceLabel(
     case 'daily-dashboard': return '每日看板';
     case 'ideation': return '研究构思';
     case 'empty': return '工作区';
+    case 'new-tab': return '新建标签';
     case 'browser': return surface.title || '新网页';
     case 'assistant-reply': return '完整回复';
     case 'note-review': return `${surface.label} · 修改审阅`;

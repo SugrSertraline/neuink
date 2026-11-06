@@ -444,6 +444,8 @@ function MineruPdfReaderBody({
     selectSegment,
     updateNoteText,
   } = useSegmentNoteDraft({
+    workspaceRoot,
+    onReveal: () => { setNoteMode('segment'); setSegmentOverlayOpen(true); },
     draftScopeKey: editorScopeKey,
     entryId: entry.id,
     notesBySegmentUid,
@@ -1297,7 +1299,7 @@ function MineruPdfReaderBody({
             onTranslateTextSelection={translateSelectedText}
             onToggleSegment={guardedToggleSegment}
             sentenceLinkEnabled={sentenceLinkEnabled}
-            sentenceHoverEnabled={readerPreferences.pdfSentenceHoverEnabled && !readingSession?.resizing}
+            sentenceHoverEnabled={readerPreferences.hoverPreviewEnabled && readerPreferences.pdfSentenceHoverEnabled && ((readerPreferences.hoverPreviewShowOriginal && readerPreferences.pdfSentenceHoverShowOriginal) || (readerPreferences.hoverPreviewShowTranslation && readerPreferences.pdfSentenceHoverShowTranslation)) && !readingSession?.resizing}
             onVisiblePageIndexesChange={setVisiblePageIndexes}
             altClickOpensNote={
               readerPreferences.segmentNoteOpenGesture === 'modifier' && !syncOnlyOnSegmentClick

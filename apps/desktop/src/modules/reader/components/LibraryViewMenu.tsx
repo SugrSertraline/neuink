@@ -19,7 +19,7 @@ export function LibraryViewMenu({ view, onSelect }: { view: LibraryView; onSelec
     </DropdownMenuTrigger>
     <DropdownMenuContent align="start" viewportAligned>
       <DropdownMenuRadioGroup value={view} onValueChange={value => onSelect(value as LibraryView)}>
-        {item('all')}{item('recent')}
+        {item('all')}{item('recent')}{item('hidden')}
         <DropdownMenuSeparator />
         <DropdownMenuLabel>解析状态</DropdownMenuLabel>
         {parseViews.map(item)}

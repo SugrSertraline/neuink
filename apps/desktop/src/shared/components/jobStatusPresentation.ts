@@ -27,7 +27,7 @@ export function jobTitle(job: Job) {
   if (job.id.startsWith('single-segment-translation:')) return '片段翻译';
   const labels: Record<Job['kind'], string> = {
     index_build: '索引构建', llm: '模型任务', parser: 'PDF 解析', pdf_import: 'PDF 导入',
-    translation: '全文翻译', paragraph_translation: '段落翻译', vectorize: '向量构建',
+    translation: '全文翻译', paragraph_translation: '段落翻译', vectorize: '向量构建', folding: '阅读详略',
   };
   return labels[job.kind] ?? '后台任务';
 }

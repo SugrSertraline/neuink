@@ -68,3 +68,14 @@ describe('snapshot math boundaries', () => {
       .toBe(String.raw`$\text{库存}\geq0$表示下界`);
   });
 });
+
+it('repairs a split graph definition without consuming following prose', () => {
+  const broken = String.raw`$\mathcal { G } =$$( \nu , \mathcal { E } )`;
+  const fixed = String.raw`$\mathcal { G } = ( \nu , \mathcal { E } )$`;
+  expect(normalizeMathMarkdown(broken)).toBe(fixed);
+  expect(normalizeMathMarkdown(broken + '$')).toBe(fixed);
+  expect(normalizeMathMarkdown('图为 ' + broken + '，表示关系。')).toBe('图为 ' + fixed + '，表示关系。');
+  expect(normalizeMathMarkdown('`' + broken + '`')).toBe('`' + broken + '`');
+  expect(normalizeMathMarkdown(broken, 'code')).toBe(broken);
+  expect(normalizeMathMarkdown(String.raw`$x$$(y)$`)).toBe(String.raw`$x$$(y)$`);
+});

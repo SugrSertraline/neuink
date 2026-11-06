@@ -7,9 +7,11 @@ import { SettingsGroup, SettingsPage } from './SettingsPrimitives';
 import { TaskModelSetting } from './TaskModelSetting';
 import { ModelProfileEditor } from './ModelProfileEditor';
 import type { SettingsPanelLayoutProps } from './SettingsPanelLayout';
+import { useModelProfileRecovery } from '../useModelProfileRecovery';
 
 export function ModelSettingsSection({ props }: { props: SettingsPanelLayoutProps }) {
-  const [profileEditorOpen, setProfileEditorOpen] = useState(false);
+  const modelEditor = useModelProfileRecovery(props);
+  const setProfileEditorOpen = modelEditor.setOpen;
   const [deleteConfirmProfile, setDeleteConfirmProfile] =
     useState<SettingsPanelLayoutProps['editingProfile']>(null);
   const { busy, settings, profileTestStates, formatContextLength, onNewProfile,
@@ -67,7 +69,9 @@ export function ModelSettingsSection({ props }: { props: SettingsPanelLayoutProp
                 </div>
 
                 </SettingsGroup>
-                <ModelProfileEditor props={props} open={profileEditorOpen} onOpenChange={setProfileEditorOpen} />
+                <ModelProfileEditor props={props} open={modelEditor.open} onOpenChange={modelEditor.onOpenChange}
+                  recovery={modelEditor.recovery} onSaved={modelEditor.saved} onDiscard={modelEditor.saved} />
+                {modelEditor.dialog}
     
                 <Dialog open={Boolean(deleteConfirmProfile)} onOpenChange={(open) => {
                   if (!open) {

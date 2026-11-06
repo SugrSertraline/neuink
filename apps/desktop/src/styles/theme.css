@@ -1,6 +1,12 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  /* Control surfaces derive from the active theme instead of blending into the page. */
+  --control-surface: color-mix(in srgb, var(--card), var(--primary) 12%);
+  --control-border: color-mix(in srgb, var(--card), var(--primary) 32%);
+  --control-hover: color-mix(in srgb, var(--card), var(--primary) 20%);
+  --control-active: color-mix(in srgb, var(--card), var(--primary) 28%);
+
   --guide-backdrop: rgb(0 0 0 / 0.72);
   --reader-desk: var(--muted);
   --reader-desk-weave: transparent;

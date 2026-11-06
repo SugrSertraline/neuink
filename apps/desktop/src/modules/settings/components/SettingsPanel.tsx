@@ -266,11 +266,13 @@ export function SettingsPanel({
   }, [parserApiKey]);
 
   const parserEndpointSave = useSettingsAutosave({
+    recovery: { id: 'parser-endpoint', label: 'MinerU 解析地址', targetId: 'parser-service', restore: setCustomParserEndpoint },
     closeScope: 'settings',
     value: customParserEndpoint, savedValue: savedParserEndpoint, equal: Object.is, delay: 500,
     save: onParserEndpointChange, onSaved: setSavedParserEndpoint
   });
   const parserKeySave = useSettingsAutosave({
+    recovery: { id: 'parser-key', label: 'MinerU 解析密钥', targetId: 'parser-service', secret: true, restore: setCustomParserApiKey },
     closeScope: 'settings',
     value: customParserApiKey, savedValue: savedParserApiKey, equal: Object.is, delay: 500,
     save: onParserApiKeyChange, onSaved: setSavedParserApiKey
@@ -291,11 +293,13 @@ export function SettingsPanel({
 
   const runtimeRoot = workspaceRoot ?? workspaceSettings?.root ?? '';
   const readerSave = useSettingsAutosave({
+    recovery: { id: 'reader-preferences', label: '阅读偏好', targetId: 'reader-preview', restore: setDraftReaderPreferences },
     closeScope: 'settings', delay: 0,
     value: draftReaderPreferences, savedValue: savedReaderPreferences, equal: equalReaderPreferences,
     save: onReaderPreferencesChange, onSaved: setSavedReaderPreferences
   });
   const runtimeSave = useSettingsAutosave({
+    recovery: { id: 'agent-runtime', label: '助手与工具配置', targetId: 'agent-main', restore: setDraftAgentRuntimeSettings },
     closeScope: 'settings',
     value: draftAgentRuntimeSettings, savedValue: savedAgentRuntimeSettings, equal: equalAgentRuntimeSettings,
     enabled: ADVANCED_ASSISTANT_SETTINGS_VISIBLE && runtimeReady && Boolean(runtimeRoot), scope: runtimeRoot,
@@ -303,6 +307,7 @@ export function SettingsPanel({
     onSaved: setSavedAgentRuntimeSettings
   });
   const translationSave = useSettingsAutosave({
+    recovery: { id: 'translation-automation', label: '自动翻译设置', targetId: 'translation-auto', restore: setTranslationAutomation },
     closeScope: 'settings',
     value: translationAutomation, savedValue: savedTranslationAutomation, equal: equalJson, enabled: workspaceReady,
     save: value => updateTranslationAutomationSettings(value.auto_translate_pdf, value.segment_types),
@@ -311,6 +316,7 @@ export function SettingsPanel({
   const taskAssignments = useMemo(() => ({ assistant: draftAssistantProfileId, translation: draftTranslationProfileId }), [draftAssistantProfileId, draftTranslationProfileId]);
   const savedTaskAssignments = useMemo(() => ({ assistant: settings.assistant_profile_id, translation: settings.translation_profile_id }), [settings.assistant_profile_id, settings.translation_profile_id]);
   const taskSave = useSettingsAutosave({
+    recovery: { id: 'task-models', label: '任务模型分配', targetId: 'models-assistant', restore: value => { setDraftAssistantProfileId(value.assistant); setDraftTranslationProfileId(value.translation); } },
     closeScope: 'settings',
     value: taskAssignments, savedValue: savedTaskAssignments, equal: equalJson, enabled: modelsReady && !busy,
     save: async value => {
@@ -594,6 +600,8 @@ export function SettingsPanel({
   return (
     <>
       <SettingsPanelLayout
+        recoveryBlocked={[parserEndpointSave, parserKeySave, readerSave, runtimeSave, translationSave, taskSave].some(item => item.recovery.blocked)}
+        recoveryNotices={<>{parserEndpointSave.notice}{parserKeySave.notice}{readerSave.notice}{runtimeSave.notice}{translationSave.notice}{taskSave.notice}</>}
       activeSettingsTab={activeSettingsTab}
       navigationTarget={navigationTarget}
       modelsUnavailable={!modelsReady}

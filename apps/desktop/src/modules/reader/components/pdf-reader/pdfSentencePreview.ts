@@ -3,7 +3,7 @@ import { alignSavedTranslation } from '../../translation/sentenceAlignment';
 import type { PdfSentenceGeometry } from './pdfSentenceHover';
 import type { SegmentRegionItem } from './types';
 
-export type PdfSentenceHover = { regionId: string; sentence: PdfSentenceGeometry | null };
+export type PdfSentenceHover = { regionId: string; sentence: PdfSentenceGeometry | null; point?: { x: number; y: number } };
 
 /** A missing sentence match must not discard the saved paragraph translation. */
 export function pdfSentencePreview(hovered: PdfSentenceHover, region: SegmentRegionItem, translated: string | null | undefined,
@@ -17,7 +17,7 @@ export function pdfSentencePreview(hovered: PdfSentenceHover, region: SegmentReg
     ?.translation.trim() || null;
   const rects = sentence?.rects.length ? sentence.rects : [region.bbox];
   const first = rects[0];
-  const anchor: PreviewAnchor = {
+  const anchor: PreviewAnchor = !sentence && hovered.point ? { x: hovered.point.x, right: hovered.point.x + 1, top: hovered.point.y, bottom: hovered.point.y + 1 } : {
     x: pageRect.left + first[0] / 1000 * pageRect.width,
     right: pageRect.left + Math.max(...rects.map(rect => rect[2])) / 1000 * pageRect.width,
     top: pageRect.top + first[1] / 1000 * pageRect.height,
@@ -25,6 +25,7 @@ export function pdfSentencePreview(hovered: PdfSentenceHover, region: SegmentReg
   };
   return {
     regionId: region.id, anchor, source: sentence?.source ?? '', translation, paragraphTranslation,
+    paragraphSource: region.sourceSegment.markdown ?? region.sourceSegment.text,
     paragraphPosition: {
       x: pageRect.left + region.bbox[0] / 1000 * pageRect.width,
       segmentRight: pageRect.left + region.bbox[2] / 1000 * pageRect.width,

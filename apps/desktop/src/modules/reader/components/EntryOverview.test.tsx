@@ -49,7 +49,7 @@ describe('EntryOverview', () => {
     );
 
     expect(getAllByText(longTitle)).toHaveLength(1);
-    expect(getAllByText(longTitle).some((element) => element.tagName === 'H1')).toBe(true);
+    expect(getAllByText(longTitle).some((element) => element.closest('h1'))).toBeTruthy();
     expect(
       getByText((_, element) =>
         element?.tagName === 'P' &&

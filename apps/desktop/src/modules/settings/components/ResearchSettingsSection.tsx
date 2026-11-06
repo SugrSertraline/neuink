@@ -5,6 +5,7 @@ import { Label } from '@/components/ui/label';
 import { getResearchSettings, saveResearchSettings, type ResearchSettings } from '@/shared/ipc/researchApi';
 import { registerSegmentEditorCloseHandler, setSegmentEditorDirty } from '@/modules/reader/components/segmentEditorDirtyRegistry';
 import { SettingsServiceSection, SettingsGroup, SettingSwitch } from './SettingsPrimitives';
+import { useFormRecovery } from '@/shared/hooks/useFormRecovery';
 
 /** Settings owns draft/status; settings-viewport owns scrolling. No new drag or key interception. */
 export function ResearchSettingsSection({ active, children }: { active: boolean; children?: ReactNode }) {
@@ -18,16 +19,21 @@ export function ResearchSettingsSection({ active, children }: { active: boolean;
   const pending = useRef(false);
   const latest = useRef({ key, busy });
   latest.current = { key, busy };
+  const recovery = useFormRecovery({ id: 'research-key', label: 'Tavily 检索密钥', targetId: 'tools-research', value: { key },
+    secretFields: ['key'], dirty: Boolean(key), ready: Boolean(settings), restore: value => setKey(value.key),
+    reveal: () => document.getElementById(`${owner}-key`)?.focus() });
+  const recoveryRef = useRef(recovery); recoveryRef.current = recovery;
   useEffect(() => {
     mounted.current = true;
     const unregister = registerSegmentEditorCloseHandler('settings', owner, {
+      ...recovery.handlers, settingsTargetId: 'tools-research', isBusy: () => pending.current,
       isDirty: () => Boolean(latest.current.key || pending.current),
       save: async () => {
         if (!latest.current.key && !pending.current) return true;
         setError('请先保存或放弃检索密钥，再关闭设置。');
         return false;
       },
-      discard: () => { setKey(''); latest.current.key = ''; }
+      discard: () => { recoveryRef.current.discard(); setKey(''); latest.current.key = ''; }
     });
     return () => { mounted.current = false; unregister(); setSegmentEditorDirty('settings', owner, false); };
   }, [owner]);
@@ -53,6 +59,7 @@ export function ResearchSettingsSection({ active, children }: { active: boolean;
     finally { pending.current = false; if (mounted.current) setBusy(false); }
   };
   return <><SettingsGroup id="tools-research" title="基础检索" description="免费检索，无需密钥。">
+    {recovery.notice}
     {!settings ? <div className="grid gap-2 text-sm">
       {busy ? <p role="status">正在读取检索设置…</p> : <Button variant="outline" size="sm" onClick={() => setAttempt(n => n + 1)}>重新读取检索设置</Button>}
     </div> : <div>
@@ -76,7 +83,7 @@ export function ResearchSettingsSection({ active, children }: { active: boolean;
           onCheckedChange={value => void save({ use_tavily: value })} />
         <Label htmlFor={`${owner}-key`}>Tavily API Key{settings.has_web_key ? '（已配置）' : '（未配置）'}</Label>
         <Input id={`${owner}-key`} type="password" autoComplete="off" spellCheck={false} value={key} maxLength={4096}
-          disabled={busy} placeholder={settings.has_web_key ? '输入新密钥可替换现有凭据' : '输入检索服务密钥'} onChange={event => setKey(event.target.value)} />
+          disabled={busy || recovery.blocked} placeholder={settings.has_web_key ? '输入新密钥可替换现有凭据' : '输入检索服务密钥'} onChange={event => setKey(event.target.value)} />
         {key && <div className="flex flex-wrap justify-end gap-2">
           <span role="status" className="mr-auto text-xs text-muted-foreground">{busy ? '保存中…' : '未保存'}</span>
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => setKey('')}>放弃输入</Button>

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { clampReadingDays, persistReadingChartPreferences, readReadingChartPreferences, type ReadingChartMode } from './readingTrend';
 
-/** Only plot surfaces own wheel zoom; the surrounding dashboard retains normal scrolling. */
+/** Ctrl+wheel zoom belongs to the primary plot; ordinary wheel scrolling belongs to the dashboard. */
 export function useReadingTrendZoom(mode: ReadingChartMode) {
   const [daysByMode, setDaysByMode] = useState(() => readReadingChartPreferences().daysByMode);
   const days = daysByMode[mode];
@@ -23,8 +23,12 @@ export function useReadingTrendZoom(mode: ReadingChartMode) {
     if (!root) return;
     let accumulated = 0, previous = 0;
     const wheel = (event: WheelEvent) => {
-      if (!(event.target instanceof Element) || !event.target.closest('[data-reading-zoom]') || event.ctrlKey || event.metaKey || Math.abs(event.deltaX) > Math.abs(event.deltaY) || !event.deltaY) return;
-      // Keep the graph stationary even at the range limits; headings/gutters still scroll the page.
+      if (!(event.target instanceof Element) || !event.target.closest('[data-reading-zoom]')) return;
+      if (!event.ctrlKey || event.metaKey || Math.abs(event.deltaX) > Math.abs(event.deltaY) || !event.deltaY) {
+        accumulated = 0; previous = 0;
+        return;
+      }
+      // Consume Ctrl+wheel even at range limits so the WebView does not zoom the whole app.
       event.preventDefault(); event.stopPropagation();
       const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 128 : 1);
       const now = performance.now();

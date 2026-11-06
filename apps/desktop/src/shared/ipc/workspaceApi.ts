@@ -238,6 +238,14 @@ export async function listEntries(root: string): Promise<EntryMeta[]> {
   });
 }
 
+export type ZoteroOrganization = { source_id: string; tags: string[]; collections: string[] };
+export type LocalCopyOrigin = { source_entry_id: string; source_title: string; source_kinds: string[]; copied_at: string; source_revision: string };
+export type EntrySourceInfo = { kinds: ('zotero' | 'mineru')[]; source_pdf_hash?: string | null; hidden?: boolean; zotero_hidden: boolean; zotero_note_ids?: string[]; zotero_organization?: ZoteroOrganization[]; local_copy_ids?: string[]; copied_from?: LocalCopyOrigin | null };
+export const listEntrySources = (root: string) => invoke<Record<string, EntrySourceInfo>>('list_entry_sources', { request: { root } });
+export const setEntrySourceHidden = (root: string, entry_id: string, hidden: boolean) => invoke<void>('set_entry_source_hidden', { request: { root, entry_id, hidden } });
+export type LocalCopyResult = { entry_id: string; created: boolean; used_cached_source?: boolean };
+export const copySourceToLocal = (root: string, entry_id: string, force_new = false) => invoke<LocalCopyResult>('copy_source_to_local', { request: { root, entry_id, force_new } });
+
 export async function listTrashedEntries(root: string): Promise<EntryMeta[]> {
   return invoke<EntryMeta[]>('list_trashed_entries', {
     request: {
@@ -576,11 +584,19 @@ export type TitleConsistency = {
   pdf_file_name: string;
   evidence: string[];
   source_revision: string;
+  confirmed: boolean;
 };
 
 export function inspectTitleConsistency(root: string, entryId: EntryId) {
   return invoke<TitleConsistency | null>('inspect_title_consistency', {
     request: { root, entry_id: entryId }
+  });
+}
+
+export function confirmTitleConsistency(root: string, entryId: EntryId, inspection: TitleConsistency) {
+  return invoke<void>('confirm_title_consistency', {
+    request: { root, entry_id: entryId, expected_title: inspection.entry_title,
+      expected_pdf_file_name: inspection.pdf_file_name, expected_source_revision: inspection.source_revision }
   });
 }
 
@@ -760,6 +776,7 @@ export type EntryTranslationResponse = {
 };
 
 export type JobKind =
+  | 'folding'
   | 'paragraph_translation'
   | 'pdf_import'
   | 'parser'
@@ -828,16 +845,24 @@ export async function queuePdfParse(
   root: string,
   entryId: EntryId,
   pdfPath: string,
-  enqueue = true
+  enqueue = true,
+  confirmedDuplicateHash?: string
 ): Promise<EntryMeta> {
   return invoke<EntryMeta>('queue_pdf_parse', {
     request: {
       root,
       entry_id: entryId,
       pdf_path: pdfPath,
-      enqueue
+      enqueue,
+      confirmed_duplicate_hash: confirmedDuplicateHash ?? null
     }
   });
+}
+
+export type PdfDuplicate = { entryId: string; title: string; fileName: string; contentHash: string; inTrash: boolean };
+
+export async function checkPdfDuplicate(root: string, path: string, source: 'pdf' | 'mineru'): Promise<PdfDuplicate | null> {
+  return invoke<PdfDuplicate | null>('check_pdf_duplicate', { request: { root, path, source } });
 }
 
 export async function importMineruClientResult(
@@ -851,10 +876,10 @@ export async function importMineruClientResult(
 }
 
 export async function createFromMineruClientResult(
-  root: string, title: string, fields: Record<string, string>, tags: string[], zipPath: string
+  root: string, title: string, fields: Record<string, string>, tags: string[], zipPath: string, confirmedDuplicateHash?: string
 ): Promise<ImportAndParsePdfResponse> {
   return invoke<ImportAndParsePdfResponse>('create_from_mineru_client_result', {
-    request: { root, title, fields, tags, zip_path: zipPath }
+    request: { root, title, fields, tags, zip_path: zipPath, confirmed_duplicate_hash: confirmedDuplicateHash ?? null }
   });
 }
 

@@ -2,18 +2,18 @@ import { Button } from '@/components/ui/button';
 import { SettingSelect } from './SettingsPrimitives';
 import type { SettingsPanelLayoutProps } from './SettingsPanelLayout';
 
-export function TaskModelSetting({ props, task }: { props: SettingsPanelLayoutProps; task: 'assistant' | 'translation' }) {
+export function TaskModelSetting({ props, task, showManageLink = true }: { props: SettingsPanelLayoutProps; task: 'assistant' | 'translation'; showManageLink?: boolean }) {
   const translation = task === 'translation';
   const selected = translation ? props.draftTranslationProfileId : props.draftAssistantProfileId;
   const title = translation ? '统一默认翻译模型' : '助手对话模型';
   return <div className="settings-form" data-setting-id={translation ? 'translation-model' : 'models-assistant'} tabIndex={-1}>
-    <SettingSelect label={title} description={translation ? '选择后自动保存。各类翻译可在下方单独指定模型；修改默认模型不改变独立指定的来源。' : '用于对话、资料问答和笔记整理。选择后自动保存。'}
+    <SettingSelect label={title} description={translation ? '选择后自动保存。仅供选择“默认翻译模型”的场景使用；修改此处不影响专用服务或独立指定的模型。' : '用于对话、资料问答和笔记整理。选择后自动保存。'}
       value={selected ?? ''} disabled={props.busy || props.settings.profiles.length === 0 || props.modelsUnavailable}
       placeholder={props.modelsUnavailable ? '配置尚未就绪' : '尚未配置模型'}
       options={props.settings.profiles.map(profile => ({ value: profile.id, label: `${profile.name} · ${profile.model}` }))}
       onValueChange={value => props.onSetTaskProfile(task, value)} />
     {props.modelsUnavailable ? <p className="text-xs text-muted-foreground">模型配置尚未就绪，请查看下方加载状态。</p>
       : !selected && <p className="text-xs text-warning">{translation ? '尚未指定统一默认模型；各类独立指定的模型和专用服务仍可使用。' : '尚未指定模型，此功能暂不可用。'}</p>}
-    {translation && <Button size="xs" variant="ghost" onClick={() => props.onSetActiveSettingsTab('models')}>管理模型连接</Button>}
+    {translation && showManageLink && <Button size="xs" variant="ghost" onClick={() => props.onSetActiveSettingsTab('models')}>管理模型连接</Button>}
   </div>;
 }

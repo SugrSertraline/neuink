@@ -8,7 +8,21 @@ use tauri::{AppHandle, Runtime};
 pub fn get_translation_routing<R: Runtime>(
     app: AppHandle<R>,
 ) -> Result<TranslationRoutingSettings, String> {
-    Ok(read_settings(&app)?.translation_routing)
+    let settings = read_settings(&app)?;
+    let mut routing = settings.translation_routing.clone();
+    if matches!(routing.default_source, TranslationSource::DefaultModel) {
+        if let Some(id) = &settings.translation_llm_profile_id {
+            routing.default_source = TranslationSource::Profile { profile_id: id.clone() };
+        }
+    }
+    for source in [&mut routing.default_source, &mut routing.word, &mut routing.selection, &mut routing.segment, &mut routing.paragraph, &mut routing.document] {
+        if matches!(source, TranslationSource::SelectionService) {
+            *source = if settings.selection_translation.provider == neuink_config::SelectionTranslationProvider::ReadingModel {
+                TranslationSource::DefaultModel
+            } else { TranslationSource::Service { provider: settings.selection_translation.provider } };
+        }
+    }
+    Ok(routing)
 }
 
 #[tauri::command]
@@ -25,23 +39,22 @@ pub fn save_translation_routing<R: Runtime>(
 }
 
 fn validate(routing: &TranslationRoutingSettings, settings: &AppSettings) -> Result<(), String> {
-    for kind in [
+    for source in std::iter::once(&routing.default_source).chain([
         TranslationKind::Word,
         TranslationKind::Selection,
         TranslationKind::Segment,
         TranslationKind::Paragraph,
         TranslationKind::Document,
-    ] {
-        match routing.source(kind) {
+    ].into_iter().map(|kind| routing.source(kind))) {
+        match source {
             TranslationSource::Profile { profile_id }
                 if !settings.llm_profiles.iter().any(|p| p.id == *profile_id) =>
             {
                 return Err("所选翻译模型已不存在，请重新选择模型。".into())
             }
-            TranslationSource::SelectionService
-                if !matches!(kind, TranslationKind::Word | TranslationKind::Selection) =>
-            {
-                return Err("专用选区服务仅适用于单词和选中文字；结构化翻译需要模型。".into())
+            TranslationSource::Service { provider } => {
+                let config = super::selection_translation::registry::configured(settings, *provider)?;
+                super::selection_translation::validate(&config)?;
             }
             _ => {}
         }
@@ -56,7 +69,8 @@ pub(crate) fn resolve_profile(
     let id = match settings.translation_routing.source(kind) {
         TranslationSource::DefaultModel => settings.translation_llm_profile_id.as_deref(),
         TranslationSource::Profile { profile_id } => Some(profile_id.as_str()),
-        TranslationSource::SelectionService => return Err("此翻译类型应通过选区服务执行。".into()),
+        TranslationSource::SelectionService if settings.selection_translation.provider == neuink_config::SelectionTranslationProvider::ReadingModel => settings.translation_llm_profile_id.as_deref(),
+        TranslationSource::SelectionService | TranslationSource::Service { .. } => return Err("此翻译类型应通过专用服务执行。".into()),
     };
     match id {
         None => Ok(None),
@@ -71,15 +85,6 @@ pub(crate) fn resolve_profile(
                     .into()
             }),
     }
-}
-
-pub(crate) fn read_profile<R: Runtime>(
-    app: &AppHandle<R>,
-    kind: TranslationKind,
-) -> Result<Option<LlmProfile>, String> {
-    let mut settings = read_settings(app)?;
-    ensure_legacy_profile(&mut settings);
-    resolve_profile(&settings, kind)
 }
 
 #[cfg(test)]
@@ -127,12 +132,17 @@ mod tests {
         );
     }
     #[test]
-    fn structured_translation_cannot_select_a_plain_text_service() {
+    fn services_are_available_for_all_translation_kinds() {
         let settings = settings();
         let mut routing = settings.translation_routing.clone();
+    if matches!(routing.default_source, TranslationSource::DefaultModel) {
+        if let Some(id) = &settings.translation_llm_profile_id {
+            routing.default_source = TranslationSource::Profile { profile_id: id.clone() };
+        }
+    }
         assert!(validate(&routing, &settings).is_ok());
         routing.document = TranslationSource::SelectionService;
-        assert!(validate(&routing, &settings).is_err());
+        assert!(validate(&routing, &settings).is_ok());
         routing.document = TranslationSource::Profile {
             profile_id: "missing".into(),
         };

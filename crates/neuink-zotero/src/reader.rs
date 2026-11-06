@@ -1,5 +1,5 @@
 use crate::{
-    attachments, database, discovery, Collection, Library, Paper, SourceSettings, ZoteroError,
+    attachments, database, discovery, Collection, Library, Paper, SourceSettings, ZoteroError, ZoteroNote,
 };
 use rusqlite::{Connection, OptionalExtension};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -51,7 +51,7 @@ fn read_snapshot(db: &Connection, settings: &SourceSettings) -> Result<Library, 
         let key: String = r.get(2)?;
         Ok((item_id, Paper { id: format!("{library_id}:{key}"), key, library_id,
             library_name: groups.get(&library_id).cloned().unwrap_or_else(|| "我的文库".into()),
-            title: String::new(), authors: String::new(), year: String::new(), fields: BTreeMap::new(), tags: vec![], collection_ids: vec![], attachments: vec![] }))
+            title: String::new(), authors: String::new(), year: String::new(), fields: BTreeMap::new(), tags: vec![], collection_ids: vec![], attachments: vec![], notes: vec![] }))
     })?.into_iter().collect();
     if papers.len() > 50_000 {
         return Err(ZoteroError::Limit);
@@ -148,6 +148,15 @@ fn read_snapshot(db: &Connection, settings: &SourceSettings) -> Result<Library, 
     for (id, parent, key, mode, path) in rows(db, "SELECT a.itemID, a.parentItemID, i.key, a.linkMode, COALESCE(a.path,'') FROM itemAttachments a JOIN items i ON i.itemID=a.itemID WHERE a.contentType='application/pdf' AND NOT EXISTS (SELECT 1 FROM deletedItems d WHERE d.itemID=a.itemID) ORDER BY a.itemID", |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?, r.get::<_, String>(4)?)))? {
         if let Some(paper) = papers.get_mut(&parent.unwrap_or(id)) {
             paper.attachments.push(attachments::resolve(directory, settings.linked_attachment_directory.as_deref(), key, mode, path));
+        }
+    }
+    let has_item_notes: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='itemNotes')", [], |row| row.get(0)).map_err(|_| ZoteroError::Schema)?;
+    if has_item_notes {
+        let notes = rows(db, "SELECT n.parentItemID, i.key, COALESCE(n.note,'') FROM itemNotes n JOIN items i ON i.itemID=n.itemID WHERE n.parentItemID IS NOT NULL AND NOT EXISTS (SELECT 1 FROM deletedItems d WHERE d.itemID=n.itemID) ORDER BY n.itemID", |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?;
+        if notes.len() > 10_000 { return Err(ZoteroError::Limit); }
+        for (parent, key, html) in notes {
+            if html.len() > 1024 * 1024 { return Err(ZoteroError::Limit); }
+            if let Some(paper) = papers.get_mut(&parent) { paper.notes.push(ZoteroNote { key, html }); }
         }
     }
     let mut papers: Vec<Paper> = papers

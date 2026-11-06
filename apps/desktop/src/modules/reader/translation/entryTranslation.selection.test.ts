@@ -18,6 +18,15 @@ beforeEach(() => {
   mocks.routing.mockResolvedValue(DEFAULT_TRANSLATION_ROUTING);
 });
 
+it('routes explicit NiuTrans selections without requiring any model configuration', async () => {
+  mocks.routing.mockResolvedValue({ ...DEFAULT_TRANSLATION_ROUTING, selection: { kind: 'service', provider: 'niutrans' } });
+  mocks.service.mockResolvedValue('小牛译文');
+  const { translateTextSelection } = await import('./entryTranslation');
+  expect(await translateTextSelection(request)).toBe('小牛译文');
+  expect(mocks.service).toHaveBeenCalledWith(request.text, 'niutrans');
+  expect(mocks.settings).not.toHaveBeenCalled();
+});
+
 describe('selection translation task lifecycle', () => {
   it('answers a known word locally without a service, model or background task', async () => {
     const { translateTextSelection } = await import('./entryTranslation');
@@ -172,4 +181,22 @@ it('does not replace a deleted independent model with the default model or servi
   const { translateTextSelection } = await import('./entryTranslation');
   await expect(translateTextSelection(request)).rejects.toThrow('已删除');
   expect(mocks.service).not.toHaveBeenCalled(); expect(mocks.generate).not.toHaveBeenCalled();
+});
+
+it('uses the default dedicated service for a following selection without loading any LLM', async () => {
+  mocks.routing.mockResolvedValue({ ...DEFAULT_TRANSLATION_ROUTING, default_source: { kind: 'service', provider: 'niutrans' }, selection: { kind: 'default_model' } });
+  mocks.service.mockResolvedValue('默认服务译文');
+  const { translateTextSelection } = await import('./entryTranslation');
+  await expect(translateTextSelection(request)).resolves.toBe('默认服务译文');
+  expect(mocks.service).toHaveBeenCalledWith(request.text, 'niutrans');
+  expect(mocks.settings).not.toHaveBeenCalled();
+  expect(mocks.generate).not.toHaveBeenCalled();
+});
+
+it.each([['Paper\r\nwrapped\n text', 'Paper wrapped text'], ['中文\n段落', '中文段落'], ['inter\u00ad\noperability', 'interoperability']])('cleans PDF line wraps before calling a service: %s', async (text, normalized) => {
+  mocks.routing.mockResolvedValue({ ...DEFAULT_TRANSLATION_ROUTING, selection: { kind: 'service', provider: 'niutrans' }, word: { kind: 'service', provider: 'niutrans' }, local_dictionary_first: false });
+  mocks.service.mockResolvedValue('译文');
+  const { translateTextSelection } = await import('./entryTranslation');
+  await translateTextSelection({ ...request, text });
+  expect(mocks.service).toHaveBeenCalledWith(normalized, 'niutrans');
 });

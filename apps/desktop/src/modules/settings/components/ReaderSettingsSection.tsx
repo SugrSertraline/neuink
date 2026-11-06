@@ -12,23 +12,14 @@ export function ReaderSettingsSection({ props }: { props: SettingsPanelLayoutPro
   const update = (patch: Partial<ReaderPreferences>) => props.onReaderPreferencesChange({ ...p, ...patch });
   const previewDisabled = !p.hoverPreviewEnabled && !p.reflowHoverSourceEnabled;
   return <SettingsPage tab="reader" title="阅读与批注" description="设置打开论文、悬停预览和片段操作的方式。">
+    <SettingsGroup title="阅读详略">
+      <SettingSwitch id="reader-auto-fold" label="打开重排版时自动生成阅读详略" description="默认关闭；仅处理尚未生成或原文已变化的正文段落。使用助手模型，正文会发送至所配置的模型服务。关闭后不再自动启动新任务。" checked={p.autoGenerateFolds ?? false} onCheckedChange={autoGenerateFolds => update({ autoGenerateFolds })} />
+    </SettingsGroup>
     <SettingsGroup title="打开条目">
       <SettingSwitch id="reader-open-pdf" label="有 PDF 时直接打开 PDF" description="打开条目时优先阅读 PDF；关闭后或没有 PDF 时显示条目概览。" checked={p.openEntryPdfByDefault ?? true} onCheckedChange={openEntryPdfByDefault => update({ openEntryPdfByDefault })} />
     </SettingsGroup>
     <SettingsGroup title="PDF 片段预览">
       <SettingSwitch id="reader-preview" label="PDF 片段悬停" description="悬停在 PDF 片段上时显示整段内容、笔记和批注。" checked={p.hoverPreviewEnabled} onCheckedChange={hoverPreviewEnabled => update({ hoverPreviewEnabled })} />
-    </SettingsGroup>
-    <SettingsGroup title="PDF 逐句悬停" description="与片段预览独立；点击句子仍可联动重排视图。有已保存的译文时可预览当前句翻译。">
-      <SettingSwitch id="reader-sentence-hover" label="整句悬停" checked={p.pdfSentenceHoverEnabled} onCheckedChange={pdfSentenceHoverEnabled => update({ pdfSentenceHoverEnabled })} />
-      <div className="settings-dependent">
-        <p className="settings-subheading">悬停卡片显示</p>
-        <div className="settings-checkbox-grid">
-          <SettingCheckbox label="句子原文" checked={p.pdfSentenceHoverShowOriginal} disabled={!p.pdfSentenceHoverEnabled}
-            onCheckedChange={pdfSentenceHoverShowOriginal => update({ pdfSentenceHoverShowOriginal })} />
-          <SettingCheckbox label="逐句译文" checked={p.pdfSentenceHoverShowTranslation} disabled={!p.pdfSentenceHoverEnabled}
-            onCheckedChange={pdfSentenceHoverShowTranslation => update({ pdfSentenceHoverShowTranslation })} />
-        </div>
-      </div>
     </SettingsGroup>
     <SettingsGroup title="其他悬停">
       <SettingSwitch id="reader-reflow-preview" label="重排悬停预览" description="鼠标悬停在重排内容上时显示对应片段。" checked={p.reflowHoverSourceEnabled} onCheckedChange={reflowHoverSourceEnabled => update({ reflowHoverSourceEnabled })} />
@@ -36,7 +27,16 @@ export function ReaderSettingsSection({ props }: { props: SettingsPanelLayoutPro
       <SettingSwitch id="reader-paper-reference-hover" label="文内引用悬停" description="悬停参考文献、图表引用时预览目标；关闭后仍可点击定位。" checked={p.paperReferenceHoverEnabled} onCheckedChange={paperReferenceHoverEnabled => update({ paperReferenceHoverEnabled })} />
     </SettingsGroup>
     <SettingsGroup id="reader-preview-content" title="片段预览内容" description={previewDisabled ? '开启 PDF 片段或重排悬停预览后生效；当前选择会保留。' : 'PDF 片段与重排预览共用以下内容选择。'}>
-      <div className="settings-checkbox-grid">{PREVIEW_CONTENT.map(([key, label]) => <SettingCheckbox key={key} label={label} checked={p[key]} disabled={previewDisabled} onCheckedChange={checked => update({ [key]: checked })} />)}</div>
+      <div data-setting-id="reader-sentence-hover" tabIndex={-1}>{PREVIEW_CONTENT.map(([key, label]) => <div key={key}>
+        <SettingCheckbox label={label} checked={p[key]} disabled={previewDisabled} onCheckedChange={checked => update({ [key]: checked })} />
+        {(key === 'hoverPreviewShowOriginal' || key === 'hoverPreviewShowTranslation') && p[key] && <div className="settings-dependent">
+          <SettingSelect label={key === 'hoverPreviewShowOriginal' ? 'PDF 原文悬停粒度' : 'PDF 译文悬停粒度'} disabled={previewDisabled}
+            value={p.pdfSentenceHoverEnabled && (key === 'hoverPreviewShowOriginal' ? p.pdfSentenceHoverShowOriginal : p.pdfSentenceHoverShowTranslation) ? 'sentence' : 'paragraph'}
+            options={[{ value: 'paragraph', label: '整段' }, { value: 'sentence', label: '逐句' }]}
+            onValueChange={value => update({ pdfSentenceHoverEnabled: true, pdfSentenceHoverShowOriginal: p.pdfSentenceHoverEnabled && p.pdfSentenceHoverShowOriginal, pdfSentenceHoverShowTranslation: p.pdfSentenceHoverEnabled && p.pdfSentenceHoverShowTranslation, [key === 'hoverPreviewShowOriginal' ? 'pdfSentenceHoverShowOriginal' : 'pdfSentenceHoverShowTranslation']: value === 'sentence' })} />
+        </div>}
+      </div>)}</div>
+      <p className="text-xs text-muted-foreground">PDF 原文和译文可分别选择整段或逐句；逐句不可用时自动显示整段并提示。重排预览沿用片段内容。</p>
       <SettingCheckbox label="PDF 预览时高亮对应区域" checked={p.hoverPreviewShowRegion} disabled={!p.hoverPreviewEnabled} onCheckedChange={hoverPreviewShowRegion => update({ hoverPreviewShowRegion })} />
     </SettingsGroup>
     <SettingsGroup title="分段与片段记录">

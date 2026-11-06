@@ -48,6 +48,15 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('translation lifecycle', () => {
+  it('refreshes the canonical translation after a paragraph action without replacing task ownership', async () => {
+    const view = await running();
+    const updated = { ...translation('partial'), updated_at: '2026-11-05T00:00:00Z' };
+    vi.mocked(api.readEntryTranslation).mockResolvedValue({ translation: updated });
+    emit({ ...job('succeeded', 'paragraph-job'), kind: 'paragraph_translation' });
+    await waitFor(() => expect(view.result.current.translation?.updated_at).toBe(updated.updated_at));
+    expect(view.result.current.activeJob?.id).toBe('job-1');
+    expect(api.runEntryTranslation).not.toHaveBeenCalled();
+  });
   it('refreshes every mounted view from disk after completion even when the event has a snapshot', async () => {
     const left = await running(), right = await running();
     const saved = { ...translation('succeeded'), updated_at: 'fresh-on-disk' };

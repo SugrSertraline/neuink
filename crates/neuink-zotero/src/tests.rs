@@ -9,6 +9,7 @@ fn fixture() -> (tempfile::TempDir, Connection, SourceSettings) {
         CREATE TABLE itemTypes(itemTypeID INTEGER, typeName TEXT);
         CREATE TABLE deletedItems(itemID INTEGER);
         CREATE TABLE itemAttachments(itemID INTEGER, parentItemID INTEGER, linkMode INTEGER, contentType TEXT, path TEXT);
+        CREATE TABLE itemNotes(itemID INTEGER, parentItemID INTEGER, note TEXT);
         CREATE TABLE fields(fieldID INTEGER, fieldName TEXT);
         CREATE TABLE itemData(itemID INTEGER, fieldID INTEGER, valueID INTEGER);
         CREATE TABLE itemDataValues(valueID INTEGER, value TEXT);
@@ -26,6 +27,7 @@ fn fixture() -> (tempfile::TempDir, Connection, SourceSettings) {
         INSERT INTO items VALUES(1,1,1,'PAPER001'),(2,2,1,'FILE0001'),(3,3,1,'NOTE0001'),(4,1,1,'TRASH001'),(5,1,2,'GROUP001');
         INSERT INTO deletedItems VALUES(4);
         INSERT INTO itemAttachments VALUES(2,1,0,'application/pdf','storage:论文.pdf');
+        INSERT INTO itemNotes VALUES(3,1,'<p>重要发现 &amp; 讨论</p>');
         INSERT INTO fields VALUES(1,'title'),(2,'DOI'),(3,'abstractNote'),(4,'date');
         INSERT INTO itemDataValues VALUES(1,'中文论文'),(2,'10.1/test'),(3,'摘要'),(4,'2024-10-01');
         INSERT INTO itemData VALUES(1,1,1),(1,2,2),(1,3,3),(1,4,4);
@@ -65,6 +67,8 @@ fn reads_metadata_collections_and_local_files_without_touching_source() {
     assert_eq!(paper.tags, vec!["time/series"]);
     assert_eq!(paper.collection_ids.len(), 2);
     assert!(paper.attachments[0].available);
+    assert_eq!(paper.notes[0].key, "NOTE0001");
+    assert!(paper.notes[0].html.contains("重要发现"));
     assert_eq!(library.collections[1].path, "我的文库 / 研究 / 时间序列");
     assert_eq!(before, fs::read(dir.path().join("zotero.sqlite")).unwrap());
 }

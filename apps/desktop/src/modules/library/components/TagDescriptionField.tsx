@@ -5,6 +5,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { registerSegmentEditorCloseHandler, setSegmentEditorDirty } from '@/modules/reader/components/segmentEditorDirtyRegistry';
 import type { TagMeta } from '@/shared/types/domain';
+import { useFormRecovery } from '@/shared/hooks/useFormRecovery';
 
 export function TagDescriptionField({ tag, scope, disabled = false, onSave, inline = false }: {
   tag: TagMeta; scope: string; disabled?: boolean;
@@ -22,6 +23,12 @@ export function TagDescriptionField({ tag, scope, disabled = false, onSave, inli
   const editor = useRef<HTMLDivElement>(null);
   const restoreFocus = useRef(false);
   const dirty = draft !== baseline;
+  const recovery = useFormRecovery({ kind: 'tag-description', id: scope, ownerId: tag.id, targetId: 'description', scope,
+    label: `标签描述 · ${tag.name}`, dirty, value: { draft, baseline }, restore: value => {
+      if (typeof value.draft !== 'string' || typeof value.baseline !== 'string') throw new Error('无效草稿');
+      setDraft(value.draft); setBaseline(value.baseline); setEditing(true);
+    }, reveal: () => { setEditing(true); requestAnimationFrame(() => editor.current?.querySelector('textarea')?.focus()); } });
+  const recoveryRef = useRef(recovery); recoveryRef.current = recovery;
   useEffect(() => {
     if (!dirty && !pending.current) { setDraft(tag.description ?? ''); setBaseline(tag.description ?? ''); }
   }, [tag.description]);
@@ -41,9 +48,10 @@ export function TagDescriptionField({ tag, scope, disabled = false, onSave, inli
     return pending.current;
   };
   const saveRef = useRef(save); saveRef.current = save;
-  const discard = () => { setDraft(latest.current.baseline); latest.current.draft = latest.current.baseline; finishEditing(); };
+  const discard = () => { recoveryRef.current.discard(); setDraft(latest.current.baseline); latest.current.draft = latest.current.baseline; finishEditing(); };
   useEffect(() => {
     const off = registerSegmentEditorCloseHandler(scope, 'tag-description', {
+      ...recovery.handlers, isBusy: () => Boolean(pending.current),
       save: () => saveRef.current(), isDirty: () => Boolean(pending.current) || latest.current.draft !== latest.current.baseline,
       discard
     });
@@ -51,6 +59,7 @@ export function TagDescriptionField({ tag, scope, disabled = false, onSave, inli
   }, [scope]);
   useEffect(() => setSegmentEditorDirty(scope, 'tag-description', dirty || busy), [scope, dirty, busy]);
   return <div className={inline ? 'contents' : 'min-w-0'} aria-label="标签描述">
+    {recovery.notice}
     {!editing || inline ? <button ref={trigger} type="button" aria-label={baseline ? '编辑标签描述' : '添加标签描述'} aria-expanded={editing} disabled={disabled}
       className={cn('group flex min-w-0 max-w-full items-start gap-1.5 rounded-sm py-0.5 text-left text-xs leading-5 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none', inline && 'col-start-2 row-start-1')}
       title={baseline || '添加这个标签的研究主题或阅读目标'} onClick={() => { if (editing) editor.current?.querySelector('textarea')?.focus(); else setEditing(true); }}>
@@ -58,7 +67,7 @@ export function TagDescriptionField({ tag, scope, disabled = false, onSave, inli
       <Pencil aria-hidden="true" className="mt-1 size-3 shrink-0" />
     </button> : null}
     {editing ? <div ref={editor} className={cn('max-w-4xl space-y-2 py-1', inline && 'col-span-full col-start-1 row-start-2 mt-1')}>
-      <Textarea autoFocus aria-label="标签描述" rows={3} disabled={disabled} className="min-h-20 max-h-40 resize-y bg-card text-sm" value={draft}
+      <Textarea autoFocus aria-label="标签描述" rows={3} disabled={disabled || recovery.blocked} className="min-h-20 max-h-40 resize-y bg-card text-sm" value={draft}
         placeholder="这组论文讨论什么，以及你想关注的内容。" onChange={event => setDraft(event.target.value)}
         onKeyDown={event => {
           if (event.nativeEvent.isComposing) return;

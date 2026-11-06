@@ -5,11 +5,12 @@ import { cn } from '@/lib/utils';
 
 /** Presentation only. The reader owns requests and edits; tutorials provide no action handlers. */
 export function ReadingSelectionToolbarControls({
-  text, demonstration = false, saving = false, translating = false, translationFailed = false,
+  text, translationLabel, demonstration = false, saving = false, translating = false, translationFailed = false,
   panel = null, onClose, onTranslate, onAsk, onHighlight, onAnnotate, onCopy,
   pinned = false, onTogglePin, dragHandleProps, selectionAvailable = true
 }: {
   text: string;
+  translationLabel?: string;
   demonstration?: boolean;
   saving?: boolean;
   translating?: boolean;
@@ -29,7 +30,7 @@ export function ReadingSelectionToolbarControls({
   const busy = demonstration || saving;
   const actionBusy = busy || !selectionAvailable;
   const actions = [
-    { label: translationFailed ? '重试翻译' : '翻译', icon: translating ? Loader2 : Languages,
+    { label: translationLabel ?? (translationFailed ? '重试翻译' : '翻译'), icon: translating ? Loader2 : Languages,
       selected: panel === 'translation', disabled: actionBusy || translating || !onTranslate, onClick: onTranslate },
     ...(demonstration || onAsk ? [
       { label: '提问', icon: MessageSquareText, disabled: actionBusy, onClick: () => onAsk?.('ask') },
@@ -48,7 +49,7 @@ export function ReadingSelectionToolbarControls({
         <Highlighter size={14} aria-hidden="true" />
         <span className="truncate">已选 {text.length} 个字符</span>
       </div>
-      {pinned && !demonstration ? <Button size="xs" variant="ghost" type="button"
+      {!demonstration && dragHandleProps ? <Button size="xs" variant="ghost" type="button"
         className="min-w-10 flex-1 touch-none cursor-grab px-2 active:cursor-grabbing"
         aria-label="拖动选区工具，方向键调整位置" title="拖动或用方向键调整位置" {...dragHandleProps}>
         <span aria-hidden="true" className="h-1 w-16 max-w-full rounded-full bg-muted-foreground/40" />

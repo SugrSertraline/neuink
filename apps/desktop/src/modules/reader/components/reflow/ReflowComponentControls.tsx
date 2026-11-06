@@ -1,19 +1,14 @@
+import { useRef, useState } from 'react';
 import { RotateCcw, SlidersHorizontal } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { ReflowContentControls } from './ReflowContentControls';
 import { resolveReflowContent, type ReflowComponentKey, type ReflowContentOverrides } from '@/shared/lib/reflowContentPreferences';
 import {
   DEFAULT_REFLOW_COMPONENT_PREFERENCES,
+  reflowTextSizeScale, reflowVisualSizeScale,
   type ReaderPreferences,
   type ReflowComponentPreferences,
   type ReflowComponentTextSize,
@@ -37,25 +32,37 @@ const VISUAL_COMPONENTS = [
 
 export function ReflowComponentControls({
   preferences,
-  onChange
+  onChange,
+  onTranslationViewChange,
+  getReadingBoundary
 }: {
+  getReadingBoundary?: () => HTMLElement | null;
   preferences: ReaderPreferences;
   onChange: (preferences: ReaderPreferences) => void;
+  onTranslationViewChange?: (view: 'paragraph' | 'sentences') => void;
 }) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [boundary, setBoundary] = useState<HTMLElement | null>(null);
   const components = preferences.reflowComponents;
   const updateComponents = (next: ReflowComponentPreferences) => {
     onChange({ ...preferences, reflowComponents: next });
   };
+  const updateContent = (key: ReflowComponentKey, patch: ReflowContentOverrides) => {
+    if (patch.translationView) onTranslationViewChange?.(patch.translationView);
+    updateComponents({ ...components, content: { ...components.content, [key]: { ...components.content?.[key], ...patch } } });
+  };
   const contentControls = (key: ReflowComponentKey, label: string) => <ReflowContentControls component={key} label={label}
-    disabled={!components[key].visible} value={resolveReflowContent(key, preferences.reflowTranslationMode, components.content?.[key])}
-    onChange={(patch: ReflowContentOverrides) => updateComponents({ ...components, content: {
-      ...components.content, [key]: { ...components.content?.[key], ...patch },
-    } })} />;
+    showTranslationView={false} disabled={!components[key].visible}
+    value={resolveReflowContent(key, preferences.reflowTranslationMode, components.content?.[key])}
+    onChange={patch => updateContent(key, patch)} />;
 
   return (
-    <Popover>
+    <Popover onOpenChange={open => {
+      if (open) setBoundary(getReadingBoundary?.() ?? triggerRef.current?.closest<HTMLElement>('[data-guide="reflow-reader"]') ?? null);
+    }}>
       <PopoverTrigger asChild>
         <Button
+          ref={triggerRef}
           aria-label="重排组件设置"
           className="h-8 gap-1.5 px-2"
           size="sm"
@@ -71,20 +78,39 @@ export function ReflowComponentControls({
       <PopoverContent
         align="end"
         viewportAligned
-        className="max-h-[min(34rem,calc(100vh-5rem))] w-80 overflow-y-auto p-0"
+        collisionBoundary={boundary}
+        collisionPadding={8}
+        sticky="always"
+        className="flex w-[22rem] max-w-[var(--radix-popover-content-available-width)] max-h-[min(36rem,var(--radix-popover-content-available-height))] flex-col gap-0 overflow-hidden p-0"
         sideOffset={8}
       >
-        <div className="border-b px-3 py-2.5">
-          <div className="text-sm font-semibold">组件显示</div>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            每个片段的原图、解析后内容分别控制，可同时显示。按类型批量设置，右键片段可单独覆盖。
+        <div className="shrink-0 border-b border-border/50 px-4 py-4">
+          <div className="text-sm font-semibold">阅读组件设置</div>
+          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+            设置全局默认；悬停正文可单独调整，选“跟随”恢复。
           </p>
         </div>
 
-        <div className="divide-y">
+        <div className="min-h-0 overflow-y-auto overscroll-contain">
+          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border/50 bg-muted/20 px-4 py-4">
+            <div><div className="text-sm font-medium">正文对照方式</div>
+              <p className="mt-1 text-xs text-muted-foreground">关闭为整段 · 单段设置优先</p></div>
+            <label className="flex shrink-0 items-center gap-2 text-sm font-medium">
+              逐句对照
+              <Switch aria-label="正文逐句对照"
+                checked={resolveReflowContent('paragraph', preferences.reflowTranslationMode, components.content?.paragraph).translationView === 'sentences'}
+                onCheckedChange={checked => updateContent('paragraph', { translationView: checked ? 'sentences' : 'paragraph' })} />
+            </label>
+          </div>
+          <details className="border-b border-border/50 px-4 py-3 text-xs text-muted-foreground">
+            <summary className="cursor-pointer py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm">原图、解析后内容与翻译有什么区别？</summary>
+            <p className="mt-2 pb-1 leading-relaxed">原图是 PDF 截图，解析后内容是可选字的重排原文，翻译是已有译文。切换显示不会重新翻译。</p>
+          </details>
+          <div className="divide-y divide-border/40">
           {TEXT_COMPONENTS.map(({ key, label }) => (
-            <div key={key}><ComponentRow label={label}>
+            <div key={key} className="grid gap-4 px-4 py-5"><ComponentRow label={label}>
               <Switch
+                title={`总开关：显示或隐藏整个${label}组件`}
                 aria-label={`显示${label}`}
                 checked={components[key].visible}
                 onCheckedChange={(visible) =>
@@ -94,7 +120,7 @@ export function ReflowComponentControls({
                   })
                 }
               />
-              <TextSizeSelect
+              <TextSizeSlider
                 disabled={!components[key].visible}
                 label={label}
                 value={components[key].size}
@@ -109,8 +135,9 @@ export function ReflowComponentControls({
           ))}
 
           {VISUAL_COMPONENTS.map(({ key, label }) => (
-            <div key={key}><ComponentRow label={label}>
+            <div key={key} className="grid gap-4 px-4 py-5"><ComponentRow label={label}>
               <Switch
+                title={`总开关：显示或隐藏整个${label}组件`}
                 aria-label={`显示${label}`}
                 checked={components[key].visible}
                 onCheckedChange={(visible) =>
@@ -120,7 +147,7 @@ export function ReflowComponentControls({
                   })
                 }
               />
-              <VisualSizeSelect
+              <VisualSizeSlider
                 disabled={!components[key].visible}
                 label={label}
                 value={components[key].size}
@@ -134,7 +161,8 @@ export function ReflowComponentControls({
             </ComponentRow>{contentControls(key, label)}</div>
           ))}
 
-          <ComponentRow label="点击图片查看详情">
+          </div>
+          <div className="border-t border-border/50 px-4 py-4"><ComponentRow label="点击图片查看详情">
             <Switch
               aria-label="点击图片查看详情"
               checked={components.imageClickToOpen}
@@ -142,10 +170,10 @@ export function ReflowComponentControls({
                 updateComponents({ ...components, imageClickToOpen })
               }
             />
-          </ComponentRow>
+          </ComponentRow></div>
         </div>
 
-        <div className="border-t p-2">
+        <div className="shrink-0 border-t border-border/50 px-4 py-3">
           <Button
             className="w-full gap-2"
             size="sm"
@@ -170,60 +198,35 @@ function ComponentRow({
   label: string;
 }) {
   return (
-    <div className="flex min-h-11 items-center gap-2 px-3 py-2">
-      <span className="min-w-0 flex-1 text-sm">{label}</span>
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <span className="min-w-16 flex-1 text-sm font-medium">{label}</span>
       {children}
     </div>
   );
 }
 
-function TextSizeSelect({
-  disabled,
-  label,
-  value,
-  onChange
-}: {
-  disabled: boolean;
-  label: string;
-  value: ReflowComponentTextSize;
-  onChange: (value: ReflowComponentTextSize) => void;
+function SizeSlider({ label, value, disabled, onChange }: {
+  label: string; value: number; disabled: boolean; onChange: (value: number) => void;
 }) {
-  return (
-    <Select disabled={disabled} value={value} onValueChange={(next) => onChange(next as ReflowComponentTextSize)}>
-      <SelectTrigger aria-label={`${label}文字大小`} className="h-7 w-[6.5rem]" size="sm">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="small">较小</SelectItem>
-        <SelectItem value="standard">标准</SelectItem>
-        <SelectItem value="large">较大</SelectItem>
-      </SelectContent>
-    </Select>
-  );
+  const percent = Math.round(value * 100);
+  return <div className="flex w-36 shrink-0 items-center gap-2">
+    <input type="range" aria-label={label} aria-valuetext={`${percent}%`} min={50} max={200} step={1}
+      disabled={disabled} value={percent} className="h-5 min-w-0 flex-1 cursor-pointer accent-primary disabled:opacity-40"
+      onChange={event => onChange(Number(event.target.value) / 100)} />
+    <Button type="button" variant="plain" size="xs" disabled={disabled}
+      className="h-6 w-11 px-0 text-xs tabular-nums text-muted-foreground hover:text-primary"
+      aria-label={`${label}恢复100%`} title="点击恢复 100%" onClick={() => onChange(1)}>{percent}%</Button>
+  </div>;
 }
 
-function VisualSizeSelect({
-  disabled,
-  label,
-  value,
-  onChange
-}: {
-  disabled: boolean;
-  label: string;
-  value: ReflowVisualSize;
-  onChange: (value: ReflowVisualSize) => void;
+function TextSizeSlider({ disabled, label, value, onChange }: {
+  disabled: boolean; label: string; value: ReflowComponentTextSize; onChange: (value: ReflowComponentTextSize) => void;
 }) {
-  return (
-    <Select disabled={disabled} value={value} onValueChange={(next) => onChange(next as ReflowVisualSize)}>
-      <SelectTrigger aria-label={`${label}展示大小`} className="h-7 w-[6.5rem]" size="sm">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="compact">紧凑</SelectItem>
-        <SelectItem value="standard">标准</SelectItem>
-        <SelectItem value="large">较大</SelectItem>
-        <SelectItem value="full">撑满宽度</SelectItem>
-      </SelectContent>
-    </Select>
-  );
+  return <SizeSlider label={`${label}文字大小`} disabled={disabled} value={reflowTextSizeScale(value)} onChange={onChange} />;
+}
+
+function VisualSizeSlider({ disabled, label, value, onChange }: {
+  disabled: boolean; label: string; value: ReflowVisualSize; onChange: (value: ReflowVisualSize) => void;
+}) {
+  return <SizeSlider label={`${label}展示大小`} disabled={disabled} value={reflowVisualSizeScale(value)} onChange={onChange} />;
 }

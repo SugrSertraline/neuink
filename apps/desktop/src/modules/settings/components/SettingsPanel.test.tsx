@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+vi.mock('@/shared/ipc/selectionTranslationApi', () => ({ getTranslationServices: vi.fn(async () => []), saveTranslationService: vi.fn(), testSelectionTranslationService: vi.fn() }));
 vi.mock('@/shared/ipc/translationRoutingApi', async original => { const mod = await original<typeof import('@/shared/ipc/translationRoutingApi')>(); return { ...mod, getTranslationRouting: vi.fn(async () => mod.DEFAULT_TRANSLATION_ROUTING), saveTranslationRouting: vi.fn(async (value: import('@/shared/ipc/translationRoutingApi').TranslationRouting) => value) }; });
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
@@ -66,6 +67,19 @@ function Harness({ target }: { target?: SettingsNavigationTarget }) {
 }
 
 describe('settings information architecture and navigation', () => {
+  it('keeps a modified model open when dismissing its close warning, and discards only explicitly', async () => {
+    render(<Harness target={{ id: 'models-connections', nonce: 1 }} />);
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }));
+    const editor = screen.getByRole('dialog');
+    fireEvent.change(within(editor).getByLabelText('名称'), { target: { value: 'unsaved model name' } });
+    fireEvent.click(within(editor).getByRole('button', { name: 'Close' }));
+    const warning = await screen.findByRole('dialog', { name: '保存修改后再继续？' });
+    fireEvent.click(within(warning).getByRole('button', { name: '取消' }));
+    expect(within(editor).getByLabelText('名称')).toHaveProperty('value', 'unsaved model name');
+    expect(mocks.saveLlmSettings).not.toHaveBeenCalled();
+    fireEvent.click(within(editor).getByRole('button', { name: '取消' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
   it('opens the Research installation section from a chat navigation target without installing on navigation', async () => {
     vi.mocked(deepResearchCommand).mockClear();
     render(<Harness target={{ id: 'tools-deep-research', nonce: 1 }} />);
@@ -178,12 +192,14 @@ describe('settings information architecture and navigation', () => {
     expect(within(page as HTMLElement).getAllByRole('heading', { level: 3 }).map(heading => heading.textContent)).toEqual(['默认模型', '模型连接']);
     expect(screen.queryByRole('heading', { name: '模型高级参数' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '设置选中文字与整体翻译 →' }));
-    expect(screen.getByRole('combobox', { name: '统一默认翻译模型' })).toBeTruthy();
-    const selectionGroup = screen.getByRole('heading', { name: '选中文字翻译' }).closest('section')!;
+    expect(await screen.findByRole('combobox', { name: '默认翻译来源' })).toBeTruthy();
+    const selectionGroup = screen.getByRole('heading', { name: '自动翻译' }).closest('section')!;
     const wholeGroup = screen.getByRole('heading', { name: '自动翻译' }).closest('section')!;
     expect(selectionGroup.contains(screen.getByRole('switch', { name: '选中文字后自动翻译' }))).toBe(true);
     expect(wholeGroup.contains(screen.getByRole('switch', { name: '解析后自动翻译 PDF' }))).toBe(true);
-    expect(screen.getByRole('heading', { name: '按翻译类型选择来源' })).toBeTruthy();
+    const behaviors = screen.getByRole('heading', { name: '翻译行为' });
+    const configuration = screen.getByRole('heading', { name: '翻译模型与服务' });
+    expect(configuration.compareDocumentPosition(behaviors) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     view.rerender(<Harness target={{ id: 'tools-services', nonce: 2 }} />);
     const service = view.container.querySelector<HTMLElement>('[data-setting-id="tools-services"]')!;
     await waitFor(() => expect(service.contains(document.activeElement) || service === document.activeElement).toBe(true));

@@ -11,6 +11,8 @@ import {
   X
 } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { useFormRecovery } from '@/shared/hooks/useFormRecovery';
+import { registerSegmentEditorCloseHandler, setSegmentEditorDirty } from './segmentEditorDirtyRegistry';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -30,6 +32,7 @@ import { cn } from '@/lib/utils';
 import { useToast } from '@/shared/hooks/useToast';
 import type { CreateEntryRequest, CreateEntryResult } from '@/shared/hooks/useWorkspace';
 import { getEffectiveParserEndpoint } from '@/shared/lib/parserSettings';
+import { DuplicatePdfError, PdfDuplicateCancelledError } from '@/shared/lib/pdfDuplicate';
 import type { TagMeta } from '@/shared/types/domain';
 
 import {
@@ -76,6 +79,14 @@ export function CreateEntryPanel({
   );
   const [pdfDragActive, setPdfDragActive] = useState(false);
   const pdfDropZoneRef = useRef<HTMLElement | null>(null);
+  const unsaved = Boolean(title || description || pdfPath || mineruZipPath || fields.length || tagDraft || selectedTagPaths.length);
+  const recovery = useFormRecovery({ kind: 'create-entry', id: 'create-entry', ownerId: 'new-entry', scope: 'create-entry',
+    label: '创建条目 · 未提交的资料', value: { pdfPath, mineruZipPath, creationMode, title, description, fields, tagDraft, selectedTagPaths }, dirty: unsaved,
+    restore: value => { if (typeof value.title !== 'string' || !Array.isArray(value.fields)) throw new Error('无效草稿');
+      setPdfPath(value.pdfPath); setMineruZipPath(value.mineruZipPath); setCreationMode(value.creationMode); setTitle(value.title);
+      setDescription(value.description); setFields(value.fields); setTagDraft(value.tagDraft); setSelectedTagPaths(value.selectedTagPaths); setCreateState('ready'); },
+    reveal: () => pdfDropZoneRef.current?.closest('[data-guide="create-entry"]')?.querySelector<HTMLInputElement>('input')?.focus() });
+  const closeState = useRef({ unsaved, createState, recovery }); closeState.current = { unsaved, createState, recovery };
   const { dismiss, notify } = useToast();
   const effectiveSelectedTagPaths = useMemo(
     () => normalizeSelectedTagPaths([...selectedTagPaths, ...parseTagInput(tagDraft)]),
@@ -203,6 +214,7 @@ export function CreateEntryPanel({
   };
 
   const resetForm = () => {
+    recovery.discard();
     setPdfPath('');
     setMineruZipPath('');
     setTitle('');
@@ -214,10 +226,19 @@ export function CreateEntryPanel({
     setCreationMode('pdf');
     setCreateState('idle');
   };
+  const resetRef = useRef(resetForm); resetRef.current = resetForm;
+  useEffect(() => {
+    const off = registerSegmentEditorCloseHandler('create-entry', 'create-entry-form', { ...recovery.handlers,
+      isDirty: () => closeState.current.unsaved, isBusy: () => closeState.current.createState === 'creating',
+      // Creating/importing can have external effects; it remains an explicit form action.
+      save: async () => !closeState.current.unsaved, discard: () => resetRef.current() });
+    return () => { off(); setSegmentEditorDirty('create-entry', 'create-entry-form', false); };
+  }, []);
+  useEffect(() => setSegmentEditorDirty('create-entry', 'create-entry-form', unsaved || createState === 'creating'), [unsaved, createState]);
 
   const submitEntry = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (createState === 'creating') {
+    if (createState === 'creating' || recovery.blocked) {
       return;
     }
     if (titleRequired) {
@@ -249,6 +270,7 @@ export function CreateEntryPanel({
         tagPaths: effectiveSelectedTagPaths
       });
       if (result) {
+        resetForm();
         if (pendingToastId) {
           dismiss(pendingToastId);
           pendingToastId = null;
@@ -276,14 +298,20 @@ export function CreateEntryPanel({
           });
         }
         onCreateEntryFinished(result);
+      } else {
+        setCreateState('ready');
       }
     } catch (caught) {
       if (pendingToastId) {
         dismiss(pendingToastId);
       }
+      if (caught instanceof PdfDuplicateCancelledError) {
+        setCreateState('ready');
+        return;
+      }
       setCreateState('failed');
       notify({
-        title: '创建条目失败',
+        title: caught instanceof DuplicatePdfError ? 'PDF 已在本地' : '创建条目失败',
         description: caught instanceof Error ? caught.message : String(caught),
         tone: 'danger',
         durationMs: Infinity
@@ -305,6 +333,7 @@ export function CreateEntryPanel({
   return (
     <div data-guide="create-entry" className="mx-auto h-full w-full max-w-4xl p-3">
       <Card className="h-full min-h-0 gap-0 overflow-hidden py-0">
+        {recovery.notice}
         <CardHeader className="shrink-0 border-b py-4">
           <CardTitle>创建条目</CardTitle>
           <CardDescription>添加来源、整理标签，然后创建到当前工作区。</CardDescription>

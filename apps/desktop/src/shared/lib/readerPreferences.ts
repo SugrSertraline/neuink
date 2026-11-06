@@ -30,8 +30,8 @@ export const REFLOW_FONT_SIZE_MAX = 24;
 export const REFLOW_FONT_SIZE_DEFAULT = 16;
 export const REFLOW_BACKGROUND_COLOR_DEFAULT = '#ffffff';
 
-export type ReflowComponentTextSize = 'small' | 'standard' | 'large';
-export type ReflowVisualSize = 'compact' | 'standard' | 'large' | 'full';
+export type ReflowComponentTextSize = 'small' | 'standard' | 'large' | number;
+export type ReflowVisualSize = 'compact' | 'standard' | 'large' | 'full' | number;
 export type ReflowTextComponentPreference = {
   visible: boolean;
   size: ReflowComponentTextSize;
@@ -70,6 +70,7 @@ export const DEFAULT_REFLOW_COMPONENT_PREFERENCES: ReflowComponentPreferences = 
 };
 
 export type ReaderPreferences = {
+  autoGenerateFolds?: boolean;
   readingLinkMode?: ReadingLinkMode;
   openEntryPdfByDefault: boolean;
   autoTranslateTextSelection: boolean;
@@ -134,6 +135,7 @@ export function withReflowTranslationMode(preferences: ReaderPreferences, mode: 
 const READER_PREFERENCES_STORAGE_KEY = 'neuink.reader.preferences';
 
 const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
+  autoGenerateFolds: false,
   readingLinkMode: 'scroll',
   openEntryPdfByDefault: true,
   autoTranslateTextSelection: false,
@@ -194,6 +196,7 @@ export function persistReaderPreferences(preferences: ReaderPreferences) {
 
 export function equalReaderPreferences(left: ReaderPreferences, right: ReaderPreferences) {
   return (
+    (left.autoGenerateFolds ?? false) === (right.autoGenerateFolds ?? false) &&
     (left.readingLinkMode ?? 'scroll') === (right.readingLinkMode ?? 'scroll') &&
     left.openEntryPdfByDefault === right.openEntryPdfByDefault &&
     left.autoTranslateTextSelection === right.autoTranslateTextSelection &&
@@ -234,6 +237,7 @@ function normalizeReaderPreferences(value: unknown): ReaderPreferences {
   const candidate = value as Partial<ReaderPreferences>;
 
   return {
+    autoGenerateFolds: candidate.autoGenerateFolds === true,
     readingLinkMode: candidate.readingLinkMode === 'click' ? 'click' : 'scroll',
     openEntryPdfByDefault:
       typeof candidate.openEntryPdfByDefault === 'boolean'
@@ -352,6 +356,7 @@ export function normalizeReflowBackgroundColor(value: unknown) {
 }
 
 export function reflowTextSizeScale(size: ReflowComponentTextSize) {
+  if (typeof size === 'number') return Number.isFinite(size) ? Math.min(2, Math.max(0.5, size)) : 1;
   return size === 'small' ? 0.86 : size === 'large' ? 1.18 : 1;
 }
 
@@ -395,6 +400,7 @@ function normalizeTextComponent(
   return {
     visible: typeof candidate.visible === 'boolean' ? candidate.visible : fallback.visible,
     size:
+      typeof candidate.size === 'number' && Number.isFinite(candidate.size) ? Math.min(2, Math.max(0.5, candidate.size)) :
       candidate.size === 'small' || candidate.size === 'large'
         ? candidate.size
         : fallback.size
@@ -411,6 +417,7 @@ function normalizeVisualComponent(
   return {
     visible: typeof candidate.visible === 'boolean' ? candidate.visible : fallback.visible,
     size:
+      typeof candidate.size === 'number' && Number.isFinite(candidate.size) ? Math.min(2, Math.max(0.5, candidate.size)) :
       candidate.size === 'compact' ||
       candidate.size === 'large' ||
       candidate.size === 'full'
@@ -424,4 +431,9 @@ function equalReflowComponentPreferences(
   right: ReflowComponentPreferences
 ) {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+export function reflowVisualSizeScale(size: ReflowVisualSize) {
+  if (typeof size === 'number') return Number.isFinite(size) ? Math.min(2, Math.max(0.5, size)) : 1;
+  return size === 'compact' ? 0.6 : size === 'large' ? 1.6 : size === 'full' ? 1.2 : 1;
 }

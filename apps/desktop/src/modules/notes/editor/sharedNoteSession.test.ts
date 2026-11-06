@@ -29,6 +29,19 @@ async function setup() {
   return { session, save, load, a, b, add };
 }
 describe('shared note document sessions', () => {
+  it('restores title and content in every view, preserves canonical content, and requires conflict confirmation', async () => {
+    const { session, a, b, save } = await setup();
+    session.restoreRecovery({ title: 'Recovered title', markdown: 'Recovered text', links: [], revision: 'old' });
+    expect(a.getText()).toBe('Recovered text'); expect(b.getText()).toBe('Recovered text');
+    expect(session.getSnapshot().title).toBe('Recovered title');
+    expect(session.getSnapshot().conflict?.remote.markdown).toBe('Base');
+    expect(save).not.toHaveBeenCalled();
+    expect(await session.save({ quiet: true })).toBe(false);
+    expect(save).not.toHaveBeenCalled();
+    session.acceptRemote();
+    expect(a.getText()).toBe('Base'); expect(b.getText()).toBe('Base');
+    expect(session.getSnapshot().dirty).toBe(false);
+  });
   it('preserves tables and structured source atoms across views and undo', async () => {
     const { a, b } = await setup();
     a.commands.insertTable({ rows: 2, cols: 2, withHeaderRow: true });

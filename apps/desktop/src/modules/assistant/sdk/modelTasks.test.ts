@@ -27,3 +27,19 @@ describe('request-wide model budget', () => {
     expect(() => resumed.turn()).toThrow('token budget exhausted');
   });
 });
+
+describe('JSON model result errors', () => {
+  const options = { settings: {} as LlmProfile, name: 'title', description: 'title', system: 'check', prompt: 'fixture' };
+
+  it('explains when output tokens are exhausted before JSON is generated', async () => {
+    vi.mocked(generateText).mockResolvedValue({ finishReason: 'length', usage: { inputTokens: 10, outputTokens: 700 } } as never);
+    await expect(runJsonModelTask(options)).rejects.toThrow('模型输出达到长度上限');
+  });
+
+  it('explains an empty model response without exposing the SDK error', async () => {
+    const noOutput = Object.assign(new Error('No output generated.'), { name: 'AI_NoOutputGeneratedError' });
+    vi.mocked(generateText).mockResolvedValue({ finishReason: 'stop', usage: {},
+      get output() { throw noOutput; } } as never);
+    await expect(runJsonModelTask(options)).rejects.toThrow('模型没有返回可用内容');
+  });
+});

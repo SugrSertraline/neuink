@@ -12,10 +12,12 @@ pub mod embedding;
 pub mod embedding_resources;
 pub mod entry;
 pub mod export;
+pub mod folding;
 pub mod job;
 pub mod mineru;
 mod llm_http;
 pub mod note_catalog;
+pub mod edit_recovery;
 pub mod onboarding;
 pub mod pdf_parse_queue;
 #[cfg(test)]
@@ -40,3 +42,5 @@ pub mod recommendations;
 pub mod zotero;
 
 pub mod import_preview;
+
+pub mod sentence_translation;

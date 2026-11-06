@@ -65,6 +65,14 @@ impl State {
 pub(super) struct ParagraphProgress(Arc<Mutex<State>>);
 
 impl ParagraphProgress {
+    pub(super) fn service_started<R: Runtime>(&self, app: &AppHandle<R>) {
+        let event = {
+            let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
+            state.phase("generating", None);
+            state.snapshot(true)
+        };
+        if let Some(event) = event { let _ = app.emit("neuink://paragraph-translation-progress", event); }
+    }
     pub(super) fn new(
         request: &ParagraphRequest,
         record: &ParagraphTranslation,

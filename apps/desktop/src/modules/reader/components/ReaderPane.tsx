@@ -1,4 +1,6 @@
 import { OtherSourceImportPage } from '@/modules/import/OtherSourceImportPage';
+import type { LibrarySourceSync } from '@/modules/import/useLibrarySourceSync';
+import type { LibrarySourceCatalog } from '@/modules/library/useLibrarySourceCatalog';
 import { ReadingStateRetention } from './navigation/ReadingStateRetention';
 import { ReadingViewSession } from './navigation/ReadingViewSession';
 import { readingViewStorageKey } from './navigation/readingViewStorage';
@@ -22,6 +24,7 @@ import { RelationsPage } from '@/modules/relations/RelationsPage';
 import { RelationReturnFrame } from '@/modules/relations/RelationReturnFrame';
 import { WorkspaceSurfaceDeck } from './WorkspaceSurfaceDeck';
 import { EmptyWorkspace } from '@/app/EmptyWorkspace';
+import { NewTabPage, type NewTabDestination } from '@/app/NewTabPage';
 import { DailyDashboard } from '@/modules/daily/DailyDashboard';
 import { IdeationWorkspace } from '@/modules/ideation/IdeationWorkspace';
 import { OwnedNoteSurfaceView } from '@/modules/notes/components/OwnedNoteSurfaceView';
@@ -98,6 +101,7 @@ type ReaderPaneProps = EntryPdfHandlers & {
   onRestoreTagArchive: (archiveId: string) => Promise<number>;
   surfaceLayout: WorkspaceSurfaceLayout;
   onOpenSurface: (surface: WorkspaceSurface, pane?: WorkspacePaneId) => void;
+  onReplaceNewTab: (id: string, destination: NewTabDestination) => void;
   onFocusSurface: (pane: WorkspacePaneId) => void;
   activeTag: string | null;
   annotationRecords: AnnotationCatalogRecord[];
@@ -123,6 +127,8 @@ type ReaderPaneProps = EntryPdfHandlers & {
   workspaceRoot: string | null;
   onCreateEntry: (request: CreateEntryRequest) => Promise<CreateEntryResult | undefined>;
   onMineruImported?: () => Promise<void> | void;
+  librarySourceSync?: LibrarySourceSync;
+  librarySourceCatalog?: LibrarySourceCatalog;
   mineruDrop?: { path: string; nonce: number } | null;
   onMineruDropConsumed?: () => void;
   onCreateEntryFinished: (result: CreateEntryResult) => void;
@@ -228,6 +234,7 @@ export function ReaderPane({
   onRestoreTagArchive,
   surfaceLayout,
   onOpenSurface,
+  onReplaceNewTab,
   onFocusSurface,
   activeTag,
   annotationRecords,
@@ -253,6 +260,8 @@ export function ReaderPane({
   workspaceRoot,
   onCreateEntry,
   onMineruImported,
+  librarySourceSync,
+  librarySourceCatalog,
   mineruDrop,
   onMineruDropConsumed,
   onCreateEntryFinished,
@@ -645,8 +654,11 @@ export function ReaderPane({
   };
   const renderLibraryView = (standalone = false) =>
     <EntryLibraryView
+        onApplyEntryTagPaths={onApplyEntryTagPaths}
         pdfParseAction={pdfParseAction}
         onOpenDailyDashboard={() => onOpenSurface({ kind: 'daily-dashboard' })}
+        librarySourceSync={librarySourceSync}
+        librarySourceCatalog={librarySourceCatalog}
         onOpenRelations={() => onOpenSurface({ kind: 'relations' })}
         activeTag={activeTag}
         section={librarySection} onSectionChange={onLibrarySectionChange}
@@ -741,7 +753,8 @@ export function ReaderPane({
     pane: WorkspacePaneId = 'left',
     focusedSegmentUid?: string,
     initialRecordMode: 'note' | 'annotation' = 'note',
-    editorScopeOverride?: string
+    editorScopeOverride?: string,
+    editRequestId?: string
   ) => {
     if (!tabId) {
       return standalone ? <EmptyPane /> : null;
@@ -787,6 +800,7 @@ export function ReaderPane({
     return (
       <Suspense fallback={<div className="grid h-full min-h-0 place-items-center text-sm text-muted-foreground" role="status">正在载入阅读器…</div>}>
       <EntryWorkspaceView
+        editRequestId={editRequestId}
         activeContentId={parsed.contentId}
         entry={openEntry}
         standalone={standalone}
@@ -1087,7 +1101,8 @@ export function ReaderPane({
         surface.kind === 'segment-notes'
             ? surface.mode ?? 'note'
             : 'note',
-        surfaceKey(surface)
+        surfaceKey(surface),
+        surface.kind === 'entry-overview' ? surface.editRequestId : undefined
       );
       const entry = entries.find((entry) => entry.id === surface.entryId);
       if (!entry || !['pdf', 'reflow', 'entry-overview'].includes(surface.kind)) return reader;
@@ -1098,6 +1113,8 @@ export function ReaderPane({
     switch (surface.kind) {
       case 'empty':
         return <EmptyWorkspace onOpen={target => onOpenSurface(target, pane)} />;
+      case 'new-tab':
+        return <NewTabPage onChoose={destination => onReplaceNewTab(surface.id, destination)} />;
       case 'daily-dashboard':
         return <DailyDashboard key={workspaceRoot} root={workspaceRoot} status={status} entries={entries} active={surfaceLayout[pane]?.kind === 'daily-dashboard'}
           onOpenEntry={onOpenEntryExplorer} onRefreshCatalog={onRefreshParseStatus}
@@ -1130,7 +1147,7 @@ export function ReaderPane({
           </Suspense>
         </div>;
       case 'external-import':
-        return workspaceRoot ? <OtherSourceImportPage key={workspaceRoot} root={workspaceRoot} scope={surfaceKey(surface)} onImported={onMineruImported} onOpenEntry={onOpenEntryExplorer} /> : <p className="p-4 text-sm text-muted-foreground">请先打开资料库。</p>;
+        return workspaceRoot ? <OtherSourceImportPage key={workspaceRoot} root={workspaceRoot} scope={surfaceKey(surface)} requestedSource={surface.source} sourceRequestId={surface.navigationId} enabledSources={librarySourceSync?.enabledSources} onImported={onMineruImported} onOpenEntry={onOpenEntryExplorer} /> : <p className="p-4 text-sm text-muted-foreground">请先打开资料库。</p>;
       case 'create-entry':
         return <div className="h-full min-h-0 overflow-hidden">{renderCreateEntryPanel()}</div>;
       case 'mineru-client-guide':

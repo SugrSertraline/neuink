@@ -1,3 +1,4 @@
+import { translatedSentenceGeometry } from './pdfSentenceHover';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { hasPdfTextSelection, pdfPageContentRect } from './pdfCanvasDom';
 import { resolvePdfSelectionAnchorSegment } from './pdfPageAnnotations';
@@ -6,7 +7,9 @@ import type { PageSegments } from './types';
 
 /** Geometry and text must belong to the same page; never clear another pane's selection. */
 function readSelection(element: HTMLDivElement, page: PageSegments): PendingPdfTextSelection | null {
-  if (!hasPdfTextSelection(element.querySelector('.pdf-text-layer'))) return null;
+  const translatedLayer = Array.from(element.querySelectorAll<HTMLElement>('[data-pdf-translation-region]'))
+    .find(layer => hasPdfTextSelection(layer));
+  if (!translatedLayer && !hasPdfTextSelection(element.querySelector('.pdf-text-layer'))) return null;
   const selection = window.getSelection();
   const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
   if (!range) return null;
@@ -22,12 +25,35 @@ function readSelection(element: HTMLDivElement, page: PageSegments): PendingPdfT
   const text = selection?.toString().trim() ?? '';
   if (!text || !rects.length) return null;
   const rect = range.getBoundingClientRect();
+  const region = translatedLayer ? page.regions.find(item => item.id === translatedLayer.dataset.pdfTranslationRegion) : null;
+  let original: PendingPdfTextSelection['original'];
+  if (region && translatedLayer) {
+    const sentences = translatedSentenceGeometry(translatedLayer, region, pageRect, translatedLayer.textContent ?? '');
+    const start = range.cloneRange(); start.collapse(true);
+    const end = range.cloneRange(); end.collapse(false);
+    const matches = sentences?.filter(sentence => {
+      if (!sentence.textRange) return false;
+      const sentenceStart = sentence.textRange.cloneRange(); sentenceStart.collapse(true);
+      const sentenceEnd = sentence.textRange.cloneRange(); sentenceEnd.collapse(false);
+      return start.compareBoundaryPoints(Range.START_TO_START, sentenceEnd) < 0 &&
+        end.compareBoundaryPoints(Range.START_TO_START, sentenceStart) > 0;
+    });
+    original = matches?.length
+      ? { text: matches.map(sentence => sentence.source).join(' '), notice: '显示所选译文所在句的原文' }
+      : { text: region.sourceSegment.markdown ?? region.sourceSegment.text, notice: '无法准确对应句子，已显示整段原文' };
+  }
   return {
+    original,
     position: { x: rect.left, y: rect.bottom },
     anchorRect: { bottom: rect.bottom, left: rect.left, right: rect.right, top: rect.top },
-    segment: resolvePdfSelectionAnchorSegment({ pageIdx: page.pageIdx, rects, regions: page.regions, text }),
+    segment: region?.sourceSegment ?? resolvePdfSelectionAnchorSegment({ pageIdx: page.pageIdx, rects, regions: page.regions, text }),
     selection: { page_idx: page.pageIdx, rects, text },
   };
+}
+
+function hasPageSelection(element: HTMLElement | null) {
+  return Boolean(element && Array.from(element.querySelectorAll<HTMLElement>('.pdf-text-layer, [data-pdf-translation-region]'))
+    .some(layer => hasPdfTextSelection(layer)));
 }
 
 function isSelectionControl(target: EventTarget | null) {
@@ -57,12 +83,12 @@ export function usePdfTextSelection(root: RefObject<HTMLDivElement>, page: PageS
   }, [cancelCapture]);
   const close = useCallback(() => {
     clear();
-    if (hasPdfTextSelection(root.current?.querySelector('.pdf-text-layer') ?? null)) {
+    if (hasPageSelection(root.current)) {
       window.getSelection()?.removeAllRanges();
     }
   }, [clear, root]);
-  const capture = useCallback((element = root.current) => {
-    if (!enabled || gesture.current || isSelectionControl(document.activeElement)) return;
+  const capture = useCallback((element = root.current, explicit = false) => {
+    if (!enabled || gesture.current || (!explicit && isSelectionControl(document.activeElement))) return;
     const selection = window.getSelection();
     const previous = dismissed.current;
     // selectionchange can already be queued when blur/cancel dismisses the UI.
@@ -74,7 +100,7 @@ export function usePdfTextSelection(root: RefObject<HTMLDivElement>, page: PageS
   const scheduleCapture = useCallback(() => {
     cancelCapture();
     if (!enabled || gesture.current) return;
-    if (!pendingRef.current && !hasPdfTextSelection(root.current?.querySelector('.pdf-text-layer') ?? null)) return;
+    if (!pendingRef.current && !hasPageSelection(root.current)) return;
     timer.current = window.setTimeout(() => {
       timer.current = null;
       capture();
@@ -99,7 +125,7 @@ export function usePdfTextSelection(root: RefObject<HTMLDivElement>, page: PageS
     const pointerUp = () => { if (gesture.current) finish(); };
     const escape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || isSelectionControl(event.target)) return;
-      if (!pendingRef.current && !hasPdfTextSelection(root.current?.querySelector('.pdf-text-layer') ?? null)) return;
+      if (!pendingRef.current && !hasPageSelection(root.current)) return;
       event.preventDefault();
       event.stopPropagation();
       close();

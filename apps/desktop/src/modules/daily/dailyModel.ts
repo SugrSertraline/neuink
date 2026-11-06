@@ -4,6 +4,7 @@ import type { NoteTarget } from '@/shared/types/domain';
 import type { SourceLinkOpenTarget } from '@/modules/notes/editor/SourceLinkNode';
 
 export type DailyModel = {
+  recoveryNotice?: import('react').ReactNode;
   root: string | null; state: DailyState | null; date: string; today: string;
   selectDate: (date: string) => void; loading: boolean; busy: boolean; error: string | null;
   mutate: (change: (state: DailyState) => DailyState) => Promise<boolean>;

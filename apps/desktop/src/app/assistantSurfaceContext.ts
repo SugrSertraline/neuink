@@ -16,7 +16,7 @@ export function assistantSurfaceContext(layout: WorkspaceSurfaceLayout, entries:
   const segment = (focused.kind === 'pdf' || focused.kind === 'reflow' || focused.kind === 'segment-notes') && selected?.entryId === entryId
     && (!('segmentUid' in focused) || !focused.segmentUid || focused.segmentUid === selected.segmentUid) ? selected : null;
   const surface: AssistantActiveSurfaceSnapshot = { capturedAt: new Date().toISOString(), entryId, noteId,
-    kind: focused.kind, pane, segmentUid: segment?.segmentUid ?? null, surfaceKey: surfaceKey(focused) };
+    kind: focused.kind === 'new-tab' ? 'empty' : focused.kind, pane, segmentUid: segment?.segmentUid ?? null, surfaceKey: surfaceKey(focused) };
   if (focused.kind === 'browser' && focused.url && /^https?:\/\//i.test(focused.url) && focused.navigationId && !focused.loading) {
     try {
       const url = normalizeBrowserUrl(focused.url);

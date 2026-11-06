@@ -8,6 +8,7 @@ import { TagPreferencesProvider } from '@/shared/components/TagPreferencesProvid
 import { ToastContext } from '@/shared/hooks/useToast';
 import { beginEntryTagDrag, cancelEntryTagDrag, finishEntryTagDrag } from '@/shared/lib/entryDragData';
 
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { LibrarySidebar, type LibraryEntry } from './LibrarySidebar';
 
 const entry: LibraryEntry = {
@@ -41,7 +42,7 @@ afterEach(() => {
 function renderSidebar(props: Partial<ComponentProps<typeof LibrarySidebar>> = {}, notify = vi.fn(() => 'toast')) {
   return render(
     <ToastContext.Provider value={{ dismiss: vi.fn(), notify }}>
-      <TagPreferencesProvider>
+      <TooltipProvider><TagPreferencesProvider>
         <LibrarySidebar
           activeContentId={null}
           activeTag={null}
@@ -70,10 +71,31 @@ function renderSidebar(props: Partial<ComponentProps<typeof LibrarySidebar>> = {
           onUpdateEntry={vi.fn()}
           {...props}
         />
-      </TagPreferencesProvider>
+      </TagPreferencesProvider></TooltipProvider>
     </ToastContext.Provider>
   );
 }
+
+it('removes the hidden Zotero view when that source is disabled', () => {
+  const view = renderSidebar({ zoteroEnabled: false, hiddenSourceCount: 2 });
+  expect(view.queryByRole('button', { name: /已隐藏/ })).toBeNull();
+  expect(within(view.getByRole('region', { name: '快速视图' })).getByRole('button', { name: '全部 1' })).toBeTruthy();
+});
+
+it('keeps hidden navigation and the hide action available while previewing entry details', () => {
+  const onSelectView = vi.fn(), onToggleSourceHidden = vi.fn();
+  const view = renderSidebar({ entryExplorerOpen: true, hiddenSourceCount: 2, onSelectView, onToggleSourceHidden,
+    selectedEntry: { ...entry, sourceInfo: { kinds: ['zotero'], zotero_hidden: false } } });
+  fireEvent.click(view.getByRole('button', { name: '从条目库隐藏当前来源论文' }));
+  expect(onToggleSourceHidden).toHaveBeenCalledExactlyOnceWith(entry.id);
+  fireEvent.click(view.getByRole('button', { name: '查看已隐藏论文 2' }));
+  expect(onSelectView).toHaveBeenCalledExactlyOnceWith('hidden');
+});
+
+it('identifies Zotero notes in the selected entry details', () => {
+  const view = renderSidebar({ entryExplorerOpen: true, selectedEntry: { ...entry, contents: [{ kind: 'note', note_id: 'from-zotero', title: 'Imported note' }] }, zoteroNoteIds: ['from-zotero'] });
+  expect(view.getByText('Zotero · 本地副本')).toBeTruthy();
+});
 
 describe('LibrarySidebar tag drop', () => {
   it('shows an unparsed category with a matching count, selection, and navigation', () => {
@@ -190,4 +212,13 @@ it('keeps tag search, edit and directory navigation independent from the panel c
   expect(onOpenTagDetails).not.toHaveBeenCalled();
   fireEvent.click(view.getByRole('button', { name: '打开标签 研究' }));
   expect(onOpenTagDetails).toHaveBeenCalledWith('research');
+});
+
+it('opens the selected entry editor from the details header', () => {
+  const onEditEntry = vi.fn();
+  const view = renderSidebar({ entryExplorerOpen: true, selectedEntry: entry, onEditEntry });
+  const button = view.getByRole('button', { name: '编辑条目' });
+  expect(button.closest('.side-head')).toBeTruthy();
+  fireEvent.click(button);
+  expect(onEditEntry).toHaveBeenCalledExactlyOnceWith(entry.id);
 });

@@ -1,4 +1,7 @@
 import { SidebarBoundaryControl } from './SidebarBoundaryControl';
+import { useLibrarySourceSync } from '@/modules/import/useLibrarySourceSync';
+import { LibrarySourceReviewDialog } from '@/modules/import/LibrarySourceReviewDialog';
+import { useLibrarySourceCatalog } from '@/modules/library/useLibrarySourceCatalog';
 import { useAssistantContextState } from './useAssistantContextState';
 import { fetchEntryPdf } from '@/shared/ipc/entryPdfApi';
 import { Library, ListFilter, MessageSquare, PanelRight, Search, Settings } from 'lucide-react';
@@ -73,6 +76,8 @@ import { IdeationProvider } from '@/modules/ideation/IdeationContext';
 import { IdeationSidebar } from '@/modules/ideation/IdeationSidebar';
 import { assistantSurfaceContext } from './assistantSurfaceContext';
 import { useBrowserTabRequests } from './useBrowserTabRequests';
+import { planWorkspaceBrowserTab } from './workspaceBrowserTabs';
+import type { NewTabDestination } from './NewTabPage';
 import {
   getWorkspaceSplitMinimums,
   workspaceSplitLeftWidthFromRatio
@@ -89,13 +94,19 @@ import {
   saveMarkdownNoteBeforeClose
 } from '../modules/notes/editor/noteDirtyRegistry';
 import { LibrarySidebar, type LibraryEntry, type LibraryView } from '../modules/library/components/LibrarySidebar';
+import { isEntrySourceHidden, isSourceEntryVisible } from '../modules/library/utils/sourceVisibility';
 import { buildTagPathById, collectDescendantTagIds } from '../modules/library/utils/tagTree';
-import { hasUnsavedEntrySegmentEditors, saveSegmentEditorsBeforeClose } from '../modules/reader/components/segmentEditorDirtyRegistry';
+import { hasUnsavedEntrySegmentEditors, saveSegmentEditorsBeforeClose, saveEntrySegmentEditorsBeforeCopy } from '../modules/reader/components/segmentEditorDirtyRegistry';
+import { SourceLocalCopyProvider } from '../modules/import/SourceLocalCopyProvider';
 import { ReaderPane } from '../modules/reader/components/ReaderPane';
 import { hasUnsavedSurface, saveEditsBeforeWorkspaceChange } from './editSafety';
 import { useSurfaceCloseGuard } from './useSurfaceCloseGuard';
 import { useSidebarResize } from './useSidebarResize';
 import { useUnsavedWindowCloseGuard } from './useUnsavedWindowCloseGuard';
+import { UnsavedWindowDialog } from './UnsavedWindowDialog';
+import { RecoveryCenter } from './useRecoveryCenter';
+import { EditRecoveryRoot } from '@/shared/hooks/useFormRecovery';
+import { recoverySurface, unsavedSurface } from './editRecoveryNavigation';
 import type { PdfJumpRequest, SidePaneState, SidePaneTarget } from '../modules/reader/types';
 import { SearchDialog } from '../modules/search/components/SearchDialog';
 import { AssistantReplyActionsContext } from '../modules/assistant/components/AssistantReplyActionsContext';
@@ -109,6 +120,8 @@ import { JobStatusDock } from '../shared/components/JobStatusDock';
 import { TitleBar } from '../shared/components/TitleBar';
 import { useToast } from '../shared/hooks/useToast';
 import { usePdfDropImport } from './usePdfDropImport';
+import { usePdfDuplicateReview } from './usePdfDuplicateReview';
+import { PdfDuplicateCancelledError, PdfDuplicateReviewContext } from '@/shared/lib/pdfDuplicate';
 import { noteCatalogRefreshKey } from './noteCatalogRefreshKey';
 import { useWorkspace } from '../shared/hooks/useWorkspace';
 import { useWorkspaceJobs } from '../shared/hooks/useWorkspaceJobs';
@@ -247,7 +260,26 @@ function isHttpEndpoint(value: string) {
 }
 
 export function App() {
-  const workspace = useWorkspace();
+  const duplicateReview = usePdfDuplicateReview();
+  const workspace = useWorkspace(duplicateReview.confirm);
+  const librarySourceSync = useLibrarySourceSync(workspace.root, workspace.status === 'ready', workspace.refreshEntries);
+  const librarySourceCatalog = useLibrarySourceCatalog(workspace.root, workspace.entries);
+  const [hiddenActionEntryId, setHiddenActionEntryId] = useState<string | null>(null);
+  const hiddenActionPending = useRef(false);
+  const [sourceReviewOpen, setSourceReviewOpen] = useState(false);
+  const autoReviewedRoots = useRef(new Set<string>());
+  useEffect(() => {
+    if (workspace.status !== 'ready' && workspace.root) autoReviewedRoots.current.delete(workspace.root);
+  }, [workspace.root, workspace.status]);
+  useEffect(() => {
+    if (!workspace.root || librarySourceSync.root !== workspace.root || librarySourceSync.running || librarySourceSync.scanVersion === 0) return;
+    if (librarySourceSync.changes.length === 0 && librarySourceSync.issues.length === 0 && !librarySourceSync.error && !librarySourceSync.truncated) return;
+    if (autoReviewedRoots.current.has(workspace.root)) return;
+    autoReviewedRoots.current.add(workspace.root);
+    setSourceReviewOpen(true);
+  }, [workspace.root, librarySourceSync.root, librarySourceSync.running, librarySourceSync.scanVersion, librarySourceSync.changes.length, librarySourceSync.issues.length, librarySourceSync.error, librarySourceSync.truncated]);
+  const sourceSyncForLibrary = { ...librarySourceSync, review: () => setSourceReviewOpen(true) };
+  const sourceAlertCount = librarySourceSync.changes.length + librarySourceSync.issues.length + (librarySourceSync.error ? 1 : 0) + (librarySourceSync.truncated ? 1 : 0);
   const onboardingRootRef = useRef(workspace.root);
   onboardingRootRef.current = workspace.root;
   const { dismiss, notify } = useToast();
@@ -278,7 +310,7 @@ export function App() {
   const [workspaceSplitLeftWidth, setWorkspaceSplitLeftWidth] = useState<number | null>(
     readStoredWorkspaceSplitLeftWidth
   );
-  const openNewBrowserTab = useBrowserTabRequests(surfaceLayout, dispatchSurface, reason => notify({
+  useBrowserTabRequests(surfaceLayout, dispatchSurface, reason => notify({
     tone: 'danger', title: reason === 'limit' ? '网页标签已达上限' : '无法打开链接',
     description: reason === 'limit' ? '最多同时打开 8 个网页，请先关闭一个网页标签后重试。' : '只支持有效的外部 HTTP(S) 网页地址。'
   }));
@@ -326,9 +358,13 @@ export function App() {
   const pdfJumpCounter = useRef(0);
   const tagPathById = useMemo(() => buildTagPathById(workspace.tags), [workspace.tags]);
   const entries = useMemo(
-    () => workspace.entries.map((entry) => toLibraryEntry(entry, tagPathById)),
-    [tagPathById, workspace.entries]
+    () => workspace.entries.map((entry) => ({ ...toLibraryEntry(entry, tagPathById), sourceInfo: librarySourceCatalog.sources[entry.id] })),
+    [tagPathById, workspace.entries, librarySourceCatalog.sources]
   );
+  const sidebarEntries = useMemo(() => entries.filter(entry => {
+    const source = librarySourceCatalog.sources[entry.id];
+    return !isEntrySourceHidden(source) && isSourceEntryVisible(source, librarySourceSync.enabledSources ?? { zotero: true, mineru: true });
+  }), [entries, librarySourceCatalog.sources, librarySourceSync.enabledSources]);
   const taskEntryTitles = useMemo(() => Object.fromEntries(workspace.entries.map(entry => [entry.id, entry.title])), [workspace.entries]);
   const parseQueue = usePdfParseQueue(workspace.status === 'ready' ? workspace.root : null,
     mineruEndpoint, parserApiKey,
@@ -526,8 +562,8 @@ export function App() {
   }, [surfaceLayout.left, surfaceLayout.right]);
 
   const trashedEntries = useMemo(
-    () => workspace.trashedEntries.map((entry) => toLibraryEntry(entry, tagPathById)),
-    [tagPathById, workspace.trashedEntries]
+    () => workspace.trashedEntries.map((entry) => ({ ...toLibraryEntry(entry, tagPathById), sourceInfo: librarySourceCatalog.sources[entry.id] })),
+    [tagPathById, workspace.trashedEntries, librarySourceCatalog.sources]
   );
   const selectedEntry = useMemo(
     () => (workspace.selectedEntry ? toLibraryEntry(workspace.selectedEntry, tagPathById) : null),
@@ -543,7 +579,7 @@ export function App() {
   });
   const { entry: activeEntry, note: activeAssistantNote, segment: activeAssistantSegmentForPanel, surface: activeAssistantSurface } = useMemo(
     () => assistantSurfaceContext(surfaceLayout, entries, activeAssistantSegment), [surfaceLayout, entries, activeAssistantSegment]);
-  const sidebarContext = resolveEntrySidebarContext(surfaceLayout);
+  const sidebarContext = resolveEntrySidebarContext(surfaceLayout, { entryId: workspace.selectedEntryId, tagId: activeTag });
   const sidebarNote = resolveTagNoteSidebarContext(surfaceLayout);
   const sidebarEntry = sidebarContext ? entries.find((entry) => entry.id === sidebarContext.entryId) ?? null : null;
   const librarySidebarMode = resolveLibrarySidebarMode(sidePanel, Boolean(sidebarEntry), Boolean(sidebarNote));
@@ -606,6 +642,10 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem(LIBRARY_VIEW_STORAGE_KEY, libraryView);
   }, [libraryView]);
+
+  useEffect(() => {
+    if (libraryView === 'hidden' && librarySourceSync.scanVersion > 0 && !librarySourceSync.enabledSources?.zotero && !librarySourceSync.enabledSources?.mineru) setLibraryView('all');
+  }, [libraryView, librarySourceSync.scanVersion, librarySourceSync.enabledSources?.zotero, librarySourceSync.enabledSources?.mineru]);
 
   useEffect(() => {
     const viewedEntryIds = [surfaceLayout.left, surfaceLayout.right]
@@ -681,6 +721,23 @@ export function App() {
 
   const openCreateEntryTab = () => {
     dispatchSurface({ type: 'open', surface: { kind: 'create-entry' } });
+  };
+  const importNavigationNonce = useRef(0);
+  const replaceNewTab = (id: string, destination: NewTabDestination) => {
+    let surface: WorkspaceSurface;
+    if (destination === 'browser') {
+      const result = planWorkspaceBrowserTab(surfaceLayout, { type: 'openBrowser', id: crypto.randomUUID() });
+      if (result.status !== 'open') {
+        if (result.status === 'limit') notify({ tone: 'danger', title: '网页标签已达上限', description: '最多同时打开 8 个网页，请先关闭一个网页标签后重试。' });
+        return;
+      }
+      surface = result.surface;
+    } else if (destination === 'zotero' || destination === 'mineru') {
+      surface = { kind: 'external-import', source: destination, navigationId: String(++importNavigationNonce.current) };
+    } else {
+      surface = { kind: destination };
+    }
+    dispatchSurface({ type: 'replaceNewTab', key: `new-tab:${id}`, surface });
   };
   const openMineruClientGuideTab = () => {
     dispatchSurface({ type: 'open', surface: { kind: 'mineru-client-guide' } });
@@ -960,7 +1017,8 @@ export function App() {
   );
 
   const selectLibraryView = (view: LibraryView, preserveTag = false) => changeLibraryContext(() => {
-    if (!preserveTag || view === 'trash') setActiveTag(null);
+    if (!preserveTag || view === 'trash' || view === 'hidden') setActiveTag(null);
+    if (view === 'hidden') { setLibraryFilterResetKey(value => value + 1); setSidePanel('library'); setSidebarOpen(true); }
     setLibrarySection('papers');
     setLibraryView(view);
     dispatchSurface({ type: 'open', surface: { kind: 'library' } });
@@ -996,18 +1054,24 @@ export function App() {
     const root = workspace.root;
     const entry = workspace.entries.find(item => item.id === entryId);
     if (!root || !entry) throw new Error('当前条目不可用，请重新打开后重试。');
-    await fetchEntryPdf(root, entryId, entry.title);
+    try {
+      await fetchEntryPdf(root, entryId, entry.title, async review => {
+        const confirmed = await duplicateReview.confirm(review);
+        return confirmed && onboardingRootRef.current === root;
+      });
+    } catch (caught) {
+      if (!(caught instanceof PdfDuplicateCancelledError)) throw caught;
+    }
     await workspace.refreshEntries(root);
     notify({ title: 'PDF 已保存', description: '可以打开 PDF 阅读，需要重排内容时再开始解析。', tone: 'success' });
   };
 
   const attachPdfToEntry = async (entryId: string, pdfPath: string) => {
-    await workspace.importPdfForEntry(
-      entryId,
-      pdfPath,
-      getEffectiveParserEndpoint(mineruEndpoint),
-      parserApiKey
-    );
+    try {
+      await workspace.importPdfForEntry(entryId, pdfPath, getEffectiveParserEndpoint(mineruEndpoint), parserApiKey);
+    } catch (caught) {
+      if (!(caught instanceof PdfDuplicateCancelledError)) throw caught;
+    }
   };
 
   const createPdfVersion = async (entryId: string, pdfPath: string) => {
@@ -1022,8 +1086,11 @@ export function App() {
       },
       getEffectiveParserEndpoint(mineruEndpoint),
       parserApiKey
-    );
-    if (!created) throw new Error('创建新版 PDF 条目失败。');
+    ).catch(caught => {
+      if (caught instanceof PdfDuplicateCancelledError) return undefined;
+      throw caught;
+    });
+    if (!created) return;
     workspace.setSelectedEntryId(created.entryId);
     notify({
       title: '已创建新版 PDF 条目',
@@ -1294,6 +1361,11 @@ export function App() {
               : 'created_metadata_only' as const
         };
       } catch (error) {
+        if (error instanceof PdfDuplicateCancelledError) {
+          const message = `已取消添加。相同内容的 PDF 已在“${error.duplicate.title}”。`;
+          updateSciverseJob('succeeded', `${source.title}：${message}`);
+          return { entryId: error.duplicate.entryId, message, status: 'already_exists' as const };
+        }
         const message = formatAssistantError(error, { debug: readAssistantDebug(), fallback: ASSISTANT_IMPORT_INCOMPLETE });
         notify({
           durationMs: 6000,
@@ -1672,7 +1744,11 @@ export function App() {
     return () => window.clearInterval(interval);
   }, [hasActiveParseTasks, refreshParseStatus]);
 
-  useUnsavedWindowCloseGuard();
+  const windowCloseGuard = useUnsavedWindowCloseGuard({ onReveal: target => {
+    const surface = unsavedSurface(target, surfaceLayout);
+    if (surface) openWorkspaceSurface(surface);
+    requestAnimationFrame(() => target.handler?.reveal?.());
+  } });
   const closeGuard = useSurfaceCloseGuard({
     root: workspace.root,
     onClose: (targets) => targets.forEach(({ pane, surface }) => dispatchSurface({ type: 'close', pane, key: surfaceKey(surface) }))
@@ -1765,19 +1841,36 @@ export function App() {
   }, [requestCloseSurfaceTab, surfaceLayout]);
 
   return (
+    <PdfDuplicateReviewContext.Provider value={duplicateReview.confirm}>
+    <EditRecoveryRoot.Provider value={workspace.root}>
+    <SourceLocalCopyProvider key={workspace.root ?? 'no-workspace'} root={workspace.root} entries={entries} refreshEntries={workspace.refreshEntries}
+      setHidden={librarySourceCatalog.setHidden} onOpenEntry={openEntryTab} beforeCopy={async entryId => {
+        if (!await saveMarkdownNotesForOwner(entryId) || !await saveEntrySegmentEditorsBeforeCopy(entryId)) throw new Error('来源条目仍有未保存内容。请保存笔记或条目信息后再导入本地副本。');
+      }}>
     <div className="app gap-0">
-      <TitleBar onOpenSearch={() => setSearchDialogOpen(true)} />
+      <TitleBar onOpenSearch={() => setSearchDialogOpen(true)} recoveryAction={<RecoveryCenter root={workspace.root} onOpen={draft => {
+        const surface = recoverySurface(draft);
+        openWorkspaceSurface(['note', 'owned-note', 'segment-notes', 'entry-overview'].includes(surface.kind) ? { ...surface, viewId: `recovery:${crypto.randomUUID()}` } : surface);
+      }} />} />
+      {duplicateReview.dialog}
       {pdfDropImport.dragActive ? (
         <div
           aria-live="polite"
-          className="pointer-events-none fixed inset-3 grid place-items-center border-2 border-dashed border-primary"
+          className="pointer-events-none fixed inset-0 grid place-items-center bg-foreground/40 p-3 backdrop-blur-[2px]"
           role="status"
           style={{ zIndex: 'var(--z-reader-preview)' }}
         >
-          <div className="border border-border bg-popover px-4 py-3 text-sm font-medium text-popover-foreground shadow-sm">
-            {workspace.status === 'ready'
-              ? '松开以导入 PDF 或 MinerU 结果目录、ZIP、RAR'
-              : '请先打开资料库，再拖入文件'}
+          <div className="grid size-full place-items-center rounded-lg border-2 border-dashed border-primary bg-background/10">
+            <div className="mx-4 max-w-md rounded-lg border border-border bg-popover px-6 py-5 text-center text-popover-foreground shadow-lg">
+              <p className="text-base font-semibold">
+                {workspace.status === 'ready' ? '松开鼠标，开始导入' : '请先打开资料库'}
+              </p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {workspace.status === 'ready'
+                  ? '支持 PDF 文件、MinerU 结果目录，以及 ZIP / RAR 压缩包'
+                  : '打开资料库后，再拖入 PDF、MinerU 结果目录或 ZIP / RAR。'}
+              </p>
+            </div>
           </div>
         </div>
       ) : null}
@@ -1799,7 +1892,21 @@ export function App() {
         onOpenResult={openSearchResult}
         onOpenSetting={openSetting}
       />
+      <LibrarySourceReviewDialog open={sourceReviewOpen} onOpenChange={setSourceReviewOpen} sync={librarySourceSync} entries={entries}
+        onOpenEntry={openEntryTab}
+        onApplyTitle={async (entryId, title) => {
+          const entry = entries.find(item => item.id === entryId);
+          if (!entry) throw new Error('本地条目已不可用，请重新检查来源。');
+          await workspace.updateWorkspaceEntry(entryId, { title, fields: entry.fields, tagPaths: entry.tags });
+        }}
+        onApplyField={async (entryId, key, value) => {
+          const entry = entries.find(item => item.id === entryId);
+          if (!entry) throw new Error('本地条目已不可用，请重新检查来源。');
+          await workspace.updateWorkspaceEntry(entryId, { title: entry.title, fields: { ...entry.fields, [key]: value }, tagPaths: entry.tags });
+        }}
+        onApplyPdfName={async (entryId, name) => { await workspace.renameWorkspacePdfDisplayName(entryId, name); }} />
       {closeGuard.dialog}
+      <UnsavedWindowDialog {...windowCloseGuard} />
       <Dialog
         open={Boolean(pendingMarkdownNoteDelete)}
         onOpenChange={(open) => {
@@ -1849,7 +1956,7 @@ export function App() {
         <WorkspaceTabsBar
           readingLinkMode={readerPreferences.readingLinkMode}
           onReadingLinkModeChange={(readingLinkMode) => updateReaderPreferences({ ...readerPreferences, readingLinkMode })}
-          onNewBrowser={openNewBrowserTab}
+          onNewTab={() => dispatchSurface({ type: 'open', surface: { kind: 'new-tab', id: crypto.randomUUID() } })}
           entries={entries}
           layout={surfaceLayout}
           onAddToAssistantContext={addWorkspaceSurfaceToAssistantContext}
@@ -1910,7 +2017,7 @@ export function App() {
             requestAnimationFrame(() => { const section = document.getElementById('daily-recommendations'); if (section?.getClientRects().length) { section.scrollIntoView({ block: 'start' }); section.focus({ preventScroll: true }); } });
           }}
           onReflect={entry => addAssistantContext({ kind: 'entry', entryId: entry.id, entryTitle: entry.title }, { draftQuestion: `帮我复盘今天阅读的《${entry.title}》：先提出三个帮助我检验理解的问题，再根据我的回答讨论关键假设和待验证之处。` })}
-          onSettings={openSettingsTab} /></SidebarPanelSlot>
+          onSettings={() => openSetting('appearance-zodiac')} /></SidebarPanelSlot>
         {sidebarOpen && librarySidebarMode === 'note-details' && sidebarNote ? (
           <TagNoteDetailsSidebar key={workspace.root} target={sidebarNote.target} title={sidebarNote.label}
             entries={entries} tags={workspace.tags} status={workspace.status} error={workspace.error} layout={surfaceLayout}
@@ -1937,8 +2044,24 @@ export function App() {
             activeTag={activeTag}
             activeView={libraryView}
             activeContentId={sidebarContext?.contentId ?? null}
-            entries={entries}
+            entries={sidebarEntries}
             trashItemCount={workspace.trashItems.length + workspace.tagArchiveCount}
+            hiddenSourceCount={entries.filter(entry => isEntrySourceHidden(librarySourceCatalog.sources[entry.id]) && isSourceEntryVisible(librarySourceCatalog.sources[entry.id], librarySourceSync.enabledSources ?? { zotero: true, mineru: true })).length}
+            zoteroEnabled={librarySourceSync.enabledSources?.zotero ?? false}
+            mineruEnabled={librarySourceSync.enabledSources?.mineru ?? false}
+            hiddenActionEntryId={hiddenActionEntryId}
+            onToggleSourceHidden={entryId => {
+              if (hiddenActionPending.current) return;
+              const hidden = !isEntrySourceHidden(librarySourceCatalog.sources[entryId]);
+              hiddenActionPending.current = true; setHiddenActionEntryId(entryId);
+              void librarySourceCatalog.setHidden(entryId, hidden).then(() => {
+                notify({ tone: 'success', title: hidden ? '已隐藏来源论文' : '已恢复显示', description: hidden ? '本地文件和来源原文保留，可在已隐藏列表恢复。' : '论文已返回条目库。',
+                  action: hidden ? <Button size="xs" variant="outline" onClick={() => selectLibraryView('hidden')}>查看已隐藏</Button> : undefined });
+              }).catch(error => notify({ tone: 'danger', title: '保存显示状态失败', description: String(error) }))
+                .finally(() => { hiddenActionPending.current = false; setHiddenActionEntryId(null); });
+            }}
+            sourceUpdateCount={sourceAlertCount}
+            onReviewSourceChanges={() => setSourceReviewOpen(true)}
             parseQueue={<PdfParseQueuePanel controller={parseQueue}
               onOpen={id => openWorkspaceSurface(entryContentSurface(id, 'pdf'))}
               onRetry={id => workspace.retryPdfParseForEntry(id, mineruEndpoint, parserApiKey)} />}
@@ -1946,6 +2069,8 @@ export function App() {
             entryExplorerOpen={librarySidebarMode === 'entry-details'}
             recentReadingEntryIds={recentReadingEntryIds}
             selectedEntry={sidebarEntry}
+            onApplyEntryTagPaths={workspace.applyEntryTagPaths}
+            zoteroNoteIds={sidebarEntry ? librarySourceCatalog.sources[sidebarEntry.id]?.zotero_note_ids : undefined}
             status={workspace.status}
             tags={workspace.tags}
             tagNotes={sidebarContext ? {
@@ -1969,8 +2094,9 @@ export function App() {
             onRenameMarkdownNote={renameMarkdownNote}
             onRenamePdfDisplayName={workspace.renameWorkspacePdfDisplayName}
             onOpenCreateEntryTab={openCreateEntryTab}
-                onOpenImportTab={() => dispatchSurface({ type: 'open', surface: { kind: 'external-import' } })}
             onOpenTagEditorTab={openTagEditorTab}
+            onEditEntry={entryId => openWorkspaceSurface({ kind: 'entry-overview', entryId,
+              contextTagId: sidebarContext?.contextTagId, editRequestId: crypto.randomUUID() }, sidebarContext?.pane)}
             onSelectContent={selectEntryContent}
             onOpenTagDetails={(tagId) => selectLibraryTag(tagId, 'papers', true)}
             onSelectView={selectLibraryView}
@@ -2056,6 +2182,7 @@ export function App() {
           key={workspace.root ?? 'no-workspace'}
           surfaceLayout={surfaceLayout}
           onOpenSurface={openWorkspaceSurface}
+          onReplaceNewTab={replaceNewTab}
           onOpenTagReading={openTagReading}
           onFocusSurface={(pane) => dispatchSurface({ type: 'focus', pane })}
           activeTag={activeTag}
@@ -2084,6 +2211,8 @@ export function App() {
             workspace.createLibraryEntry(request, mineruEndpoint, parserApiKey)
           }
           onMineruImported={() => workspace.refreshEntries()}
+          librarySourceSync={sourceSyncForLibrary}
+          librarySourceCatalog={librarySourceCatalog}
           mineruDrop={mineruDrop}
           onMineruDropConsumed={() => setMineruDrop(null)}
           onCreateEntryFinished={(result) => {
@@ -2185,7 +2314,7 @@ export function App() {
             workspace.removeSegmentNote(entryId, segmentUid)
           }
           onSaveMarkdownNote={saveMarkdownNote}
-          onSelectEntry={workspace.setSelectedEntryId}
+          onSelectEntry={id => { workspace.setSelectedEntryId(id); setSidePanel('details'); setSidebarOpen(true); }}
           onSelectTag={selectLibraryTag}
           onSwitchWorkspaceRoot={switchWorkspace}
           onWorkspaceSplitLeftWidthChange={resizeWorkspaceSplitLeft}
@@ -2274,11 +2403,14 @@ export function App() {
             if (scope?.root !== workspace.root || scope.kind !== 'entry') return;
             const entry = workspace.entries.find(item => item.id === scope.entry_id);
             if (!entry) { notify({ title: '原条目已不可用', description: '请在条目库或回收站核对。' }); return; }
-            openEntryContentTab(entry.id, entry.pdf ? 'pdf' : 'overview');
+            openEntryContentTab(entry.id, job.kind === 'folding' ? 'reflow' : entry.pdf ? 'pdf' : 'overview');
             if (job.kind === 'parser') { setSidePanel('library'); setSidebarOpen(true); }
           }} />
         <button type="button">辅助栏</button>
       </footer>
     </div>
+    </SourceLocalCopyProvider>
+    </EditRecoveryRoot.Provider>
+    </PdfDuplicateReviewContext.Provider>
   );
 }

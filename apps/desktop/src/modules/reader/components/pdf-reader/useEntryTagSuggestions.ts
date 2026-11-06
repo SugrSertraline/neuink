@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { analyzeEntryTags, getLlmSettings, subscribeLlmSettings, type TagRecommendation } from '@/shared/ipc/assistantApi';
 import { useToast } from '@/shared/hooks/useToast';
 import type { LibraryEntry } from '../../../library/components/LibrarySidebar';
-import { useReadingViewSession } from '../navigation/ReadingViewSession';
+import { useReadingViewSession } from '../navigation/readingViewContext';
 import { useReadingSession } from '../../parallel-reading/ReadingSessionContext';
 import { beginTagSuggestionTask, pendingTagRecommendations, readTagSuggestions, subscribeTagSuggestions, tagSuggestionKey, updateTagSuggestions } from './entryTagSuggestionStore';
 

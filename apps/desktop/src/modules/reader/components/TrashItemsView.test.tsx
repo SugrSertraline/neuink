@@ -8,6 +8,15 @@ import { TrashItemsView } from './TrashItemsView';
 
 afterEach(cleanup);
 
+it('allows restoring a legacy source entry but never offers permanent deletion', () => {
+  const onRestoreEntry = vi.fn();
+  const view = render(<TrashItemsView items={[{ trash_id: 'entry:source', entry_id: 'source', entry_title: '来源论文', kind: 'entry', item_id: 'source', title: '来源论文', preview: '', deleted_at: '', parent_entry_trashed: true, restorable: true, stored_trash_item: false, source_managed: true }]}
+    onRestoreEntry={onRestoreEntry} onPurgeEntry={vi.fn()} onRestoreItem={vi.fn()} onPurgeItem={vi.fn()} />);
+  expect(view.queryByRole('button', { name: '彻底删除 来源论文' })).toBeNull();
+  fireEvent.click(view.getByRole('button', { name: '恢复 来源论文' }));
+  expect(onRestoreEntry).toHaveBeenCalledWith('source');
+});
+
 describe('TrashItemsView', () => {
   it('shows deleted child content together with its original entry', () => {
     const items: TrashItem[] = [

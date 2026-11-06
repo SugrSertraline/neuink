@@ -47,6 +47,28 @@ export class SharedNoteSession {
     this.listeners.forEach(listener => listener());
   }
   configure(io: IO) { this.io = io; }
+  recoverySnapshot() {
+    return this.note ? { title: this.state.title, markdown: this.markdown(), links: this.links, revision: this.note.revision } : null;
+  }
+  restoreRecovery(payload: Record<string, unknown>) {
+    if (!this.note || this.state.loading || this.state.saving || typeof payload.title !== 'string' || typeof payload.markdown !== 'string' || !Array.isArray(payload.links)) throw new Error('Invalid recovery');
+    const links = payload.links as SourceLink[];
+    if (links.some(link => !link || typeof link.link_id !== 'string')) throw new Error('Invalid source links');
+    this.links = links;
+    this.withMuted(() => {
+      for (const peer of this.peers) {
+        peer.updateLinks(links);
+        peer.editor.commands.setContent(payload.markdown as string, { contentType: 'markdown', emitUpdate: false });
+        hydrateSourceLinkNodes(peer.editor, links, this.workspace);
+        this.expectedDocs.set(peer, peer.editor.state.doc);
+        this.doc = peer.editor.state.doc;
+      }
+    });
+    const conflict = payload.revision !== this.note.revision ? { remote: this.note, localTitle: payload.title,
+      localMarkdown: payload.markdown, localLinks: links } : null;
+    this.publish({ title: payload.title, conflict, error: conflict ? '正式笔记已更新，请比较版本后再保存恢复草稿。' : null });
+    this.updateDirty();
+  }
   private markdown() {
     const peer = [...this.peers].find(p => this.initialized.has(p) && !p.editor.isDestroyed);
     return peer ? dematerializeMarkdownSourceLinks(getMarkdownWithSourceLinks(peer.editor), this.links) : this.baseline;
@@ -141,6 +163,7 @@ export class SharedNoteSession {
   async save(options: NoteSaveOptions = {}): Promise<boolean> {
     if (this.savePromise) return this.savePromise;
     if (!this.note || this.state.loading || this.state.loadFailed) return false;
+    if (this.state.conflict && !options.expectedRevisionOverride) return false;
     if (!this.state.dirty && options.quiet && !options.expectedRevisionOverride) return true;
     const title = (options.titleOverride ?? this.state.title).trim() || '未命名笔记';
     const markdown = this.markdown();

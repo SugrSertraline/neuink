@@ -32,14 +32,36 @@ function showTable(overrides: Partial<ComponentProps<typeof LibraryPaperTable>> 
 }
 
 describe('library table width fitting', () => {
+  it('preserves saved action widths within the compact icon column limits', () => {
+    window.localStorage.setItem(ENTRY_LIBRARY_COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify({ title: 300, actions: 136 }));
+    const { resize, widths } = showTable();
+    resize(1100);
+    expect(widths()[0]).toBe(300);
+    const currentWidths = widths();
+    expect(currentWidths[currentWidths.length - 1]).toBe(136);
+    expect(JSON.parse(window.localStorage.getItem(ENTRY_LIBRARY_COLUMN_WIDTHS_STORAGE_KEY)!)).toEqual({ title: 300, actions: 136 });
+  });
+
+  it('fits the selection column without changing saved widths and offsets the pinned title', () => {
+    const { table, resize, widths, rerender } = showTable();
+    const viewport = widths().reduce((sum, width) => sum + width, 0) * 2;
+    resize(viewport);
+    rerender({ selection: { enabled: true, ids: new Set(), all: false, some: false, toggle: vi.fn(), toggleAll: vi.fn() } });
+    expect(widths()[0]).toBe(42);
+    expect(widths().reduce((sum, width) => sum + width, 0)).toBeCloseTo(viewport);
+    expect(window.localStorage.getItem(ENTRY_LIBRARY_COLUMN_WIDTHS_STORAGE_KEY)).toBeNull();
+    resize(1100);
+    expect(screen.getByRole('columnheader', { name: '标题' }).style.left).toBe('42px');
+    expect(table.querySelector('tbody td[data-pinned="left"]')).toBeTruthy();
+  });
   it('fills a wide viewport proportionally beyond manual limits without persisting the expansion', () => {
     const { table, resize, widths } = showTable();
     const originalWidths = widths();
     resize(originalWidths.reduce((sum, width) => sum + width, 0) * 2);
     expect(widths()).toEqual(originalWidths.map(width => width * 2));
     expect(table.querySelectorAll('[data-pinned]')).toHaveLength(0);
-    expect(table.querySelectorAll('col')).toHaveLength(9);
-    expect(screen.getAllByRole('cell')).toHaveLength(9);
+    expect(table.querySelectorAll('col')).toHaveLength(ENTRY_LIBRARY_COLUMNS.length);
+    expect(screen.getAllByRole('cell')).toHaveLength(ENTRY_LIBRARY_COLUMNS.length);
     expect(table.querySelector('thead th')?.className).not.toContain('shadow-[');
     expect(window.localStorage.getItem(ENTRY_LIBRARY_COLUMN_WIDTHS_STORAGE_KEY)).toBeNull();
     resize(1100);
@@ -91,7 +113,7 @@ describe('library table width fitting', () => {
     expect(window.localStorage.getItem(ENTRY_LIBRARY_COLUMN_WIDTHS_STORAGE_KEY)).toBeNull();
     drag(2);
     fireEvent.pointerUp(window, { clientX: 250, pointerId: 2 });
-    expect(JSON.parse(window.localStorage.getItem(ENTRY_LIBRARY_COLUMN_WIDTHS_STORAGE_KEY)!)).toEqual({ title: 492 });
+    expect(JSON.parse(window.localStorage.getItem(ENTRY_LIBRARY_COLUMN_WIDTHS_STORAGE_KEY)!)).toEqual({ title: 489 });
     const displayed = widths()[0];
     Object.defineProperty(header, 'clientWidth', { configurable: true, value: displayed });
     fireEvent.keyDown(handle, { key: 'ArrowRight' });
