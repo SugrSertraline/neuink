@@ -1,3 +1,4 @@
+import { ResearchPlanDialog } from './ResearchPlanDialog';
 import { useMemo, useState } from 'react';
 import { ArrowLeft, Pencil, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -35,6 +36,7 @@ function ActiveWorkspace({ root, entries, onOpenEntry, onOpenSource }: Props) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
   const [canvasError, setCanvasError] = useState<string | null>(null);
+  const [planning, setPlanning] = useState(false);
   const [editing, setEditing] = useState(false);
   const [inspecting, setInspecting] = useState(false);
   const [choosingBranch, setChoosingBranch] = useState(false);
@@ -95,7 +97,7 @@ function ActiveWorkspace({ root, entries, onOpenEntry, onOpenSource }: Props) {
       <div className="min-w-[120px] flex-1"><div className="flex items-center gap-1"><h1 className="truncate text-sm font-semibold" title={board.title}>{board.title}</h1><Button size="icon-sm" variant="ghost" aria-label="编辑构思名称与说明" onClick={() => setEditing(true)}><Pencil className="size-3" /></Button></div>{board.description && <p className="truncate text-xs text-muted-foreground" title={board.description}>{board.description}</p>}</div>
       <div className="flex items-center gap-2"><span className="text-xs text-muted-foreground" role="status">{saving ? '保存中…' : dirty ? '未保存' : '已保存到本地'}</span><Button size="sm" variant="outline" disabled={!dirty || saving} onClick={() => void save()}>保存</Button></div>
     </header>
-    <div className="flex shrink-0 flex-wrap items-center gap-1 border-b px-3 py-1.5"><Button size="sm" variant="outline" onClick={() => selectSlot(null)}>浏览卡片</Button><Button size="sm" variant="ghost" onClick={() => { selectSlot('problem'); context.requestCard('problem'); }}><Plus />研究问题</Button><span className="ml-auto text-xs text-muted-foreground">{nodes.length} 张卡片 · {links.length} 条关系</span></div>
+    <div className="flex shrink-0 flex-wrap items-center gap-1 border-b px-3 py-1.5"><Button size="sm" variant="outline" onClick={() => selectSlot(null)}>浏览卡片</Button><Button size="sm" variant="ghost" onClick={() => { selectSlot('problem'); context.requestCard('problem'); }}><Plus />研究问题</Button><Button size="sm" variant="outline" disabled={!nodes.length} onClick={() => setPlanning(true)}>评价并生成方案</Button><span className="ml-auto text-xs text-muted-foreground">{nodes.length} 张卡片 · {links.length} 条关系</span></div>
     {(error || canvasError) && <div role="alert" className="shrink-0 border-b px-3 py-2 text-xs text-destructive">{error ? `保存失败：${error}。修改仍在当前页面，请重试保存。` : canvasError}</div>}
     {undo && <div role="status" className="flex shrink-0 items-center gap-2 border-b px-3 py-1 text-xs">已移除{undo.nodes.length ? '卡片及相关连线' : '关系'}<Button size="sm" variant="ghost" onClick={() => {
       update(current => { const ids = new Set([...current.placements.map(p => p.id), ...undo.nodes.map(p => p.id)]); return { ...current, placements: [...current.placements, ...undo.nodes], links: [...(current.links ?? []), ...undo.links.filter(link => ids.has(link.from) && ids.has(link.to))] }; }); setUndo(null);
@@ -107,6 +109,7 @@ function ActiveWorkspace({ root, entries, onOpenEntry, onOpenSource }: Props) {
         onViewport={viewport => context.editBoard(board.id, { viewport })} onDropCard={drop} onBrowse={selectSlot} onClearSelection={clearSelection} />
       {(selectedLink || (previewCard && (inspecting || context.selectionSource === 'library'))) && <IdeationInspector key={selectedLink?.id ?? selectedNode?.id ?? previewCard?.id} root={root} node={selectedNode} card={previewCard} link={selectedLink} nodes={nodes} onClose={() => { setInspecting(false); if (!selectedNode) { setSelectedLinkId(null); setSelectedCardId(null); } }} onRemoveNode={removeNode} onRemoveLink={removeLink} onBranch={branch} onOpenEntry={onOpenEntry} onOpenSource={onOpenSource} />}
     </div>
+    {planning && <ResearchPlanDialog root={root} onClose={() => setPlanning(false)} />}
     {editing && <IdeationBoardDialog board={board} onClose={() => setEditing(false)} />}
   </div>;
 }

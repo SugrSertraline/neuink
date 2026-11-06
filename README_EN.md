@@ -19,7 +19,7 @@ Exploratory features retained in this branch:
 - **Paper cards:** organize or generate cards for research background, problems, methods, results, assumptions and limitations, with access to source evidence.
 - **Ideation canvases:** manage multiple research ideas, drag in cards, pan, zoom and arrange nodes, and edit relationships between cards.
 - **Branch exploration:** choose follow-up cards around an existing node, add research questions, and retain the idea's relationships and layout.
-- **Assistant discussions:** bring the selected idea into the existing assistant as context for checking evidence and discussing research directions.
+- **Research plans:** select cards and relationships, evaluate compatibility, evidence gaps and risks with the assistant model, then review and explicitly save a technical plan and minimum validation experiments as a card.
 
 “Branch exploration” above refers to paths on the ideation canvas. `alpha` does not automatically merge into `beta` or `main`, and may not contain beta's latest development changes. Official download packages are maintained separately from this exploratory branch.
 
@@ -44,13 +44,26 @@ Bundled research-inspiration references retain the [Microsoft ResearchStudio att
 3. Review generated drafts, source passages and suggested relationships before choosing what to retain. Check unsupported content instead of treating model output as fact.
 4. Drag cards onto the current board or use its add action. Pan, zoom, fit the view, and use automatic arrangement or manual positioning.
 5. Select a node, choose suitable follow-up cards, add your own questions and edit relationships. These branches are idea paths, unrelated to Git branches such as alpha and beta.
-6. When you want a discussion, attach the current idea as context to the existing assistant and initiate a question. Keep the research question, relationships and evidence distinct; idea content is not automatically promoted to system instructions.
+6. Open the evaluation dialog, select cards and enter a research goal. Start or stop the task explicitly.
+7. Review compatibility, risks, evidence gaps, implementation steps, experiments, stopping criteria and alternatives. Save the result as a plan card only after review; input cards, links and source-check status are preserved as a snapshot. Changed inputs require a new evaluation.
+
+This is a dedicated model task; automatic attachment of the board to assistant chat is not implemented.
 
 ### What requires a model
 
-Browsing saved cards, creating boards, manual editing, dragging, linking, zooming and saving layouts do not require generation. Paper-card extraction and assistant discussions use the selected assistant model, which receives the relevant paper or idea context. Generated drafts require review; having a draft does not mean it has been accepted into the board.
+Browsing saved cards, creating boards, manual editing, dragging, linking, zooming and saving layouts do not require generation. Paper-card extraction and research-plan evaluation use the selected assistant model, which receives the relevant paper or idea context. Generated drafts require review; having a draft does not mean it has been accepted into the board.
 
 This branch does not promise automatic judgments of academic novelty, proof of research claims or execution of experiments. Evidence links support checking rather than replacing source reading. Model drafts, personal ideas and reference patterns have different origins and should be assessed accordingly.
+
+### Templates and processing limits
+
+Card templates distinguish background/problems, method/component interfaces, constraints/assumptions, measured results, limitations and personal hypotheses. Missing paper facts remain explicitly unspecified. Manual template insertion never replaces existing card text; older cards remain editable.
+
+Parsed paper text is processed in source-preserving batches rather than sampled from the beginning and end. Personal annotations are excluded. Manual and background extraction show batch progress and use the configured assistant connection, context and generation settings. Successful batches survive individual format failures; authentication failure or cancellation ends the task. Exact duplicates merge their sources. Limits are 100 batches, 300 cards, 600 relations and a 10 MB draft file. Reaching the card limit marks partial coverage. Cross-batch relationships, automatic semantic deduplication and checkpoint resume are not implemented; rerunning extraction makes new model requests and may incur costs. Old partial drafts are not automatically completed.
+
+Evaluation accepts 1–40 selected cards, checks at most 80 distinct source segments and supplies up to 2400 characters per verified segment. Changed or unavailable sources are labeled accordingly. A real source marker does not prove a generated interpretation. User links and inspiration patterns are hypotheses, not paper evidence.
+
+Results remain temporary until explicitly saved as an AI draft card, with input snapshots. Oversized reports require fewer selected cards. Failed saves preserve the current card and retries do not insert duplicates. Closing an unsaved preview discards that temporary result. No web novelty search, experiment execution or unsupported success probability is provided. Native Tauri visuals and real-provider output quality require separate acceptance testing.
 
 ### Local interaction preview
 

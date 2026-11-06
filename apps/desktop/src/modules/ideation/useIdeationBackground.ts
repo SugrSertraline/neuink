@@ -12,6 +12,7 @@ export function useIdeationBackground(root: string, entries: LibraryEntry[], sta
   const [summaries, setSummaries] = useState<IdeationDraftSummary[] | null>(null);
   const [modelReady, setModelReady] = useState(false);
   const [modelKnown, setModelKnown] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retryId, setRetryId] = useState<string | null>(null);
@@ -48,13 +49,13 @@ export function useIdeationBackground(root: string, entries: LibraryEntry[], sta
     const legacyFailure = entries.find(item => item.status === 'Parsed' && byId.get(item.id)?.status === 'failed' && !byId.get(item.id)?.error_code);
     const entry = retry ?? legacyFailure ?? entries.find(item => item.status === 'Parsed' && !byId.has(item.id));
     if (!entry) { if (retryId) setRetryId(null); return; }
-    const controller = new AbortController(); active.current = controller; setActiveId(entry.id);
+    const controller = new AbortController(); active.current = controller; setActiveId(entry.id); setProgress(null);
     const expected = byId.get(entry.id)?.revision ?? 'missing';
     void (async () => {
       try {
         let draft: IdeationDraft;
         try {
-          const result = await generatePaperCards(root, entry.id, controller.signal);
+          const result = await generatePaperCards(root, entry.id, controller.signal, (done, total) => { if (mounted.current && !controller.signal.aborted) setProgress({ done, total }); });
           draft = { entry_id: entry.id, status: 'ready', partial: result.partial, model: result.model,
             cards: result.cards.map(card => ({ id: card.id, entry_id: entry.id, title: card.title, body: card.body, kind: card.kind, sources: card.sources, pattern_ids: card.pattern_ids })), relations: result.relations ?? [] };
         } catch (caught) {
@@ -76,5 +77,5 @@ export function useIdeationBackground(root: string, entries: LibraryEntry[], sta
     })();
   }, [available, enabled, libraryReady, modelReady, state, summaries, error, entries, byId, retryId, root, activeId]);
   const retry = useCallback((entryId: string) => { setError(null); setEnabled(true); setRetryId(entryId); }, [setEnabled]);
-  return { enabled, setEnabled, summaries, byId, activeId, error, refresh, retry, pendingCount, modelReady, modelKnown };
+  return { progress, enabled, setEnabled, summaries, byId, activeId, error, refresh, retry, pendingCount, modelReady, modelKnown };
 }

@@ -1,3 +1,4 @@
+import { cardTemplateText } from './cardTemplates';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Plus, FolderOpen, Layers } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -36,6 +37,7 @@ export function IdeationSidebar({ root, entries, onOpenEntry, onOpenSource }: {
   const [limit, setLimit] = useState(30);
   const [generation, setGeneration] = useState<CardGeneration | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState('');
   const [loading, setLoading] = useState(false);
   const requestRef = useRef<AbortController | null>(null);
   const [manual, setManual] = useState(false);
@@ -99,8 +101,8 @@ export function IdeationSidebar({ root, entries, onOpenEntry, onOpenSource }: {
   };
   const reorganize = async (id: string) => {
     if (loading || generation) return;
-    const controller = new AbortController(); requestRef.current = controller; setLoading(true); setError(null);
-    try { const result = await generatePaperCards(root, id, controller.signal); if (!controller.signal.aborted) setGeneration(result); }
+    const controller = new AbortController(); requestRef.current = controller; setLoading(true); setError(null); setProgress('准备正文…');
+    try { const result = await generatePaperCards(root, id, controller.signal, (done, total) => { if (!controller.signal.aborted) setProgress(`已处理 ${done}/${total} 批`); }); if (!controller.signal.aborted) setGeneration(result); }
     catch (caught) { if (!controller.signal.aborted) setError(cardErrorMessages[classifyCardError(caught)]); }
     finally { if (requestRef.current === controller) { requestRef.current = null; setLoading(false); } }
   };
@@ -156,11 +158,13 @@ export function IdeationSidebar({ root, entries, onOpenEntry, onOpenSource }: {
         <SearchInput label="搜索卡片" placeholder={allowedKinds ? '在这些候选卡片中搜索' : '搜索卡片内容或来源论文'} value={query} onValueChange={setQuery} />
         <div className="grid grid-cols-2 gap-2"><Select value={source} onValueChange={setSource}><SelectTrigger size="sm" className="w-full" aria-label="卡片来源"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">全部来源</SelectItem><SelectItem value="papers">来自论文</SelectItem><SelectItem value="personal">自行创建</SelectItem><SelectItem value="patterns">研究模式</SelectItem></SelectContent></Select>
         <Select value={filter} onValueChange={setFilter}><SelectTrigger size="sm" className="w-full" aria-label="筛选卡片类型"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">{allowedKinds ? '可用类型' : '全部类型'}</SelectItem>{Object.entries(cardLabels).filter(([value]) => !allowedKinds || allowedKinds.includes(value as CardKind)).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select></div>
+        {background.activeId && background.progress && <p role="status" className="text-xs text-muted-foreground">后台整理：{background.progress.done}/{background.progress.total} 批</p>}
+        {loading && progress && <p role="status" className="text-xs text-muted-foreground">{progress}</p>}
         {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
         {loading && <div role="status" className="flex items-center gap-2 text-xs text-muted-foreground">正在整理或读取…{requestRef.current && <Button size="sm" variant="ghost" onClick={() => requestRef.current?.abort()}>取消</Button>}</div>}
         <Dialog open={Boolean(generation)} onOpenChange={open => { if (!open) setGeneration(null); }}><DialogContent layout="bounded"><DialogHeader><DialogTitle>核对论文卡片</DialogTitle><DialogDescription>核对内容与原文后，选择保存或加入当前构思。</DialogDescription></DialogHeader><DialogBody>{generation && <section aria-label="AI 卡片草稿" className="space-y-2">
           <div className="text-xs font-medium">核对草稿 · {entriesById.get(generation.entryId)?.title ?? '论文'}</div>
-          <p className="text-xs text-muted-foreground">模型：{generation.model}。{generation.partial ? '仅分析了部分正文。' : '已分析提供的正文。'}请核对来源后添加；重新整理的结果在添加前是临时预览，旧草稿保留。</p>
+          <p className="text-xs text-muted-foreground">模型：{generation.model}。{generation.partial ? '仅完成部分整理（旧草稿可能仅分析了部分正文，或本次有失败批次／达到 300 张上限），请核对覆盖范围；成功结果已保留。' : '已分析提供的正文。'}请核对来源后添加；重新整理的结果在添加前是临时预览，旧草稿保留。</p>
           {(generation.relations?.length ?? 0) > 0 && <p className="text-xs text-muted-foreground">识别到 {generation.relations?.length} 条关系，放入画布后可查看出处；关系为 AI 归纳，需核对。</p>}
           {generation.cards.map(card => <div key={card.id} className="space-y-1 rounded border bg-background p-2 text-xs">
             <label className="flex items-center gap-2"><Checkbox checked={card.selected} onCheckedChange={checked => changeSuggestion(card.id, { selected: checked === true })} />{cardLabels[card.kind]}</label>
@@ -176,6 +180,8 @@ export function IdeationSidebar({ root, entries, onOpenEntry, onOpenSource }: {
             {!entry && <div className="max-h-32 overflow-y-auto text-xs">{entries.filter(item => paperQuery.trim() && `${item.title} ${item.tags.join(' ')}`.toLowerCase().includes(paperQuery.toLowerCase())).slice(0, 20).map(item => <Button key={item.id} variant="ghost" size="sm" className="w-full justify-start truncate" onClick={() => setEntryId(item.id)}>{item.title}</Button>)}<p className="text-muted-foreground">可选：搜索并关联论文；不选择则保存为我的卡片。</p></div>}
             {entry && <div className="flex items-center justify-between text-xs"><span className="truncate">{entry.title}</span><Button variant="ghost" size="sm" onClick={() => setEntryId('')}>更换</Button></div>}
             <Select value={kind} onValueChange={value => setKind(value as CardKind)}><SelectTrigger aria-label="卡片类型" size="sm" className="w-full"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(cardLabels).filter(([value]) => !context.branchTarget || context.branchTarget.kinds.includes(value as CardKind)).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select>
+            <Button size="sm" variant="outline" disabled={Boolean(body.trim())} onClick={() => setBody(cardTemplateText(kind))}>填入{cardLabels[kind]}模板</Button>
+            <p className="text-xs text-muted-foreground">每张卡只记录一个内容；模板未说明的字段可保留待补充。</p>
             <Input aria-label="卡片标题" placeholder="卡片标题" maxLength={160} value={title} onChange={e => setTitle(e.target.value)} /><Textarea aria-label="卡片内容" placeholder="记录核对后的内容或自己的理解" maxLength={20000} value={body} onChange={e => setBody(e.target.value)} />
             <Button size="sm" disabled={!title.trim() || !body.trim() || Boolean(context.branchTarget && !context.branchTarget.kinds.includes(kind))} onClick={() => { const card = { id: crypto.randomUUID(), entry_id: entry?.id ?? userEntryId, title: title.trim(), body: body.trim(), kind }; const p = nextPosition(), target = targetFor(card.kind); placeCard(update, card, p.x, p.y, target); context.completeBranchTarget(target); setTitle(''); setBody(''); setManual(false); setSource(entry ? 'papers' : 'personal'); }}>{context.activeBoard ? '添加卡片并放入画布' : '保存到卡片库'}</Button></>}
         </section></DialogBody></DialogContent></Dialog>

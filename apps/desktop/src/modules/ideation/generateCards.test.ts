@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { classifyCardError, generatePaperCards, parseCardRelations, parseCardSuggestions, selectPaperText } from './generateCards';
+import { classifyCardError, generatePaperCards, parseCardRelations, parseCardSuggestions } from './generateCards';
 import { researchPatterns } from './patterns/researchPatterns';
 
 const mocks = vi.hoisted(() => ({ settings: vi.fn(), read: vi.fn(), run: vi.fn() }));
@@ -48,25 +48,36 @@ describe('model generated card validation', () => {
     const relations = parseCardRelations(value, cards, '[S1] segment_uid: seg-1\n原文', sources, 'paper');
     expect(relations).toEqual([{ from: 'a', to: 'b', kind: 'addresses', sources: [expect.objectContaining({ segment_uid: 'seg-1' })] }]);
   });
-  it('samples later segments without fabricating markers or exceeding the budget', () => {
-    const text = Array.from({ length: 8 }, (_, i) => `[S${i + 1}] segment_uid: seg-${i + 1}\n${'原文'.repeat(250)}`).join('\n');
-    const sample = selectPaperText(text, 1000);
-    expect(sample.partial).toBe(true); expect(sample.markdown.length).toBeLessThanOrEqual(1000);
-    expect(sample.markdown).toContain('[S1]'); expect(sample.markdown).toMatch(/\[S[3-8]\]/);
-  });
   it('exposes all imported main patterns and subpatterns', () => {
     expect(researchPatterns).toHaveLength(15);
     expect(researchPatterns.reduce((count, pattern) => count + pattern.subpatterns.length, 0)).toBe(31);
   });
-  it('sends a bounded paper to the configured model and reports partial coverage', async () => {
-    mocks.settings.mockResolvedValue({ assistant_profile: { name: '测试模型', model: 'model', max_context_length: 4000 } });
+  it('processes every batch and deduplicates the resulting cards', async () => {
+    mocks.settings.mockResolvedValue({ assistant_profile: { name: '测试模型', model: 'model', max_context_length: 16000 } });
     mocks.read.mockResolvedValue({ entry_id: 'paper', entry_title: '论文', markdown: `[S1] segment_uid: seg-1\n${'原文'.repeat(6000)}`, sources });
     mocks.run.mockResolvedValue({ cards: [{ kind: 'problem', title: '问题', body: '问题说明', source_markers: ['S1'] }] });
     const result = await generatePaperCards('root', 'paper', new AbortController().signal);
-    expect(result.partial).toBe(true);
+    expect(result.partial).toBe(false);
+    expect(mocks.run.mock.calls.length).toBeGreaterThan(1);
+    expect(result.cards).toHaveLength(1);
     expect(result.cards[0].sources[0].segment_uid).toBe('seg-1');
-    expect(mocks.run.mock.calls[0][0].prompt).toContain('只提供部分');
-    expect(mocks.run.mock.calls[0][0].prompt.length).toBeLessThan(5000);
+    expect(mocks.run.mock.calls[0][0].prompt).toContain('分批整理');
+    expect(mocks.run.mock.calls[0][0].prompt.length).toBeLessThan(18000);
+  });
+  it('keeps successful batches when another batch fails', async () => {
+    mocks.settings.mockResolvedValue({ assistant_profile: { model: 'model', max_context_length: 16000 } });
+    mocks.read.mockResolvedValue({ entry_id: 'paper', entry_title: '论文', markdown: `[S1] segment_uid: seg-1\n${'原文'.repeat(6000)}`, sources });
+    mocks.run.mockRejectedValueOnce(new Error('invalid JSON')).mockResolvedValue({ cards: [{ kind: 'method', title: '保留结果', body: '内容', source_markers: ['S1'] }] });
+    const progress = vi.fn();
+    const result = await generatePaperCards('root', 'paper', new AbortController().signal, progress);
+    expect(result.partial).toBe(true); expect(result.cards[0].title).toBe('保留结果');
+    const last = progress.mock.calls[progress.mock.calls.length - 1]; expect(last[0]).toBe(last[1]);
+  });
+  it('does not accept invented source markers into generated paper cards', async () => {
+    mocks.settings.mockResolvedValue({ assistant_profile: { model: 'model', max_context_length: 16000 } });
+    mocks.read.mockResolvedValue({ entry_id: 'paper', entry_title: '论文', markdown: '[S1] segment_uid: seg-1\n原文', sources });
+    mocks.run.mockResolvedValue({ cards: [{ kind: 'method', title: '无依据', body: '内容', source_markers: ['S999'] }] });
+    await expect(generatePaperCards('root', 'paper', new AbortController().signal)).rejects.toThrow('没有带来源');
   });
   it('does not call the model if parsed paper content is missing', async () => {
     mocks.settings.mockResolvedValue({ assistant_profile: { model: 'model' } });

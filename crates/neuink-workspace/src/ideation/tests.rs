@@ -251,3 +251,23 @@ fn multiple_boards_preserve_local_edits_deleted_graphs_viewports_and_evidence() 
         .deleted_at
         .is_none());
 }
+#[test]
+fn batched_paper_drafts_allow_more_than_thirty_cards_and_preserve_previous_on_overflow() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Workspace::create(dir.path()).unwrap();
+    let mut draft = IdeationDraft {
+        entry_id: "paper".into(), status: "ready".into(), partial: false,
+        model: "model".into(), error_code: None, relations: Vec::new(),
+        cards: (0..300).map(|i| IdeationCard {
+            id: format!("card-{i}"), entry_id: "paper".into(), title: "方法".into(),
+            body: "来源清晰的整理".repeat(100), kind: "method".into(),
+            origin: Some("ai_draft".into()), pattern_ids: Vec::new(), sources: Vec::new(),
+        }).collect(),
+    };
+    let saved = workspace.save_ideation_draft("missing", draft.clone()).unwrap();
+    assert_eq!(workspace.read_ideation_draft("paper").unwrap().draft.unwrap().cards.len(), 300);
+    let mut extra = draft.cards[0].clone(); extra.id = "overflow".into(); draft.cards.push(extra);
+    assert!(workspace.save_ideation_draft(&saved.revision, draft).is_err());
+    assert_eq!(workspace.read_ideation_draft("paper").unwrap().revision, saved.revision);
+    assert!(workspace.read_ideation().unwrap().state.cards.is_empty());
+}

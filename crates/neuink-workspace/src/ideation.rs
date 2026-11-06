@@ -34,7 +34,7 @@ impl Workspace {
                 draft: None,
             });
         }
-        if fs::metadata(&path)?.len() > 1_000_000 {
+        if fs::metadata(&path)?.len() > 10_000_000 {
             return Err(invalid("卡片草稿过大，原文件已保留"));
         }
         let bytes = fs::read(path)?;
@@ -103,7 +103,7 @@ impl Workspace {
             return Err(invalid("卡片草稿已在其他位置更新，本次结果未覆盖"));
         }
         validate_draft(&draft, &draft.entry_id)?;
-        if serde_json::to_vec(&draft)?.len() > 1_000_000 {
+        if serde_json::to_vec(&draft)?.len() > 10_000_000 {
             return Err(invalid("卡片草稿过大，原文件已保留"));
         }
         atomic_write_json(path, &draft)?;

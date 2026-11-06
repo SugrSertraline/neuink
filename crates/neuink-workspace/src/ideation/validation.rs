@@ -177,12 +177,12 @@ pub(super) fn validate_draft(draft: &IdeationDraft, entry_id: &str) -> Result<()
     if draft.entry_id != entry_id
         || !valid_id(entry_id)
         || !["ready", "failed"].contains(&draft.status.as_str())
-        || draft.cards.len() > 30
+        || draft.cards.len() > 300
         || draft.model.len() > 500
         || (draft.status == "ready" && draft.cards.is_empty())
         || (draft.status == "failed" && !draft.cards.is_empty())
         || draft.cards.iter().any(|c| c.entry_id != entry_id)
-        || draft.relations.len() > 60
+        || draft.relations.len() > 600
         || draft.relations.iter().any(|relation| {
             relation.from == relation.to
                 || !draft.cards.iter().any(|card| card.id == relation.from)
