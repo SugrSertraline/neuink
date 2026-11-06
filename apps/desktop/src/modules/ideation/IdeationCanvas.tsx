@@ -1,5 +1,6 @@
+import { cardSummary, compactCardLabels } from './cardPresentation';
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type PointerEvent } from 'react';
-import { GitFork, GripVertical, Link2, LockKeyhole, Minus, Pencil, Plus, Scan } from 'lucide-react';
+import { GitFork, GripVertical, Link2, LockKeyhole, Minus, Pencil, Plus, Scan, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import type { IdeationLink, IdeationViewport, PaperCard, Placement } from '@/shared/ipc/ideationApi';
@@ -18,7 +19,7 @@ const initialView = { x: 0, y: 0, scale: 1 };
 type Gesture = { pointer: number; startX: number; startY: number; nodeId?: string; x: number; y: number; uiScale: number; originalView: IdeationViewport };
 
 /** Canvas owns pan, zoom and movement; only completed gestures are persisted. No scrolling surface. */
-export function IdeationCanvas({ nodes, links, slots = [], activeSlot, viewport, selectedNodeId, selectedLinkId, connecting, onSelectNode, onEditNode, onSelectLink, onConnect, onCancelConnect, onMove, onViewport, onDropCard, onBrowse, onClearSelection, onSelectSlot, onCreateProblem, routes, layoutVersion, onArrange, workspaceRoot, boardId, branchSourceId, showBranchPopover, onRequestBranch, onOpenBranches, onCanvasWidth }: {
+export function IdeationCanvas({ nodes, links, slots = [], activeSlot, viewport, selectedNodeId, selectedLinkId, connecting, onSelectNode, onEditNode, onRemoveNode, onSelectLink, onConnect, onCancelConnect, onMove, onViewport, onDropCard, onBrowse, onClearSelection, onSelectSlot, onCreateProblem, routes, layoutVersion, onArrange, workspaceRoot, boardId, branchSourceId, showBranchPopover, onRequestBranch, onOpenBranches, onCanvasWidth }: {
   onCanvasWidth: (width: number) => void;
   onOpenBranches: (id: string) => void;
   workspaceRoot: string; boardId: string; branchSourceId: string | null; showBranchPopover: boolean; onRequestBranch: (id: string) => void;
@@ -26,7 +27,7 @@ export function IdeationCanvas({ nodes, links, slots = [], activeSlot, viewport,
   nodes: CanvasNode[]; links: IdeationLink[]; viewport?: IdeationViewport | null;
   selectedNodeId: string | null; selectedLinkId: string | null; connecting: string | null;
   onSelectNode: (id: string) => void; onSelectLink: (id: string) => void; onConnect: (id: string) => void;
-  onEditNode: (id: string) => void;
+  onEditNode: (id: string) => void; onRemoveNode?: (id: string) => void;
   onCancelConnect: () => void; onMove: (id: string, x: number, y: number) => void;
   onViewport: (view: IdeationViewport) => void; onDropCard: (data: string, x: number, y: number, slot?: BranchSlot) => void;
   onBrowse: (kind: 'problem' | 'idea' | null) => void; onClearSelection: () => void;
@@ -194,12 +195,13 @@ export function IdeationCanvas({ nodes, links, slots = [], activeSlot, viewport,
                 const d = { ArrowLeft: [-delta, 0], ArrowRight: [delta, 0], ArrowUp: [0, -delta], ArrowDown: [0, delta] }[event.key];
                 if (d) { event.preventDefault(); event.stopPropagation(); onMove(node.id, clamp(node.x + d[0], 10000), clamp(node.y + d[1], 10000)); }
               }}><GripVertical className="size-3.5" /></Button>
-            <span className="flex-1 truncate">{cardLabels[node.card.kind]}</span>{node.locked && <LockKeyhole className="size-3" aria-label="已固定" />}
+            <span className="flex-1 truncate">{compactCardLabels[node.card.kind]}</span>{node.locked && <LockKeyhole className="size-3" aria-label="已固定" />}
             {node.card.origin === 'ai_draft' && <span className="text-[10px]">待核对</span>}
             <Button size="icon-sm" variant="ghost" aria-label={`编辑卡片 ${node.card.title}`} title="编辑卡片" onPointerDown={event => event.stopPropagation()} onClick={() => onEditNode(node.id)}><Pencil className="size-3" /></Button>
+            {onRemoveNode && <Button size="icon-sm" variant="ghost" aria-label={`从画布移除 ${node.card.title}`} title="从画布移除（卡片库保留，可撤销）" onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); onRemoveNode(node.id); }}><Trash2 className="size-3" /></Button>}
           </div>
           <button className="min-h-0 flex-1 space-y-2 overflow-hidden px-3 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" onClick={() => onSelectNode(node.id)} aria-label={node.card.title} aria-pressed={selectedNodeId === node.id}>
-            <span className="line-clamp-2 text-sm font-medium leading-snug">{node.card.title}</span><span className="line-clamp-3 whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">{node.card.body || '点击补充内容'}</span>
+            <span className="line-clamp-2 text-sm font-medium leading-snug">{node.card.title}</span><span className="line-clamp-3 whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">{cardSummary(node.card)}</span>
           </button>
           <div className="flex items-center gap-1 border-t px-3 py-1"><span title={node.sourceTitle} className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{node.sourceTitle}</span><Button size="sm" variant="ghost" aria-label={`选择分支 ${node.card.title}`} onClick={() => onOpenBranches(node.id)}><GitFork className="size-3" />下一步</Button><Button size="sm" variant={connecting === node.id ? 'secondary' : 'ghost'} onClick={() => onConnect(node.id)}><Link2 className="size-3" />连接</Button></div>
         </Card>

@@ -311,3 +311,27 @@ it('keeps selection on blank canvas clicks, and toggles it only on the selected 
   fireEvent.click(problemNode); fireEvent.keyDown(canvas(), { key: 'Escape' });
   expect(problemNode.getAttribute('aria-pressed')).toBe('false');
 });
+
+it('removes a canvas card directly, preserves the library card and supports undo', async () => {
+  api.read.mockResolvedValue({ revision: 'r1', state: twoBoards() }); renderWorkspace();
+  await screen.findByLabelText('构思画布');
+  fireEvent.click(within(canvas()).getByRole('button', { name: '从画布移除 反事实方法' }));
+  expect(within(canvas()).queryByRole('button', { name: '反事实方法' })).toBeNull();
+  await save(); expect(savedState().cards.some((c: any) => c.id === 'c1')).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '撤销移除' }));
+  expect(within(canvas()).getByRole('button', { name: '反事实方法' })).toBeTruthy();
+});
+
+it('clicking the same empty slot resets a stale candidate search', async () => {
+  api.read.mockResolvedValue({ revision: 'r1', state: twoBoards() }); renderWorkspace();
+  await screen.findByLabelText('构思画布');
+  fireEvent.click(within(canvas()).getByRole('button', { name: '研究问题' }));
+  fireEvent.click(screen.getByRole('button', { name: '分支选项：尝试已有方法' }));
+  const search = screen.getByRole('textbox', { name: '搜索卡片' });
+  fireEvent.change(search, { target: { value: '没有这样的候选' } });
+  expect(screen.queryByTestId('library-card-c1')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '下一步：尝试已有方法' }));
+  await waitFor(() => expect((search as HTMLInputElement).value).toBe(''));
+  expect(screen.getByTestId('library-card-c1')).toBeTruthy();
+  expect(screen.queryByTestId('library-card-c2')).toBeNull();
+});

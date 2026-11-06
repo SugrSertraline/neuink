@@ -21,6 +21,7 @@ type IdeationContextValue = ReturnType<typeof useIdeation> & ReturnType<typeof u
   selectionSource: 'library' | 'canvas'; selectCanvasCard: (id: string) => void;
   selectedSlot: CardKind | null; selectSlot: (kind: CardKind | null) => void;
   branchSourceId: string | null; selectBranchSource: (id: string | null) => void;
+  candidateRequest: number;
   branchTarget: BranchSlot | null; selectBranchTarget: (slot: BranchSlot | null) => void;
   completeBranchTarget: (slot?: BranchSlot | null) => void;
   requestBranch: (id: string) => void;
@@ -43,6 +44,7 @@ function ActiveProvider({ root, children, entries, libraryReady, onShowSidebar }
   const selectCanvasCard = (id: string) => { setCardId(id); setSelectionSource('canvas'); };
   const [selectedSlot, setSelectedSlot] = useState<CardKind | null>(null);
   const [branchSourceId, setBranchSourceId] = useState<string | null>(null);
+  const [candidateRequest, setCandidateRequest] = useState(0);
   const [branchTarget, setBranchTarget] = useState<Pick<BranchSlot, 'sourceId' | 'id'> | null>(null);
   const [cardRequest, setCardRequest] = useState<{ id: number; kind: CardKind } | null>(null);
   const activeBoard = store.state?.boards?.find(board => board.id === activeId && !board.deleted_at) ?? null;
@@ -71,13 +73,13 @@ function ActiveProvider({ root, children, entries, libraryReady, onShowSidebar }
   const duplicateBoard = (sourceId: string) => { const id = crypto.randomUUID(); store.update(current => copyBoard(current, sourceId, id)); selectBoard(id); };
   const selectSlot = (kind: CardKind | null) => { setSelectedSlot(kind); setBranchTarget(null); setBranchSourceId(null); setSidebarTab('cards'); onShowSidebar?.(); };
   const selectBranchSource = (id: string | null) => { setBranchSourceId(id); setBranchTarget(null); setSelectedSlot(null); if (id) { setSidebarTab('cards'); onShowSidebar?.(); } };
-  const selectBranchTarget = (slot: BranchSlot | null) => { setBranchTarget(slot); setSelectedSlot(null); if (slot) { setBranchSourceId(slot.sourceId); setSidebarTab('cards'); onShowSidebar?.(); } };
+  const selectBranchTarget = (slot: BranchSlot | null) => { setCandidateRequest(value => value + 1); setBranchTarget(slot); setSelectedSlot(null); if (slot) { setBranchSourceId(slot.sourceId); setSidebarTab('cards'); onShowSidebar?.(); } };
   const completeBranchTarget = (slot?: BranchSlot | null) => { if (slot) layout.consumeSlot(slot); setBranchTarget(current => slot && current?.id === slot.id && current.sourceId === slot.sourceId ? null : current); };
-  const requestBranch = (id: string) => { if (!branchSourceId) return; layout.revealSlot(id); setBranchTarget({ id, sourceId: branchSourceId }); setSidebarTab('cards'); onShowSidebar?.(); };
+  const requestBranch = (id: string) => { if (!branchSourceId) return; layout.revealSlot(id); setCandidateRequest(value => value + 1); setBranchTarget({ id, sourceId: branchSourceId }); setSidebarTab('cards'); onShowSidebar?.(); };
   const requestCard = (kind: CardKind) => { setCardRequest(current => ({ id: (current?.id ?? 0) + 1, kind })); setSidebarTab('cards'); onShowSidebar?.(); };
   return <Context.Provider value={{ ...store, ...layout, collection: store.state, state, update, activeBoard, selectBoard, createBoard, editBoard, duplicateBoard,
     sidebarTab, setSidebarTab, showSidebar: () => onShowSidebar?.(), entryId, setEntryId, selectedCardId, setSelectedCardId, selectionSource, selectCanvasCard, selectedSlot, selectSlot,
-    branchSourceId, selectBranchSource, branchTarget: currentBranchTarget, selectBranchTarget, completeBranchTarget, requestBranch, cardRequest, requestCard, background }}>{children}</Context.Provider>;
+    branchSourceId, selectBranchSource, candidateRequest, branchTarget: currentBranchTarget, selectBranchTarget, completeBranchTarget, requestBranch, cardRequest, requestCard, background }}>{children}</Context.Provider>;
 }
 export function IdeationProvider({ root, children, ...props }: Omit<Props, 'root'> & { root: string | null }) {
   return root ? <ActiveProvider key={root} root={root} {...props}>{children}</ActiveProvider> : <Context.Provider value={null}>{children}</Context.Provider>;
