@@ -40,7 +40,7 @@ export function ModelSettingsSection({ props }: { props: SettingsPanelLayoutProp
                           <span className="min-w-0 truncate text-[13px] font-semibold" title={profile.name}>{profile.name}</span>
                           <span className="flex flex-wrap gap-1">
                             {settings.assistant_profile_id === profile.id && <Badge variant="secondary">对话</Badge>}
-                            {settings.translation_profile_id === profile.id && <Badge variant="secondary">整体翻译</Badge>}
+                            {settings.translation_profile_id === profile.id && <Badge variant="secondary">默认翻译</Badge>}
                           </span>
                         </div>
                         <p className="mt-1 truncate text-xs" title={profile.model}>{profile.model}</p>

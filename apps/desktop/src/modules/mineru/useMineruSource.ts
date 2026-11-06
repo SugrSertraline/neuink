@@ -1,6 +1,6 @@
 import { open } from '@tauri-apps/plugin-dialog';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { cancelMineruSearch, discoverMineru, getMineruSettings, onMineruSettingsChanged, saveMineruSettings, type MineruCandidate, type MineruSettings } from '@/shared/ipc/mineruApi';
+import { cancelMineruSearch, discoverMineru, getMineruSettings, onMineruSettingsChanged, saveMineruSettings, setMineruEnabled, type MineruCandidate, type MineruSettings } from '@/shared/ipc/mineruApi';
 
 let nextSearchId = 0;
 
@@ -69,7 +69,7 @@ export function useMineruSource(active: boolean, onSaved?: () => void) {
     latest.current = value;
     setSettings(value);
     if (changed) saved.current?.();
-    if (!value.results_directory) {
+    if (value.enabled !== false && !value.results_directory) {
       await find(current);
     }
   }), [run]);
@@ -87,6 +87,13 @@ export function useMineruSource(active: boolean, onSaved?: () => void) {
   }) : undefined, [active, reload, interruptSearch]);
   return {
     settings, candidates, busy, searching, error, notice, reload,
+    setEnabled: (enabled: boolean) => run(async current => {
+      const value = await setMineruEnabled(enabled);
+      if (!current()) return;
+      latest.current = value; setSettings(value);
+      setNotice(enabled ? '已启用 MinerU 自动同步和条目显示。' : '已关闭 MinerU 自动同步；已有副本保留，但在条目库隐藏。');
+      saved.current?.();
+    }),
     choose: () => {
       const interrupted = interruptSearch();
       return run(async current => {

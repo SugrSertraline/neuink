@@ -1280,6 +1280,7 @@ fn search_records_include_notes_but_only_succeeded_segments() {
     workspace
         .set_pdf_parse_state(&parsed.id, neuink_domain::PdfParseStatus::Succeeded, None)
         .unwrap();
+    fs::write(&source_pdf, b"%PDF-1.7\npending paper").unwrap();
     workspace.import_pdf(&pending.id, &source_pdf).unwrap();
 
     let parsed_segment = neuink_domain::SourceSegment::new(

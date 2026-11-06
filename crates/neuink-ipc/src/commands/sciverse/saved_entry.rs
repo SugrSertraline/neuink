@@ -1,8 +1,9 @@
 use super::{configured_client, read_settings, PrepareSciversePaperImportRequest};
 use neuink_domain::{EntryId, EntryMeta};
 use neuink_sciverse::SciverseClient;
+use neuink_workspace::pdf_duplicate::PdfDuplicate;
 use neuink_workspace::{Workspace, WorkspaceError};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, sync::OnceLock, time::Duration};
 use tauri::{AppHandle, Emitter, Runtime};
 
@@ -10,13 +11,25 @@ use tauri::{AppHandle, Emitter, Runtime};
 pub struct FetchEntryPdfRequest {
     pub root: PathBuf,
     pub entry_id: EntryId,
+    #[serde(default)]
+    pub confirmed_duplicate_hash: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum FetchEntryPdfResult {
+    Saved { entry: EntryMeta },
+    Duplicate {
+        duplicate: PdfDuplicate,
+        source: String,
+    },
 }
 
 #[tauri::command]
 pub async fn fetch_entry_pdf<R: Runtime>(
     app: AppHandle<R>,
     request: FetchEntryPdfRequest,
-) -> Result<EntryMeta, String> {
+) -> Result<FetchEntryPdfResult, String> {
     let settings = read_settings(&app)?;
     let client = if settings.sciverse.enabled {
         Some(configured_client(&settings.sciverse))
@@ -28,7 +41,7 @@ pub async fn fetch_entry_pdf<R: Runtime>(
         client.as_ref().and_then(|value| value.as_ref().ok()),
     )
     .await;
-    if result.is_ok() {
+    if matches!(&result, Ok(FetchEntryPdfResult::Saved { .. })) {
         let _ = app.emit(
             "research-library-changed",
             serde_json::json!({"root":request.root}),
@@ -40,7 +53,7 @@ pub async fn fetch_entry_pdf<R: Runtime>(
 pub(super) async fn fetch_saved_entry(
     request: &FetchEntryPdfRequest,
     client: Option<&SciverseClient>,
-) -> Result<EntryMeta, String> {
+) -> Result<FetchEntryPdfResult, String> {
     // One retry at a time bounds memory and makes duplicate requests re-read the
     // entry after the first download has committed, including across split panes.
     static DOWNLOAD: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
@@ -55,7 +68,7 @@ pub(super) async fn fetch_saved_entry(
         .read_entry(&request.entry_id)
         .map_err(|_| "条目已移除或不可用。")?;
     if entry.pdf.is_some() {
-        return Ok(entry);
+        return Ok(FetchEntryPdfResult::Saved { entry });
     }
     let fields = &entry.fields;
     let field = |names: &[&str]| {
@@ -111,11 +124,35 @@ pub(super) async fn fetch_saved_entry(
     let result = std::fs::read(&path)
         .map_err(|_| "读取下载文件失败，请重试。".to_string())
         .and_then(|bytes| {
+            let hash = blake3::hash(&bytes).to_hex().to_string();
+            if request.confirmed_duplicate_hash.as_deref() != Some(hash.as_str()) {
+                if let Some(duplicate) = workspace
+                    .find_pdf_duplicate(&hash)
+                    .map_err(|error| error.to_string())?
+                {
+                    return Ok(FetchEntryPdfResult::Duplicate {
+                        duplicate,
+                        source: preparation
+                            .pdf_source_url
+                            .clone()
+                            .unwrap_or_else(|| "在线获取的 PDF".into()),
+                    });
+                }
+            }
             workspace
-                .attach_downloaded_pdf(&entry, &bytes, preparation.pdf_source_url.as_deref())
+                .attach_downloaded_pdf_with_confirmation(
+                    &entry,
+                    &bytes,
+                    preparation.pdf_source_url.as_deref(),
+                    request.confirmed_duplicate_hash.as_deref(),
+                )
+                .map(|entry| FetchEntryPdfResult::Saved { entry })
                 .map_err(|error| match error {
                     WorkspaceError::PdfAlreadyExists(_) => {
                         "此条目已存在 PDF，未覆盖文件。请刷新详情。".into()
+                    }
+                    WorkspaceError::PdfContentDuplicate(title) => {
+                        format!("相同内容的 PDF 已在本地：“{title}”。请打开已有条目。")
                     }
                     WorkspaceError::EntryRevisionConflict(_) => {
                         "下载期间条目信息发生变化，请重试。".into()

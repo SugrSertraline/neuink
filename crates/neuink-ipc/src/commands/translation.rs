@@ -61,7 +61,7 @@ enum RequestActivity {
 
 use super::{
     job::{emit_job_event, job_manager},
-    settings::read_translation_profile,
+    translation_routing::read_profile as read_translation_profile,
 };
 
 const MAX_PAPER_CONTEXT_BUDGET: usize = 120_000;
@@ -252,7 +252,7 @@ pub async fn run_entry_translation<R: Runtime>(
     }) {
         return Err("此条目已有翻译任务，请等待完成或暂停／取消后再开始。".into());
     }
-    let profile = read_translation_profile(&app)?
+    let profile = read_translation_profile(&app, neuink_config::TranslationKind::Document)?
         .ok_or_else(|| "Please configure a translation model first.".to_string())?;
     let workspace = Workspace::open(request.root.clone()).map_err(|error| error.to_string())?;
     let segments = workspace
@@ -408,7 +408,7 @@ pub async fn translate_entry_segment<R: Runtime>(
     app: AppHandle<R>,
     request: TranslateEntrySegmentRequest,
 ) -> Result<EntryTranslationResponse, String> {
-    let profile = read_translation_profile(&app)?
+    let profile = read_translation_profile(&app, neuink_config::TranslationKind::Segment)?
         .ok_or_else(|| "Please configure a translation model first.".to_string())?;
     single_segment::translate(request, profile).await
 }

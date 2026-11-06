@@ -1,11 +1,13 @@
+import { DEFAULT_TRANSLATION_ROUTING } from '@/shared/ipc/translationRoutingApi';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('@/shared/ipc/translationLogApi', () => ({ logTranslationFailure: mocks.log }));
 
-const mocks = vi.hoisted(() => ({ settings: vi.fn(), generate: vi.fn(), service: vi.fn(), log: vi.fn(async () => true) }));
+const mocks = vi.hoisted(() => ({ settings: vi.fn(), generate: vi.fn(), service: vi.fn(), routing: vi.fn(), createModel: vi.fn(() => 'model'), log: vi.fn(async () => true) }));
+vi.mock('@/shared/ipc/translationRoutingApi', async original => ({ ...await original<typeof import('@/shared/ipc/translationRoutingApi')>(), getTranslationRouting: mocks.routing }));
 vi.mock('@/shared/ipc/selectionTranslationApi', () => ({ translateSelectionService: mocks.service }));
 vi.mock('@/shared/ipc/assistantApi', () => ({ getLlmSettings: mocks.settings }));
 vi.mock('ai', () => ({ generateText: mocks.generate }));
-vi.mock('../../assistant/sdk/provider', () => ({ createNeuinkModel: () => 'model', generationSettings: () => ({}) }));
+vi.mock('../../assistant/sdk/provider', () => ({ createNeuinkModel: mocks.createModel, generationSettings: () => ({}) }));
 
 const request = { root: 'library', entryId: 'paper', entryTitle: '论文', text: 'Private selected source', context: 'Private paragraph context' };
 beforeEach(() => {
@@ -13,6 +15,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.settings.mockResolvedValue({ translation_profile: { max_context_length: 8192 } });
   mocks.service.mockResolvedValue(null);
+  mocks.routing.mockResolvedValue(DEFAULT_TRANSLATION_ROUTING);
 });
 
 describe('selection translation task lifecycle', () => {
@@ -144,4 +147,29 @@ describe('selection translation task lifecycle', () => {
     expect(mocks.service).not.toHaveBeenCalled();
     expect(mocks.settings).not.toHaveBeenCalled();
   });
+});
+
+it('routes a selection to its independent model without calling the configured service', async () => {
+  mocks.routing.mockResolvedValue({ ...DEFAULT_TRANSLATION_ROUTING, selection: { kind: 'profile', profile_id: 'precise' } });
+  mocks.settings.mockResolvedValue({ translation_profile: { model: 'default' }, profiles: [{ id: 'precise', model: 'precise', max_context_length: 8192 }] });
+  mocks.generate.mockResolvedValue({ text: '独立译文' });
+  const { translateTextSelection } = await import('./entryTranslation');
+  await expect(translateTextSelection(request)).resolves.toBe('独立译文');
+  expect(mocks.createModel).toHaveBeenCalledWith(expect.objectContaining({ id: 'precise', model: 'precise' }));
+  expect(mocks.service).not.toHaveBeenCalled();
+});
+it('allows known words to bypass the local dictionary and use the unified default model', async () => {
+  mocks.routing.mockResolvedValue({ ...DEFAULT_TRANSLATION_ROUTING, local_dictionary_first: false, word: { kind: 'default_model' } });
+  mocks.generate.mockResolvedValue({ text: '模型释义' });
+  const { translateTextSelection } = await import('./entryTranslation');
+  await expect(translateTextSelection({ ...request, text: 'embedding' })).resolves.toBe('模型释义');
+  expect(mocks.service).not.toHaveBeenCalled();
+  expect(mocks.generate).toHaveBeenCalledOnce();
+});
+it('does not replace a deleted independent model with the default model or service', async () => {
+  mocks.routing.mockResolvedValue({ ...DEFAULT_TRANSLATION_ROUTING, selection: { kind: 'profile', profile_id: 'deleted' } });
+  mocks.settings.mockResolvedValue({ translation_profile: { model: 'default' }, profiles: [] });
+  const { translateTextSelection } = await import('./entryTranslation');
+  await expect(translateTextSelection(request)).rejects.toThrow('已删除');
+  expect(mocks.service).not.toHaveBeenCalled(); expect(mocks.generate).not.toHaveBeenCalled();
 });

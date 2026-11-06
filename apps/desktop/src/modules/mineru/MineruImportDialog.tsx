@@ -10,6 +10,7 @@ import { openPathInFileManager } from '@/shared/ipc/assistantApi';
 import { MineruSourceControls } from './MineruSourceControls';
 import { useMineruSource } from './useMineruSource';
 import { useMineruImport } from './useMineruImport';
+import { useActiveSourceRefresh } from '@/modules/import/useActiveSourceRefresh';
 
 const PAGE_SIZE = 50;
 function displayPath(path: string) {
@@ -27,10 +28,7 @@ export function MineruImportDialog({ root, onClose, onImported, onOpenEntry, onS
   const source = useMineruSource(active, model.reset);
   useEffect(() => { onBusyChange?.(model.busy); }, [model.busy, onBusyChange]);
   const sourceDirectory = source.settings?.results_directory;
-  useEffect(() => {
-    if (sourceDirectory) void model.load();
-    else model.reset();
-  }, [sourceDirectory, root, model.load, model.reset]);
+  const refresh = useActiveSourceRefresh(active && !source.busy, sourceDirectory, model.busy, model.load, model.reset);
   const [query, setQuery] = useState('');
   const [openError, setOpenError] = useState('');
   const [page, setPage] = useState(0);
@@ -40,11 +38,12 @@ export function MineruImportDialog({ root, onClose, onImported, onOpenEntry, onS
     return items.filter(item => terms.every(term => `${item.title} ${displayPath(item.path)}`.toLocaleLowerCase().includes(term)));
   }, [items, query]);
   useEffect(() => { setPage(0); }, [query, model.snapshot]);
-  const eligible = filtered.filter(item => item.has_pdf && !model.outcomes[item.id]?.result);
+  const eligible = filtered.filter(item => item.has_pdf && !model.snapshot?.existing?.[item.id] && !model.outcomes[item.id]?.result);
   const selectedVisible = eligible.filter(item => model.selected.has(item.id)).length;
   const imported = Object.values(model.outcomes).filter(outcome => outcome.result?.status === 'imported').length;
   const skipped = Object.values(model.outcomes).filter(outcome => outcome.result?.status === 'skipped').length;
   const failed = Object.values(model.outcomes).filter(outcome => outcome.error).length;
+  const cancelled = Object.values(model.outcomes).filter(outcome => outcome.cancelled).length;
   const close = () => { if (!model.busy) onClose(); };
   const openResultLocation = async (path: string) => {
     setOpenError('');
@@ -56,7 +55,7 @@ export function MineruImportDialog({ root, onClose, onImported, onOpenEntry, onS
       <ImportPanelBody>
         <div className="mb-4"><MineruSourceControls source={source} disabled={model.busy} onBeforeChoose={() => { if (model.loading) model.reset(); }} /></div>
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <Button variant="outline" disabled={model.busy || model.loading || source.busy || !sourceDirectory} onClick={() => void model.load()}>{model.loading ? '正在读取…' : model.snapshot ? '刷新结果列表' : '重试读取'}</Button>
+          <Button variant="outline" disabled={model.busy || model.loading || source.busy || !sourceDirectory} onClick={() => void refresh()}>{model.loading ? '正在读取…' : model.snapshot ? '刷新结果列表' : '重试读取'}</Button>
           {model.loading ? <span role="status" className="text-xs text-muted-foreground">正在检查本机 MinerU 结果…</span>
             : model.snapshot && <span className="text-xs text-muted-foreground">找到 {items.length} 项结果{model.snapshot.truncated ? ' · 目录较大，仅显示部分结果' : ''}</span>}
         </div>
@@ -71,8 +70,9 @@ export function MineruImportDialog({ root, onClose, onImported, onOpenEntry, onS
             <TableHeader className="bg-muted"><TableRow><TableHead className="w-10"><span className="sr-only">选择</span></TableHead><TableHead>解析结果</TableHead><TableHead className="w-36">导入状态</TableHead></TableRow></TableHeader>
             <TableBody>{filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(item => {
               const outcome = model.outcomes[item.id];
+              const existing = model.snapshot?.existing?.[item.id] ?? outcome?.result?.entry_id;
               return <TableRow key={item.id} data-state={model.selected.has(item.id) ? 'selected' : undefined}>
-                <TableCell className="align-top pt-3"><Checkbox aria-label={`选择 ${item.title}`} checked={model.selected.has(item.id)} disabled={model.busy || !item.has_pdf || Boolean(outcome?.result)}
+                <TableCell className="align-top pt-3"><Checkbox aria-label={`选择 ${item.title}`} checked={model.selected.has(item.id)} disabled={model.busy || !item.has_pdf || Boolean(existing)}
                   onCheckedChange={checked => model.setSelected(previous => { const next = new Set(previous); if (checked === true) next.add(item.id); else next.delete(item.id); return next; })} /></TableCell>
                 <TableCell className="min-w-0 overflow-hidden py-2"><p className="truncate font-medium" title={item.title}>{item.title}</p>
                   <div className="mt-1 flex min-w-0 items-center gap-1 text-muted-foreground"><span className="shrink-0">{item.kind === 'directory' ? '结果目录' : item.kind.toUpperCase()} ·</span>
@@ -81,8 +81,10 @@ export function MineruImportDialog({ root, onClose, onImported, onOpenEntry, onS
                     <Button size="xs" variant="outline" aria-label={`打开 ${item.title} 的${item.kind === 'directory' ? '结果目录' : '所在文件夹'}`} onClick={() => void openResultLocation(item.path)}>打开目录</Button>
                     {onPreview && <Button size="xs" variant="outline" disabled={!item.has_pdf} onClick={() => onPreview({ source: 'mineru', root, snapshot_id: model.snapshot!.snapshot_id, item_id: item.id }, item.title)}>预览 PDF</Button>}
                   </div></TableCell>
-                <TableCell className="whitespace-normal align-top py-2">{outcome?.result ? <div className="grid justify-items-start gap-1"><span className="text-success">{outcome.result.status === 'imported' ? '已导入' : '已在本地'}</span>
-                  {onOpenEntry && <Button size="xs" variant="outline" disabled={model.busy} onClick={() => { close(); onOpenEntry(outcome.result!.entry_id); }}>打开</Button>}</div>
+                <TableCell className="whitespace-normal align-top py-2">{existing ? <div className="grid justify-items-start gap-1"><span className="text-success">{outcome?.result?.status === 'imported' ? '已导入' : '已在本地'}</span>
+                  {model.snapshot?.changed?.includes(item.id) && <span className="text-warning">来源有更新；本地内容未覆盖</span>}
+                  {onOpenEntry && <Button size="xs" variant="outline" disabled={model.busy} onClick={() => { close(); onOpenEntry(existing); }}>打开</Button>}</div>
+                  : outcome?.cancelled ? <span className="text-muted-foreground">已取消，可重新导入</span>
                   : outcome?.error ? <p role="alert" className="break-words text-destructive">{outcome.error}</p>
                   : <span className="text-muted-foreground">{item.has_pdf ? '可导入' : '缺少原 PDF'}</span>}</TableCell>
               </TableRow>;
@@ -94,7 +96,7 @@ export function MineruImportDialog({ root, onClose, onImported, onOpenEntry, onS
       <ImportPanelFooter>
         {model.progress.total > 0 && <div role="status" className="grid gap-1 text-xs"><p className="truncate" title={model.progress.current}>{model.busy ? model.progress.stopped ? '正在停止，等待当前论文保存…' : `正在导入：${model.progress.current}` : model.progress.stopped ? '导入已停止，已完成的论文保留。' : '本批导入已结束。'}</p>
           <progress aria-label="MinerU 导入进度" className="h-1 w-full accent-primary" max={model.progress.total} value={model.progress.completed} />
-          <p className="text-muted-foreground">本次处理 {model.progress.completed}/{model.progress.total} · 新增 {imported} · 已存在 {skipped} · 待重试 {failed}</p></div>}
+          <p className="text-muted-foreground">本次处理 {model.progress.completed}/{model.progress.total} · 新增 {imported} · 已存在 {skipped} · 已取消 {cancelled} · 待重试 {failed}</p></div>}
         <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-xs text-muted-foreground">已选 {model.selected.size} 项{model.selected.size > selectedVisible ? '（包含筛选外结果）' : ''}</span>
           <div className="flex items-center gap-2">{model.busy ? <Button variant="outline" disabled={model.progress.stopped} onClick={model.cancel}>停止导入</Button> : <>
             {!embedded && <Button variant="outline" onClick={close}>关闭</Button>}<Button disabled={model.loading || source.busy || !model.selected.size} onClick={() => void model.start()}>{failed ? '重试／导入所选' : '导入所选'}</Button>

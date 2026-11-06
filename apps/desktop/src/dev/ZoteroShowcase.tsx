@@ -13,7 +13,7 @@ import '../styles/globals.css';
 let settings: ZoteroSettings = { data_directory: 'D:\\研究资料\\Zotero', linked_attachment_directory: null };
 let failNext = false;
 const snapshot: ZoteroSnapshot = {
-  snapshot_id: 'preview', existing: { '0': 'already-local' },
+  snapshot_id: 'preview', existing: { '0': 'already-local' }, hidden: [],
   library: { source_id: 'preview', data_directory: settings.data_directory!, collections: [
     { id: 'diffusion', name: '扩散模型', path: '我的文库 / 机器学习 / 扩散模型', parent_id: null },
   ], papers: Array.from({ length: 58 }, (_, i) => ({

@@ -6,6 +6,14 @@ import { equalReaderPreferences, persistReaderPreferences, readStoredReaderPrefe
 
 beforeEach(() => window.localStorage.clear());
 
+it('keeps automatic reading-detail generation disabled by default and persists an explicit choice', () => {
+  const initial = readStoredReaderPreferences();
+  expect(initial.autoGenerateFolds).toBe(false);
+  persistReaderPreferences({ ...initial, autoGenerateFolds: true });
+  expect(readStoredReaderPreferences().autoGenerateFolds).toBe(true);
+  expect(equalReaderPreferences(initial, readStoredReaderPreferences())).toBe(false);
+});
+
 describe('reader preferences', () => {
   it('defaults to scroll linking, persists click linking and rejects invalid modes', () => {
     const original = readStoredReaderPreferences();

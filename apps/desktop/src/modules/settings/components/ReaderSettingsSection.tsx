@@ -12,6 +12,9 @@ export function ReaderSettingsSection({ props }: { props: SettingsPanelLayoutPro
   const update = (patch: Partial<ReaderPreferences>) => props.onReaderPreferencesChange({ ...p, ...patch });
   const previewDisabled = !p.hoverPreviewEnabled && !p.reflowHoverSourceEnabled;
   return <SettingsPage tab="reader" title="阅读与批注" description="设置打开论文、悬停预览和片段操作的方式。">
+    <SettingsGroup title="阅读详略">
+      <SettingSwitch id="reader-auto-fold" label="打开重排版时自动生成阅读详略" description="默认关闭；仅处理尚未生成或原文已变化的正文段落。使用助手模型，正文会发送至所配置的模型服务。关闭后不再自动启动新任务。" checked={p.autoGenerateFolds ?? false} onCheckedChange={autoGenerateFolds => update({ autoGenerateFolds })} />
+    </SettingsGroup>
     <SettingsGroup title="打开条目">
       <SettingSwitch id="reader-open-pdf" label="有 PDF 时直接打开 PDF" description="打开条目时优先阅读 PDF；关闭后或没有 PDF 时显示条目概览。" checked={p.openEntryPdfByDefault ?? true} onCheckedChange={openEntryPdfByDefault => update({ openEntryPdfByDefault })} />
     </SettingsGroup>

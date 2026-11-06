@@ -37,10 +37,12 @@ const VISUAL_COMPONENTS = [
 
 export function ReflowComponentControls({
   preferences,
-  onChange
+  onChange,
+  onTranslationViewChange
 }: {
   preferences: ReaderPreferences;
   onChange: (preferences: ReaderPreferences) => void;
+  onTranslationViewChange?: (view: 'paragraph' | 'sentences') => void;
 }) {
   const components = preferences.reflowComponents;
   const updateComponents = (next: ReflowComponentPreferences) => {
@@ -48,9 +50,9 @@ export function ReflowComponentControls({
   };
   const contentControls = (key: ReflowComponentKey, label: string) => <ReflowContentControls component={key} label={label}
     disabled={!components[key].visible} value={resolveReflowContent(key, preferences.reflowTranslationMode, components.content?.[key])}
-    onChange={(patch: ReflowContentOverrides) => updateComponents({ ...components, content: {
+    onChange={(patch: ReflowContentOverrides) => { if (patch.translationView) onTranslationViewChange?.(patch.translationView); updateComponents({ ...components, content: {
       ...components.content, [key]: { ...components.content?.[key], ...patch },
-    } })} />;
+    } }); }} />;
 
   return (
     <Popover>

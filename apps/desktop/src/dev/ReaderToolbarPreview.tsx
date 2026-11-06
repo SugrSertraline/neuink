@@ -5,6 +5,9 @@ import { ReflowToolbar } from '@/modules/reader/components/reflow/ReflowToolbar'
 import { ReflowAppearanceControls } from '@/modules/reader/components/reflow/ReflowAppearanceControls';
 import { ReflowComponentControls } from '@/modules/reader/components/reflow/ReflowComponentControls';
 import { ReaderToolbar, HoverPreviewControls } from '@/modules/reader/components/pdf-reader/ReaderToolbar';
+import { ReadingViewSession } from '@/modules/reader/components/navigation/ReadingViewSession';
+import { ReadingNavigationScope } from '@/modules/reader/components/navigation/ReadingNavigation';
+import { ReadingNavigationControls } from '@/modules/reader/components/navigation/ReadingNavigationControls';
 import { readStoredReaderPreferences } from '@/shared/lib/readerPreferences';
 import type { LibraryEntry } from '@/modules/library/components/LibrarySidebar';
 import type { EntryTranslation } from '@/shared/ipc/workspaceApi';
@@ -21,11 +24,15 @@ const translation: EntryTranslation = {
 
 /** Real toolbar components with isolated callbacks; never accesses a workspace. */
 export function ReaderToolbarPreview() {
-  const [width, setWidth] = useState(320);
+  const [width, setWidth] = useState(1000);
   const [scale, setScale] = useState(1);
   const [busy, setBusy] = useState(false);
   const [preferences, setPreferences] = useState(readStoredReaderPreferences);
   const [message, setMessage] = useState('');
+  const [page, setPage] = useState(1);
+  const [query, setQuery] = useState('');
+  const [zoom, setZoom] = useState(.8);
+  const [tagsOpen, setTagsOpen] = useState(false);
   useEffect(() => {
     const previous = document.documentElement.style.zoom;
     document.documentElement.style.zoom = String(scale);
@@ -33,7 +40,7 @@ export function ReaderToolbarPreview() {
   }, [scale]);
   return <main className="h-screen overflow-auto bg-background p-4">
     <div className="mb-4 flex flex-wrap items-center gap-2">
-      {[260, 320, 420, 680, 1000].map(value => <Button key={value} size="sm" onClick={() => setWidth(value)}>{value}px</Button>)}
+      {[260, 320, 420, 680, 840, 1000, 1440, 1600].map(value => <Button key={value} size="sm" onClick={() => setWidth(value)}>{value}px</Button>)}
       <Button size="sm" onClick={() => setScale(scale === 1 ? 1.25 : 1)}>缩放 {scale === 1 ? '125%' : '100%'}</Button>
       <Button size="sm" onClick={() => setBusy(!busy)}>切换忙碌状态</Button>
       <span role="status">{message}</span>
@@ -51,13 +58,18 @@ export function ReaderToolbarPreview() {
         <p className="p-3 text-sm">重排正文区域</p>
       </section>
       <section className="border" aria-label="PDF 工具栏检查">
-        <ReaderToolbar entry={entry} pageCount={27} segmentCount={328} recommendedTags={[]} selectedRecommendedTagPaths={[]}
-          tagSuggestionBusy={false} tagSuggestionsOpen={false} translation={translation} translationBusy={busy} reparseBusy={busy}
-          readerPreferences={preferences} onReaderPreferencesChange={setPreferences} zoom={0.8}
-          onZoomIn={noop} onZoomOut={noop} onZoomReset={noop} onApplyRecommendedTags={noop} onDismissRecommendedTags={noop}
-          onRecommendedTagToggle={noop} onTagSuggestionsOpenChange={noop} onExportTranslation={noop}
-          onExportPaper={() => setMessage('PDF 导出已触发')} onPauseTranslation={noop} onOpenTranslationTask={noop}
+        <ReadingViewSession surface={{ kind: 'pdf', entryId: entry.id }} workspaceRoot="toolbar-preview" active><ReadingNavigationScope>
+        <ReaderToolbar entry={entry} navigation={<ReadingNavigationControls segments={[]} entryId={entry.id} workspaceRoot={null} />}
+          currentPage={page} onCurrentPageChange={setPage} searchQuery={query} onSearchQueryChange={setQuery}
+          searchStatus={query ? 'ready' : 'idle'} searchMatchCount={query ? 3 : 0} searchActiveMatchNumber={query ? 1 : 0}
+          onSearchNext={() => setMessage('下一个匹配')} onSearchPrevious={() => setMessage('上一个匹配')} pageCount={27} segmentCount={328} recommendedTags={[]} selectedRecommendedTagPaths={[]}
+          tagSuggestionBusy={busy} tagSuggestionPhase={busy ? 'generating' : 'idle'} tagSuggestionsOpen={tagsOpen} onGenerateRecommendedTags={() => setMessage('生成推荐标签')} translation={translation} translationBusy={busy} translationMessage="正在翻译 · 等待模型正文" reparseBusy={busy}
+          readerPreferences={preferences} onReaderPreferencesChange={setPreferences} zoom={zoom}
+          onZoomIn={() => setZoom(z => z + .01)} onZoomOut={() => setZoom(z => z - .01)} onZoomReset={() => setZoom(1)} onApplyRecommendedTags={noop} onDismissRecommendedTags={noop}
+          onRecommendedTagToggle={noop} onTagSuggestionsOpenChange={setTagsOpen} onExportTranslation={noop}
+          onExportPaper={() => setMessage('PDF 导出已触发')} onPauseTranslation={() => setMessage('暂停翻译')} onCancelTranslation={() => setMessage('取消翻译')} onOpenTranslationTask={() => setMessage('打开翻译任务')}
           onOpenPdf={noop} onRevealPdf={noop} />
+        </ReadingNavigationScope></ReadingViewSession>
         <p className="p-3 text-sm">PDF 正文区域</p>
       </section>
     </div>

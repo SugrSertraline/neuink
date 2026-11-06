@@ -23,6 +23,30 @@ const reflowA: WorkspaceSurface = { kind: 'reflow', entryId: 'a' };
 const noteA: WorkspaceSurface = { kind: 'note', entryId: 'a', noteId: 'n1' };
 const pdfB: WorkspaceSurface = { kind: 'pdf', entryId: 'b' };
 
+it('replaces a blank tab in place and reuses an already open destination', () => {
+  const blank: WorkspaceSurface = { kind: 'new-tab', id: 'one' };
+  let state = workspaceSurfaceReducer(initialWorkspaceSurfaceLayout, { type: 'open', surface: blank });
+  expect(state.leftTabs.map(surfaceKey)).toEqual(['library', 'new-tab:one']);
+  state = workspaceSurfaceReducer(state, { type: 'replaceNewTab', key: 'new-tab:one', surface: { kind: 'create-entry' } });
+  expect(state.leftTabs.map(surfaceKey)).toEqual(['library', 'create-entry']);
+  expect(state.left.kind).toBe('create-entry');
+
+  state = workspaceSurfaceReducer(state, { type: 'open', surface: { kind: 'new-tab', id: 'two' } });
+  state = workspaceSurfaceReducer(state, { type: 'replaceNewTab', key: 'new-tab:two', surface: { kind: 'library' } });
+  expect(state.leftTabs.map(surfaceKey)).toEqual(['library', 'create-entry']);
+  expect(state.left.kind).toBe('library');
+});
+
+it('replaces a blank tab in its split pane and carries its pinned state', () => {
+  const blank: WorkspaceSurface = { kind: 'new-tab', id: 'split' };
+  let state = workspaceSurfaceReducer(initialWorkspaceSurfaceLayout, { type: 'open', pane: 'right', surface: blank });
+  state = workspaceSurfaceReducer(state, { type: 'setPinned', key: 'new-tab:split', pinned: true });
+  state = workspaceSurfaceReducer(state, { type: 'replaceNewTab', key: 'new-tab:split', surface: { kind: 'browser', id: 'web' } });
+  expect(state.rightTabs.map(surfaceKey)).toEqual(['browser:web']);
+  expect(state.right?.kind).toBe('browser');
+  expect(state.pinnedTabKeys).toEqual(['browser:web']);
+});
+
 it('closes the last library into an empty workspace and reopens a page without a phantom tab', () => {
   const closed = workspaceSurfaceReducer(initialWorkspaceSurfaceLayout, { type: 'close', pane: 'left', key: 'library' });
   expect(closed).toEqual(emptyWorkspaceSurfaceLayout);

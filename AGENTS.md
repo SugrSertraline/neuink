@@ -4,14 +4,18 @@
 
 - `main` is the approved release branch and the GitHub default branch.
 - Use `beta` for everyday feature development. Validate changes and obtain the user's confirmation before merging new features into `main`.
-- Keep `seal-campus-travel` separate for the campus travel prototype.
+- Use the public `alpha` branch for exploratory work before promoting reviewed changes to `beta`. It preserves the research ideation card canvas previously developed on `demo/ideation-evaluation`; keep its experimental scope and limitations clear in its README.
+- Keep `seal-campus-travel` local-only and separate for the campus travel prototype.
+- The public `origin` may expose `main`, `beta` and `alpha` branches. Keep `seal-campus-travel`, local archive refs and work-in-progress snapshots local. The local pre-push hook preserves Git LFS handling and guards this policy; it is not a server-side permission rule.
+- Before removing obsolete branches, verify their changes are merged or patch-equivalent and preserve a local recovery ref. Local branch-cleanup manifests and working-file backups live in `.git/branch-archives/`; archive refs are outside `refs/heads/`.
 - Name branches by purpose without a `codex/` prefix.
 - Desktop release artifacts and website deployments must come from `main`; release tags must point to commits already included in `main`. Pull requests targeting `main` may run validation without publishing artifacts.
 - Keep unrelated uncommitted work out of maintenance commits and preserve it when switching branches.
 
 ## Local testing preference
 
-- The user wants everyday testing to launch the native development app with `npm --workspace apps/desktop run dev:d-data`, using the existing `D:\NeuInk\data` directory. Do not rebuild or replace `D:\NeuInk\Neuink.exe` after each feature unless explicitly requested.
+- The working repository is `D:\NeuInk`; the local portable app and authoritative user data live in `D:\NeuInk\portable`. Everyday development can launch the native app with `npm --workspace apps/desktop run dev:d-data`, which uses `portable/data` by default.
+- After a new local version has been validated for daily use, deploy its program and resources directly to `portable`, preserving `portable/data`; do not create another working copy or remap the data path. This standing local update preference does not authorize merging into `main` or publishing a release.
 - On this Windows workstation, the desktop shortcut `Neuink 开发测试.lnk` runs `apps/desktop/scripts/start-dev-windows.ps1`. It starts the same development workflow in the background and records startup output in `target/desktop-dev/launcher.log`.
 - Close the portable app before starting development against the same data; do not run both simultaneously. Preserve the user's real papers, notes and settings. This is a local development preference, not authorization to merge into `main` or publish a release.
 

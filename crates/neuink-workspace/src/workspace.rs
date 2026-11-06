@@ -135,6 +135,7 @@ impl Workspace {
         if !entry_dir.exists() {
             return Err(WorkspaceError::EntryMissing(entry_id.to_string()));
         }
+        if crate::entry_sources::is_source_managed_dir(&entry_dir)? { return Err(WorkspaceError::SourceManagedEntry); }
         let trashed_entry_dir = self.layout.trashed_entry_dir(entry_id);
         if trashed_entry_dir.exists() {
             return Err(WorkspaceError::EntryAlreadyExists(entry_id.to_string()));
@@ -169,6 +170,7 @@ impl Workspace {
         if !trashed_entry_dir.exists() {
             return Err(WorkspaceError::EntryMissing(entry_id.to_string()));
         }
+        if crate::entry_sources::is_source_managed_dir(&trashed_entry_dir)? { return Err(WorkspaceError::SourceManagedEntry); }
         fs::remove_dir_all(trashed_entry_dir)?;
         Ok(())
     }
@@ -278,6 +280,15 @@ impl Workspace {
         entry_id: &EntryId,
         src_path: impl Into<PathBuf>,
     ) -> Result<EntryMeta, WorkspaceError> {
+        self.import_pdf_with_confirmation(entry_id, src_path, None)
+    }
+
+    pub fn import_pdf_with_confirmation(
+        &self,
+        entry_id: &EntryId,
+        src_path: impl Into<PathBuf>,
+        confirmed_hash: Option<&str>,
+    ) -> Result<EntryMeta, WorkspaceError> {
         let _guard = self.begin_tag_safe_mutation()?;
         let src_path = src_path.into();
         let mut entry = self.read_entry_meta(entry_id)?;
@@ -286,6 +297,12 @@ impl Workspace {
         }
 
         let bytes = fs::read(&src_path)?;
+        let content_hash = blake3::hash(&bytes).to_hex().to_string();
+        if confirmed_hash != Some(content_hash.as_str()) {
+            if let Some(duplicate) = self.find_pdf_duplicate(&content_hash)? {
+                return Err(WorkspaceError::PdfContentDuplicate(duplicate.title));
+            }
+        }
         atomic_write(self.layout.entry_pdf_file(entry_id), &bytes)?;
         entry.pdf = Some(PdfAsset {
             file_name: src_path
@@ -293,7 +310,7 @@ impl Workspace {
                 .and_then(|name| name.to_str())
                 .unwrap_or("paper.pdf")
                 .to_string(),
-            content_hash: blake3::hash(&bytes).to_hex().to_string(),
+            content_hash,
             imported_at: Utc::now(),
             parse: PdfParseState::not_started(),
         });

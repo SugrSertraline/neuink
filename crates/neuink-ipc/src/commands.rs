@@ -11,6 +11,7 @@ pub mod embedding;
 pub mod embedding_resources;
 pub mod entry;
 pub mod export;
+pub mod folding;
 pub mod job;
 pub mod mineru;
 mod llm_http;
@@ -32,6 +33,7 @@ pub mod tag_reading;
 #[cfg(test)]
 mod tag_tests;
 pub mod translation;
+pub mod translation_routing;
 pub mod workspace;
 pub mod daily;
 pub mod recommendations;

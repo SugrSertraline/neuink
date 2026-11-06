@@ -254,7 +254,7 @@ impl Workspace {
         Ok(missing)
     }
 
-    fn entries_including_trash(&self) -> Result<Vec<(EntryMeta, bool)>, WorkspaceError> {
+    pub(crate) fn entries_including_trash(&self) -> Result<Vec<(EntryMeta, bool)>, WorkspaceError> {
         Ok(self
             .list_entries()?
             .into_iter()

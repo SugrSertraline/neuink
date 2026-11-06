@@ -12,6 +12,8 @@ type LocalJobOptions = {
   failureMessage: string;
 };
 
+export type LocalJobReporter = (progress: JobProgress, update?: { status?: 'processing' | 'paused'; message?: string }) => void;
+
 // A window-local projection, not another executor or persistent task queue.
 // Keeping it outside a reader component lets an in-flight selection outlive its toolbar.
 let jobs: Job[] = [];
@@ -32,7 +34,7 @@ function publish(job: Job): void {
   }
 }
 
-export async function runLocalBackgroundJob<T>(options: LocalJobOptions, execute: (report: (progress: JobProgress) => void) => Promise<T>): Promise<T> {
+export async function runLocalBackgroundJob<T>(options: LocalJobOptions, execute: (report: LocalJobReporter) => Promise<T>): Promise<T> {
   const now = new Date().toISOString();
   let job: Job = {
     id: `${options.idPrefix ?? 'local-task'}:${crypto.randomUUID()}`,
@@ -47,8 +49,8 @@ export async function runLocalBackgroundJob<T>(options: LocalJobOptions, execute
   };
   publish(job);
   try {
-    const result = await execute(progress => {
-      job = { ...job, progress, updated_at: new Date().toISOString() };
+    const result = await execute((progress, update) => {
+      job = { ...job, ...update, progress, updated_at: new Date().toISOString() };
       publish(job);
     });
     job = { ...job, status: 'succeeded', message: options.successMessage };
@@ -56,8 +58,9 @@ export async function runLocalBackgroundJob<T>(options: LocalJobOptions, execute
   } catch (error) {
     // Only an allowlisted category/status survives in the task registry. The
     // owning UI still receives its original exception and applies its own policy.
-    const canceled = error instanceof DOMException && error.name === 'AbortError';
-    job = { ...job, status: canceled ? 'canceled' : 'failed', message: canceled ? '操作已停止，已完成的内容保留' : options.failureMessage, error: canceled ? null : assistantErrorDiagnostic(error) };
+    const duplicateCanceled = error instanceof Error && error.name === 'PdfDuplicateCancelledError';
+    const canceled = (error instanceof DOMException && error.name === 'AbortError') || duplicateCanceled;
+    job = { ...job, status: canceled ? 'canceled' : 'failed', message: duplicateCanceled ? '已取消添加重复的 PDF' : canceled ? '操作已停止，已完成的内容保留' : options.failureMessage, error: canceled ? null : assistantErrorDiagnostic(error) };
     throw error;
   } finally {
     publish({ ...job, updated_at: new Date().toISOString() });

@@ -24,6 +24,16 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+it('removes disabled import sources and explains when both are off', async () => {
+  const view = render(<OtherSourceImportPage root="workspace" enabledSources={{ zotero: false, mineru: true }} />);
+  await screen.findByText('Local paper');
+  expect(screen.queryByRole('tab', { name: 'Zotero' })).toBeNull();
+  expect(api.scanZotero).not.toHaveBeenCalled();
+  view.rerender(<OtherSourceImportPage root="workspace" enabledSources={{ zotero: false, mineru: false }} />);
+  expect(screen.getByRole('status').textContent).toContain('请在设置中启用来源');
+  expect(screen.queryByRole('tab', { name: 'MinerU' })).toBeNull();
+});
+
 it('switches internally without remounting panels or losing selection, filters and scroll', async () => {
   render(<OtherSourceImportPage root="workspace" />);
   await screen.findByText('此资料库没有可导入的文献。');
@@ -43,8 +53,8 @@ it('switches internally without remounting panels or losing selection, filters a
   expect((input as HTMLInputElement).value).toBe('Local');
   expect(screen.getByRole('checkbox', { name: '选择 Local paper' }).getAttribute('aria-checked')).toBe('true');
   expect(scroll.scrollTop).toBe(120);
-  expect(api.scanMineru).toHaveBeenCalledTimes(1);
-  expect(api.scanZotero).toHaveBeenCalledTimes(1);
+  expect(api.scanMineru).toHaveBeenCalledTimes(2);
+  expect(api.scanZotero).toHaveBeenCalledTimes(2);
   expect(screen.queryByRole('dialog')).toBeNull();
 });
 
@@ -60,4 +70,14 @@ it('previews without importing or changing the selected rows', async () => {
   expect(screen.getByRole('checkbox', { name: '选择 Local paper' }).getAttribute('aria-checked')).toBe('false');
   fireEvent.click(screen.getByRole('button', { name: '关闭预览' }));
   await waitFor(() => expect(screen.queryByRole('complementary')).toBeNull());
+});
+
+it('opens the requested source and follows a later menu request without losing the other panel', async () => {
+  const view = render(<OtherSourceImportPage root="workspace" requestedSource="mineru" sourceRequestId="1" />);
+  await screen.findByText('Local paper');
+  expect(screen.getByRole('tab', { name: 'MinerU' }).getAttribute('aria-selected')).toBe('true');
+  view.rerender(<OtherSourceImportPage root="workspace" requestedSource="zotero" sourceRequestId="2" />);
+  await screen.findByText('此资料库没有可导入的文献。');
+  expect(screen.getByRole('tab', { name: 'Zotero' }).getAttribute('aria-selected')).toBe('true');
+  expect(api.scanMineru).toHaveBeenCalledTimes(1);
 });

@@ -12,6 +12,18 @@ integration, and user-selected LLM or parser services are not covered by this
 NOTICE. They are subject to their respective model cards, licences, and
 service terms.
 
+TextFold reading-level adaptation
+---------------------------------
+This product includes modified portions of TextFold (formerly PaperFold),
+Copyright 2026 Xia Chen, https://github.com/chenxiachan/textfold, licensed under
+the Apache License, Version 2.0. Adapted from revision
+5fc941dc4560ee2809c0f278da28457292c7f739: paragraph-level prompt and assembly,
+word alignment, and bounded text transition logic. Neuink changes the code for
+its model provider, source segments, persistence and scroll container.
+The paragraph prompt retains the upstream English/CJK budgets and writing
+instructions; the adapter bounds document context and omits section summaries.
+The upstream LICENSE and NOTICE are retained in apps/desktop/public/licenses.
+
 Browser content readers
 -----------------------
 Mozilla Readability 0.6.0 is vendored unmodified from

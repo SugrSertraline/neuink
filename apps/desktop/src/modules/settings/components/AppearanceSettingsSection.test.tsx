@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Tabs } from '@/components/ui/tabs';
 import { AppearanceSettingsSection } from './AppearanceSettingsSection';
 import type { SettingsPanelLayoutProps } from './SettingsPanelLayout';
@@ -8,7 +8,8 @@ import { APP_THEME_PRESETS } from '@/shared/lib/themePresets';
 
 const material = vi.hoisted(() => ({ appearance: 'standard', setAppearance: vi.fn(), glassReducedTransparency: false, setGlassReducedTransparency: vi.fn() }));
 vi.mock('@/shared/components/AppearanceProvider', () => ({ useAppearance: () => material }));
-afterEach(() => { cleanup(); material.appearance = 'standard'; });
+beforeEach(() => { HTMLElement.prototype.scrollIntoView = vi.fn(); });
+afterEach(() => { cleanup(); localStorage.clear(); material.appearance = 'standard'; });
 it('closes the accent picker and uses fixed colors for material themes without changing the saved standard accent', () => {
   const change = vi.fn();
   const props = { themePresets: APP_THEME_PRESETS, themePreset: 'violet', onThemePresetChange: change, uiScale: 1 } as unknown as SettingsPanelLayoutProps;
@@ -24,4 +25,11 @@ it('closes the accent picker and uses fixed colors for material themes without c
   material.appearance = 'standard'; view.rerender(<Tabs value="appearance"><AppearanceSettingsSection props={props} /></Tabs>);
   expect(screen.getByRole('button', { name: /^强调色：/ }).textContent).toContain(APP_THEME_PRESETS.find(p => p.id === 'violet')!.label);
   expect(change).not.toHaveBeenCalled();
+});
+it('saves the zodiac in app settings for the daily sidebar', async () => {
+  const props = { themePresets: APP_THEME_PRESETS, themePreset: 'violet', uiScale: 1 } as unknown as SettingsPanelLayoutProps;
+  render(<Tabs value="appearance"><AppearanceSettingsSection props={props} /></Tabs>);
+  fireEvent.keyDown(screen.getByRole('combobox', { name: '我的星座' }), { key: 'ArrowDown' });
+  fireEvent.click(await screen.findByRole('option', { name: '天秤座' }));
+  expect(JSON.parse(localStorage.getItem('neuink.daily.sidebar.v1')!).zodiac).toBe('天秤座');
 });

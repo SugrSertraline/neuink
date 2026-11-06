@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+mod translation_routing;
+pub use translation_routing::{TranslationKind, TranslationRoutingSettings, TranslationSource};
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct AppSettings {
     #[serde(default)]
@@ -16,6 +19,8 @@ pub struct AppSettings {
     pub translation_llm_profile_id: Option<String>,
     #[serde(default)]
     pub translation_automation: TranslationAutomationSettings,
+    #[serde(default)]
+    pub translation_routing: TranslationRoutingSettings,
     #[serde(default, deserialize_with = "read_selection_translation")]
     pub selection_translation: SelectionTranslationSettings,
     #[serde(default)]
@@ -32,17 +37,27 @@ pub struct AppSettings {
     pub theme: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct ZoteroSettings {
+    pub enabled: bool,
     pub data_directory: Option<String>,
     pub linked_attachment_directory: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+impl Default for ZoteroSettings {
+    fn default() -> Self { Self { enabled: true, data_directory: None, linked_attachment_directory: None } }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct MineruSettings {
+    pub enabled: bool,
     pub results_directory: Option<String>,
+}
+
+impl Default for MineruSettings {
+    fn default() -> Self { Self { enabled: true, results_directory: None } }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]

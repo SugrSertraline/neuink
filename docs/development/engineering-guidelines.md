@@ -77,11 +77,11 @@ npm run desktop:build
 
 ### 使用 D 盘现有资料调试阅读器
 
-Windows 开发版可以直接使用现有便携版资料。先关闭 `D:\NeuInk\Neuink.exe`，再运行 `npm --workspace apps/desktop run dev:d-data`。该命令默认读取 `D:\NeuInk\data`；如需其它目录，设置 `NEUINK_DEV_DATA_DIR` 为包含 `library` 的绝对路径。`npm --workspace apps/desktop run dev:d-data -- --check` 只检查路径；`npm --workspace apps/desktop run audit:sentences` 只读统计已保存的段落译文及逐句配对失败位置。
+Windows 开发版可以直接使用仓库内便携版资料。先关闭 `D:\NeuInk\portable\Neuink.exe`，再运行 `npm --workspace apps/desktop run dev:d-data`。该命令默认读取仓库内 `portable/data`；如需其它目录，设置 `NEUINK_DEV_DATA_DIR` 为包含 `library` 的绝对路径。`npm --workspace apps/desktop run dev:d-data -- --check` 只检查路径；`npm --workspace apps/desktop run audit:sentences` 只读统计已保存的段落译文及逐句配对失败位置。
 
 开发版会直接写入这份资料，调试前按需要自行备份。它和便携版共用资料锁，不能同时打开。路径覆盖只在 debug 构建生效，正式版仍使用程序旁的 `data`。
 
-本机日常测试默认使用此开发入口，不在每次修改后替换 D 盘便携版。桌面“Neuink 开发测试”快捷方式通过 `apps/desktop/scripts/start-dev-windows.ps1` 后台启动同一流程；重复点击不会创建第二个开发进程组，启动记录位于 `target/desktop-dev/launcher.log`。前端修改由 Vite 更新，原生修改由 Tauri 开发进程重新编译；关闭开发窗口后，下次仍从该快捷方式启动。源码和 D 盘资料均保持原位置。
+本机源码位于 `D:\NeuInk`，便携程序和资料位于仓库内 `portable`。日常测试默认使用开发入口；桌面“Neuink 开发测试”快捷方式通过 `apps/desktop/scripts/start-dev-windows.ps1` 后台启动同一流程，重复点击不会创建第二个开发进程组，启动记录位于 `target/desktop-dev/launcher.log`。前端修改由 Vite 更新，原生修改由 Tauri 开发进程重新编译。需要更新本机便携程序时，将验证过的新程序和资源部署到 `portable`，保留其中的 `data`，无需再映射资料路径。
 
 ## 8. 文档规则
 

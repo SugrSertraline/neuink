@@ -30,10 +30,14 @@ import type { LibraryEntry } from './LibrarySidebar';
 import { SidebarSectionHeader } from './SidebarSectionHeader';
 import { SidebarContentRow as ContentRow } from './SidebarContentRow';
 import { EntryTagNotesSidebar, type EntryTagNotesContext } from '@/modules/notes/components/EntryTagNotesSidebar';
+import { ZoteroOrganizationInfo } from './ZoteroOrganizationInfo';
+import { SourceLocalCopyControl } from '@/modules/import/SourceLocalCopyProvider';
 
 type EntryContentSidebarProps = {
   activeContentId: string | null;
   entry: LibraryEntry;
+  zoteroNoteIds?: string[];
+  onApplyEntryTagPaths?: (entryId: string, paths: string[]) => Promise<unknown> | unknown;
   tags: TagMeta[];
   tagNotes?: EntryTagNotesContext;
   onOpenTrash: () => void;
@@ -50,6 +54,8 @@ type EntryContentSidebarProps = {
 export function EntryContentSidebar({
   activeContentId,
   entry,
+  zoteroNoteIds = [],
+  onApplyEntryTagPaths,
   tags,
   tagNotes,
   onOpenTrash,
@@ -238,6 +244,7 @@ export function EntryContentSidebar({
                 <span className="text-muted-foreground">暂无描述</span>
               )}
             </InfoBlock>
+            <SourceLocalCopyControl entry={entry} />
 
             <InfoBlock label="标签">
               {entry.tags.length > 0 ? (
@@ -254,6 +261,8 @@ export function EntryContentSidebar({
                 <span className="text-muted-foreground">暂无属性</span>
               )}
             </InfoBlock>
+            {entry.sourceInfo?.zotero_organization?.length && onApplyEntryTagPaths ? <ZoteroOrganizationInfo compact onOpenDetails={() => onSelectContent('overview')} key={entry.id} organization={entry.sourceInfo.zotero_organization}
+              tags={tags} tagPaths={entry.tags} onAddTagPath={path => onApplyEntryTagPaths(entry.id, [path])} /> : null}
           </section>
 
           <section className="min-w-0 space-y-1">
@@ -352,7 +361,7 @@ export function EntryContentSidebar({
                 icon={<FileText size={14} />}
                 key={note.note_id}
                 label={note.title}
-                meta="文档笔记"
+                meta={zoteroNoteIds.includes(note.note_id) ? 'Zotero · 本地副本' : '文档笔记'}
                 action={
                   <div className="flex items-center gap-0.5">
                     {entry.pdfFileName ? (

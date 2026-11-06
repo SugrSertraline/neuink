@@ -14,6 +14,7 @@ src-tauri/gen/schemas/
 dist/
 build/
 release/
+/portable/
 **/dist/
 **/build/
 *.tsbuildinfo

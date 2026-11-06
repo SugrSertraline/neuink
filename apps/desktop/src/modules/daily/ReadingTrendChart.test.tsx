@@ -46,7 +46,7 @@ it('keeps independent wheel ranges, keyboard inspection and session values in th
   const values = props(); render(<ReadingTrendChart {...values} />);
   const previews = ['折线图', '热力图', '日 K 线'].map(name => screen.getByRole('region', { name }));
   const before = previews.map(node => node.innerHTML);
-  fireEvent.wheel(lastPoint('柱状图'), { deltaY: -120 });
+  fireEvent.wheel(lastPoint('柱状图'), { deltaY: -120, ctrlKey: true });
   expect(points('柱状图')).toHaveLength(22);
   expect(previews.map(node => node.innerHTML)).toEqual(before);
   fireEvent.click(screen.getByRole('button', { name: '放大查看日 K 线' }));
@@ -79,14 +79,21 @@ it('shows one interactive primary chart and three read-only preview buttons, wit
   expect(screen.queryByLabelText('日期阅读详情')).toBeNull();
 });
 
-it('zooms only the primary graph without changing preview plots, selected day or page scrolling', () => {
+it('leaves ordinary wheel scrolling to the dashboard and zooms only the primary graph with Ctrl', () => {
   const values = props(); const ui = render(<ReadingTrendChart {...values} />);
   const previews = ['折线图', '热力图', '日 K 线'].map(name => screen.getByRole('region', { name }));
   const before = previews.map(preview => preview.innerHTML);
   const point = lastPoint('柱状图');
-  const wheel = new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true });
-  fireEvent(point, wheel);
-  expect(wheel.defaultPrevented).toBe(true);
+  const pageWheel = vi.fn(); ui.container.addEventListener('wheel', pageWheel);
+  const ordinaryWheel = new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true });
+  fireEvent(point, ordinaryWheel);
+  expect(ordinaryWheel.defaultPrevented).toBe(false);
+  expect(pageWheel).toHaveBeenCalledOnce();
+  expect(points('柱状图')).toHaveLength(28);
+  const zoomWheel = new WheelEvent('wheel', { deltaY: -120, ctrlKey: true, bubbles: true, cancelable: true });
+  fireEvent(point, zoomWheel);
+  expect(zoomWheel.defaultPrevented).toBe(true);
+  expect(pageWheel).toHaveBeenCalledOnce();
   expect(points('柱状图')).toHaveLength(22);
   expect(previews.map(preview => preview.innerHTML)).toEqual(before);
   const previewWheel = new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true });
@@ -96,18 +103,18 @@ it('zooms only the primary graph without changing preview plots, selected day or
   expect(screen.getByLabelText('阅读图表范围').textContent).toContain('10/23');
   const outside = new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true });
   fireEvent(screen.getByText('阅读趋势'), outside); expect(outside.defaultPrevented).toBe(false);
-  fireEvent(point, new WheelEvent('wheel', { deltaY: 120, ctrlKey: true, bubbles: true, cancelable: true }));
-  expect(points('柱状图')).toHaveLength(22);
-  ui.unmount(); render(<ReadingTrendChart {...values} />); expect(points('柱状图')).toHaveLength(22);
+  fireEvent(lastPoint('柱状图'), new WheelEvent('wheel', { deltaY: 120, ctrlKey: true, bubbles: true, cancelable: true }));
+  expect(points('柱状图')).toHaveLength(28);
+  ui.unmount(); render(<ReadingTrendChart {...values} />); expect(points('柱状图')).toHaveLength(28);
 });
 
 it('retains four independent ranges through swaps, keyboard reset and remount', () => {
   const values = props(); const ui = render(<ReadingTrendChart {...values} />);
-  fireEvent.wheel(lastPoint('柱状图'), { deltaY: -120 }); // 22 days
+  fireEvent.wheel(lastPoint('柱状图'), { deltaY: -120, ctrlKey: true }); // 22 days
   for (const [name, delta, expected] of [['折线图', 120, 34], ['热力图', -80, 24], ['日 K 线', 80, 32]] as const) {
     fireEvent.click(screen.getByRole('button', { name: `放大查看${name}` }));
     expect(points(name)).toHaveLength(28);
-    fireEvent.wheel(lastPoint(name), { deltaY: delta });
+    fireEvent.wheel(lastPoint(name), { deltaY: delta, ctrlKey: true });
     expect(points(name)).toHaveLength(expected);
   }
   fireEvent.click(screen.getByRole('button', { name: '放大查看折线图' }));
@@ -125,22 +132,34 @@ it('retains four independent ranges through swaps, keyboard reset and remount', 
 
 it('does not carry a partial wheel gesture into the next primary chart', () => {
   render(<ReadingTrendChart {...props()} />);
-  fireEvent.wheel(lastPoint('柱状图'), { deltaY: -30 });
+  fireEvent.wheel(lastPoint('柱状图'), { deltaY: -30, ctrlKey: true });
   fireEvent.click(screen.getByRole('button', { name: '放大查看折线图' }));
-  fireEvent.wheel(lastPoint('折线图'), { deltaY: -20 });
+  fireEvent.wheel(lastPoint('折线图'), { deltaY: -20, ctrlKey: true });
   expect(points('折线图')).toHaveLength(28);
-  fireEvent.wheel(lastPoint('折线图'), { deltaY: -20 });
+  fireEvent.wheel(lastPoint('折线图'), { deltaY: -20, ctrlKey: true });
   expect(points('折线图')).toHaveLength(26);
   fireEvent.click(screen.getByRole('button', { name: '放大查看柱状图' }));
   expect(points('柱状图')).toHaveLength(28);
 });
 
+it('clears a partial Ctrl zoom when the user resumes ordinary scrolling', () => {
+  render(<ReadingTrendChart {...props()} />);
+  fireEvent.wheel(lastPoint('柱状图'), { deltaY: -30, ctrlKey: true });
+  const ordinary = new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true });
+  fireEvent(lastPoint('柱状图'), ordinary);
+  expect(ordinary.defaultPrevented).toBe(false);
+  fireEvent.wheel(lastPoint('柱状图'), { deltaY: -20, ctrlKey: true });
+  expect(points('柱状图')).toHaveLength(28);
+  fireEvent.wheel(lastPoint('柱状图'), { deltaY: -20, ctrlKey: true });
+  expect(points('柱状图')).toHaveLength(26);
+});
+
 it('bounds wheel zoom and supports keyboard range adjustment and reset', () => {
   render(<ReadingTrendChart {...props()} />);
   fireEvent.click(screen.getByRole('button', { name: '放大查看折线图' }));
-  for (let i = 0; i < 10; i++) fireEvent.wheel(lastPoint('折线图'), { deltaY: -600 });
+  for (let i = 0; i < 10; i++) fireEvent.wheel(lastPoint('折线图'), { deltaY: -600, ctrlKey: true });
   expect(points('折线图')).toHaveLength(7);
-  for (let i = 0; i < 10; i++) fireEvent.wheel(lastPoint('折线图'), { deltaY: 600 });
+  for (let i = 0; i < 10; i++) fireEvent.wheel(lastPoint('折线图'), { deltaY: 600, ctrlKey: true });
   expect(points('折线图')).toHaveLength(90);
   fireEvent.keyDown(lastPoint('折线图'), { key: '0' }); expect(points('折线图')).toHaveLength(28);
   fireEvent.keyDown(lastPoint('折线图'), { key: '+' }); expect(points('折线图')).toHaveLength(21);
@@ -182,6 +201,7 @@ it('keeps hover and keyboard hints inside the plot and dismisses them without ch
   const plot = point.closest('[data-reading-zoom]')!;
   fireEvent.mouseEnter(point);
   expect(within(plot.closest('[data-reading-chart-grid]') as HTMLElement).getByRole('tooltip').textContent).toContain('30 分钟');
+  expect(screen.getByRole('tooltip').textContent).toContain('Ctrl + 滚轮缩放图表');
   expect(point.hasAttribute('title')).toBe(false);
   fireEvent.mouseLeave(plot); expect(screen.queryByRole('tooltip')).toBeNull();
   act(() => point.focus()); expect(screen.getByRole('tooltip')).toBeTruthy();

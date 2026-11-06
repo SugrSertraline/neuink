@@ -8,6 +8,7 @@ import {
   Eye,
   ExternalLink,
   FolderOpen,
+  FileText,
   ListChecks,
   Loader2,
   MoreHorizontal,
@@ -44,10 +45,14 @@ import { PdfViewControls } from '../navigation/ReadingViewSession';
 import { PdfZoomControls } from './PdfZoomControls';
 import { PdfPreviewSizeControls } from './PdfPreviewSizeControls';
 import { RecommendedTagControls } from './RecommendedTagControls';
+import { EntryTitleConsistency } from '../EntryTitleConsistency';
 
 export function ReaderToolbar({
   navigation,
   entry,
+  workspaceRoot,
+  titleCheckReloadKey = 0,
+  onRefreshEntries,
   pageCount,
   segmentCount,
   recommendedTags,
@@ -97,6 +102,9 @@ export function ReaderToolbar({
   onZoomReset
 }: {
   navigation?: import('react').ReactNode;
+  workspaceRoot?: string | null;
+  titleCheckReloadKey?: number;
+  onRefreshEntries?: () => Promise<void>;
   entry: LibraryEntry;
   pageCount: number;
   segmentCount: number;
@@ -200,10 +208,29 @@ export function ReaderToolbar({
     <div data-guide="pdf-tools" className="pdf-reader-toolbar border-b bg-background">
       <EntryContentHeader
         className="border-b-0"
-        contentTitle="PDF 内容"
+        contentTitle={<div className="pdf-reader-document-heading">
+          <div className="flex min-w-0 items-center gap-2"><FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" /><span className="min-w-0 truncate" title={entry.title}>{entry.title}</span>
+            {onRefreshEntries ? <EntryTitleConsistency entryId={entry.id} entryTitle={entry.title}
+              pdfFileName={entry.pdfFileName} parsed={entry.status === 'Parsed'} root={workspaceRoot ?? null}
+              reloadKey={titleCheckReloadKey} onRefreshEntries={onRefreshEntries} /> : null}
+          </div>
+          <div className="pdf-reader-document-meta flex min-w-0 items-center gap-2 text-xs font-normal text-muted-foreground">
+            <span className="shrink-0" title={entry.pdfFileName ?? undefined}>PDF 内容</span><span className="shrink-0">{segmentCount} 个区域</span><StatusBadge status={entry.status} />
+            {translationBusy ? (
+              <span
+                aria-live="polite"
+                title={translationMessage || '正在翻译'}
+                className="pdf-reader-translation-status min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
+              >
+                <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden="true" />
+                <span className="truncate">{translationMessage || '正在翻译'}</span>
+              </span>
+            ) : null}
+          </div>
+        </div>}
         entryTitle={entry.title}
+        showEntryTitle={false}
       >
-        <PdfViewControls />
         {translationBusy ? (
           <ToolbarTooltip content="暂停当前翻译任务">
           <Button disabled={Boolean(translationStopPending)} aria-label="暂停翻译" className="pdf-reader-toolbar-overflow-action shrink-0" size="sm" type="button" variant="outline" onClick={onPauseTranslation}>
@@ -213,8 +240,8 @@ export function ReaderToolbar({
           </ToolbarTooltip>
         ) : null}
 
-        {translationPaused && onResumeTranslation ? <Button disabled={Boolean(translationStopPending)} className="pdf-reader-toolbar-overflow-action shrink-0" size="sm" onClick={onResumeTranslation}><Play size={14} aria-hidden="true" />继续翻译</Button> : null}
-        {(translationBusy || translationPaused) && onCancelTranslation ? <Button disabled={Boolean(translationStopPending)} className="pdf-reader-toolbar-overflow-action shrink-0" size="sm" variant="outline" onClick={onCancelTranslation}>取消翻译</Button> : null}
+        {translationPaused && onResumeTranslation ? <Button disabled={Boolean(translationStopPending)} className="pdf-reader-toolbar-overflow-action shrink-0" size="sm" aria-label="继续翻译" title="继续翻译" onClick={onResumeTranslation}><Play size={14} aria-hidden="true" /><span className="pdf-reader-toolbar-label">继续翻译</span></Button> : null}
+        {(translationBusy || translationPaused) && onCancelTranslation ? <Button disabled={Boolean(translationStopPending)} className="pdf-reader-toolbar-overflow-action shrink-0" size="sm" variant="outline" aria-label="取消翻译" title="取消翻译" onClick={onCancelTranslation}><X size={14} aria-hidden="true" /><span className="pdf-reader-toolbar-label">取消翻译</span></Button> : null}
 
         {onExportPaper && segmentCount > 0 ? (
           <ToolbarTooltip content="导出解析全文、中文译稿或中英对照，支持 Word、TXT 和图片资料包">
@@ -230,16 +257,6 @@ export function ReaderToolbar({
             <span className="pdf-reader-toolbar-label">导出</span>
           </Button>
           </ToolbarTooltip>
-        ) : null}
-
-        {translationBusy ? (
-          <span
-            aria-live="polite"
-            className="pdf-reader-translation-status min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
-          >
-            <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden="true" />
-            <span className="truncate">{translationMessage || '正在翻译'}</span>
-          </span>
         ) : null}
 
         {entry.status === 'Parsed' ? (
@@ -297,49 +314,38 @@ export function ReaderToolbar({
 
         {tagControls}
 
-        <HoverPreviewControls
-          preferences={readerPreferences}
-          onChange={onReaderPreferencesChange}
-        />
-
         {overflowMenu()}
-
-        <PdfReadingModeControl preferences={readerPreferences} onChange={onReaderPreferencesChange} />
-
-        <Button
-          className="shrink-0"
-          aria-label={readerPreferences.pageDisplayMode === 'dual' ? '切换为单页' : '切换为双页'}
-          size="icon-sm"
-          title={readerPreferences.pageDisplayMode === 'dual' ? '切换为单页' : '切换为双页'}
-          type="button"
-          variant={readerPreferences.pageDisplayMode === 'dual' ? 'secondary' : 'outline'}
-          onClick={() =>
-            onReaderPreferencesChange({
-              ...readerPreferences,
-              pageDisplayMode:
-                readerPreferences.pageDisplayMode === 'dual' ? 'single' : 'dual',
-            })
-          }
-        >
-          <Columns2 size={14} aria-hidden="true" />
-        </Button>
-
-        <PdfZoomControls zoom={zoom} onZoomIn={onZoomIn} onZoomOut={onZoomOut} onZoomReset={onZoomReset} />
       </EntryContentHeader>
 
-      <div data-material="reader-toolbar-row" className="flex min-w-0 flex-wrap items-center gap-2 border-t bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground">
-        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-          {entry.pdfFileName ? (
-            <span className="min-w-0 truncate font-medium text-foreground" title={entry.pdfFileName}>
-              {entry.pdfFileName}
-            </span>
-          ) : null}
-          <span className="shrink-0">{segmentCount} 个区域</span>
-          <StatusBadge status={entry.status} />
+      <div data-material="reader-toolbar-row" className="pdf-reader-controls-row border-t bg-muted/20 text-xs text-muted-foreground">
+        <div className="pdf-reader-display-controls" role="group" aria-label="PDF 阅读显示">
+          <PdfViewControls />
+          <HoverPreviewControls
+            preferences={readerPreferences}
+            onChange={onReaderPreferencesChange}
+          />
+          <PdfReadingModeControl preferences={readerPreferences} onChange={onReaderPreferencesChange} />
+          <Button
+            className="shrink-0"
+            aria-label={readerPreferences.pageDisplayMode === 'dual' ? '切换为单页' : '切换为双页'}
+            size="icon-sm"
+            title={readerPreferences.pageDisplayMode === 'dual' ? '切换为单页' : '切换为双页'}
+            type="button"
+            variant={readerPreferences.pageDisplayMode === 'dual' ? 'secondary' : 'outline'}
+            onClick={() =>
+              onReaderPreferencesChange({
+                ...readerPreferences,
+                pageDisplayMode:
+                  readerPreferences.pageDisplayMode === 'dual' ? 'single' : 'dual',
+              })
+            }
+          >
+            <Columns2 size={14} aria-hidden="true" />
+          </Button>
+          <PdfZoomControls zoom={zoom} onZoomIn={onZoomIn} onZoomOut={onZoomOut} onZoomReset={onZoomReset} />
         </div>
-
-        {pageNavigation}
-        {searchControls}
+        <div className="pdf-reader-page-controls" role="group" aria-label="PDF 阅读导航">{pageNavigation}</div>
+        <div className="pdf-reader-search">{searchControls}</div>
       </div>
     </div>
   );
@@ -617,7 +623,7 @@ function PdfSearchControls({
           </Button>
         ) : null}
       </div>
-      <span aria-live="polite" className="min-w-12 text-center text-[11px] tabular-nums">
+      <span aria-live="polite" className={resultLabel ? 'shrink-0 text-center text-[11px] tabular-nums' : 'sr-only'}>
         {resultLabel}
       </span>
       <Button aria-label="上一个匹配" disabled={!hasMatches} size="icon-xs" title="上一个匹配（Shift+Enter）" type="button" variant="outline" onClick={onPrevious}>
