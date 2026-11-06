@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { realpathSync } from 'node:fs';
 
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
@@ -23,7 +24,7 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 1420,
     strictPort: true,
-    fs: { allow: [__dirname, path.resolve(__dirname, '../../node_modules')] },
+    fs: { allow: [__dirname, path.resolve(__dirname, '../../node_modules'), realpathSync(path.resolve(__dirname, '../../node_modules'))] },
     watch: {
       ignored: ['**/src-tauri/**']
     }
