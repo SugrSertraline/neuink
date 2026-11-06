@@ -252,7 +252,7 @@ it('stays on the canvas when selecting an idea and exposes no assistant action',
   expect(within(canvas()).queryByText('反事实方法')).toBeNull();
 });
 
-it('fills the exact slot, preserves existing nodes and viewport, and restores saved coordinates', async () => {
+it('lays out the requested slot, keeps edits stable, and restores filled coordinates', async () => {
   api.read.mockResolvedValue({ revision: 'r1', state: { ...twoBoards(), links: [{ id: 'relation', from: 'p2', to: 'p1', kind: 'addresses' }] } });
   renderWorkspace(); await screen.findByLabelText('构思画布');
   const article = (id: string) => canvas().querySelector<HTMLElement>(`[data-node-id="${id}"]`)!;
@@ -262,15 +262,17 @@ it('fills the exact slot, preserves existing nodes and viewport, and restores sa
   fireEvent.keyDown(within(article('p1')).getByLabelText('使用方向键移动 研究问题'), { key: 'ArrowRight' });
   fireEvent.click(screen.getByRole('button', { name: '分支选项：尝试已有方法' }));
   expect(canvas().querySelectorAll('[data-branch-slot]')).toHaveLength(1);
-  expect(article('p1').style.left).toBe(`${x + 20}px`);
+  const arrangedX = article('p1').style.left;
+  expect(arrangedX).not.toBe(`${x + 20}px`);
   fireEvent.click(within(article('p1')).getByLabelText('编辑卡片 研究问题'));
   fireEvent.change(screen.getByLabelText('内容'), { target: { value: '修改问题背景' } });
-  expect(article('p1').style.left).toBe(`${x + 20}px`);
+  expect(article('p1').style.left).toBe(arrangedX);
   fireEvent.click(screen.getByLabelText('关闭详情'));
   fireEvent.click(screen.getByRole('button', { name: '分支选项：尝试已有方法' }));
   expect(canvas().querySelectorAll('[data-branch-slot]')).toHaveLength(1);
   const slot = canvas().querySelector<HTMLElement>('[data-branch-slot="method"]')!;
   const position = { x: Number.parseFloat(slot.style.left), y: Number.parseFloat(slot.style.top) };
+  const arrangedPositions = ['p1', 'p2'].map(id => ({ id, x: Number.parseFloat(article(id).style.left), y: Number.parseFloat(article(id).style.top) }));
   const transform = article('p1').parentElement!.style.transform;
   fireEvent.click(within(screen.getByTestId('library-card-c1')).getByText('填入空位'));
   expect(article('p1').parentElement!.style.transform).toBe(transform);
@@ -278,8 +280,8 @@ it('fills the exact slot, preserves existing nodes and viewport, and restores sa
   await save();
   const current = savedState(), placed = current.placements.filter((p: any) => p.board_id === 'a');
   expect(placed).toHaveLength(3);
-  expect(placed.find((p: any) => p.id === 'p1')).toMatchObject({ body: '修改问题背景', x: x + 20, y: 80 });
-  expect(placed.find((p: any) => p.id === 'p2')).toMatchObject({ x: 500, y: 80 });
+  expect(placed.find((p: any) => p.id === 'p1')).toMatchObject({ body: '修改问题背景', ...arrangedPositions[0] });
+  expect(placed.find((p: any) => p.id === 'p2')).toMatchObject(arrangedPositions[1]);
   const filled = placed.find((p: any) => !['p1', 'p2'].includes(p.id));
   expect(filled).toMatchObject(position);
   expect(placed.every((p: any) => p.card_id)).toBe(true);

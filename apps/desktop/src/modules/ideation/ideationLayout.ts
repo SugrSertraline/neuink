@@ -21,13 +21,13 @@ function layoutEndpoints(link: IdeationLink) {
     ? [link.to, link.from] : [link.from, link.to];
 }
 
-export function arrangeBoard(state: IdeationState, sourceId: string | null = null): BoardLayout {
+export function arrangeBoard(state: IdeationState, sourceId: string | null = null, selectedSlotId?: string): BoardLayout {
   const graph = new Graph<GraphLabel, NodeLabel, EdgeLabel>({ multigraph: true });
-  graph.setGraph({ rankdir: 'LR', ranksep: 100, nodesep: 36, edgesep: 24, marginx: 48, marginy: 48 });
+  graph.setGraph({ rankdir: 'LR', ranksep: 140, nodesep: 64, edgesep: 40, marginx: 48, marginy: 48 });
   graph.setDefaultEdgeLabel(() => ({}));
   const source = state.placements.find(p => p.id === sourceId);
   const kind = state.cards.find(card => card.id === source?.card_id)?.kind;
-  const slots: BranchSlot[] = source && kind ? branchRules[kind].map(rule => ({ ...rule, sourceId: source.id, x: 0, y: 0 })) : [];
+  const slots: BranchSlot[] = source && kind ? branchRules[kind].filter(rule => !selectedSlotId || rule.id === selectedSlotId).map(rule => ({ ...rule, sourceId: source.id, x: 0, y: 0 })) : [];
   state.placements.forEach(p => graph.setNode(p.id, { width: nodeWidth, height: nodeHeight }));
   const edges = (state.links ?? []).filter(link => graph.hasNode(link.from) && graph.hasNode(link.to));
   edges.forEach(link => {

@@ -4,8 +4,8 @@ import type { CardKind } from '@/shared/ipc/ideationApi';
 export const cardTemplates: Record<CardKind, readonly string[]> = {
   background: ['研究场景', '重要性', '已知进展', '尚存缺口'],
   problem: ['研究对象', '目标', '现有不足', '成功标准'],
-  method: ['输入', '输出', '核心机制', '依赖条件', '数据与计算需求', '方法归属'],
-  component: ['输入', '输出', '组件作用', '连接接口', '适用条件', '组件归属'],
+  method: ['抽象方法', '核心步骤', '输入与输出', '适用条件与边界', '原文实例', '方法归属'],
+  component: ['抽象机制', '组件作用与接口', '适用条件与边界', '原文实例', '组件归属'],
   constraint: ['约束条件', '适用范围', '不满足时的影响'],
   assumption: ['前提假设', '成立依据', '失效条件'],
   result: ['数据集', '实验设置', '对比基线', '指标与结果', '结论边界'],

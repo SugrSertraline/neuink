@@ -56,3 +56,16 @@ it('does not invalidate layout on content edits or manual moves but does on topo
   expect(graphStructure({ ...graph, placements: graph.placements.map(p => ({ ...p, x: p.x + 20, body: '局部改写' })) })).toBe(graphStructure(graph));
   expect(graphStructure({ ...graph, links: [] })).not.toBe(graphStructure(graph));
 });
+
+it('lays out only the requested empty slot and separates its port from existing arrows', () => {
+  const result = arrangeBoard(graph, 'p', 'subproblem');
+  expect(result.slots).toHaveLength(1);
+  const p = result.placements.find(n => n.id === 'p')!, m = result.placements.find(n => n.id === 'm')!, slot = result.slots[0];
+  expect(slot.id).toBe('subproblem');
+  expect(Math.abs(slot.y - m.y)).toBeGreaterThanOrEqual(nodeHeight + 60);
+  const rects = [...result.placements, slot]; noOverlap(rects);
+  const solid = routeBetween(m, p, rects, result.routes.addresses);
+  const hint = routeBetween(p, slot, rects, result.routes[slotKey(slot)]);
+  clearRoute(solid, rects); clearRoute(hint, rects);
+  expect(Math.abs(solid.points[solid.points.length - 1].y - hint.points[0].y)).toBeGreaterThan(20);
+});

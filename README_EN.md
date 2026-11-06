@@ -57,7 +57,7 @@ This branch does not promise automatic judgments of academic novelty, proof of r
 
 ### Templates and processing limits
 
-Card templates distinguish background/problems, method/component interfaces, constraints/assumptions, measured results, limitations and personal hypotheses. Missing paper facts remain explicitly unspecified. Manual template insertion never replaces existing card text; older cards remain editable.
+Method/component cards now lead with a reusable abstract mechanism and place paper-specific implementations in a separate example field. Abstraction is not evidence of transferability; existing drafts require explicit regeneration. Card templates distinguish background/problems, method/component interfaces, constraints/assumptions, measured results, limitations and personal hypotheses. Missing paper facts remain explicitly unspecified. Manual template insertion never replaces existing card text; older cards remain editable.
 
 Parsed paper text is processed in source-preserving batches rather than sampled from the beginning and end. Personal annotations are excluded. Manual and background extraction show batch progress and use the configured assistant connection, context and generation settings. Successful batches survive individual format failures; authentication failure or cancellation ends the task. Exact duplicates merge their sources. Limits are 100 batches, 300 cards, 600 relations and a 10 MB draft file. Reaching the card limit marks partial coverage. Cross-batch relationships, automatic semantic deduplication and checkpoint resume are not implemented; rerunning extraction makes new model requests and may incur costs. Old partial drafts are not automatically completed.
 

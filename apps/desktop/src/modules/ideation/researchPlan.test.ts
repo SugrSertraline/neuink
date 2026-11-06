@@ -42,3 +42,9 @@ describe('research evidence and paper coverage', () => {
     expect(saved).toContain('本画布的改写'); expect(saved).toContain('seg-1'); expect(saved).toContain('未进行联网');
   });
 });
+
+it('separates reusable mechanisms from concrete paper examples in method cards', () => {
+  const body = structuredCardBody('method', { '抽象方法': '用替代信号恢复缺失输入', '原文实例': '论文通过跨变量信息补全交通序列' }, '摘要');
+  expect(body.indexOf('抽象方法')).toBeLessThan(body.indexOf('原文实例'));
+  expect(body).toContain('跨变量信息'); expect(body).toContain('适用条件与边界');
+});
