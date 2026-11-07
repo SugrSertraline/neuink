@@ -66,6 +66,14 @@ pub enum WorkspaceError {
     PdfMissing(String),
     #[error("invalid PDF display name: {0}")]
     InvalidPdfDisplayName(String),
+    #[error("reading PDF changed since it was loaded; reload the entry before replacing it: {0}")]
+    ReadingPdfChanged(String),
+    #[error("file is not a PDF: {0}")]
+    ReadingPdfInvalid(String),
+    #[error("reading PDF was not replaced because verification failed: {0}")]
+    ReadingPdfVerification(String),
+    #[error("reading PDF replacement failed and restoring the previous files also failed: {0}")]
+    ReadingPdfRollbackFailed(String),
     #[error("entry PDF is not parsed: {0}")]
     PdfNotParsed(String),
     #[error("invalid PDF parse transition: {0}")]

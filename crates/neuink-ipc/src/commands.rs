@@ -22,6 +22,8 @@ pub mod onboarding;
 pub mod pdf_parse_queue;
 #[cfg(test)]
 mod pdf_parse_queue_tests;
+#[cfg(test)]
+mod entry_mineru_pdf_tests;
 pub mod pdf_reader;
 pub mod pdf_text;
 pub mod research;

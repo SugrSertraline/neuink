@@ -2310,6 +2310,7 @@ export function App() {
           onAttachPdf={attachPdfToEntry}
           onCreatePdfVersion={createPdfVersion}
           onImportMineruClientResult={workspace.importMineruClientResultForEntry}
+          onReplaceReadingPdf={workspace.replaceReadingPdfForEntry}
           onExportTranslationNote={exportEntryTranslation}
           onSaveAnnotation={workspace.saveAnnotation}
           onDeleteAnnotation={workspace.removeAnnotation}

@@ -328,7 +328,7 @@ function MineruPdfReaderBody({
   });
 
   const pdfPath = loadState.status === "ready" ? loadState.data.pdf_path : null;
-  const pdfBytesState = usePdfBytes(pdfPath);
+  const pdfBytesState = usePdfBytes(pdfPath, entry.pdfContentHash);
   const pdfState = usePdfDocument(
     pdfBytesState.status === "ready" ? pdfBytesState.bytes : null,
   );

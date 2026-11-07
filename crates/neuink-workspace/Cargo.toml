@@ -13,6 +13,7 @@ docx-rs = { version = "0.4.22", default-features = false }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 scraper = { version = "0.24", default-features = false }
+sha2 = "0.10"
 neuink-domain = { path = "../neuink-domain" }
 neuink-zotero = { path = "../neuink-zotero" }
 serde.workspace = true

@@ -246,6 +246,7 @@ export function EntryWorkspaceView({
   onAttachPdf,
   onCreatePdfVersion,
   onImportMineruClientResult,
+  onReplaceReadingPdf,
   onCreateMarkdownSourceLink,
   onImportMarkdownNoteSegmentAsset,
   onReadMarkdownNote,
@@ -304,7 +305,8 @@ export function EntryWorkspaceView({
     refreshKey: `${pdfReaderReloadKey}:${segmentRecordReloadKey}`, load: onReadPdfReader });
   const readerData = recordsData.data;
   const recordPdfBytes = usePdfBytes(
-    activeContentId === 'segment-notes' ? readerData?.pdf_path ?? null : null
+    activeContentId === 'segment-notes' ? readerData?.pdf_path ?? null : null,
+    entry.pdfContentHash
   );
   const recordPdfState = usePdfDocument(
     recordPdfBytes.status === 'ready' ? recordPdfBytes.bytes : null
@@ -448,6 +450,7 @@ export function EntryWorkspaceView({
                 onFetchPdf={onFetchPdf} onAttachPdf={onAttachPdf}
                 onCreatePdfVersion={onCreatePdfVersion}
                 onImportMineruClientResult={onImportMineruClientResult}
+                onReplaceReadingPdf={onReplaceReadingPdf}
                 onApplyEntryTagPaths={onApplyEntryTagPaths}
                 onOpenContent={onOpenContent}
                 onUpdateEntry={onUpdateEntry}

@@ -1,5 +1,7 @@
 use std::{
     collections::BTreeMap,
+    fs,
+    io::Cursor,
     path::{Component, Path, PathBuf},
     process::Command,
 };
@@ -13,6 +15,7 @@ use neuink_parser::{
     normalize_mineru_zip, CustomEndpointParserProvider, ParseTask, ParseTaskState,
 };
 use neuink_workspace::note::NoteDocument;
+use neuink_workspace::reading_pdf::{PdfPairSummary, ReadingPdfVerifier};
 use neuink_workspace::TrashItem;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Runtime};
@@ -296,6 +299,32 @@ pub struct CreateFromMineruClientResultRequest {
     pub zip_path: PathBuf,
     #[serde(default)]
     pub confirmed_duplicate_hash: Option<String>,
+    /// Original PDF to use as the reading file. Required with `pdf_verification`
+    /// and checked against the ZIP's origin PDF before anything is written.
+    #[serde(default)]
+    pub pdf_path: Option<PathBuf>,
+    #[serde(default)]
+    pub pdf_verification: Option<PdfPairSummary>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReplaceEntryReadingPdfRequest {
+    pub root: PathBuf,
+    pub entry_id: EntryId,
+    pub pdf_path: PathBuf,
+    pub expected_content_hash: String,
+    pub verification: PdfPairSummary,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReadMineruZipOriginPdfRequest {
+    pub zip_path: PathBuf,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReadEntryMineruOriginPdfRequest {
+    pub root: PathBuf,
+    pub entry_id: EntryId,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1128,15 +1157,41 @@ pub fn import_mineru_client_result(
 
 #[tauri::command]
 pub fn create_from_mineru_client_result(
+    mut request: CreateFromMineruClientResultRequest,
+) -> Result<ImportAndParsePdfResponse, String> {
+    let verification = request.pdf_verification.take();
+    create_from_mineru_client_result_with(
+        request,
+        verification.as_ref().map(|value| value as &dyn ReadingPdfVerifier),
+    )
+}
+
+/// `verifier` is required whenever `request.pdf_path` is set. A missing verifier
+/// rejects the import, so an unchecked PDF is never written.
+pub(crate) fn create_from_mineru_client_result_with(
     request: CreateFromMineruClientResultRequest,
+    verifier: Option<&dyn ReadingPdfVerifier>,
 ) -> Result<ImportAndParsePdfResponse, String> {
     let zip_bytes = read_mineru_source(&request.zip_path)?;
-    create_from_mineru_source_bytes(request, zip_bytes)
+    create_from_mineru_source_bytes_with(request, zip_bytes, verifier)
 }
 
 pub(crate) fn create_from_mineru_source_bytes(
+    mut request: CreateFromMineruClientResultRequest,
+    zip_bytes: Vec<u8>,
+) -> Result<ImportAndParsePdfResponse, String> {
+    let verification = request.pdf_verification.take();
+    create_from_mineru_source_bytes_with(
+        request,
+        zip_bytes,
+        verification.as_ref().map(|value| value as &dyn ReadingPdfVerifier),
+    )
+}
+
+fn create_from_mineru_source_bytes_with(
     request: CreateFromMineruClientResultRequest,
     zip_bytes: Vec<u8>,
+    verifier: Option<&dyn ReadingPdfVerifier>,
 ) -> Result<ImportAndParsePdfResponse, String> {
     let source_id = request.zip_path.canonicalize().ok()
         .map(|path| blake3::hash(path.to_string_lossy().as_bytes()).to_hex().to_string());
@@ -1146,12 +1201,30 @@ pub(crate) fn create_from_mineru_source_bytes(
     validate_single_result(&zip_bytes)?;
     let origin_pdf = source_pdf(&zip_bytes)?
         .ok_or_else(|| "新建条目时，MinerU 结果还需包含原 PDF。".to_string())?;
-    let pdf_hash = source_pdf_hash(&zip_bytes, &origin_pdf)?;
-    reject_duplicate_pdf(&workspace, &pdf_hash, request.confirmed_duplicate_hash.as_deref())?;
     let document = normalize_mineru_zip(&zip_bytes).map_err(|error| error.to_string())?;
     if document.segments.is_empty() {
         return Err("所选结果未包含可导入的 MinerU content_list。".to_string());
     }
+    // Keep the verified bytes rather than reading the selected path again later.
+    let (reading_pdf_name, reading_pdf_bytes) = match &request.pdf_path {
+        Some(pdf_path) => {
+            let verifier = verifier.ok_or_else(|| {
+                "缺少原始 PDF 的校验摘要，未创建条目。请让界面先完成 PDF 校验后再导入。".to_string()
+            })?;
+            let bytes = verify_reading_pdf_against_zip(&zip_bytes, &origin_pdf, pdf_path, verifier)
+                .map_err(|reason| format!("原始 PDF 未通过校验，未创建条目：{reason}"))?;
+            let name = pdf_path.file_name().and_then(|name| name.to_str())
+                .unwrap_or("paper.pdf").to_string();
+            (name, bytes)
+        }
+        None => {
+            let name = Path::new(&origin_pdf).file_name().and_then(|name| name.to_str())
+                .unwrap_or("paper.pdf").to_string();
+            (name, read_zip_entry(&zip_bytes, &origin_pdf)?)
+        }
+    };
+    let pdf_hash = blake3::hash(&reading_pdf_bytes).to_hex().to_string();
+    reject_duplicate_pdf(&workspace, &pdf_hash, request.confirmed_duplicate_hash.as_deref())?;
     let entry = workspace
         .create_entry_with_meta(request.title, request.fields, request.tags)
         .map_err(|error| error.to_string())?;
@@ -1159,12 +1232,11 @@ pub(crate) fn create_from_mineru_source_bytes(
         workspace
             .write_mineru_output_zip(&entry.id, &zip_bytes)
             .map_err(|error| error.to_string())?;
-        let extracted_pdf = workspace
-            .layout()
-            .entry_mineru_output_dir(&entry.id)
-            .join(origin_pdf);
         workspace
-            .import_pdf_with_confirmation(&entry.id, &extracted_pdf, request.confirmed_duplicate_hash.as_deref())
+            .import_pdf_bytes_with_confirmation(
+                &entry.id, &reading_pdf_name, &reading_pdf_bytes,
+                request.confirmed_duplicate_hash.as_deref(),
+            )
             .map_err(|error| error.to_string())?;
         workspace
             .write_segments(&entry.id, &document.segments)
@@ -1189,6 +1261,111 @@ pub(crate) fn create_from_mineru_source_bytes(
         segment_count: document.segments.len(),
         task_id: None,
     })
+}
+
+/// Compares `pdf_path` with the ZIP's origin copy and returns the candidate bytes
+/// that were verified. Callers must write those returned bytes, not read the path again.
+fn verify_reading_pdf_against_zip(
+    zip_bytes: &[u8],
+    origin_pdf: &str,
+    pdf_path: &Path,
+    verifier: &dyn ReadingPdfVerifier,
+) -> Result<Vec<u8>, String> {
+    let candidate = fs::read(pdf_path).map_err(|error| error.to_string())?;
+    neuink_workspace::reading_pdf::validate_pdf_bytes(&candidate)
+        .map_err(|error| error.to_string())?;
+    let origin = read_zip_entry(zip_bytes, origin_pdf)?;
+    verifier.verify(&candidate, &origin)?;
+    Ok(candidate)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CheckMineruZipReadingPdfRequest {
+    pub zip_path: PathBuf,
+    pub pdf_path: PathBuf,
+    pub pdf_verification: PdfPairSummary,
+}
+
+/// Runs the combined-import PDF check without creating anything. The frontend
+/// calls this before it writes tags, so a rejected PDF leaves no tags behind.
+/// `create_from_mineru_client_result` repeats the same check before it writes.
+#[tauri::command]
+pub fn check_mineru_zip_reading_pdf(request: CheckMineruZipReadingPdfRequest) -> Result<(), String> {
+    let zip_bytes = read_mineru_source(&request.zip_path)?;
+    validate_single_result(&zip_bytes)?;
+    let origin_pdf = source_pdf(&zip_bytes)?
+        .ok_or_else(|| "新建条目时，MinerU 结果还需包含原 PDF。".to_string())?;
+    verify_reading_pdf_against_zip(&zip_bytes, &origin_pdf, &request.pdf_path, &request.pdf_verification)
+        .map(|_| ())
+        .map_err(|reason| format!("原始 PDF 未通过校验：{reason}"))
+}
+
+fn read_zip_entry(zip_bytes: &[u8], normalized_name: &str) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+
+    let mut archive = zip::ZipArchive::new(Cursor::new(zip_bytes))
+        .map_err(|error| format!("无法读取 MinerU 客户端 ZIP：{error}"))?;
+    for index in 0..archive.len() {
+        let mut file = archive.by_index(index).map_err(|error| error.to_string())?;
+        if file.name().replace('\\', "/") != normalized_name.replace('\\', "/") {
+            continue;
+        }
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)
+            .map_err(|error| error.to_string())?;
+        return Ok(bytes);
+    }
+    Err(format!("MinerU 客户端 ZIP 中找不到 {normalized_name}。"))
+}
+
+/// Replaces the reading PDF of an existing entry. The verifier and the optimistic hash check run before any write.
+#[tauri::command]
+pub fn replace_entry_reading_pdf(
+    request: ReplaceEntryReadingPdfRequest,
+) -> Result<EntryMeta, String> {
+    let workspace =
+        neuink_workspace::Workspace::open(&request.root).map_err(|error| error.to_string())?;
+    let file_name = request
+        .pdf_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "PDF 文件名无效。".to_string())?
+        .to_string();
+    let candidate = fs::read(&request.pdf_path).map_err(|error| error.to_string())?;
+    workspace
+        .replace_reading_pdf(
+            &request.entry_id,
+            &file_name,
+            &candidate,
+            &request.expected_content_hash,
+            &request.verification,
+        )
+        .map_err(|error| error.to_string())
+}
+
+/// Returns the origin PDF bytes inside a MinerU client ZIP for frontend verification.
+#[tauri::command]
+pub fn read_mineru_zip_origin_pdf(
+    request: ReadMineruZipOriginPdfRequest,
+) -> Result<tauri::ipc::Response, String> {
+    let zip_bytes = read_mineru_source(&request.zip_path)?;
+    validate_single_result(&zip_bytes)?;
+    let origin_name = source_pdf(&zip_bytes)?
+        .ok_or_else(|| "新建条目时，MinerU 结果还需包含原 PDF。".to_string())?;
+    read_zip_entry(&zip_bytes, &origin_name).map(tauri::ipc::Response::new)
+}
+
+/// Returns the `paper_origin.pdf` stored for an entry, for replacement verification.
+#[tauri::command]
+pub fn read_entry_mineru_origin_pdf(
+    request: ReadEntryMineruOriginPdfRequest,
+) -> Result<tauri::ipc::Response, String> {
+    let workspace =
+        neuink_workspace::Workspace::open(&request.root).map_err(|error| error.to_string())?;
+    workspace
+        .mineru_origin_pdf_bytes(&request.entry_id)
+        .map(tauri::ipc::Response::new)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

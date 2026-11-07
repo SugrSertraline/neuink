@@ -32,7 +32,7 @@ describe('PDF destinations', () => {
   });
   it('rejects invalid destinations and allows retry after a failure', async () => {
     const {pdf,document}=fixture(); document.getDestination.mockResolvedValueOnce(null);
-    await expect(resolvePdfDestination(pdf,'section')).rejects.toThrow('没有可用');
+    await expect(resolvePdfDestination(pdf,'section')).rejects.toThrow('缺少内部跳转目标表');
     await expect(resolvePdfDestination(pdf,'section')).resolves.toMatchObject({pageIdx:1});
     await expect(resolvePdfDestination(pdf,[9,{name:'Fit'}])).rejects.toThrow('页码无效');
   });

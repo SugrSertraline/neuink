@@ -11,7 +11,12 @@ export type RetryablePdfBytesLoadState = PdfBytesLoadState & {
   retry: () => void;
 };
 
-export function usePdfBytes(pdfPath: string | null): RetryablePdfBytesLoadState {
+/**
+ * `contentHash` must change whenever the file at `pdfPath` is replaced. The
+ * path stays the same across an in-place replacement, so the hash is the only
+ * signal that the cached bytes are stale.
+ */
+export function usePdfBytes(pdfPath: string | null, contentHash?: string | null): RetryablePdfBytesLoadState {
   const [loadState, setLoadState] = useState<PdfBytesLoadState>({
     status: 'idle',
     bytes: null,
@@ -48,7 +53,7 @@ export function usePdfBytes(pdfPath: string | null): RetryablePdfBytesLoadState 
     return () => {
       cancelled = true;
     };
-  }, [loadAttempt, pdfPath]);
+  }, [loadAttempt, pdfPath, contentHash]);
 
   return useMemo(() => ({ ...loadState, retry }), [loadState, retry]);
 }
