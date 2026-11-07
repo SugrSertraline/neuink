@@ -58,6 +58,83 @@ beforeEach(() => {
 afterEach(() => { setAssistantBackgroundRun(null); vi.useRealTimers(); });
 
 describe('assistant production controller persistence boundaries', () => {
+  it.each(['completed', 'failed', 'canceled'] as const)('preserves interleaved thinking and tool order while streaming and when %s', async outcome => {
+    const input = options();
+    const timeline = (message: Conversation['messages'][number]) => message.parts?.flatMap(part =>
+      part.type === 'reasoning' ? [part.text] : part.type === 'tool-call' ? [part.id] : []);
+    vi.mocked(runAssistantHarness).mockImplementation(async callbacks => {
+      callbacks.onReasoningDelta?.('先检查');
+      callbacks.onReasoningDelta?.('来源。');
+      callbacks.onToolEvent?.({ id: 'read', toolName: 'read_pdf_pages', status: 'running' });
+      callbacks.onReasoningDelta?.('再比较结果。');
+      callbacks.onToolEvent?.({ id: 'search', toolName: 'search_pdf_text', status: 'running' });
+      // A late receipt updates the first tool rather than moving it after new thinking/tools.
+      callbacks.onToolEvent?.({ id: 'read', toolName: 'read_pdf_pages', status: 'done', summary: '读取完成' });
+      const streaming = getAssistantBackgroundRun(input.runAbortControllerRef.current!)!.conversation!;
+      expect(timeline(streaming.messages[streaming.messages.length - 1])).toEqual(['先检查来源。', 'read', '再比较结果。', 'search']);
+      callbacks.onToolEvent?.({ id: 'search', toolName: 'search_pdf_text', status: 'error', error: '搜索失败' });
+      callbacks.onReasoningDelta?.('根据已有来源回答。');
+      callbacks.onDelta?.('已有回答');
+      if (outcome === 'canceled') {
+        input.runAbortControllerRef.current!.abort();
+        callbacks.onReasoningDelta?.('迟到思考');
+        callbacks.onToolEvent?.({ id: 'late', toolName: 'read_pdf_pages', status: 'running' });
+      }
+      if (outcome !== 'completed') throw new Error('interrupted');
+      return { answer: '最终回答', sources: [] };
+    });
+    await runAssistantPanelTask(input);
+    const reloaded = JSON.parse(JSON.stringify(lastMessage()));
+    expect(timeline(reloaded)).toEqual(['先检查来源。', 'read', '再比较结果。', 'search', '根据已有来源回答。']);
+    expect(reloaded.parts).toContainEqual(expect.objectContaining({ type: 'tool-call', id: 'read', status: 'done' }));
+    expect(reloaded.parts).toContainEqual(expect.objectContaining({ type: 'tool-call', id: 'search', status: 'error' }));
+  });
+
+  it.each(['completed', 'failed', 'cancelled'] as const)('persists full tool messages when the task is %s', async outcome => {
+    const input = options();
+    const transcript = {
+      version: 1 as const, runId: 'execution-history', capturedAt: '', profileId: 'test', model: 'test',
+      protocol: 'openai_compatible', sources: [], messages: [
+        { role: 'assistant' as const, content: [{ type: 'tool-call' as const, toolCallId: 'read', toolName: 'read_note', input: {} }] },
+        { role: 'tool' as const, content: [{ type: 'tool-result' as const, toolCallId: 'read', toolName: 'read_note',
+          output: { type: 'json' as const, value: { markdown: 'FULL_PERSISTED_RESULT' } } }] }
+      ]
+    };
+    vi.mocked(runAssistantHarness).mockImplementation(async callbacks => {
+      await callbacks.onModelTranscript?.(transcript);
+      if (outcome === 'cancelled') input.runAbortControllerRef.current!.abort();
+      if (outcome !== 'completed') throw new Error('interrupted');
+      return { answer: 'Done', sources: [], modelTranscript: { ...transcript, outcome } };
+    });
+    await runAssistantPanelTask(input);
+    const part = lastMessage().parts?.find(part => part.type === 'model-transcript');
+    expect(part).toMatchObject({ type: 'model-transcript', transcript: { outcome } });
+    expect(JSON.stringify(part)).toContain('FULL_PERSISTED_RESULT');
+  });
+
+  it('updates the original assistant message on checkpoint resume instead of duplicating the run', async () => {
+    const transcript = { version: 1 as const, runId: 'execution-resume', capturedAt: '', profileId: 'test', model: 'test',
+      protocol: 'openai_compatible', sources: [], messages: [] };
+    disk.messages = [
+      { message_id: 'original-user', role: 'user', content: 'hello', created_at: '', source_links: [] },
+      { message_id: 'original-assistant', role: 'assistant', content: '', created_at: '', source_links: [],
+        parts: [{ type: 'model-transcript', transcript }, { type: 'reasoning', text: '之前的思考' },
+          { type: 'tool-call', id: 'previous-read', toolName: 'read_pdf_pages', status: 'done' }],
+        tool_events: [{ id: 'previous-read', toolName: 'read_pdf_pages', status: 'done', summary: '之前已读取' }] }
+    ];
+    vi.mocked(runAssistantHarness).mockImplementation(async callbacks => {
+      callbacks.onReasoningDelta?.('恢复后的思考');
+      return { answer: 'Resumed', sources: [], modelTranscript: transcript };
+    });
+    await runAssistantPanelTask({ ...options(), conversation: structuredClone(disk), resumeExecutionId: 'execution-resume' });
+    expect(appendConversationMessages).not.toHaveBeenCalled();
+    expect(disk.messages).toHaveLength(2);
+    expect(lastMessage().message_id).toBe('original-assistant');
+    expect(lastMessage().content).toBe('Resumed');
+    expect(lastMessage().parts?.flatMap(part => part.type === 'reasoning' ? [part.text]
+      : part.type === 'tool-call' ? [part.id] : [])).toEqual(['之前的思考', 'previous-read', '恢复后的思考']);
+  });
+
   it.each(['completed', 'canceled'] as const)('saves local thinking separately from the answer when %s', async status => {
     const input = options(); input.selectedProfile = CLAUDE_PROFILE;
     vi.mocked(runLocalAgentHarness).mockImplementation(async callbacks => {

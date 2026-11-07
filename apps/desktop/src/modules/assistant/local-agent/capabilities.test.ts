@@ -77,7 +77,7 @@ describe('local Agent capability parity and recovery', () => {
   it('uses the shared frozen mention map and conversation context, including tag entries', async () => {
     vi.mocked(runLocalAgent).mockImplementation(async request => {
       const prompt = JSON.parse(request.prompt);
-      expect(prompt.harnessBrief).toContain('Earlier instruction');
+      expect(prompt.conversation).toContain('Earlier instruction');
       expect(prompt.harnessBrief).toContain('C1');
       expect(prompt.harnessBrief).toContain('e2');
       expect(prompt.harnessBrief).toContain('exhaustive');

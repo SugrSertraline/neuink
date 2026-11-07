@@ -161,6 +161,23 @@ describe('ChatMessage performance boundaries', () => {
     expect(getByText('隐藏的长思考')).toBeTruthy();
   });
 
+  it('shows a compaction checkpoint as a visible memory marker, not an empty reply', () => {
+    const message = { ...createMessage(), content: '' };
+    message.parts = [{ type: 'memory', memory: { summary: '较早的对话已整理为摘要', decisions: [], entities: [], open_items: [],
+      user_preferences: [], last_user_goal: '', message_count: 4, source_count: 1, pending_proposal_count: 0, updated_at: '' } }];
+    const { getByText, queryByRole, queryByText } = render(
+      <AssistantReplyActionsContext.Provider value={{ root: 'root', openReply: vi.fn(), openSource: vi.fn(), addSciverseSource: vi.fn() }}>
+        <ChatMessage message={message} streaming={false} onOpenSource={() => undefined} />
+      </AssistantReplyActionsContext.Provider>,
+    );
+    // The summary is the message itself, so it is not hidden behind "展开执行详情" and no reply is offered.
+    expect(getByText('较早的对话已整理为摘要')).toBeTruthy();
+    expect(queryByRole('button', { name: '展开执行详情' })).toBeNull();
+    expect(queryByRole('button', { name: '展开阅读' })).toBeNull();
+    expect(queryByRole('status')).toBeNull();
+    expect(queryByText('正在处理')).toBeNull();
+  });
+
   it('shows one compact status for an empty streaming response and none for plain completed text', () => {
     const message = { ...createMessage(), content: '' };
     const { getByRole, queryByRole, rerender } = render(<ChatMessage message={message} streaming onOpenSource={() => undefined} />);

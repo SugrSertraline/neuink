@@ -19,6 +19,7 @@ import {
 } from '../agent-core/agent';
 import { createAgentToolFailure, isAgentToolFailure } from '../agent-core/toolFailure';
 import { observeAssistantContext } from '../harness/context';
+import { buildConversationTail } from '../harness/conversationMemory';
 import { runDurableHarness } from '../harness/durableHarness';
 import type { RunAssistantHarnessOptions } from '../harness/engine';
 import { modelDrivenBrief, verifyGroundedProposals } from '../harness/engine';
@@ -108,8 +109,8 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
     })();
     execution?.set('contextSnapshot', snapshot);
     const { plan, invocationPlan } = buildDirectExecution(runtimeSettings, options.question, options.composerSnapshot?.executionMode ?? 'act');
-    invocationPlan.enabledToolIds = invocationPlan.enabledToolIds.filter(id => id !== 'task.run_subagent');
-    const main = { ...runtimeSettings.mainAssistant, enabledToolIds:runtimeSettings.mainAssistant.enabledToolIds.filter(id => id !== 'task.run_subagent') };
+    invocationPlan.enabledToolIds = invocationPlan.enabledToolIds.filter(id => id !== 'task_run_subagent');
+    const main = { ...runtimeSettings.mainAssistant, enabledToolIds:runtimeSettings.mainAssistant.enabledToolIds.filter(id => id !== 'task_run_subagent') };
     const pinned = buildPinnedContext(options.assistantContext?.items ?? [], 1);
     const frozenSelected = execution?.get<string>('local:selectedNotes');
     const selected = frozenSelected !== undefined ? {text:frozenSelected, sourceByMarker:new Map()} :
@@ -173,6 +174,9 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
           harnessBrief:modelDrivenBrief({ composerSnapshot:options.composerSnapshot, contextPlan:options.contextPlan,
             currentSurface:options.currentSurface, history:options.conversationHistory ?? [],
             mentionScope:options.mentionScope ?? options.scope, tagMentionScopes:options.tagMentionScopes }),
+          // The native Agent loops replay history as real model turns; this CLI transport has no
+          // message array, so the frozen prompt carries the same tail as text.
+          conversation:buildConversationTail(options.conversationHistory ?? []),
           recovery:options.resumeExecutionId ? { observations:runtime.observations,
             sources:[...ledger.sources].map(([marker,source]) => ({marker:`S${marker}`,source})),
             proposals:[...proposals,...entryMetaProposals,...tagProposals].map(p => ({id:p.id,status:p.status})),

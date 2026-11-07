@@ -4,7 +4,8 @@ import { createNeuinkModel, generationSettings } from './provider';
 import type { RunBudget } from '../agent-core';
 import { modelTaskOutputTokens } from './contextBudget';
 
-export const MEMORY_PROMPT = 'Update a factual semantic checkpoint from the prior checkpoint and conversation. Preserve goals, decisions, unresolved work, referenced entities, and stable preferences. Do not invent facts.';
+// The compaction prompt lives with the summarizer in `conversationSummary`, so there is no
+// second copy here for a caller to pass in and let the two triggers drift apart.
 
 /** Fixed tasks have no tool registry, delegation, or autonomous execution loop. */
 export async function runJsonModelTask(options: {
@@ -16,6 +17,10 @@ export async function runJsonModelTask(options: {
   prompt: string;
   abortSignal?: AbortSignal;
   timeoutMs?: number;
+  /** Compaction is a bookkeeping call, not a model reply: it still pays for its real tokens
+   *  but must not consume a loop turn, which is reserved for the task itself. */
+  chargeTurn?: boolean;
+  onFinish?: (finishReason: string | undefined) => void;
 }) {
   options.abortSignal?.throwIfAborted();
   const parameters = generationSettings(options.settings);
@@ -23,7 +28,8 @@ export async function runJsonModelTask(options: {
     maxContextLength: options.settings.max_context_length, maxOutputTokens: parameters.maxOutputTokens,
     system: options.system, prompt: options.prompt
   });
-  options.budget?.turn();
+  if (options.chargeTurn === false) options.budget?.assertTokenBudget();
+  else options.budget?.turn();
   await options.budget?.persist?.();
   const result = await generateText({
     ...parameters,
@@ -39,6 +45,7 @@ export async function runJsonModelTask(options: {
   });
   options.abortSignal?.throwIfAborted();
   options.budget?.usage(result.usage?.inputTokens, result.usage?.outputTokens);
+  options.onFinish?.(result.finishReason);
   await options.budget?.persist?.();
   if (result.finishReason === 'length') {
     throw new Error('模型输出达到长度上限，未生成完整结果。请提高该模型的最大输出 Token 后重试。');
@@ -57,6 +64,38 @@ export async function runJsonModelTask(options: {
     }
     throw error;
   }
+}
+
+/** A fixed task that returns prose. Unlike `runJsonModelTask` it does not request JSON output;
+ *  the caller owns validation of the text. */
+export async function runTextModelTask(options: {
+  budget?: RunBudget;
+  settings: LlmProfile;
+  system: string;
+  prompt: string;
+  abortSignal?: AbortSignal;
+  /** Compaction is a bookkeeping call, not a model reply: it still pays for its real tokens
+   *  but must not consume a loop turn, which is reserved for the task itself. */
+  chargeTurn?: boolean;
+}) {
+  options.abortSignal?.throwIfAborted();
+  if (options.chargeTurn === false) options.budget?.assertTokenBudget();
+  else options.budget?.turn();
+  await options.budget?.persist?.();
+  const result = await generateText({
+    ...generationSettings(options.settings),
+    model: createNeuinkModel(options.settings),
+    system: options.system,
+    prompt: options.prompt,
+    abortSignal: options.abortSignal
+      ? AbortSignal.any([options.abortSignal, AbortSignal.timeout(120_000)])
+      : AbortSignal.timeout(120_000),
+    maxRetries: 0
+  });
+  options.abortSignal?.throwIfAborted();
+  options.budget?.usage(result.usage?.inputTokens, result.usage?.outputTokens);
+  await options.budget?.persist?.();
+  return { text: result.text, finishReason: result.finishReason };
 }
 
 /** Credentials belong to model profiles, never to tools or a child-agent instance. */

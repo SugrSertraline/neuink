@@ -4,7 +4,7 @@ import type { RequestUserInput } from '../runtime/userInput';
 import { runDurableHarness } from './durableHarness';
 import type { DurableExecution } from '../runtime/durableExecution';
 import type { RunBudget } from '../agent-core';
-import { MEMORY_PROMPT, resolveModelProfile } from '../sdk/modelTasks';
+import { resolveModelProfile } from '../sdk/modelTasks';
 import type {
   AssistantContextSnapshot,
   AssistantToolTraceEvent,
@@ -45,12 +45,7 @@ import { verifyHarnessResult } from './verification';
 import { observeAssistantContext } from './context';
 import { buildDirectExecution } from '../runtime/executionPolicy';
 import { routeAssistantRequest, routeSummary, type RequestRoute } from '../runtime/requestRouter';
-import {
-  appendConversationMemory,
-  buildConversationTail,
-  shouldUpdateConversationMemory,
-  updateConversationMemory
-} from './conversationMemory';
+import { latestConversationMemory } from './conversationMemory';
 import {
   AssistantHarnessError,
   createAgentRun,
@@ -96,6 +91,7 @@ export type RunAssistantHarnessOptions = {
   onNoteProposal?: (proposal: AssistantNoteProposal) => void;
   onToolEvent?: (event: AssistantToolTraceEvent) => void;
   onReasoningDelta?: (delta: string) => void;
+  onModelTranscript?: (transcript: import('@/shared/types/modelTranscript').AssistantModelTranscript) => void | Promise<void>;
   preferredAgentId?: string | null;
   profiles?: LlmProfile[];
   question: string;
@@ -246,6 +242,7 @@ async function executeAssistantHarness(options: RunAssistantHarnessOptions): Pro
     abortSignal?.throwIfAborted();
     const delegatedCalls = new Set<string>();
     const grounded = await answerWithGroundedAgent({
+      onModelTranscript: options.onModelTranscript,
       budget: options.budget,
       execution: options.execution,
       applicationActions: options.applicationActions,
@@ -258,6 +255,7 @@ async function executeAssistantHarness(options: RunAssistantHarnessOptions): Pro
       contextSnapshot: snapshot,
       browserTabTarget: currentSurface?.kind === 'browser' ? currentSurface.browserTab : null,
       conversationHistory,
+      conversationMemory: latestConversationMemory(conversationHistory),
       currentEntry: snapshot.active_entry
         ? { id: snapshot.active_entry.entry_id, title: snapshot.active_entry.entry_title }
         : currentEntry,
@@ -286,7 +284,7 @@ async function executeAssistantHarness(options: RunAssistantHarnessOptions): Pro
         : undefined,
       onReasoningDelta,
       onToolEvent: (event) => {
-        if (event.toolName === 'task.run_subagent') {
+        if (event.toolName === 'task_run_subagent') {
           delegatedCalls.add(event.id);
           agentRun.subagentTaskCount = delegatedCalls.size;
           upsertRunNode(agentRun, {
@@ -350,61 +348,6 @@ async function executeAssistantHarness(options: RunAssistantHarnessOptions): Pro
       agentLoopState: grounded.agentLoopState
     };
     activeTaskState = nextTaskState;
-    if (shouldUpdateConversationMemory(conversationHistory, question, grounded.answer)) {
-      upsertRunNode(agentRun, {
-        agentId: 'conversation-memory',
-        id: `${runId}-memory`,
-        kind: 'planner',
-        status: 'running',
-        title: 'Update semantic memory checkpoint'
-      });
-      const memoryProfile = settings;
-      emitHarnessEvent(onToolEvent, {
-        id: `${runId}-memory`, status: 'running', toolName: 'agent.memory',
-        summary: '对话达到记忆整理阈值，正在保存摘要。'
-      });
-      try {
-        grounded.conversationMemory = await updateConversationMemory({
-          budget: options.budget,
-          abortSignal,
-          answer: grounded.answer,
-          history: conversationHistory,
-          pendingProposalCount: proposalIds.length,
-          question,
-          settings: memoryProfile,
-          sourceCount: grounded.sources.length,
-          systemPrompt: MEMORY_PROMPT
-        });
-        emitHarnessEvent(onToolEvent, {
-          id: `${runId}-memory`, status: 'done', toolName: 'agent.memory', summary: '对话摘要已整理。'
-        });
-        upsertRunNode(agentRun, {
-          agentId: 'conversation-memory',
-          id: `${runId}-memory`,
-          kind: 'planner',
-          outputSummary: `summary=${grounded.conversationMemory.summary.slice(0, 180)}`,
-          status: 'succeeded',
-          title: 'Update semantic memory checkpoint'
-        });
-      } catch (memoryError) {
-        throwIfAborted(abortSignal);
-        upsertRunNode(agentRun, {
-          agentId: 'conversation-memory',
-          error: errorMessage(memoryError),
-          id: `${runId}-memory`,
-          kind: 'planner',
-          status: 'failed',
-          title: 'Update semantic memory checkpoint'
-        });
-        emitHarnessEvent(onToolEvent, {
-          error: errorMessage(memoryError),
-          id: `${runId}-memory`,
-          status: 'error',
-          summary: 'The semantic memory checkpoint was not updated; the durable transcript remains available.',
-          toolName: 'agent.memory'
-        });
-      }
-    }
     upsertRunNode(agentRun, {
       agentId: activeExecution.agent.id,
       id: `${runId}-loop`,
@@ -463,7 +406,8 @@ export function modelDrivenBrief({
   mentionScope: ScopeSnapshot;
   tagMentionScopes?: Record<string, ScopeSnapshot>;
 }) {
-  const transcript = buildConversationTail(history);
+  // The conversation itself is replayed as real model turns, not as a truncated
+  // string here; only the parts that must be re-derived live in this brief.
   const lastDiagram = [...history].reverse().flatMap(message => [...(message.parts ?? [])].reverse())
     .find(part => part.type === 'tool-result' && part.diagram);
   const previousDiagram = lastDiagram?.type === 'tool-result' && lastDiagram.diagram
@@ -489,7 +433,9 @@ export function modelDrivenBrief({
   const taskObservation = latestTask?.type === 'task-state'
     ? `Previous task state: status=${latestTask.task.status}, goal=${JSON.stringify(latestTask.task.goal.normalizedGoal)}, proposals=${latestTask.task.proposalIds.length}. A later natural-language request may continue, correct, or replace it; decide from the conversation.`
     : '';
-  return appendConversationMemory([
+  // The conversation memory checkpoint is not part of this brief: it is sent as the first
+  // conversation turn by `answerWithGroundedAgent`, ahead of the replayed transcript.
+  return [
     'Use a model-driven Agent loop. Interpret all user replies as natural language; never require fixed phrases, regex slots, or magic retry wording.',
     'Answer directly when no external observation or side effect is needed. Naming, summarization, wording, planning, and deciding whether to ask are model-native cognition, not tools.',
     'Call tools only for workspace observation, deterministic computation, or an authorized side effect. For "name and create", choose the name internally and call create_entry once. For title suggestions only, answer without tools.',
@@ -505,9 +451,8 @@ export function modelDrivenBrief({
     historicalMentionMaps ? `Historical Typed Mention Maps available for continuation:\n${historicalMentionMaps}` : '',
     taskObservation,
     contextPlan?.summary ? `UI context summary (informational only; the Agent decides semantic roles): ${contextPlan.summary}` : '',
-    transcript ? `Recent conversation:\n${transcript}` : '',
     previousDiagram
-  ].filter(Boolean).join('\n\n'), history);
+  ].filter(Boolean).join('\n\n');
 }
 
 function formatMentionMap(

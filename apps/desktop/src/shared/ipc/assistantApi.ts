@@ -147,6 +147,11 @@ export function conversationSourceKey(source: ConversationSourceLink) {
     : `local:${source.entry_id}:${source.segment_uid}`;
 }
 
+export function conversationSourceSnapshotKey(source: ConversationSourceLink) {
+  return JSON.stringify([conversationSourceKey(source), source.quote,
+    isSciverseConversationSource(source) ? source.page_no : source.page_idx]);
+}
+
 export type ConversationRole = 'user' | 'assistant';
 
 export type AssistantToolTraceEvent = {
@@ -164,6 +169,14 @@ export type AssistantToolTraceEvent = {
 };
 
 export type AssistantConversationMemory = {
+  /** Automatic compaction summarizes a prefix and keeps this complete recent suffix verbatim. */
+  retained_context?: {
+    version: 1;
+    messages: import('ai').ModelMessage[];
+    profileId: string;
+    model: string;
+    protocol: string;
+  };
   decisions: string[];
   entities: string[];
   last_user_goal: string | null;
@@ -177,6 +190,7 @@ export type AssistantConversationMemory = {
 };
 
 export type AssistantMessagePart =
+  | { type: 'model-transcript'; transcript: import('../types/modelTranscript').AssistantModelTranscript }
   | { type: 'local-agent'; provider: 'claude' | 'codex' | 'opencode'; sessionId: string; initialized: boolean }
   | { type: 'text'; markdown: string }
   | { type: 'reasoning'; text: string }

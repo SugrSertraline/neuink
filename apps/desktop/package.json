@@ -22,6 +22,8 @@
     "verify:reader-licenses": "node scripts/reader-licenses.cjs",
     "test:packaging": "node --test scripts/onboarding-resources.test.cjs scripts/browser-reader-resources.test.cjs scripts/reader-licenses.test.cjs scripts/embedding-resources.test.cjs scripts/release-artifacts.test.cjs scripts/macos-artifacts.test.cjs scripts/release-version.test.cjs scripts/portable-layout.test.cjs scripts/research-component.test.cjs scripts/windows-installer.test.cjs scripts/installer-artifacts.test.cjs",
     "test:frontend": "vitest run",
+    "eval:assistant-tools": "vitest run src/modules/assistant/evals/assistantToolUse.live.test.ts",
+    "eval:assistant-tools:harness": "vitest run src/modules/assistant/evals --exclude **/*.live.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

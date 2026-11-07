@@ -133,7 +133,7 @@ describe('ordinary failures stay inside the tool boundary', () => {
   it('returns a failed child and its actual partial evidence to the parent in a durable run', async () => {
     const provider = model([{ call: childCall }, { call: readCall }, { error: new Error('provider secret diagnostic') },
       { text: '子任务未完成，但已取得的片段提到 42 participants [S1]。' }]);
-    const input = options(); input.invocationPlan.requiredToolIds = ['task.run_subagent'];
+    const input = options(); input.invocationPlan.requiredToolIds = ['task_run_subagent'];
     const result = await answerWithGroundedAgent(input);
     expect(result.agentLoopState?.status).toBe('completed');
     expect(result.toolEvents).toContainEqual(expect.objectContaining({ toolName: 'task_run_subagent', status: 'error' }));
@@ -169,7 +169,8 @@ describe('ordinary failures stay inside the tool boundary', () => {
   });
   it('lets the parent summarize when the child has insufficient local context capacity', async () => {
     const provider = model([{ call: childCall }, { text: '子任务上下文不足，没有取得足够证据。' }]);
-    const input = options(); input.runtimeSettings.subagents[0].systemPrompt = 'Worker instructions. '.repeat(10_000);
+    // Instructions alone exceed 90% of the 128k token window. Character length is not capacity.
+    const input = options(); input.runtimeSettings.subagents[0].systemPrompt = 'Worker instructions. '.repeat(30_000);
     const result = await answerWithGroundedAgent(input);
     expect(result.agentLoopState?.status).toBe('completed');
     expect(provider.doStreamCalls).toHaveLength(2);

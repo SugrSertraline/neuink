@@ -34,6 +34,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 
 import { Button } from '@/components/ui/button';
+import { canonicalAssistantToolId, isProposalTool } from '@/shared/lib/assistantToolNames';
 import type {
   AssistantMessagePart,
   AssistantToolTraceEvent,
@@ -57,6 +58,7 @@ import { buildNoteProposalPreview } from './noteProposalPreview';
 import { EntryMetaProposalCard } from './EntryMetaProposalCard';
 import { TagProposalList } from './TagProposalList';
 import { ExecutionDetails } from './ExecutionDetails';
+import { executionTimelineFromParts } from './assistantExecutionTimeline';
 import { noteProposalElementId, useNoteReview } from '../review/NoteReviewContext';
 import { AssistantDiagramBlock } from './AssistantDiagramBlock';
 import { NoteDiffLines, NoteRenderedContent } from '../review/NoteDiffLines';
@@ -124,6 +126,11 @@ function ChatMessageComponent({
   const toolErrorNotice = assistantToolErrorNotice({ streaming, hasAnswer: Boolean(content.trim()), runStatus: resolvedAgentRun?.status });
   const resolvedMemory = memoryFromParts(messageParts);
   const reasoning = reasoningFromParts(messageParts);
+  const executionTimeline = executionTimelineFromParts(messageParts, resolvedToolEvents);
+  const toolEventsById = new Map(resolvedToolEvents.map(event => [event.id, event]));
+  // A compaction checkpoint is a marker, not a reply: it carries no text, no run and no tools.
+  const checkpointOnly = message.role === 'assistant' && Boolean(resolvedMemory) && !content.trim()
+    && !streaming && !resolvedAgentRun && !resolvedPlan && resolvedToolEvents.length === 0 && !reasoning;
   const contextItems = contextItemsFromParts(messageParts);
   const contextPlan = contextPlanFromParts(messageParts);
   const composer = messageParts.find(part => part.type === 'context-snapshot')?.composer;
@@ -167,14 +174,9 @@ function ChatMessageComponent({
           </Button> : null}
       </div>
       {isPlanningRequest ? <div className="mb-1 text-[11px] text-muted-foreground">仅规划 · 只读</div> : null}
-      {message.role === 'assistant' && (streaming || resolvedAgentRun || resolvedPlan || resolvedMemory || resolvedToolEvents.length > 0 || reasoning) ? (
+      {checkpointOnly && resolvedMemory ? <MemorySummary memory={resolvedMemory} /> : null}
+      {message.role === 'assistant' && !checkpointOnly && (streaming || resolvedAgentRun || resolvedPlan || resolvedMemory || resolvedToolEvents.length > 0 || reasoning) ? (
         <ExecutionDetails key={message.message_id} awaitingApproval={awaitingApproval} streaming={streaming} hasAnswer={Boolean(content.trim())} run={resolvedAgentRun} events={resolvedToolEvents} reasoning={reasoning}>
-      {reasoning ? (
-        <section className="text-[11px] leading-4 text-muted-foreground" aria-label="思考过程">
-          <div className="mb-1 font-medium">思考过程</div>
-          <div className="whitespace-pre-wrap break-words">{reasoning}</div>
-        </section>
-      ) : null}
       {resolvedAgentRun ? (
         <AgentRunSummary run={resolvedAgentRun} errorNotice={toolErrorNotice} onRetry={onRetryAgentRun} />
       ) : null}
@@ -182,9 +184,18 @@ function ChatMessageComponent({
       {resolvedMemory ? (
         <MemorySummary memory={resolvedMemory} />
       ) : null}
-      {resolvedToolEvents.length > 0 ? (
-        <ToolTrace events={resolvedToolEvents} errorNotice={toolErrorNotice} />
-      ) : null}
+      <div className="grid gap-2" aria-label="执行时间线">
+        {executionTimeline.map((item, index) => {
+          if (item.type === 'reasoning') return (
+            <section key={`reasoning:${index}`} className="text-[11px] leading-4 text-muted-foreground" aria-label="思考过程">
+              <div className="mb-1 font-medium">思考过程</div>
+              <div className="whitespace-pre-wrap break-words">{item.text}</div>
+            </section>
+          );
+          const event = toolEventsById.get(item.id);
+          return event ? <ToolTrace key={item.id} events={[event]} errorNotice={toolErrorNotice} /> : null;
+        })}
+      </div>
         </ExecutionDetails>
       ) : null}
       {extraContextItems.length > 0 ? <AssistantContextSummary items={extraContextItems} plan={contextPlan} onOpenSource={onOpenSource} /> : null}
@@ -1063,7 +1074,7 @@ function ToolTraceIcon({ event }: { event: AssistantToolTraceEvent }) {
     return <Search className="shrink-0 text-primary" size={12} aria-hidden="true" />;
   }
 
-  if (event.toolName.includes('.propose_')) {
+  if (isProposalTool(event.toolName)) {
     return <FilePlus2 className="shrink-0 text-primary" size={12} aria-hidden="true" />;
   }
 
@@ -1079,6 +1090,7 @@ function ToolTraceIcon({ event }: { event: AssistantToolTraceEvent }) {
 
 function toolLabel(toolName: string) {
   toolName = toolName.replace(/^(?:claude|codex|opencode)\.mcp__neuink__/, '');
+  toolName = canonicalAssistantToolId(toolName);
   if (toolName === 'read_pdf_pages') return '读取 PDF 文字';
   if (toolName === 'search_pdf_text') return '搜索 PDF 文字';
   if (toolName === 'agent.route') {
@@ -1105,19 +1117,16 @@ function toolLabel(toolName: string) {
   if (toolName === 'read_entry_assistant_context') {
     return 'Read entry markdown';
   }
-  if (toolName === 'note.propose_create' || toolName === 'note_propose_create') {
+  if (toolName === 'note_propose_create') {
     return 'Propose new note';
   }
-  if (toolName === 'note.propose_patch' || toolName === 'note_propose_patch') {
+  if (toolName === 'note_propose_patch') {
     return 'Propose note patch';
   }
-  if (
-    toolName === 'segment_note.propose_patch' ||
-    toolName === 'segment_note_propose_patch'
-  ) {
+  if (toolName === 'segment_note_propose_patch') {
     return 'Propose segment note patch';
   }
-  if (toolName === 'entry.propose_meta_patch' || toolName === 'entry_propose_meta_patch') {
+  if (toolName === 'entry_propose_meta_patch') {
     return 'Propose Entry metadata';
   }
   return toolName;

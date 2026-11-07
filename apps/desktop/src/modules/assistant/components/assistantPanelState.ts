@@ -1,3 +1,4 @@
+import type { AssistantExecutionItem } from './assistantExecutionTimeline';
 import {
   ArrowDown,
   Archive,
@@ -150,7 +151,11 @@ import {
 } from './assistantContextTargets';
 import { AssistantHarnessError, runAssistantHarness } from '../harness/engine';
 import { planAssistantContext } from '../harness/contextPlanner';
-import { estimateTokensFromChars, modelContextTokens } from '../sdk/contextBudget';
+import { lastMemoryCheckpointIndex, renderConversationContext } from '../runtime/conversationTranscript';
+import { COMPACTION_TRIGGER_RATIO, CONTEXT_WARNING_RATIO, estimateTokensFromChars, estimateTokensFromText, modelContextTokens } from '../sdk/contextBudget';
+import { resolveLlmApiProtocol } from '@/shared/ipc/assistantApi';
+import { latestContextUsage } from '../runtime/modelTranscript';
+import { estimateMessagesTokens, usageCalibration } from '../sdk/contextUsage';
 
 type AssistantPanelProps = {
   activeEntry: LibraryEntry | null;
@@ -182,7 +187,6 @@ type AssistantPanelProps = {
   onRemoveAssistantContextItem: (itemId: string) => void;
 };
 
-const CONTEXT_WARNING_RATIO = 0.7;
 const CONTEXT_WARNING_MIN_TOKENS = 32_000;
 
 type AssistantBackgroundRunSnapshot = {
@@ -333,7 +337,9 @@ export function buildAssistantMessageParts({
   contextItems = [],
   contextPlan,
   entryMetaProposals = [],
+  executionTimeline,
   memory,
+  modelTranscript,
   noteProposals = [],
   reasoning,
   tagProposals = [],
@@ -348,7 +354,9 @@ export function buildAssistantMessageParts({
   contextItems?: AssistantContextItem[];
   contextPlan?: AssistantContextPlan | null;
   entryMetaProposals?: AssistantEntryMetaProposal[];
+  executionTimeline?: AssistantExecutionItem[];
   memory?: AssistantConversationMemory | null;
+  modelTranscript?: import('@/shared/types/modelTranscript').AssistantModelTranscript;
   noteProposals?: AssistantNoteProposal[];
   reasoning?: string;
   tagProposals?: AssistantTagProposal[];
@@ -358,6 +366,7 @@ export function buildAssistantMessageParts({
   toolEvents?: AssistantToolTraceEvent[];
 }): AssistantMessagePart[] {
   const parts: AssistantMessagePart[] = [];
+  if (modelTranscript) parts.push({ type: 'model-transcript', transcript: modelTranscript });
 
   if (agentRun) {
     parts.push({
@@ -393,7 +402,7 @@ export function buildAssistantMessageParts({
     });
   }
 
-  for (const event of toolEvents) {
+  const appendToolParts = (event: AssistantToolTraceEvent) => {
     parts.push({
       args: event.input,
       recovered: event.recovered,
@@ -423,19 +432,31 @@ export function buildAssistantMessageParts({
         type: 'error'
       });
     }
+  };
+
+  if (executionTimeline) {
+    const eventsById = new Map(toolEvents.map(event => [event.id, event]));
+    for (const item of executionTimeline) {
+      if (item.type === 'reasoning') {
+        if (item.text.trim()) parts.push({ ...item });
+      } else {
+        const event = eventsById.get(item.id);
+        if (event) {
+          appendToolParts(event);
+          eventsById.delete(item.id);
+        }
+      }
+    }
+    for (const event of eventsById.values()) appendToolParts(event);
+  } else {
+    for (const event of toolEvents) appendToolParts(event);
+    if (reasoning?.trim()) parts.push({ text: reasoning, type: 'reasoning' });
   }
 
   if (content.trim()) {
     parts.push({
       markdown: content,
       type: 'text'
-    });
-  }
-
-  if (reasoning?.trim()) {
-    parts.push({
-      text: reasoning,
-      type: 'reasoning'
     });
   }
 
@@ -471,16 +492,34 @@ export function buildAssistantMessageParts({
   return parts;
 }
 
+/** The transcript a request actually sends starts after the newest `memory` checkpoint, so the
+ *  usage ring must measure that window. Measuring the whole conversation instead would keep
+ *  reporting summarized turns as if they were still in context, and the ring would never fall
+ *  after the user compacts. Mirrors `renderConversationTranscript` in `runtime`. */
+export function conversationContextWindow(messages: readonly ConversationMessage[]) {
+  const boundary = lastMemoryCheckpointIndex(messages);
+  // The checkpoint message itself carries the summary the brief sends, so it stays in the count.
+  return boundary < 0 ? [...messages] : messages.slice(boundary);
+}
+
 export function analyzeConversationLength(
   messages: ConversationMessage[],
   selectedProfile: LlmProfile | null
 ) {
   const materialMessages = messages.filter((message) => !message.message_id.startsWith('client-'));
-  const charCount = materialMessages.reduce(
-    (total, message) => total + estimateMessageChars(message),
+  const model = selectedProfile ? {
+    profileId: selectedProfile.id, model: selectedProfile.model, protocol: resolveLlmApiProtocol(selectedProfile.api_protocol)
+  } : undefined;
+  const contextMessages = renderConversationContext(materialMessages, model);
+  const charCount = contextMessages.reduce(
+    (total, message) => total + (typeof message.content === 'string' ? message.content.length
+      : message.content.reduce((sum, part) => sum + ('text' in part ? part.text.length : JSON.stringify(part).length), 0)),
     0
   );
-  const estimatedTokens = estimateTokensFromChars(charCount);
+  // Measure the same model-visible projection as the driver, then calibrate with this model's
+  // reported input usage. UI state and duplicate evidence ledgers are not request content.
+  const measured = model ? latestContextUsage(materialMessages, model) : undefined;
+  const estimatedTokens = Math.ceil((estimateMessagesTokens(contextMessages) + (measured?.overheadTokens ?? 0)) * usageCalibration(measured));
   const modelTokens = modelContextTokens(selectedProfile?.max_context_length);
   const usageRatio = estimatedTokens / modelTokens;
   const memoryActive = materialMessages.some((message) =>
@@ -489,12 +528,16 @@ export function analyzeConversationLength(
 
   return {
     charCount,
+    estimatedTokens,
     isLong: usageRatio >= CONTEXT_WARNING_RATIO && estimatedTokens >= CONTEXT_WARNING_MIN_TOKENS,
     kiloChars: Math.max(1, Math.round(charCount / 1000)),
     kiloTokens: Math.max(1, Math.round(estimatedTokens / 1000)),
     memoryActive,
     modelKiloTokens: Math.max(1, Math.round(modelTokens / 1000)),
-    messageCount: materialMessages.length
+    messageCount: materialMessages.length,
+    // The automatic compaction trigger fires here; the ring marks the same point.
+    nearingAutoCompaction: usageRatio >= COMPACTION_TRIGGER_RATIO,
+    usageRatio
   };
 }
 
@@ -505,6 +548,66 @@ export function estimateMessageChars(message: ConversationMessage) {
     0
   );
   return Math.max(contentChars, partChars);
+}
+
+export function estimateMessageTokens(message: ConversationMessage) {
+  const contentTokens = estimateTokensFromText(message.content);
+  const partTokens = (message.parts ?? []).reduce(
+    (total, part) => total + estimatePartTokens(part),
+    0
+  );
+  return Math.max(contentTokens, partTokens);
+}
+
+/** Mirrors `estimatePartChars`, but measures real prose with the language-aware estimator and
+ *  keeps nominal per-unit budgets on the sizing scale they were written with. */
+export function estimatePartTokens(part: AssistantMessagePart) {
+  if (part.type === 'text') {
+    return estimateTokensFromText(part.markdown);
+  }
+  if (part.type === 'tool-result') {
+    return estimateTokensFromText(part.summary) + (part.sourceLinks?.length ?? 0) * estimateTokensFromChars(160);
+  }
+  if (part.type === 'tool-call') {
+    return estimateTokensFromText(part.toolName) + estimateTokensFromChars(80);
+  }
+  if (part.type === 'source') {
+    return estimateTokensFromChars(160);
+  }
+  if (part.type === 'context') {
+    return part.items.length * estimateTokensFromChars(120);
+  }
+  if (part.type === 'context-snapshot') {
+    return part.items.length * estimateTokensFromChars(160)
+      + estimateTokensFromText(part.plan ? JSON.stringify(part.plan) : '');
+  }
+  if (part.type === 'note-proposal') {
+    return estimateTokensFromText(part.proposal.markdown) + estimateTokensFromText(part.proposal.title);
+  }
+  if (part.type === 'entry-meta-proposal') {
+    return estimateTokensFromText([
+      part.proposal.beforeTitle,
+      part.proposal.afterTitle,
+      part.proposal.beforeDescription,
+      part.proposal.afterDescription,
+      part.proposal.rationale ?? ''
+    ].join('\n'));
+  }
+  if (part.type === 'memory') {
+    return estimateTokensFromText(JSON.stringify(part.memory));
+  }
+  if (part.type === 'plan') {
+    return estimateTokensFromText(part.plan.rationale)
+      + estimateTokensFromText(part.plan.missing.join(' '))
+      + estimateTokensFromChars(160);
+  }
+  if (part.type === 'task-state') {
+    return estimateTokensFromText(JSON.stringify(part.task));
+  }
+  if (part.type === 'error') {
+    return estimateTokensFromText(part.message);
+  }
+  return 0;
 }
 
 export function estimatePartChars(part: AssistantMessagePart) {

@@ -9,21 +9,23 @@ import { isRawModelToolCall } from './modelToolCallMarkup';
 
 /** The same evidence/completion contract applies to SDK and native Agent answers. */
 export function answerVerification({ answer, question, plan, sources, events, observations,
-  hasProposals, availabilityNotes, missing = [] }: {
+  hasProposals, availabilityNotes, missing = [], historicalObservations = [], historicalEvents = [] }: {
   answer: string; question: string; plan?: AssistantTaskPlan | null;
   sources: Map<number, ConversationSourceLink>; events: AssistantToolTraceEvent[];
   observations: Array<{ toolName: string; output: unknown }>;
   hasProposals: boolean; availabilityNotes: string[]; missing?: string[];
+  historicalObservations?: Array<{ toolName: string; output: unknown }>;
+  historicalEvents?: AssistantToolTraceEvent[];
 }): { message: string; correction: string } | undefined {
   if (isRawModelToolCall(answer)) return {
     message: ASSISTANT_READ_FAILURES.contract,
     correction: '上一次输出的是原始工具调用标记，不是回答。请根据已有工具结果直接回答用户，并按实际来源添加引用；不要输出 <tool_call> 标记。'
   };
-  const records = paperRecords(events.flatMap(event => event.status === 'done' ? event.researchPapers ?? [] : []), [...sources.values()]);
+  const records = paperRecords([...historicalEvents, ...events].flatMap(event => event.status === 'done' ? event.researchPapers ?? [] : []), [...sources.values()]);
   const presentationError = paperPresentationError(answer, records);
   const toolMarkup = hasAssistantToolMarkup(answer);
   const invalidCitation = [...answer.matchAll(/\[S(\d+)]/g)].some(match => !sources.has(Number(match[1])));
-  const externalUrls = returnedExternalCitationUrls(observations);
+  const externalUrls = returnedExternalCitationUrls([...historicalObservations, ...observations]);
   const citedExternalSource = matchedExternalCitationUrls(answer, externalUrls, records).length > 0;
   const citedSciversePaper = presentedPaperRecords(answer, records).some(record => record.kind === 'sciverse');
   const evidenceRead = events.some(event => event.status === 'done' && (event.sources?.length ?? 0) > 0);

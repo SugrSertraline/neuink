@@ -3,6 +3,7 @@ import { AgentPersistenceError } from '../agent-core';
 import { saveAgentExecution, type AgentExecutionRecord } from '@/shared/ipc/agentExecutionApi';
 import { RESEARCH_READ_TOOLS } from '@/shared/ipc/researchApi';
 import { PLANNING_READ_TOOLS } from './executionPolicy';
+import { legacyToolIdentity } from './toolIdentity';
 
 /** Application-owned durable state. No model credentials or executable configuration belong here. */
 export class DurableExecution {
@@ -74,11 +75,17 @@ export function canReplayAssistantTool(name: string) {
 
 export async function bindExecutionIdentity(execution: DurableExecution | undefined, actorId: string, identity: unknown) {
   if (!execution) return;
-  const bytes = new TextEncoder().encode(JSON.stringify(identity));
-  const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))]
-    .map(byte => byte.toString(16).padStart(2, '0')).join('');
+  const digest = await identityDigest(identity);
   const key = `identity:${actorId}`;
   const previous = execution.get<string>(key);
-  if (previous && previous !== digest) throw new Error('模型或 Agent 权限配置已改变，不能沿用旧任务的执行上下文。请恢复原配置或开始新任务。');
+  if (previous && previous !== digest && previous !== await identityDigest(legacyToolIdentity(identity))) {
+    throw new Error('模型或 Agent 权限配置已改变，不能沿用旧任务的执行上下文。请恢复原配置或开始新任务。');
+  }
   execution.set(key, digest);
+}
+
+async function identityDigest(identity: unknown) {
+  const bytes = new TextEncoder().encode(JSON.stringify(identity));
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))]
+    .map(byte => byte.toString(16).padStart(2, '0')).join('');
 }

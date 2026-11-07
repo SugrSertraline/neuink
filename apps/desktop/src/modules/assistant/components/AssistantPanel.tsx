@@ -119,6 +119,8 @@ import {
   entryMarkdownTargets,
   scopeLabel
 } from './assistantContextTargets';
+import { AssistantContextRing } from './AssistantContextRing';
+import { canCompactConversation, compactConversation } from './assistantCompaction';
 import { planAssistantContext } from '../harness/contextPlanner';
 import { LOCAL_AGENTS, localAgentName, readLastAssistantEngine, saveLastAssistantEngine, useLocalAgentEnabled, type AssistantEngine } from '@/shared/lib/localAgentSettings';
 import { localAgentProfile, localAgentSelection, selectionLocalProvider, conversationLocalSession } from '../local-agent/session';
@@ -173,9 +175,6 @@ type AssistantPanelProps = {
   onReplaceAssistantContext: (items: AssistantContextInput[]) => void;
   onRemoveAssistantContextItem: (itemId: string) => void;
 };
-
-const CONTEXT_WARNING_RATIO = 0.7;
-const CONTEXT_WARNING_MIN_TOKENS = 32_000;
 
 const INITIAL_MESSAGE_RENDER_LIMIT = 30;
 export function AssistantPanel({
@@ -250,6 +249,7 @@ export function AssistantPanel({
   const [composerPrefill, setComposerPrefill] = useState<string | null>(null);
   const [messageQueues, setMessageQueues] = useState<AssistantMessageQueueSnapshot[]>([]);
   const [busy, setBusy] = useState(false);
+  const [compactingConversationId, setCompactingConversationId] = useState<string | null>(null);
   const [decidingProposal, setDecidingProposal] = useState<string | null>(null);
   const proposalDecisionLock = useRef(false);
   const [error, setError] = useState<string | null>(null);
@@ -361,6 +361,21 @@ export function AssistantPanel({
     return externalAssistantContextItems(assistantContext.items, composerSnapshot);
   }, [assistantContext.items, composerSnapshot.mentions]);
   const composerDisabled = !root || !selectedProfile;
+  // Scoped to its own conversation: another conversation may still run while this one compacts.
+  const compacting = compactingConversationId !== null && compactingConversationId === conversation?.id;
+  /** Deleting, renaming, exporting or compacting the same conversation must not overlap. */
+  const conversationLocked = (conversationId: string) =>
+    busy || (compacting && conversationId === conversation?.id);
+  // A conversation has one writer: starting a request while a compaction is in flight would let
+  // both append to the same history. Typing stays possible; only starting work is blocked.
+  const writingConversation = busy || compacting;
+  const ringDisabledReason = busy
+    ? '对话正在运行，先停止或等待本轮结束'
+    : !conversation
+      ? '当前没有对话可压缩'
+      : !canCompactConversation(conversation.messages)
+        ? '最近的内容已经全部包含在摘要里'
+        : null;
 
   useEffect(() => {
     if (root && selectedProfile && !usingLocalAgent) void warmAssistantRouter();
@@ -507,7 +522,7 @@ export function AssistantPanel({
     if (!queued && !resumeExecutionId && readingContext.unavailable) return;
     const currentRun = conversation ? findAssistantBackgroundRun(root, conversation.id)
       : runAbortControllerRef.current ? getAssistantBackgroundRun(runAbortControllerRef.current) : null;
-    if (!queued && !currentRun && (busy || messageQueue?.items.length)) return;
+    if (!queued && !currentRun && (writingConversation || messageQueue?.items.length)) return;
     if (currentRun && !queued) {
       const snapshot: AssistantComposerSnapshot = {
         mentions: composerSnapshot.mentions.map((mention) => ({ ...mention })),
@@ -734,7 +749,7 @@ export function AssistantPanel({
   };
 
   const deleteConversationHistory = async (item: ConversationMeta) => {
-    if (!root || busy || findAssistantBackgroundRun(root, item.id) || getAssistantMessageQueues(root).some(queue => queue.conversationId === item.id)) {
+    if (!root || conversationLocked(item.id) || findAssistantBackgroundRun(root, item.id) || getAssistantMessageQueues(root).some(queue => queue.conversationId === item.id)) {
       return;
     }
 
@@ -778,7 +793,7 @@ export function AssistantPanel({
   };
 
   const renameConversationHistory = async (item: ConversationMeta, nextTitle: string) => {
-    if (!root || busy || findAssistantBackgroundRun(root, item.id) || getAssistantMessageQueues(root).some(queue => queue.conversationId === item.id)) {
+    if (!root || conversationLocked(item.id) || findAssistantBackgroundRun(root, item.id) || getAssistantMessageQueues(root).some(queue => queue.conversationId === item.id)) {
       return;
     }
 
@@ -816,7 +831,7 @@ export function AssistantPanel({
   };
 
   const exportConversationHistory = async (item: ConversationMeta) => {
-    if (!root || busy || findAssistantBackgroundRun(root, item.id) || getAssistantMessageQueues(root).some(queue => queue.conversationId === item.id)) {
+    if (!root || conversationLocked(item.id) || findAssistantBackgroundRun(root, item.id) || getAssistantMessageQueues(root).some(queue => queue.conversationId === item.id)) {
       return;
     }
 
@@ -845,7 +860,7 @@ export function AssistantPanel({
   };
 
   const exportCurrentConversation = async () => {
-    if (!conversation || busy) {
+    if (!conversation || writingConversation) {
       return;
     }
 
@@ -868,6 +883,39 @@ export function AssistantPanel({
       });
     } finally {
       setBusy(false);
+    }
+  };
+
+  /** Manual compaction reuses the loop's checkpoint, so both paths share one summary format and
+   *  one boundary. Nothing is written until the summary is valid: a failure leaves the
+   *  conversation exactly as it was. */
+  const compactConversationNow = async () => {
+    if (!root || !conversation || !selectedProfile || writingConversation || ringDisabledReason) {
+      return;
+    }
+    const compactedConversationId = conversation.id;
+    setCompactingConversationId(compactedConversationId);
+    try {
+      const updated = await compactConversation({ conversation, root, settings: selectedProfile });
+      setConversation(current => current?.id === updated.id ? updated : current);
+      setConversations(await listConversations(root));
+      notify({
+        description: '全部当前上下文已整理为摘要，原始记录仍保留在本机。',
+        title: '已压缩对话上下文',
+        tone: 'success'
+      });
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : String(caught);
+      notify({
+        description: formatAssistantError(message, {
+          debug: readAssistantDebug(),
+          fallback: '对话未压缩，内容没有任何改变，可以稍后重试。'
+        }),
+        title: '压缩失败',
+        tone: 'danger'
+      });
+    } finally {
+      setCompactingConversationId(current => current === compactedConversationId ? null : current);
     }
   };
 
@@ -1247,7 +1295,7 @@ export function AssistantPanel({
                   </div>
                   <div className="mt-1.5 flex flex-wrap gap-1">
                     <Button
-                      disabled={!conversation || busy}
+                      disabled={!conversation || writingConversation}
                       size="xs"
                       type="button"
                       variant="secondary"
@@ -1297,7 +1345,16 @@ export function AssistantPanel({
             onResume={(id) => { void send(undefined, id); }} /> : null}
           <AssistantComposerEditor
             actions={researchMode ? (research.status?.active && !research.status.active.installation ? <Button size="sm" variant="outline" disabled={research.busy || !research.status.active.id} onClick={() => void research.command({ kind: 'cancel' })}><Square />停止研究</Button>
-              : <Button size="sm" disabled={!root || !selectedProfile || usingLocalAgent || selectedProfile.api_protocol !== 'openai_compatible' || !question.trim() || researchChat.sending || research.busy || !research.status?.ready || Boolean(research.status?.active) || research.status?.pending_save} onClick={() => void send()}><Send />{researchChat.sending ? '正在准备…' : '发送'}</Button>) : busy ? <>
+              : <Button size="sm" disabled={!root || !selectedProfile || usingLocalAgent || selectedProfile.api_protocol !== 'openai_compatible' || !question.trim() || researchChat.sending || research.busy || !research.status?.ready || Boolean(research.status?.active) || research.status?.pending_save} onClick={() => void send()}><Send />{researchChat.sending ? '正在准备…' : '发送'}</Button>) : <>
+              <AssistantContextRing
+                compacting={compacting}
+                disabledReason={ringDisabledReason}
+                kiloTokens={longConversation.kiloTokens}
+                modelKiloTokens={longConversation.modelKiloTokens}
+                usageRatio={longConversation.usageRatio}
+                onCompact={() => void compactConversationNow()}
+              />
+              {busy ? <>
               <Button size="sm" type="button" variant="outline" onClick={cancelRun}>
                 <Square />
                 停止
@@ -1313,14 +1370,14 @@ export function AssistantPanel({
               </Button>
             </> : <Button
               data-guide="assistant-send"
-              disabled={!selectedProfile || !question.trim() || readingContext.unavailable || Boolean(messageQueue?.items.length)}
+              disabled={!selectedProfile || !question.trim() || readingContext.unavailable || Boolean(messageQueue?.items.length) || compacting}
               size="sm"
               type="button"
               onClick={() => void send()}
             >
               <Send />
               发送
-            </Button>}
+            </Button>}</>}
             composerDraft={composerDraft}
             workspaceRoot={root}
             contextItems={assistantContext.items}

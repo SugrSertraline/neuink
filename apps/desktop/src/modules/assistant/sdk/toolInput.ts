@@ -215,12 +215,12 @@ export function searchMode(value: unknown) {
 }
 
 export function proposalToolInput(
-  toolName: 'note.propose_create' | 'note.propose_patch' | 'segment_note.propose_patch',
+  toolName: 'note_propose_create' | 'note_propose_patch' | 'segment_note_propose_patch',
   input: unknown,
   plan?: AssistantTaskPlan
 ) {
   const object = asObject(input);
-  if (toolName === 'note.propose_create') {
+  if (toolName === 'note_propose_create') {
     return { ...object, action: 'create', target: 'markdown_note' };
   }
   const action = plan?.noteAction === 'append' ||
@@ -235,7 +235,7 @@ export function proposalToolInput(
   return {
     ...object,
     action,
-    target: toolName === 'segment_note.propose_patch' ? 'segment_note' : 'markdown_note'
+    target: toolName === 'segment_note_propose_patch' ? 'segment_note' : 'markdown_note'
   };
 }
 

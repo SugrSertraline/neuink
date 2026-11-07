@@ -437,6 +437,7 @@ pub fn prune_agent_runs(
 pub fn load_prompt(request: LoadPromptRequest) -> Result<String, String> {
     match request.name.as_str() {
         "qna_system" => Ok(include_str!("../../prompts/qna_system.md").to_string()),
+        "qna_context" => Ok(include_str!("../../prompts/qna_context.md").to_string()),
         "qna_user" => Ok(include_str!("../../prompts/qna_user.md").to_string()),
         "ask_segment" => Ok(include_str!("../../prompts/ask_segment.md").to_string()),
         "assistant_router" => Ok(include_str!("../../prompts/assistant_router.md").to_string()),

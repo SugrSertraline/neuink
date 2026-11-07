@@ -11,6 +11,7 @@ import type {
   SubagentProfile
 } from '@/shared/types/agentRuntime';
 import type { AgentInvocationPlan, AssistantTaskPlan } from '@/shared/types/assistant';
+import { canonicalAssistantToolId, isProposalTool } from './assistantToolNames';
 
 const STORAGE_KEY = 'neuink.agentRuntime.v4';
 const LEGACY_MAIN_DESCRIPTION = 'Neuink 全局主助手，负责直接响应用户、选择技能和委派子 agent。';
@@ -22,7 +23,7 @@ const DEFAULT_MAIN_TOOL_IDS: AgentToolId[] = [
   'read_pdf_pages', 'search_pdf_text',
   'search_papers', 'search_web', 'read_webpage', 'import_papers',
   'read_browser_tab',
-  'app.set_appearance',
+  'app_set_appearance',
   'create_entry',
   'search_segments',
   'read_segment_content',
@@ -31,12 +32,12 @@ const DEFAULT_MAIN_TOOL_IDS: AgentToolId[] = [
   'read_sciverse_content',
   'read_current_note',
   'read_note',
-  'note.propose_create',
-  'note.propose_patch',
-  'segment_note.propose_patch',
-  'entry.propose_meta_patch',
-  'tag.propose_change',
-  'task.run_subagent'
+  'note_propose_create',
+  'note_propose_patch',
+  'segment_note_propose_patch',
+  'entry_propose_meta_patch',
+  'tag_propose_change',
+  'task_run_subagent'
 ];
 
 const EVIDENCE_TOOL_IDS: AgentToolId[] = [
@@ -54,7 +55,7 @@ function createMainAssistant(partial: Partial<MainAssistantProfile>): MainAssist
     allowedMcpServerIds: partial.allowedMcpServerIds ?? [],
     description: partial.description && partial.description !== LEGACY_MAIN_DESCRIPTION
       ? partial.description : DEFAULT_MAIN_DESCRIPTION,
-    enabledToolIds: (partial.enabledToolIds ?? DEFAULT_MAIN_TOOL_IDS).filter(isActiveTool),
+    enabledToolIds: normalizeToolIds(partial.enabledToolIds ?? DEFAULT_MAIN_TOOL_IDS),
     id: 'main-assistant',
     kind: 'main_assistant',
     llmProfileId: partial.llmProfileId ?? null,
@@ -81,7 +82,7 @@ function createSubagent(
     allowedMcpServerIds: partial.allowedMcpServerIds ?? [],
     description: partial.description ?? '',
     enabled: partial.enabled ?? true,
-    enabledToolIds: (partial.enabledToolIds ?? EVIDENCE_TOOL_IDS).filter(isActiveTool),
+    enabledToolIds: normalizeToolIds(partial.enabledToolIds ?? EVIDENCE_TOOL_IDS),
     id: partial.id,
     kind: 'subagent',
     llmProfileId: partial.llmProfileId ?? null,
@@ -233,7 +234,7 @@ function normalizeToolPackages(value: unknown): AgentToolPackage[] {
     )
     .map((toolPackage) => ({
       allowedToolIds: Array.isArray(toolPackage.allowedToolIds)
-        ? (toolPackage.allowedToolIds.filter((item): item is AgentToolId => typeof item === 'string') as AgentToolId[])
+        ? [...new Set(toolPackage.allowedToolIds.filter((item): item is AgentToolId => typeof item === 'string').map(canonicalAssistantToolId))] as AgentToolId[]
         : [],
       description: typeof toolPackage.description === 'string' ? toolPackage.description : '',
       enabled: toolPackage.enabled ?? true,
@@ -274,7 +275,7 @@ export function configuredAgentToolIds(settings: AgentRuntimeSettings, agent: Ag
     .flatMap(server => server.allowedToolNames.map(name => `mcp.${server.id}.${name}` as AgentToolId));
   const hasAvailableWorker = resolveAllowedSubagents(settings, agent).length > 0;
   const configured = [...agent.enabledToolIds, ...external]
-    .filter(id => id !== 'task.run_subagent' || hasAvailableWorker);
+    .filter(id => id !== 'task_run_subagent' || hasAvailableWorker);
   return auditAgentToolPermissions(configured, agent, settings).allowedToolIds;
 }
 
@@ -346,10 +347,10 @@ function deniedToolReason(
     }
     return null;
   }
-  if (toolId.includes('.propose_') && !agent.permissions.canWriteProposals) {
+  if (isProposalTool(toolId) && !agent.permissions.canWriteProposals) {
     return 'write proposals disabled';
   }
-  if (toolId === 'task.run_subagent' && !agent.permissions.canInvokeSubagents) {
+  if (toolId === 'task_run_subagent' && !agent.permissions.canInvokeSubagents) {
     return 'subagent invocation disabled';
   }
   if (
@@ -401,6 +402,10 @@ export function subagentOutputLabel(_outputKind: SubagentOutputKind) {
 
 function unique<T>(value: T, index: number, array: T[]) {
   return array.indexOf(value) === index;
+}
+
+function normalizeToolIds(ids: readonly string[]): AgentToolId[] {
+  return [...new Set(ids.map(canonicalAssistantToolId))].filter(isActiveTool) as AgentToolId[];
 }
 
 function isActiveTool(id: string) {
