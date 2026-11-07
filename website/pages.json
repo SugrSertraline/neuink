@@ -6,6 +6,12 @@
     "description": "从创建资料库到保存第一篇带来源的笔记。"
   },
   {
+    "id": "updates",
+    "title": "近期更新与版本范围",
+    "group": "开始",
+    "description": "了解 beta 新功能、正式下载版的区别和当前使用边界。"
+  },
+  {
     "id": "concepts",
     "title": "核心概念与关系",
     "group": "开始",
@@ -34,6 +40,12 @@
     "title": "PDF 导入与 MinerU 解析",
     "group": "整理资料",
     "description": "PDF 与客户端 ZIP 两条路径，以及自建解析服务。"
+  },
+  {
+    "id": "zotero",
+    "title": "Zotero 资料与笔记",
+    "group": "整理资料",
+    "description": "本机来源接入、独立副本、笔记差异与明确确认的写回。"
   },
   {
     "id": "pdf",

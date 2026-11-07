@@ -4,6 +4,39 @@
 
 <h1 align="center">Neuink</h1>
 
+## Continue from your Zotero library
+
+Neuink is a local-first workspace for paper reading and evidence-linked notes. Connect existing papers, read PDF or reflowed content, translate, retain sources and use your own model for research assistance.
+
+**Updated 2026-11-07: the following capabilities are integrated in beta.** Public downloads follow [Releases](https://github.com/SugrSertraline/neuink/releases); beta source features are not a claim that a new installer has shipped.
+
+| Workflow | Current beta capability |
+| --- | --- |
+| Zotero sources | Connect a local data directory, browse source entries, review changes and explicitly import independent copies. |
+| Zotero notes | Select notes to import, compare original and local changes, save locally or explicitly confirm source replacement. |
+| Reading | PDF/reflow, paragraph detail levels, bilingual reading and per-behavior translation routing. |
+| Paper cards | Generate on request, review and edit abstractions with paper examples and source evidence. |
+| Assistant | Context usage, manual/automatic compaction, cross-turn tool results and an ordered execution timeline. |
+| arXiv | Structured discovery, paged candidates and downloads only after user approval. |
+| MinerU PDFs | Pair parsed output with an original PDF or replace a verified reading PDF while retaining parsed content and reading work. |
+
+### Zotero workflow and boundaries
+
+1. Enable a local Zotero data directory in settings; papers can remain organized in Zotero.
+2. Browse source entries and explicitly import independent copies when needed. Local edits do not automatically alter Zotero.
+3. Import selected notes while retaining their source association.
+4. Compare source, local content and differences before choosing local save or confirmed source replacement.
+5. Recheck version or permission errors; local-save and writeback outcomes are reported separately.
+
+Local saves do not require Zotero to run. Writeback currently requires **Zotero 10 or later running with local access allowed**. Image-containing notes cannot be written back directly. Disabling a source hides its entries without deleting originals or imported copies. This is local integration and controlled writeback, not cloud synchronization or unrestricted rich-text round trips.
+
+[Zotero guide (Chinese)](https://sugrsertraline.github.io/neuink/zotero.html) · [Beta updates and limits](https://sugrsertraline.github.io/neuink/updates.html)
+
+Paper cards remain visible. Experimental ideation opens only by entering `/inspiration` in search; background, questions and method steps accept cards or private descriptions. Recommendations require adoption and reports require explicit saving. It does not execute experiments.
+
+PDF replacement has runtime rollback but no crash/power-loss recovery journal; this beta limitation was explicitly accepted. The integrated version passed 4,182 frontend and 670 backend tests, type checking and frontend production build; opt-in acceptance tests were skipped. Real-model and native visual acceptance were not completed in this integration pass.
+
+
 <p align="center">
   <strong><a href="https://sugrsertraline.github.io/neuink/">Explore Neuink — Product Website →</a></strong><br>
   Features, real app screenshots, core concepts, and step-by-step tutorials.<br>
