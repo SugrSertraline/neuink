@@ -21,6 +21,9 @@ export const assistantTaskStatusLabels: Record<AssistantDockTask['status'], stri
 };
 
 export function jobTitle(job: Job) {
+  if (job.id.startsWith('ideation-recommend:')) return '研究卡片推荐';
+  if (job.id.startsWith('ideation-compose:')) return '研究思路整理';
+  if (job.id.startsWith('ideation-report:')) return '研究报告生成';
   if (job.id.startsWith('research-import:')) return '论文下载与添加';
   if (job.id.startsWith('sciverse-import:')) return 'Sciverse 论文保存';
   if (job.id.startsWith('selection-translation:')) return '选区翻译';

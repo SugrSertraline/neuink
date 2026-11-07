@@ -7,7 +7,7 @@ export type IdeationViewport = { x: number; y: number; scale: number };
 export type IdeationBoard = { id: string; title: string; description: string; created_at: string; updated_at: string; deleted_at?: string | null; viewport?: IdeationViewport | null };
 export type Placement = { id: string; card_id: string; board_id?: string; x: number; y: number; slot?: CardKind | null; locked?: boolean; title?: string | null; body?: string | null };
 export type IdeationLinkKind = 'related' | 'addresses' | 'input' | 'combines' | 'contrasts' | 'supports' | 'limits' | 'feedback' | 'hypothesis' | 'alternative' | 'progression' | 'decomposes' | 'depends_on' | 'tests' | 'challenges' | 'motivates';
-export type IdeationLink = { id: string; from: string; to: string; kind?: IdeationLinkKind | null; label?: string | null; description?: string; origin?: 'ai_inferred' | 'user'; entry_id?: string; sources?: CardSource[] };
+export type IdeationLink = { direction?: 'forward' | 'both' | 'none'; id: string; from: string; to: string; kind?: IdeationLinkKind | null; label?: string | null; description?: string; origin?: 'ai_inferred' | 'user'; entry_id?: string; sources?: CardSource[] };
 /** Version 1 is accepted for migration only. New writes use version 2 with board ownership. */
 export type IdeationState = { version: 1 | 2; cards: PaperCard[]; placements: Placement[]; links?: IdeationLink[]; boards?: IdeationBoard[] };
 export type IdeationSnapshot = { revision: string; state: IdeationState };

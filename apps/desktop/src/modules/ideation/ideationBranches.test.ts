@@ -7,7 +7,7 @@ import { modelDrivenBrief } from '@/modules/assistant/harness/engine';
 import type { AssistantActiveSurfaceSnapshot } from '@/shared/types/assistant';
 
 const problem: PaperCard = { id: 'problem', entry_id: 'ideation-user', kind: 'problem', title: '缺失数据', body: '观测不完整时预测不稳定' };
-const method: PaperCard = { id: 'method', entry_id: 'paper', kind: 'method', title: '重建方法', body: '重建后预测', origin: 'ai_draft' };
+const method: PaperCard = { id: 'method', entry_id: 'paper', kind: 'method', title: '重建方法', body: '重建后预测', origin: 'ai_reviewed' };
 const board = { id: 'a', title: '当前构思', description: '研究目标', created_at: '', updated_at: '' };
 const state: IdeationState = { version: 2, boards: [board], cards: [problem, method], placements: [{ id: 'p', card_id: problem.id, board_id: board.id, x: 50, y: 50 }] };
 

@@ -1,0 +1,31 @@
+// @vitest-environment jsdom
+import { act, cleanup, renderHook } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
+import { useIdeation } from './useIdeation';
+import { updateBoardGraph } from './ideationBoards';
+const api = vi.hoisted(() => ({ read: vi.fn(), save: vi.fn() }));
+vi.mock('@/shared/ipc/ideationApi', () => ({ readIdeation: api.read, saveIdeation: api.save }));
+vi.mock('@/modules/reader/components/segmentEditorDirtyRegistry', () => ({ registerSegmentEditorCloseHandler: () => () => {}, setSegmentEditorDirty: vi.fn() }));
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); });
+it('saves only changed data, debounces edits, and cancels a reverted edit', async () => {
+  vi.useFakeTimers();
+  const state = { version: 2, cards: [], placements: [], links: [], boards: [{ id: 'b', title: '原目标', description: '', created_at: '', updated_at: '' }] };
+  api.read.mockResolvedValue({ revision: 'r1', state });
+  api.save.mockImplementation(async (_root, _revision, value) => ({ revision: 'r2', state: value }));
+  const { result } = renderHook(() => useIdeation('root'));
+  await act(async () => {});
+  act(() => result.current.update(current => structuredClone(current)));
+  act(() => result.current.update(current => updateBoardGraph(current, 'b', graph => ({ ...graph, placements: [...graph.placements] }))));
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  expect(api.save).not.toHaveBeenCalled(); expect(result.current.dirty).toBe(false);
+  const title = (value: string) => result.current.update(current => ({ ...current, boards: current.boards?.map(board => ({ ...board, title: value, updated_at: 'later' })) }));
+  act(() => title('临时目标')); act(() => title('原目标'));
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  expect(api.save).not.toHaveBeenCalled(); expect(result.current.dirty).toBe(false);
+  act(() => title('新目标')); act(() => title('最终目标'));
+  await act(async () => { await vi.advanceTimersByTimeAsync(801); });
+  expect(api.save).toHaveBeenCalledTimes(1);
+  expect(api.save.mock.calls[0][2].boards[0].title).toBe('最终目标');
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(api.save).toHaveBeenCalledTimes(1);
+});

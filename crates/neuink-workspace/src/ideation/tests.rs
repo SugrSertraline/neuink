@@ -87,6 +87,7 @@ fn links_round_trip_and_cannot_reference_missing_placements() {
     let mut state: IdeationState = serde_json::from_str(legacy).unwrap();
     assert!(state.links.is_empty());
     state.links.push(IdeationLink {
+        direction: None,
         id: "l1".into(),
         from: "p1".into(),
         to: "p2".into(),
@@ -101,6 +102,15 @@ fn links_round_trip_and_cannot_reference_missing_placements() {
     let round_trip: IdeationState =
         serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
     assert_eq!(round_trip.links[0].to, "p2");
+    state.links[0].direction = Some("both".into());
+    state.placements[0].x = -120.0;
+    validate(&state).unwrap();
+    let saved: IdeationState = serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
+    assert_eq!(saved.links[0].direction.as_deref(), Some("both"));
+    assert_eq!(saved.placements[0].x, -120.0);
+    state.links[0].direction = Some("bad".into());
+    assert!(validate(&state).is_err());
+    state.links[0].direction = None;
     state.placements.pop();
     assert!(validate(&state).is_err());
 }

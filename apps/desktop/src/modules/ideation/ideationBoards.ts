@@ -1,3 +1,4 @@
+import { sameIdeationData } from './sameIdeationData';
 import type { IdeationBoard, IdeationLink, IdeationLinkKind, IdeationState, PaperCard, Placement } from '@/shared/ipc/ideationApi';
 
 export const linkLabels: Record<IdeationLinkKind, string> = {
@@ -28,7 +29,7 @@ export function updateBoardGraph(state: IdeationState, boardId: string | null, c
   if (boardId && !board) return state; // A late drop must never resurrect a deleted board.
   const graph = projectBoard(state, boardId);
   const next = change(graph);
-  if (next === graph) return state;
+  if (sameIdeationData(next, graph)) return state;
   const oldIds = new Set(graph.placements.map(node => node.id));
   return { ...state, cards: next.cards,
     boards: state.boards?.map(item => item.id === boardId ? { ...item, updated_at: new Date().toISOString() } : item),
@@ -42,10 +43,26 @@ export function copyBoard(state: IdeationState, sourceId: string, id: string = c
   if (!source) return state;
   const graph = projectBoard(state, sourceId);
   const ids = new Map(graph.placements.map(node => [node.id, crypto.randomUUID()]));
+  const fieldPrefix = `local-idea-${sourceId}-worksheet-`;
+  const fieldIds = new Map(graph.placements.filter(node => node.card_id.startsWith(fieldPrefix)).map(node => [node.card_id, `local-idea-${id}-worksheet-${node.card_id.slice(fieldPrefix.length)}`]));
+  const fieldCopies = state.cards.filter(card => fieldIds.has(card.id)).map(card => ({ ...card, id: fieldIds.get(card.id)! }));
   const now = new Date().toISOString();
   return { ...state,
+    cards: fieldCopies.length ? [...state.cards, ...fieldCopies] : state.cards,
     boards: [...(state.boards ?? []), { ...source, id, title: `${source.title.slice(0, 110)}（副本）`, created_at: now, updated_at: now }],
-    placements: [...state.placements, ...graph.placements.map(node => ({ ...node, id: ids.get(node.id)!, board_id: id }))],
+    placements: [...state.placements, ...graph.placements.map(node => ({ ...node, id: ids.get(node.id)!, card_id: fieldIds.get(node.card_id) ?? node.card_id, board_id: id }))],
     links: [...(state.links ?? []), ...(graph.links ?? []).map(link => ({ ...link, id: crypto.randomUUID(), from: ids.get(link.from)!, to: ids.get(link.to)! }))],
   };
+}
+
+/** Repair only confirmed canvas suggestions from the old frontend, never paper extraction edges. */
+export function repairConfirmedResearchLinks(state: IdeationState): IdeationState {
+  let changed = false;
+  const links = state.links?.map(link => {
+    if (link.origin === 'ai_inferred' && (!link.entry_id || !link.sources?.length) && /^AI 建议（(?:用户已核对|已确认)[，,]/.test(link.description ?? '')) {
+      changed = true; return { ...link, origin: 'user' as const };
+    }
+    return link;
+  });
+  return changed ? { ...state, links } : state;
 }

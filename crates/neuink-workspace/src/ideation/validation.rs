@@ -97,8 +97,8 @@ pub(super) fn validate(state: &IdeationState) -> Result<(), WorkspaceError> {
             || p.body.as_ref().is_some_and(|body| body.len() > 100_000)
             || !p.x.is_finite()
             || !p.y.is_finite()
-            || !(0.0..=10000.0).contains(&p.x)
-            || !(0.0..=10000.0).contains(&p.y)
+            || !(-10000.0..=10000.0).contains(&p.x)
+            || !(-10000.0..=10000.0).contains(&p.y)
             || p.slot.as_deref().is_some_and(|slot| {
                 ![
                     "background",
@@ -127,7 +127,8 @@ pub(super) fn validate(state: &IdeationState) -> Result<(), WorkspaceError> {
         .collect();
     let mut links = HashSet::new();
     for link in &state.links {
-        if !valid_id(&link.id)
+        if link.direction.as_deref().is_some_and(|direction| !["forward", "both", "none"].contains(&direction))
+            || !valid_id(&link.id)
             || !links.insert(&link.id)
             || link.from == link.to
             || link.label.as_ref().is_some_and(|label| label.len() > 500)

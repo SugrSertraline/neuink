@@ -48,3 +48,12 @@ it('separates reusable mechanisms from concrete paper examples in method cards',
   expect(body.indexOf('抽象方法')).toBeLessThan(body.indexOf('原文实例'));
   expect(body).toContain('跨变量信息'); expect(body).toContain('适用条件与边界');
 });
+it('requires research-design sections and validates their evidence references', () => {
+  const input = researchInput(board, state, new Set(['n1','n2']), '目标');
+  expect(() => parseResearchPlan({ ...plan, background: [] }, input)).toThrow();
+  expect(() => parseResearchPlan({ ...plan, innovations: [{ title: '创新', detail: '建议', card_refs: ['C999'] }] }, input)).toThrow('引用');
+  const markdown = researchPlanMarkdown(parseResearchPlan(plan, input), input, 'test');
+  expect(markdown.indexOf('## 研究背景')).toBeLessThan(markdown.indexOf('## 核心问题'));
+  expect(markdown.indexOf('## 我们提出的解决方案')).toBeLessThan(markdown.indexOf('## 潜在创新点'));
+  expect(markdown.indexOf('## 可尝试的技术路线')).toBeLessThan(markdown.indexOf('## 可行性与边界'));
+});

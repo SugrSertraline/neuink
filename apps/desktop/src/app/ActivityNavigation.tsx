@@ -1,4 +1,4 @@
-import { CalendarDays, Library, Lightbulb, ListFilter, MessageSquare, PanelRight, Search, Settings } from 'lucide-react';
+import { CalendarDays, Library, ListFilter, MessageSquare, PanelRight, Search, Settings } from 'lucide-react';
 import { ActivityButton } from './appSupport';
 import { AppearanceIcon } from '@/shared/components/AppearanceIcon';
 import type { WorkspaceSurface } from './workspaceSurface';
@@ -6,13 +6,12 @@ import { resolveActivityNavigationItem, type SidePanel } from './activityBarStat
 
 const destinations: SidePanel[] = ['daily-dashboard', 'library', 'details', 'search', 'same-tag', 'assistant'];
 
-export function ActivityNavigation({ focusedKind, activePanel, noteDetails, onOpenPage, onOpenRight, onSelectTool, onCloseSidebar, onOpenIdeation }: {
+export function ActivityNavigation({ focusedKind, activePanel, noteDetails, onOpenPage, onOpenRight, onSelectTool, onCloseSidebar }: {
   focusedKind: WorkspaceSurface['kind']; activePanel: SidePanel | null; noteDetails: boolean;
   onOpenPage: (page: 'library' | 'daily-dashboard' | 'settings') => void;
   onOpenRight: (page: 'library' | 'daily-dashboard' | 'settings') => void;
   onSelectTool: (panel: SidePanel) => void;
   onCloseSidebar?: () => void;
-  onOpenIdeation?: () => void;
 }) {
   const activeItem = resolveActivityNavigationItem(focusedKind, activePanel);
   const activeIndex = activeItem === null ? -1 : destinations.indexOf(activeItem);
@@ -43,11 +42,10 @@ export function ActivityNavigation({ focusedKind, activePanel, noteDetails, onOp
       <ActivityButton active={activeItem === 'assistant'} expanded={activePanel === 'assistant'} label="助手" onClick={() => selectTool('assistant')}>
         <AppearanceIcon kind="assistant"><MessageSquare size={18} aria-hidden="true" /></AppearanceIcon>
       </ActivityButton>
+
     </div>
     <div className="spacer" />
-    {onOpenIdeation && <ActivityButton kind="navigation" active={activeItem === 'ideation'} expanded={activePanel === 'ideation'} label="研究构思" onClick={onOpenIdeation}>
-      <Lightbulb size={18} aria-hidden="true" />
-    </ActivityButton>}
+
     <ActivityButton kind="page" active={focusedKind === 'settings'} label="设置" onClick={() => openPage('settings')} onContextMenu={() => onOpenRight('settings')}>
       <AppearanceIcon kind="settings"><Settings size={18} aria-hidden="true" /></AppearanceIcon>
     </ActivityButton>

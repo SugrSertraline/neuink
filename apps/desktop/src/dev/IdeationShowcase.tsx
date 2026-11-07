@@ -1,4 +1,7 @@
-import { useState } from 'react';
+import { ToastProvider } from '@/shared/components/ToastProvider';
+import { JobStatusDock } from '@/shared/components/JobStatusDock';
+import { getLocalBackgroundJobs, subscribeLocalBackgroundJobs } from '@/shared/lib/localBackgroundJobs';
+import { useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import { mockIPC } from '@tauri-apps/api/mocks';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -26,6 +29,7 @@ let state: IdeationState = { version: 2, boards: [
   { id: 'c3', entry_id: 'paper2', kind: 'method', title: '反事实扰动与对照学习', body: '改变输入中的缺失模式，比较表示变化，检验哪些关联依赖于不稳定的观测条件。' },
   { id: 'c4', entry_id: 'ideation-user', kind: 'idea', title: '引入缺失感知的融合约束', body: '尝试根据缺失模式调节两个分支的贡献。需要检查分支互补是否真的带来收益。' },
   { id: 'c5', entry_id: 'paper1', kind: 'assumption', title: '空间邻域仍提供可用信息', body: '拆分后能否恢复信息，依赖于邻近节点的观测覆盖以及跨节点关系的稳定性。' },
+  { id:'c7',entry_id:'paper2',kind:'component',title:'基于可用观测的轻量恢复',body:'仅使用当前可观测数据恢复缺失信息，检查误差如何传递到预测模块。' },
   { id: 'c6', entry_id: 'paper2', kind: 'limitation', title: '合成扰动未必代表真实变化', body: '需验证生成的缺失模式是否覆盖部署场景，不能仅用合成数据推断实际效果。' },
 ], placements: [
   { id: 'n1', board_id: 'idea1', card_id: 'c1', x: 60, y: 180 },
@@ -41,23 +45,28 @@ let state: IdeationState = { version: 2, boards: [
 if (params.has('single')) state = { ...state, placements: [state.placements[0]], links: [] };
 if (params.has('empty')) state = { version: 2, cards: [], boards: [], placements: [] };
 mockIPC((command, payload) => {
+  if (command === 'get_llm_settings') return { assistant_profile: params.has('model-mock') ? { id:'fixture',name:'隔离模型',model:'fixture',api_key:null,base_url:'http://invalid.local',api_protocol:'openai',max_context_length:32000,max_output_tokens:4000,temperature:null,top_p:null } : null };
   if (command !== 'ideation_workspace') throw new Error('Isolated preview: no real IPC');
   const action = (payload as { request: { action: { kind: string; state?: IdeationState } } }).request.action;
+  if (action.kind === 'list_drafts') return [];
+  if (action.kind === 'read_draft') return {revision:'preview',draft:null};
   if (action.kind === 'read' && params.has('read-error')) throw new Error('示例读取失败');
   if (action.kind === 'save') { if (params.has('save-error')) throw new Error('示例版本冲突'); state = structuredClone(action.state!); }
   return { revision: 'preview', state: structuredClone(state) };
 });
 
 function Showcase() {
+  const jobs=useSyncExternalStore(subscribeLocalBackgroundJobs,getLocalBackgroundJobs);
   const [sidebar, setSidebar] = useState(true);
   const [message, setMessage] = useState('隔离示例 · 不读取本地论文、不调用模型');
-  return <TooltipProvider><AppearanceProvider><IdeationProvider root="ideation-preview" onShowSidebar={() => setSidebar(true)}>
+  return <TooltipProvider><ToastProvider><AppearanceProvider><IdeationProvider root="ideation-preview" onShowSidebar={() => setSidebar(true)}>
     <main className="fixed inset-0 flex min-h-0 flex-col overflow-hidden bg-background text-foreground">
       <div className="flex shrink-0 items-center gap-3 border-b px-3 py-2"><span className="text-sm font-semibold">Neuink</span><span className="text-xs text-muted-foreground">研究构思 · 交互预览</span><Button size="sm" variant="ghost" onClick={() => setSidebar(value => !value)}>切换侧栏</Button><span className="ml-auto truncate text-xs text-muted-foreground">{message}</span></div>
       <div className="flex min-h-0 flex-1">{sidebar && <div className="h-full w-[300px] shrink-0 border-r"><IdeationSidebar root="ideation-preview" entries={entries} onOpenEntry={() => setMessage('示例：打开来源论文')} onOpenSource={() => setMessage('示例：核对原文')} /></div>}
         <div className="min-w-0 flex-1"><IdeationWorkspace root="ideation-preview" entries={entries} onOpenEntry={() => setMessage('示例：打开来源论文')} /></div>
       </div>
+      <div className="flex shrink-0 justify-end border-t px-3 py-1"><JobStatusDock jobs={jobs} /></div>
     </main>
-  </IdeationProvider></AppearanceProvider></TooltipProvider>;
+  </IdeationProvider></AppearanceProvider></ToastProvider></TooltipProvider>;
 }
 createRoot(document.getElementById('root')!).render(<Showcase />);

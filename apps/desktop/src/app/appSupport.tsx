@@ -159,7 +159,7 @@ export function readStoredBoolean(key: string, fallback: boolean) {
 export function readStoredSidePanel(): SidePanel {
   if (typeof window === 'undefined') return 'library';
   const value = window.localStorage.getItem(SIDE_PANEL_STORAGE_KEY);
-  return value === 'assistant' || value === 'search' || value === 'library' || value === 'details' || value === 'same-tag' || value === 'daily-dashboard' || value === 'ideation' ? value : 'library';
+  return value === 'assistant' || value === 'search' || value === 'library' || value === 'details' || value === 'same-tag' || value === 'daily-dashboard' ? value : 'library';
 }
 
 export function readStoredLibraryView(): LibraryView {

@@ -13,14 +13,14 @@ export function IdeationBoardDialog({ board, onClose }: { board: IdeationBoard |
   const context = useIdeationContext()!;
   const [title, setTitle] = useState(board === 'new' ? '' : board.title);
   const [description, setDescription] = useState(board === 'new' ? '' : board.description);
-  return <Dialog open onOpenChange={open => { if (!open) onClose(); }}><DialogContent layout="bounded" className="h-auto max-h-[calc(100%-2rem)]">
+  return <Dialog open onOpenChange={open => { if (!open) onClose(); }}><DialogContent layout="bounded" className="h-auto max-h-[calc(100%-2rem)] sm:max-w-[34rem]">
     <DialogHeader><DialogTitle>{board === 'new' ? '新建构思' : '编辑构思'}</DialogTitle><DialogDescription>围绕一个研究问题收集卡片、探索不同的解决路径。</DialogDescription></DialogHeader>
-    <DialogBody><form id="ideation-board-form" className="space-y-4" onSubmit={event => {
+    <DialogBody><form id="ideation-board-form" className="space-y-6 py-2" onSubmit={event => {
       event.preventDefault(); if (!title.trim()) return;
       if (board === 'new') context.createBoard(title, description); else context.editBoard(board.id, { title: title.trim(), description });
       onClose();
-    }}><label className="block space-y-1 text-xs"><span>构思名称</span><Input autoFocus required maxLength={160} value={title} onChange={e => setTitle(e.target.value)} placeholder="例如：缺失数据下的时空预测" /></label>
-      <label className="block space-y-1 text-xs"><span>研究问题或目标（可选）</span><Textarea maxLength={4000} value={description} onChange={e => setDescription(e.target.value)} placeholder="先描述背景与待解决的问题，方法可以在画布中尝试。" /></label>
+    }}><label className="block space-y-2 text-sm font-medium"><span>构思名称</span><Input autoFocus required maxLength={160} value={title} onChange={e => setTitle(e.target.value)} placeholder="例如：缺失数据下的时空预测" /></label>
+      <label className="block space-y-2 text-sm font-medium"><span>研究问题或目标（可选）</span><Textarea className="min-h-32 resize-y text-sm font-normal leading-6" maxLength={4000} value={description} onChange={e => setDescription(e.target.value)} placeholder="先描述背景与待解决的问题，之后可以选择方法并获取组合建议。" /></label>
     </form></DialogBody><DialogFooter><Button variant="outline" onClick={onClose}>取消</Button><Button form="ideation-board-form" type="submit" disabled={!title.trim()}>{board === 'new' ? '创建构思' : '保存名称与说明'}</Button></DialogFooter>
   </DialogContent></Dialog>;
 }
@@ -46,7 +46,7 @@ export function IdeationBoardList() {
         return <div key={board.id} className={`mb-1 flex items-start gap-1 rounded-md border p-2 ${context.activeBoard?.id === board.id && !deleted ? 'border-primary/30 bg-primary/10' : 'border-transparent hover:bg-muted/60'}`}>
           <button disabled={deleted} onClick={() => context.selectBoard(board.id)} aria-current={context.activeBoard?.id === board.id ? 'page' : undefined} className="min-w-0 flex-1 space-y-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">
             <span className="line-clamp-2 text-sm font-medium">{board.title}</span>{board.description && <span className="line-clamp-2 text-xs text-muted-foreground">{board.description}</span>}
-            <span className="block text-xs text-muted-foreground">{nodes.length} 张卡片 · {relations} 条关系</span>
+            <span className="block text-xs text-muted-foreground">{nodes.filter(n => !n.card_id.includes('-worksheet-')).length} 张已选卡片</span>
           </button>
           {deleted ? <Button size="sm" variant="outline" onClick={() => context.editBoard(board.id, { deleted_at: null })}>恢复</Button> : <DropdownMenu><DropdownMenuTrigger asChild><Button size="icon-sm" variant="ghost" aria-label={`管理构思 ${board.title}`}><MoreHorizontal /></Button></DropdownMenuTrigger><DropdownMenuContent align="end">
             <DropdownMenuItem onSelect={() => setEditing(board)}>编辑名称与说明</DropdownMenuItem><DropdownMenuItem onSelect={() => context.duplicateBoard(board.id)}>复制构思</DropdownMenuItem>
@@ -54,7 +54,7 @@ export function IdeationBoardList() {
           </DropdownMenuContent></DropdownMenu>}
         </div>;
       })}
-    </div><p className="shrink-0 border-t p-3 text-xs leading-relaxed text-muted-foreground">每条构思独立保存卡片位置与关系。论文卡片可以重复用于不同构思。</p>
+    </div><p className="shrink-0 border-t p-3 text-xs leading-relaxed text-muted-foreground">每条构思独立保存问题、已选方法和组合方案。方法卡片可以重复用于不同构思。</p>
     {editing && <IdeationBoardDialog board={editing} onClose={() => setEditing(null)} />}
   </div>;
 }

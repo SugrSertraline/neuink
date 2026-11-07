@@ -1,3 +1,4 @@
+import { IdeationCommand, isIdeationCommand } from './IdeationCommand';
 import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -26,6 +27,7 @@ type SearchDialogProps = {
   onOpenChange: (open: boolean) => void;
   onOpenResult: (hit: SearchHit) => void;
   onOpenSetting?: (id: string) => void;
+  onOpenIdeation?: () => boolean;
 };
 
 export function SearchDialog({
@@ -34,16 +36,19 @@ export function SearchDialog({
   status,
   onOpenChange,
   onOpenResult,
-  onOpenSetting
+  onOpenSetting,
+  onOpenIdeation
 }: SearchDialogProps) {
   const [query, setQuery] = useState('');
   const appearanceCommand = isAppearanceCommand(query);
+  const ideationCommand = isIdeationCommand(query);
+  const commandMode = appearanceCommand || ideationCommand;
   const [mode, setMode] = useState<SearchMode>('hybrid');
   const [hoverPreviewEnabled, setHoverPreviewEnabled] = useState(true);
   const { busy, error, results } = useGlobalSearch({
     root,
     status,
-    query: appearanceCommand ? '' : query,
+    query: commandMode ? '' : query,
     mode,
     limit: 80
   });
@@ -98,13 +103,13 @@ export function SearchDialog({
             value={query}
             onValueChange={setQuery}
           />
-          {!appearanceCommand && busy ? (
+          {!commandMode && busy ? (
             <Loader2
               className="absolute right-6 top-6 size-4 animate-spin text-muted-foreground"
               aria-hidden="true"
             />
           ) : null}
-          {!appearanceCommand ? <div className="mt-2 flex items-center justify-between gap-2">
+          {!commandMode ? <div className="mt-2 flex items-center justify-between gap-2">
             <Button
               aria-pressed={hoverPreviewEnabled}
               size="xs"
@@ -129,7 +134,7 @@ export function SearchDialog({
             </div>
           </div>
           : null}
-          {!appearanceCommand ? <><EmbeddingStatusLine
+          {!commandMode ? <><EmbeddingStatusLine
             className="mt-1.5 justify-end"
             error={embeddingError}
             mode={mode}
@@ -150,7 +155,7 @@ export function SearchDialog({
         </div>
 
         <div className="min-h-0 overflow-hidden">
-          {appearanceCommand ? <AppearanceCommand onExecuted={() => { setQuery(''); onOpenChange(false); }} /> : <SearchResultList
+          {ideationCommand ? <IdeationCommand enabled={Boolean(root) && status === 'ready' && Boolean(onOpenIdeation)} onOpen={() => { if (onOpenIdeation?.()) { setQuery(''); onOpenChange(false); } }} /> : appearanceCommand ? <AppearanceCommand onExecuted={() => { setQuery(''); onOpenChange(false); }} /> : <SearchResultList
             settingsQuery={query}
             onOpenSetting={onOpenSetting ? id => { onOpenSetting(id); onOpenChange(false); } : undefined}
             className="h-full min-h-0"

@@ -25,6 +25,7 @@ export const branchRules: Record<CardKind, BranchRule[]> = {
 export function candidateKinds(kind: CardKind): CardKind[] { return [...new Set(branchRules[kind].flatMap(item => item.kinds))]; }
 
 export function placeBranchCard(state: IdeationState, card: PaperCard, x: number, y: number, target?: BranchSlot | null): IdeationState {
+  if (card.origin === 'ai_draft' || state.cards.find(item => item.id === card.id)?.origin === 'ai_draft') throw new Error('请先核对并确认这张 AI 卡片。');
   if (target && (!target.kinds.includes(card.kind) || !state.placements.some(p => p.id === target.sourceId))) throw new Error('这张卡片不符合该位置，或来源节点已被移除。');
   const id = crypto.randomUUID();
   return { ...state, cards: state.cards.some(c => c.id === card.id) ? state.cards : [...state.cards, card],

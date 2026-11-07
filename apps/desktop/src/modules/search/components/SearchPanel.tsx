@@ -1,3 +1,4 @@
+import { IdeationCommand, isIdeationCommand } from './IdeationCommand';
 import { AlertTriangle, Eye, EyeOff, Hammer, Loader2, RefreshCw } from 'lucide-react';
 import { useState } from 'react';
 
@@ -35,17 +36,20 @@ type SearchPanelProps = {
   status: 'loading' | 'ready' | 'error';
   onOpenResult: (hit: SearchHit) => void;
   onOpenSetting?: (id: string) => void;
+  onOpenIdeation?: () => boolean;
 };
 
-export function SearchPanel({ buildStatus = null, root, status, onOpenResult, onOpenSetting }: SearchPanelProps) {
+export function SearchPanel({ buildStatus = null, root, status, onOpenResult, onOpenSetting, onOpenIdeation }: SearchPanelProps) {
   const [query, setQuery] = useState('');
   const appearanceCommand = isAppearanceCommand(query);
+  const ideationCommand = isIdeationCommand(query);
+  const commandMode = appearanceCommand || ideationCommand;
   const [mode, setMode] = useState<SearchMode>('hybrid');
   const [hoverPreviewEnabled, setHoverPreviewEnabled] = useState(true);
   const [rebuildRequested, setRebuildRequested] = useState(false);
   const [buildConfirmOpen, setBuildConfirmOpen] = useState(false);
   const { notify } = useToast();
-  const { busy, error, results } = useGlobalSearch({ root, status, query: appearanceCommand ? '' : query, mode });
+  const { busy, error, results } = useGlobalSearch({ root, status, query: commandMode ? '' : query, mode });
   const semanticMode = mode === 'hybrid' || mode === 'semantic';
   const { embeddingError, embeddingStatus } = useEmbeddingStatus(
     semanticMode && Boolean(root) && status === 'ready'
@@ -126,7 +130,7 @@ export function SearchPanel({ buildStatus = null, root, status, onOpenResult, on
             value={query}
             onValueChange={setQuery}
           />
-          {!appearanceCommand ? <><div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
+          {!commandMode ? <><div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
             <span className="shrink-0 text-[11px] font-semibold text-muted-foreground">模式</span>
             <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-1.5">
               <Button
@@ -201,7 +205,7 @@ export function SearchPanel({ buildStatus = null, root, status, onOpenResult, on
           ) : null}</> : null}
         </div>
 
-        {appearanceCommand ? <AppearanceCommand onExecuted={() => setQuery('')} /> : <SearchResultList
+        {ideationCommand ? <IdeationCommand enabled={Boolean(root) && status === 'ready' && Boolean(onOpenIdeation)} onOpen={() => { if (onOpenIdeation?.()) { setQuery(''); } }} /> : appearanceCommand ? <AppearanceCommand onExecuted={() => setQuery('')} /> : <SearchResultList
           settingsQuery={query}
           onOpenSetting={onOpenSetting}
           className="h-full min-h-0"

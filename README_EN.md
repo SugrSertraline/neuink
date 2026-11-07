@@ -437,3 +437,36 @@ Reading detail adapts the paragraph prompt and assembly, source-word alignment a
 Translation settings provide one **Default translation source** selector for dedicated translation services and saved LLM connections. Each behavior can follow this default or keep its own override. Changing the default does not overwrite explicit choices or existing translations; legacy settings preserve their previous sources.
 
 Translation requests normalize PDF selection line wraps locally without changing annotations. Dedicated services keep superscripts, formula and code markers locally; individual request failures remain attached to their segments and do not stop the remaining work. PDF hover settings nest paragraph/sentence choices under source and translation visibility, with explicit paragraph fallback notices. Library headers cycle ascending, descending, then the current view default.
+
+Research cards are generated only on explicit user action. Opening the library never generates cards or retries old failures. AI cards require confirmation before canvas placement or research-plan generation. Review actions open the source paper’s card-management page.
+
+The research dialog accepts optional background, available inputs, and expected outputs, including reviews and analysis reports. Generated reports can be reviewed and edited before explicit confirmation creates a local entry. Closing discards unsaved dialog drafts; generation alone does not create an entry.
+
+The canvas can suggest relationships using the configured assistant model. Proposed links remain transient dashed previews until explicit acceptance, with editable types, reasoning, and conditions. Existing links are preserved. Research on an unconnected multi-card board offers this step but can proceed without it. Wheel zoom is centered on the pointer.
+
+### Alpha: sparse research relationships
+
+Relationship suggestions prioritize the background, core question, main method and validation plan. Evidence, constraints and alternatives are not connected by default; composition details remain in card content and suggestion rationale. No composite cards are created automatically. AI additions count existing links against a budget of at most eight links and one fewer than the non-constraint card count, and avoid cycles. Modifications and deletions require individual confirmation. Manual links retain custom descriptions, bidirectional arrows and no-arrow connections, including feedback loops when needed. This conservative default is not a restriction on research structure.
+
+### Alpha: method-guided research worksheet
+
+The default ideation page now contains background, question, methods, requirements and a composition plan. Users add cards with buttons rather than arranging a canvas. Existing cards and historical links remain stored, but worksheet reports exclude old graph links.
+
+Adding a method requests up to three recommendations from the configured assistant model, restricted to confirmed library methods/components and manual methods. Recommendations distinguish complements from alternatives and explain fit, integration and conditions. Adding recommendations and adopting composition drafts require explicit actions. No historical co-use statistics, vector ranking or verified compatibility is claimed. Requests include at most 120 candidates with 2,000-character excerpts; limited scope and context-budget errors are surfaced.
+
+Worksheet fields and adopted plans use existing autosave; unaccepted suggestions remain session-local. Input changes invalidate pending results, and leaving or stopping cancels requests. Reports still require confirmation before creating a local entry. Automated tests validate state and request behavior; live-model recommendation quality and native visual acceptance remain to be assessed.
+
+All five worksheet sections accept multiple cards, either from the sidebar or as private descriptions belonging to the current idea. Cards normally fit three per row and wrap on narrower pages. Method steps have explicit numbering and move-earlier/later controls. Their persisted order is sent to recommendation and report generation as a proposed sequence, not verified compatibility. Reordering invalidates previous suggestions without triggering another model request.
+
+### Current Alpha: three research-material sections
+
+The worksheet now has Background, Research questions, and Method steps. Constraints, inputs/outputs and existing findings belong to Background; historical composition content remains under the research-thinking draft. Each section has a Describe action for private cards and a white, dashed empty slot that opens matching AI recommendations at the top of the sidebar, with all cards and manual filters below. Placement roles preserve the source card's original type and content.
+
+Drag cards by their handles within a section, or use earlier/later buttons and handle arrow keys. Only a completed drop saves the order; Escape and focus loss cancel. Method numbering and order are supplied to the model, while other ordering indicates display priority. Reordering does not trigger model calls. Recommendations are snapshot-bound, cancellable and limited to confirmed candidates; all library cards remain available when recommendation fails. Native desktop visual/drag acceptance and live-model quality evaluation remain outstanding.
+
+Research card recommendations, composition and report generation now use the shared task list and notifications, with actual stage messages, cancellation and completion/failure feedback. Retrying replaces previous terminal notifications of the same kind. Composition only reads selected cards; reports remain drafts until explicitly saved. All 171 relevant tests and type checking pass. Isolated browser checks cover core interactions and three viewport widths; native Tauri visuals and real-model output quality have not been validated in this pass.
+
+
+### Experimental entry point
+
+Per-paper AI cards remain available in reading content and are generated only on request. The ideation navigation entry is hidden. Type `/inspiration` in global or sidebar search, then select the result or press Enter to open the workspace. A ready library is required; the command does not run AI. Experimental tabs and the sidebar do not reopen on restart; saved cards and ideas are preserved.

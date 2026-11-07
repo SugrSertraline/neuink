@@ -14,7 +14,9 @@ function savedSurface(value: unknown): WorkspaceSurface | null {
   if (!record(value)) return null;
   const view = id(value.viewId) ? { viewId: value.viewId } : {};
   switch (value.kind) {
-    case 'external-import': case 'daily-dashboard': case 'ideation': case 'library': case 'relations': case 'mineru-client-guide': case 'tag-editor':
+    // Experimental ideation must be explicitly opened through the search command each session.
+    case 'ideation': return null;
+    case 'external-import': case 'daily-dashboard': case 'library': case 'relations': case 'mineru-client-guide': case 'tag-editor':
       return { kind: value.kind };
     case 'tag-reading': case 'tag-details':
       return id(value.tagId) ? { kind: value.kind, tagId: value.tagId,

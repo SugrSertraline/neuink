@@ -14,7 +14,6 @@ export function PaperCardEditor({ card, isNew, busy, error, onSave, onClose }: {
   onSave: (card: PaperCard) => void; onClose: () => void;
 }) {
   const [title, setTitle] = useState(card.title), [body, setBody] = useState(card.body), [kind, setKind] = useState(card.kind);
-  const [discarding, setDiscarding] = useState(false);
   const dirty = title !== card.title || body !== card.body || kind !== card.kind;
   useEffect(() => {
     const owner = `paper-card:${card.entry_id}:${card.id}`;
@@ -22,7 +21,7 @@ export function PaperCardEditor({ card, isNew, busy, error, onSave, onClose }: {
     const unregister = registerSegmentEditorCloseHandler('ideation', owner, { save: async () => false, discard: onClose });
     return () => { unregister(); setSegmentEditorDirty('ideation', owner, false); };
   }, [card.id, card.entry_id, dirty, onClose]);
-  const close = () => { if (!busy) { if (dirty) setDiscarding(true); else onClose(); } };
+  const close = () => { if (!busy) onClose(); };
   return <Dialog open onOpenChange={open => { if (!open) close(); }}><DialogContent layout="bounded" onPointerDownOutside={event => event.preventDefault()}>
     <DialogHeader><DialogTitle>{isNew ? '新建论文卡片' : '编辑论文卡片'}</DialogTitle><DialogDescription>一张卡片只表达一个方法或观点。原文实例放在内容后面，已有来源会保留。</DialogDescription></DialogHeader>
     <DialogBody className="space-y-4">
@@ -31,7 +30,6 @@ export function PaperCardEditor({ card, isNew, busy, error, onSave, onClose }: {
       <div className="flex items-center justify-between"><span>卡片内容</span><Button size="sm" variant="ghost" disabled={busy || Boolean(body.trim())} onClick={() => setBody(cardTemplateText(kind))}>填入模板</Button></div>
       <Textarea aria-label="卡片内容" value={body} maxLength={20000} disabled={busy} className="min-h-64" onChange={e => setBody(e.target.value)} placeholder="先写抽象方法，再补充核心步骤、适用边界与原文实例。" />
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
-      {discarding && <div role="alert" className="space-y-2 rounded-md border p-3"><p>有未保存的修改，是否放弃？</p><Button size="sm" variant="outline" onClick={() => setDiscarding(false)}>继续编辑</Button><Button size="sm" variant="destructive" onClick={onClose}>放弃修改</Button></div>}
     </DialogBody>
     <DialogFooter><Button variant="outline" disabled={busy} onClick={close}>取消</Button><Button disabled={busy || !title.trim() || !body.trim()} onClick={() => onSave({ ...card, title: title.trim(), body: (kind === 'method' || kind === 'component') && !body.includes('**') ? `**${kind === 'method' ? '抽象方法' : '抽象机制'}**：${body.trim()}` : body.trim(), kind })}>{busy ? '保存中…' : '保存卡片'}</Button></DialogFooter>
   </DialogContent></Dialog>;

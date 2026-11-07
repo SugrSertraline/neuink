@@ -7,7 +7,20 @@ export function cardSummary(card: { kind: CardKind; body?: string }) {
   if (field) {
     const match = body.match(new RegExp('(?:^|\\n)\\*\\*' + field + '\\*\\*[:：]\\s*([\\s\\S]*?)(?=\\n\\s*\\*\\*[^*]+\\*\\*[:：]|$)'));
     if (match?.[1].trim() && !/^(原文未说明|待补充)$/.test(match[1].trim())) return match[1].trim();
-    return '待整理抽象说明 · 查看详情保留原内容';
+    return '';
   }
   return body.replace(/\*\*([^*]+)\*\*[:：]?/g, '$1：').replace(/^#{1,6}\s+/gm, '').replace(/\s+/g, ' ').trim().slice(0, 180) || '点击补充内容';
+}
+
+/** Expanded face preview keeps examples in the detail surface. */
+export function cardFaceSummary(card: { kind: CardKind; body?: string }) {
+  if (card.kind !== 'method' && card.kind !== 'component') {
+    return (card.body ?? '').trim();
+  }
+  const labels = card.kind === 'method' ? ['核心步骤', '输入与输出', '适用条件与边界'] : ['组件作用与接口', '适用条件与边界'];
+  const extra = labels.flatMap(label => {
+    const value = card.body?.match(new RegExp('(?:^|\\n)\\*\\*' + label + '\\*\\*[:：]\\s*([\\s\\S]*?)(?=\\n\\s*\\*\\*[^*]+\\*\\*[:：]|$)'))?.[1].trim();
+    return value && !/^(原文未说明|待补充)$/.test(value) ? [`**${label}**：${value}`] : [];
+  });
+  return [cardSummary(card), ...extra].filter(Boolean).join('\n\n');
 }

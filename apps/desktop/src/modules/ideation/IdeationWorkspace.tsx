@@ -1,115 +1,116 @@
-import { ResearchPlanDialog } from './ResearchPlanDialog';
-import { useMemo, useState } from 'react';
-import { ArrowLeft, Pencil, Plus } from 'lucide-react';
+import { useIdeationTask } from './ideationTask';
+import { WorksheetCardSection } from './WorksheetCardSection';
+import { LocalIdeaEditor } from './LocalIdeaEditor';
+import { useEffect, useRef, useState } from 'react';
+import { ArrowLeft, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { SourceSnapshotPreview } from '@/shared/components/SourceSnapshotPreview';
 import type { LibraryEntry } from '@/modules/library/components/LibrarySidebar';
 import type { SourceLinkOpenTarget } from '@/modules/notes/editor/SourceLinkNode';
-import type { IdeationLink, Placement } from '@/shared/ipc/ideationApi';
+import type { PaperCard } from '@/shared/ipc/ideationApi';
 import { useIdeationContext } from './IdeationContext';
-import { clamp, placeCard, placeDraftCard, presetCards, presetEntryId, userEntryId } from './ideationUtils';
-import { nodeCard } from './ideationBoards';
 import { IdeationBoardDialog } from './IdeationBoardList';
-import { IdeationCanvas, type CanvasNode } from './IdeationCanvas';
-import { IdeationInspector } from './IdeationInspector';
-import type { BranchSlot } from './ideationBranches';
-
-type Props = {
-  root: string; entries: LibraryEntry[];
-  onOpenEntry: (id: string) => void;
-  onOpenSource?: (target: SourceLinkOpenTarget) => void;
-};
+import { ResearchPlanDialog } from './ResearchPlanDialog';
+import { placeCard } from './ideationUtils';
+import { cardErrorMessages, classifyCardError } from './generateCards';
+import { ResearchPlanError } from './researchPlan';
+import { recommendMethods, type MethodAdvice } from './methodRecommendations';
+import { sectionForNode, reorderWorksheetCards, worksheetSections, type WorksheetSection, isWorksheetCard, setWorksheetValue, worksheetFields, worksheetNodes, worksheetReportState, worksheetValue, type WorksheetField } from './researchWorksheet';
+type Props = { root: string; entries: LibraryEntry[]; onOpenEntry: (id: string) => void; onOpenSource?: (target: SourceLinkOpenTarget) => void };
 export function IdeationWorkspace(props: Props) {
   const context = useIdeationContext();
-  const [creating, setCreating] = useState(false);
+  const [creating,setCreating] = useState(false);
   if (!context) return <p className="p-4 text-sm text-muted-foreground">请先打开资料库。</p>;
-  if (!context.state) return <div className="p-4 text-sm" role={context.error ? 'alert' : 'status'}>{context.error ? `研究构思读取失败：${context.error}` : '正在读取研究构思…'}{context.error && <Button size="sm" variant="outline" onClick={context.retryLoad}>重新读取</Button>}</div>;
-  if (!context.activeBoard) return <div className="flex h-full flex-col items-center justify-center gap-3 bg-background p-6"><h1 className="text-lg font-semibold">研究构思</h1><p className="max-w-md text-center text-sm leading-relaxed text-muted-foreground">为每个研究问题建立一张画布。从论文中复用卡片，连接问题、方法与证据，逐步形成可讨论的方向。</p><p role={context.error ? 'alert' : 'status'} className={context.error ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}>{context.error ? `保存失败：${context.error}。当前修改仍保留。` : context.saving ? '保存中…' : context.dirty ? '未保存' : '已保存到本地'}</p>{context.dirty && <Button size="sm" variant="outline" disabled={context.saving} onClick={() => void context.save()}>保存</Button>}<div className="flex gap-2"><Button onClick={() => setCreating(true)}>新建构思</Button><Button variant="outline" onClick={() => { context.setSidebarTab('boards'); context.showSidebar(); }}>查看构思列表</Button></div>{creating && <IdeationBoardDialog board="new" onClose={() => setCreating(false)} />}</div>;
-  return <ActiveWorkspace key={context.activeBoard.id} {...props} />;
+  if (!context.state) return <div className="p-4" role={context.error ? 'alert' : 'status'}>{context.error ?? '正在读取研究构思…'}{context.error && <Button onClick={context.retryLoad}>重新读取</Button>}</div>;
+  if (!context.activeBoard) return <div className="flex h-full flex-col items-center justify-center gap-4 p-6"><h1 className="text-lg font-semibold">从一个问题开始</h1><p className="text-sm text-muted-foreground">描述问题，挑选积累的方法，让 AI 帮你整理组合思路。</p><Button onClick={() => setCreating(true)}>新建构思</Button>{creating && <IdeationBoardDialog board="new" onClose={() => setCreating(false)} />}</div>;
+  return <ResearchWorksheet key={context.activeBoard.id} {...props} />;
 }
-
-function ActiveWorkspace({ root, entries, onOpenEntry, onOpenSource }: Props) {
-  const context = useIdeationContext()!;
-  const { state: currentState, activeBoard: currentBoard, update, save, dirty, saving, error, selectedCardId, setSelectedCardId, selectSlot } = context;
-  const state = currentState!, board = currentBoard!;
-  const entriesById = useMemo(() => new Map(entries.map(entry => [entry.id, entry])), [entries]);
-  const [connecting, setConnecting] = useState<string | null>(null);
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
-  const [canvasError, setCanvasError] = useState<string | null>(null);
-  const [planning, setPlanning] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [inspecting, setInspecting] = useState(false);
-  const [choosingBranch, setChoosingBranch] = useState(false);
-  const [undo, setUndo] = useState<{ nodes: Placement[]; links: IdeationLink[] } | null>(null);
-  const cards = new Map(state.cards.map(card => [card.id, card]));
-  const nodes: CanvasNode[] = state.placements.flatMap(p => {
-    const source = cards.get(p.card_id); if (!source) return [];
-    return [{ ...p, card: nodeCard(p, source), sourceTitle: source.entry_id === userEntryId ? '我的卡片' : source.entry_id === presetEntryId ? '通用研究模式' : entriesById.get(source.entry_id)?.title ?? '来源论文不可用' }];
-  });
-  const links = state.links ?? [];
-  const byId = new Map(nodes.map(p => [p.id, p]));
-  const selectedNode = context.selectionSource === 'canvas' ? nodes.find(node => node.id === selectedNodeId && node.card_id === selectedCardId) : undefined;
-  const selectedLink = selectedCardId ? undefined : links.find(link => link.id === selectedLinkId);
-  const previewCard = selectedNode ? selectedNode.card : cards.get(selectedCardId ?? '');
-  const slots = !connecting && context.branchTarget ? [context.branchTarget] : [];
-  const clearSelection = () => { setSelectedNodeId(null); setSelectedLinkId(null); setSelectedCardId(null); context.selectBranchSource(null); };
-  const selectLink = (id: string) => { setSelectedLinkId(id); setSelectedNodeId(null); setSelectedCardId(null); setConnecting(null); context.selectBranchSource(null); };
-  const connect = (from: string, to: string) => {
-    if (from === to) { setConnecting(null); return; }
-    const existing = links.find(link => link.from === from && link.to === to);
-    if (existing) { selectLink(existing.id); return; }
-    const id = crypto.randomUUID(), a = byId.get(from), b = byId.get(to);
-    const kind = a?.card.kind === 'background' && b?.card.kind === 'problem' ? 'motivates' : b?.card.kind === 'problem' && ['method', 'component', 'idea'].includes(a?.card.kind ?? '') ? 'addresses' : 'related';
-    update(current => ({ ...current, links: [...(current.links ?? []), { id, from, to, kind, origin: 'user' }] }));
-    selectLink(id);
-  };
-  const selectNode = (id: string, toggle = true) => {
-    if (connecting) { connect(connecting, id); return; }
-    const node = byId.get(id); if (!node) return;
-    if (toggle && context.branchSourceId === id && selectedNodeId === id) { clearSelection(); setInspecting(false); return; }
-    setChoosingBranch(true); setSelectedNodeId(id); setSelectedLinkId(null); context.selectCanvasCard(node.card_id); context.selectBranchSource(id); setInspecting(false);
-  };
-  const removeNode = (id: string) => {
-    const node = state.placements.find(p => p.id === id); if (!node) return;
-    setUndo({ nodes: [node], links: links.filter(link => link.from === id || link.to === id) });
-    update(current => ({ ...current, placements: current.placements.filter(p => p.id !== id), links: (current.links ?? []).filter(link => link.from !== id && link.to !== id) }));
-    clearSelection(); setConnecting(null);
-  };
-  const removeLink = (id: string) => { setUndo({ nodes: [], links: links.filter(link => link.id === id) }); update(current => ({ ...current, links: current.links?.filter(link => link.id !== id) })); clearSelection(); };
-  const branch = (id: string) => {
-    const node = byId.get(id); if (!node) return;
-    const newId = crypto.randomUUID();
-    update(current => ({ ...current, placements: [...current.placements, { id: newId, card_id: node.card_id, x: clamp(node.x + 340, 10000), y: clamp(node.y + 260, 10000), title: `${node.card.title.slice(0, 145)}（分支）`, body: node.card.body }], links: [...(current.links ?? []), { id: crypto.randomUUID(), from: id, to: newId, kind: 'alternative', origin: 'user' }] }));
-    setSelectedNodeId(newId); context.selectCanvasCard(node.card_id); context.selectBranchSource(newId); setInspecting(true);
-  };
-  const drop = (data: string, x: number, y: number, slot?: BranchSlot) => {
-    setCanvasError(null);
+function ResearchWorksheet({ root, entries, onOpenEntry }: Props) {
+  const runTask = useIdeationTask();
+  const context = useIdeationContext()!, state = context.state!, board = context.activeBoard!;
+  const [editing,setEditing] = useState(false), [planning,setPlanning] = useState(false);
+  const [localCard,setLocalCard] = useState<{ field: WorksheetField; nodeId?: string; title?: string; body?: string } | null>(null);
+  const [detail,setDetail] = useState<PaperCard | null>(null);
+  const [busy,setBusy] = useState(false), [error,setError] = useState(''), [notice,setNotice] = useState('');
+  const [advice,setAdvice] = useState<MethodAdvice | null>(null);
+  const [undo,setUndo] = useState<(() => void) | null>(null);
+  const controller = useRef<AbortController | null>(null);
+  const nodes = worksheetNodes(state);
+  const values = Object.fromEntries(worksheetFields.map(f => [f.key, worksheetValue(state,board.id,f.key)])) as Record<WorksheetField,string>;
+  const sectionText = (field: WorksheetField) => nodes.filter(n => sectionForNode(n) === field).map(n => n.card.body).filter(Boolean).join('\n\n');
+  const goal = sectionText('problem') || board.description;
+  const methods = nodes.filter(n => sectionForNode(n) === 'method' && n.card.body.trim());
+  const selected = nodes.filter(n => !isWorksheetCard(n.card_id) || n.card.body.trim()).map(n => n.card);
+  const fingerprint = JSON.stringify([board.id, board.description, values, nodes.map(n => [n.id,n.card.title,n.card.body,n.card.origin,n.slot]), context.background.summaries?.map(s => [s.entry_id,s.revision])]);
+  const latest = useRef(fingerprint); latest.current = fingerprint;
+  useEffect(() => { controller.current?.abort(); setBusy(false); setAdvice(null); setError(''); }, [fingerprint]);
+  useEffect(() => () => { controller.current?.abort(); }, []);
+  useEffect(() => { const card = state.cards.find(c => c.id === context.selectedCardId); if (card) setDetail(card); }, [context.selectedCardId]);
+  const run = async () => {
+    if (!goal.trim()) { setError('请先填写想解决的问题，再推荐方法。'); return; }
+    const abort = new AbortController(); controller.current?.abort(); controller.current = abort;
+    const snapshot = fingerprint; setBusy(true); setError(''); setAdvice(null); setNotice('');
     try {
-      if (data.startsWith('card:')) { const card = cards.get(data.slice(5)); if (card) placeCard(update, card, x, y, slot); }
-      else if (data.startsWith('preset:')) { const card = presetCards.find(item => item.id === data.slice(7)); if (card) placeCard(update, card, x, y, slot); }
-      else if (data.startsWith('draft:')) { const [entryId, cardId] = data.slice(6).split(':'); if (entryId && cardId) void placeDraftCard(root, update, entryId, cardId, x, y, slot).then(() => context.completeBranchTarget(slot)).catch(() => setCanvasError('无法填入卡片：请检查类型或刷新草稿后重试。')); }
-      if (!data.startsWith('draft:')) context.completeBranchTarget(slot);
-    } catch { setCanvasError('这张卡片不适合此空位，请选择对应类型的卡片。'); }
+      const result = await runTask({root,kind:'compose',controller:abort},async stage=>{
+        stage('基于已选方法和顺序整理思路');
+        const result = await recommendMethods({goal,background:sectionText('background'),constraints:'',selected,candidates:[],mode:'compose',methodOrder:methods.map(n=>n.card_id)},abort.signal);
+        stage('校验研究思路');return result;
+      });
+      if (abort.signal.aborted || latest.current !== snapshot) return;
+      setAdvice(result);setNotice('研究思路尚未验证，请审阅后采用。');
+    } catch (cause) { if (!abort.signal.aborted && latest.current === snapshot) setError(cause instanceof ResearchPlanError ? cause.message : cardErrorMessages[classifyCardError(cause)]); }
+    finally { if (controller.current === abort) { setBusy(false); controller.current = null; } }
   };
-  return <div className="@container flex h-full min-h-0 min-w-0 flex-col bg-background" aria-label="研究构思">
-    <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b px-3 py-2">
+  const methodIds = methods.map(n => n.card_id).join('|');
+  const previousMethods = useRef(methodIds);
+  useEffect(() => {
+    const previous = new Set(previousMethods.current.split('|')); previousMethods.current = methodIds;
+    const added = methodIds.split('|').find(id => id && !previous.has(id));
+    if (added) context.requestWorksheetCards('method');
+  }, [methodIds]);
+  const remove = (id: string) => {
+    const index = state.placements.findIndex(n => n.id === id); const node = state.placements[index]; if (!node) return; const links = (state.links ?? []).filter(l => l.from === id || l.to === id);
+    context.update(current => ({ ...current, placements: current.placements.filter(n => n.id !== id), links: current.links?.filter(l => l.from !== id && l.to !== id) }));
+    setUndo(() => () => context.update(current => ({ ...current, placements: [...current.placements.slice(0,index),node,...current.placements.slice(index)], links: [...(current.links ?? []),...links.filter(l => [l.from,l.to].every(n => n === id || current.placements.some(p => p.id === n)))] })));
+  };
+  const write = (key: WorksheetField, value: string) => context.update(current => setWorksheetValue(current,board.id,key,value));
+  return <div className="flex h-full min-h-0 flex-col bg-background" aria-label="研究方案填写页">
+    <header className="flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-3">
       <Button size="sm" variant="ghost" onClick={() => { context.setSidebarTab('boards'); context.showSidebar(); }}><ArrowLeft />构思列表</Button>
-      <div className="min-w-[120px] flex-1"><div className="flex items-center gap-1"><h1 className="truncate text-sm font-semibold" title={board.title}>{board.title}</h1><Button size="icon-sm" variant="ghost" aria-label="编辑构思名称与说明" onClick={() => setEditing(true)}><Pencil className="size-3" /></Button></div>{board.description && <p className="truncate text-xs text-muted-foreground" title={board.description}>{board.description}</p>}</div>
-      <div className="flex items-center gap-2"><span className="text-xs text-muted-foreground" role="status">{saving ? '保存中…' : dirty ? '未保存' : '已保存到本地'}</span><Button size="sm" variant="outline" disabled={!dirty || saving} onClick={() => void save()}>保存</Button></div>
+      <h1 className="min-w-0 flex-1 truncate text-sm font-semibold" title={board.title}>{board.title}</h1><Button size="icon-sm" variant="ghost" aria-label="编辑构思名称" onClick={() => setEditing(true)}><Pencil /></Button>
+      <span role="status" className="w-24 text-right text-xs text-muted-foreground">{context.saving ? '保存中…' : context.dirty ? '未保存' : '已保存到本地'}</span>
+      <Button size="sm" variant="outline" disabled={!context.dirty || context.saving} onClick={() => void context.save()}>保存</Button>
+      <Button size="sm" disabled={!goal.trim() || !selected.length || busy} onClick={() => setPlanning(true)}>开始研究</Button>
     </header>
-    <div className="flex shrink-0 flex-wrap items-center gap-1 border-b px-3 py-1.5"><Button size="sm" variant="outline" onClick={() => selectSlot(null)}>浏览卡片</Button><Button size="sm" variant="ghost" onClick={() => { selectSlot('problem'); context.requestCard('problem'); }}><Plus />研究问题</Button><Button size="sm" variant="outline" disabled={!nodes.length} onClick={() => setPlanning(true)}>评价并生成方案</Button><span className="ml-auto text-xs text-muted-foreground">{nodes.length} 张卡片 · {links.length} 条关系</span></div>
-    {(error || canvasError) && <div role="alert" className="shrink-0 border-b px-3 py-2 text-xs text-destructive">{error ? `保存失败：${error}。修改仍在当前页面，请重试保存。` : canvasError}</div>}
-    {undo && <div role="status" className="flex shrink-0 items-center gap-2 border-b px-3 py-1 text-xs">已移除{undo.nodes.length ? '卡片及相关连线' : '关系'}<Button size="sm" variant="ghost" onClick={() => {
-      update(current => { const ids = new Set([...current.placements.map(p => p.id), ...undo.nodes.map(p => p.id)]); return { ...current, placements: [...current.placements, ...undo.nodes], links: [...(current.links ?? []), ...undo.links.filter(link => ids.has(link.from) && ids.has(link.to))] }; }); setUndo(null);
-    }}>撤销移除</Button><Button size="sm" variant="ghost" onClick={() => setUndo(null)}>关闭提示</Button></div>}
-    <div className="relative flex min-h-0 flex-1">
-      <IdeationCanvas onCanvasWidth={context.setCanvasWidth} workspaceRoot={root} boardId={board.id} branchSourceId={context.branchSourceId} showBranchPopover={choosingBranch && !inspecting && !connecting} onRequestBranch={id => { context.requestBranch(id); setChoosingBranch(false); }} onOpenBranches={id => selectNode(id, false)} routes={context.layoutRoutes} layoutVersion={context.layoutVersion} onArrange={context.arrange} nodes={nodes} links={links} slots={slots} activeSlot={context.branchTarget} onSelectSlot={context.selectBranchTarget} onCreateProblem={() => { selectSlot('problem'); context.requestCard('problem'); }} viewport={board.viewport} selectedNodeId={selectedNodeId} selectedLinkId={selectedLinkId} connecting={connecting}
-        onSelectNode={selectNode} onRemoveNode={removeNode} onEditNode={id => { selectNode(id, false); setInspecting(true); }} onSelectLink={selectLink} onConnect={id => { if (connecting) connect(connecting, id); else { setConnecting(id); clearSelection(); } }} onCancelConnect={() => setConnecting(null)}
-        onMove={(id, x, y) => update(current => ({ ...current, placements: current.placements.map(p => p.id === id && !p.locked ? { ...p, x, y, slot: undefined } : p) }))}
-        onViewport={viewport => context.editBoard(board.id, { viewport })} onDropCard={drop} onBrowse={selectSlot} onClearSelection={clearSelection} />
-      {(selectedLink || (previewCard && (inspecting || context.selectionSource === 'library'))) && <IdeationInspector key={selectedLink?.id ?? selectedNode?.id ?? previewCard?.id} root={root} node={selectedNode} card={previewCard} link={selectedLink} nodes={nodes} onClose={() => { setInspecting(false); if (!selectedNode) { setSelectedLinkId(null); setSelectedCardId(null); } }} onRemoveNode={removeNode} onRemoveLink={removeLink} onBranch={branch} onOpenEntry={onOpenEntry} onOpenSource={onOpenSource} />}
+    <div className="min-h-0 flex-1 overflow-y-auto" aria-label="研究内容">
+      <div className="mx-auto max-w-[1064px] space-y-8 px-5 py-6">
+        <p className="text-sm text-muted-foreground">先描述问题，再选择方法。AI 帮你找可配合的方法、整理方案；无需连线。</p>
+        {context.error && <p role="alert" className="text-sm text-destructive">保存失败：{context.error}。内容仍保留，请点击保存重试。</p>}
+        {undo && <div className="flex items-center gap-2 text-sm" role="status">已更新本构思，可撤销此次操作<Button size="sm" variant="outline" onClick={() => { undo(); setUndo(null); }}>撤销</Button></div>}
+        {worksheetSections.map(field => <WorksheetCardSection key={field.key} boardId={board.id} section={field.key}
+          nodes={nodes.filter(n => n.card.body.trim() && sectionForNode(n) === field.key)} active={context.worksheetSection === field.key}
+          onChoose={()=>context.requestWorksheetCards(field.key)} onDescribe={()=>setLocalCard({field:field.key})}
+          onView={node=>setDetail(node.card)} onEdit={node=>setLocalCard({field:field.key,nodeId:node.id,title:node.card.title,body:node.card.body})}
+          onRemove={remove} onReorder={(source,target,after)=>context.update(current=>reorderWorksheetCards(current,field.key,source,target,after))} />)}
+        <section aria-label="研究思路草稿" className="space-y-4">
+          <div className="flex flex-wrap items-center gap-3"><h2 className="mr-auto text-sm font-semibold">研究思路草稿</h2><Button size="sm" variant="outline" disabled={busy||!goal.trim()||!methods.length} onClick={()=>void run()}>整理研究思路</Button></div>
+          <p className="text-xs leading-5 text-muted-foreground">AI 根据上面的背景、问题和方法顺序整理思路。这是生成结果，不需要再添加一类素材。</p>
+          {busy&&<div role="status" className="flex items-center gap-2 text-sm">正在整理研究思路…<Button size="sm" variant="outline" onClick={()=>{controller.current?.abort();setBusy(false);setNotice('已停止，可以重新整理。');}}>停止</Button></div>}
+          {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}{notice&&<p role="status" className="text-xs text-muted-foreground">{notice}</p>}
+          {advice?.plan&&<div className="space-y-3 rounded-lg border bg-card p-4"><h3 className="text-sm font-medium">新建议 · 尚未采用</h3><SourceSnapshotPreview markdown={advice.plan} normalization="none" /><Button size="sm" onClick={()=>{const old=values.composition;write('composition',advice.plan);setUndo(()=>()=>write('composition',old));}}>采用研究思路</Button></div>}
+          {nodes.filter(n=>sectionForNode(n)==='composition'&&n.card.body.trim()).map(node=><div key={node.id} className="space-y-3 rounded-lg border bg-card p-4"><div className="flex items-center gap-2"><h3 className="mr-auto text-sm font-medium">{node.card.title}</h3>{node.card_id.startsWith('local-idea-')&&<Button size="sm" variant="outline" onClick={()=>setLocalCard({field:'composition',nodeId:node.id,title:node.card.title,body:node.card.body})}>修改草稿</Button>}<Button size="sm" variant="ghost" onClick={()=>remove(node.id)}>移除</Button></div><SourceSnapshotPreview markdown={node.card.body} normalization="none" /></div>)}
+        </section>
+      </div>
     </div>
-    {planning && <ResearchPlanDialog root={root} onClose={() => setPlanning(false)} />}
+    {localCard && <LocalIdeaEditor maxLength={localCard.field === 'composition' ? 12000 : 6000} title={localCard.title} body={localCard.body} onClose={() => setLocalCard(null)} onSave={(title,body) => {
+      if (localCard.nodeId) context.update(current => ({ ...current, placements: current.placements.map(n => n.id === localCard.nodeId ? {...n,title,body} : n) }));
+      else placeCard(context.update,{id:`local-idea-${crypto.randomUUID()}`,entry_id:'ideation-user',kind:worksheetFields.find(f => f.key === localCard.field)!.kind,title,body},0,0);
+      setLocalCard(null);
+    }} />}
     {editing && <IdeationBoardDialog board={board} onClose={() => setEditing(false)} />}
+    {planning && <ResearchPlanDialog root={root} onClose={() => setPlanning(false)} worksheet={{ goal, state: worksheetReportState(state), background: sectionText('background'), constraints: '' }} />}
+    {detail && <Dialog open onOpenChange={open => { if (!open) { setDetail(null); context.setSelectedCardId(null); } }}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>{detail.title}</DialogTitle><DialogDescription>卡片详情 · {entries.find(e => e.id === detail.entry_id)?.title ?? '本构思或个人内容'}</DialogDescription></DialogHeader><DialogBody><SourceSnapshotPreview markdown={detail.body} normalization="none" />{entries.some(e => e.id === detail.entry_id) && <Button variant="outline" onClick={() => onOpenEntry(detail.entry_id)}>查看来源论文</Button>}</DialogBody></DialogContent></Dialog>}
+
   </div>;
 }

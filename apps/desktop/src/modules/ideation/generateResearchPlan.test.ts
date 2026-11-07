@@ -10,6 +10,8 @@ beforeEach(() => { vi.resetAllMocks(); mocks.settings.mockResolvedValue({ assist
 it('passes the chosen graph and verified source text using the assistant settings', async () => {
   const result = await generateResearchPlan('root', input(), new AbortController().signal);
   expect(result.plan.verdict).toBe('conditional');
+  expect(mocks.run).toHaveBeenCalledTimes(3);
+  expect(JSON.parse(mocks.run.mock.calls[2][0].prompt).previous).toHaveLength(2);
   const prompt = JSON.parse(mocks.run.mock.calls[0][0].prompt);
   expect(prompt.input.cards).toHaveLength(2); expect(prompt.input.links).toHaveLength(1);
   expect(prompt.evidence[0].text).toBe('原文内容');

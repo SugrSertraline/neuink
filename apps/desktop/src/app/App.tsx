@@ -1891,6 +1891,11 @@ export function App() {
         onOpenChange={setSearchDialogOpen}
         onOpenResult={openSearchResult}
         onOpenSetting={openSetting}
+        onOpenIdeation={() => {
+          if (!workspace.root || workspace.status !== 'ready') return false;
+          if (!openWorkspaceSurface({ kind: 'ideation' })) return false;
+          setSidePanel('ideation'); setSidebarOpen(true); return true;
+        }}
       />
       <LibrarySourceReviewDialog open={sourceReviewOpen} onOpenChange={setSourceReviewOpen} sync={librarySourceSync} entries={entries}
         onOpenEntry={openEntryTab}
@@ -1946,7 +1951,7 @@ export function App() {
         workspace.tags, entries, trashedEntries, markdownNoteRefreshById
       )}>
       <DailyProvider key={workspace.root} root={workspace.root} openNote={(target, title) => openWorkspaceSurface(noteSurface(target, title))} openSource={openMarkdownSourceLink}>
-      <IdeationProvider root={workspace.root} entries={entries} libraryReady={workspace.status === 'ready'} onShowSidebar={() => { setSidePanel('ideation'); setSidebarOpen(true); }}>
+      <IdeationProvider onOpenWorkspace={() => openWorkspaceSurface({ kind: 'ideation' })} root={workspace.root} entries={entries} libraryReady={workspace.status === 'ready'} onShowSidebar={() => { setSidePanel('ideation'); setSidebarOpen(true); }}>
       <main
         data-guide="reader-workspace"
         ref={observeSidebarContainer}
@@ -1997,17 +2002,13 @@ export function App() {
           onSelect={(pane, surface) => openWorkspaceSurface(surface, pane)}
         />
         <ActivityNavigation focusedKind={focusedSurface.kind} activePanel={activeActivityPanel} noteDetails={Boolean(sidebarNote)}
-          onOpenIdeation={() => {
-            if (focusedSurface.kind === 'ideation' && sidebarOpen && sidePanel === 'ideation') { setSidebarOpen(false); return; }
-            if (openWorkspaceSurface({ kind: 'ideation' })) { setSidePanel('ideation'); setSidebarOpen(true); }
-          }}
           onOpenPage={openActivityPage}
           onOpenRight={page => openActivityPage(page, 'right')}
           onSelectTool={selectSidePanel}
           onCloseSidebar={() => setSidebarOpen(false)} />
         <WorkspaceSidebar open={sidebarOpen}>
         <SidebarPanelSlot active={sidebarOpen && sidePanel === 'ideation'}>
-          {workspace.root && <IdeationSidebar key={workspace.root} root={workspace.root} entries={entries} onOpenEntry={openEntryTab} onOpenSource={openMarkdownSourceLink} />}
+          {workspace.root && <IdeationSidebar key={workspace.root} root={workspace.root} entries={entries} onOpenEntry={openEntryTab} onOpenCards={id => openEntryContentTab(id, 'paper-cards')} onOpenSource={openMarkdownSourceLink} />}
         </SidebarPanelSlot>
         <SidebarPanelSlot active={sidebarOpen && sidePanel === 'daily-dashboard'}><DailySidebar
           active={sidebarOpen && sidePanel === 'daily-dashboard'} entries={entries} status={workspace.status}
@@ -2109,6 +2110,11 @@ export function App() {
             status={workspace.status}
             onOpenResult={openSearchResult}
         onOpenSetting={openSetting}
+        onOpenIdeation={() => {
+          if (!workspace.root || workspace.status !== 'ready') return false;
+          if (!openWorkspaceSurface({ kind: 'ideation' })) return false;
+          setSidePanel('ideation'); setSidebarOpen(true); return true;
+        }}
           />
         ) : null}
         <SidebarPanelSlot active={sidebarOpen && sidePanel === 'same-tag'}>

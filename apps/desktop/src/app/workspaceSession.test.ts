@@ -106,3 +106,11 @@ it('restores a paper card tab in the correct pane', () => {
   saveWorkspaceSession('cards', value);
   expect(readWorkspaceSession('cards', catalog)).toEqual(value);
 });
+
+it('does not restore the hidden experimental workspace, but keeps paper reading tabs', () => {
+  const value = workspaceSurfaceReducer(layout(), { type: 'open', surface: { kind: 'ideation' } });
+  saveWorkspaceSession('a', value);
+  const restored = readWorkspaceSession('a', catalog);
+  expect([...restored.leftTabs, ...restored.rightTabs].some(tab => tab.kind === 'ideation')).toBe(false);
+  expect([...restored.leftTabs, ...restored.rightTabs].some(tab => tab.kind === 'pdf')).toBe(true);
+});
