@@ -4,79 +4,37 @@
 
 <h1 align="center">Neuink</h1>
 
-## Current branch: beta — everyday development and integration
+## Continue from your Zotero library
 
-`beta` includes the synchronized paper-card workflow. Per-paper cards stay visible; experimental ideation is hidden from navigation and opens only through `/inspiration` in search. Exploration continues on `alpha`; official releases still come from `main`.
+Neuink is a local-first workspace for paper reading and evidence-linked notes. Connect existing papers, read PDF or reflowed content, translate, retain sources and use your own model for research assistance.
 
-| Branch | Purpose |
+**Updated 2026-11-07: the following capabilities are integrated in beta.** Public downloads follow [Releases](https://github.com/SugrSertraline/neuink/releases); beta source features are not a claim that a new installer has shipped.
+
+| Workflow | Current beta capability |
 | --- | --- |
-| [main](https://github.com/SugrSertraline/neuink/tree/main) | Approved releases; the public website and download packages are published from here. |
-| [beta](https://github.com/SugrSertraline/neuink/tree/beta) | Everyday development and integration validation. |
-| [alpha](https://github.com/SugrSertraline/neuink/tree/alpha) | Exploratory features such as research cards and ideation; reviewed changes can move into beta individually. |
+| Zotero sources | Connect a local data directory, browse source entries, review changes and explicitly import independent copies. |
+| Zotero notes | Select notes to import, compare original and local changes, save locally or explicitly confirm source replacement. |
+| Reading | PDF/reflow, paragraph detail levels, bilingual reading and per-behavior translation routing. |
+| Paper cards | Generate on request, review and edit abstractions with paper examples and source evidence. |
+| Assistant | Context usage, manual/automatic compaction, cross-turn tool results and an ordered execution timeline. |
+| arXiv | Structured discovery, paged candidates and downloads only after user approval. |
+| MinerU PDFs | Pair parsed output with an original PDF or replace a verified reading PDF while retaining parsed content and reading work. |
 
-The synchronized features include manually generated and reviewed paper cards, a three-section research worksheet (background, questions and method steps), private idea content, model recommendations and report drafts. Reports become local entries only after explicit confirmation. Legacy canvas data remains compatible, but the current workflow does not require manual connections. Native visuals and real-model output quality still need separate acceptance testing.
+### Zotero workflow and boundaries
 
-The [isolated interaction preview](apps/desktop/ideation-showcase.html) uses sample data and mocked IPC. It does not read real papers or call models, and does not establish that the native app or real model integrations have passed acceptance testing.
+1. Enable a local Zotero data directory in settings; papers can remain organized in Zotero.
+2. Browse source entries and explicitly import independent copies when needed. Local edits do not automatically alter Zotero.
+3. Import selected notes while retaining their source association.
+4. Compare source, local content and differences before choosing local save or confirmed source replacement.
+5. Recheck version or permission errors; local-save and writeback outcomes are reported separately.
 
-Bundled research-inspiration references retain the [Microsoft ResearchStudio attribution](apps/desktop/src/modules/ideation/patterns/researchstudio/README.md) and [MIT license](apps/desktop/src/modules/ideation/patterns/researchstudio/LICENSE). These patterns are inspiration, not factual claims about a user's papers.
+Local saves do not require Zotero to run. Writeback currently requires **Zotero 10 or later running with local access allowed**. Image-containing notes cannot be written back directly. Disabling a source hides its entries without deleting originals or imported copies. This is local integration and controlled writeback, not cloud synchronization or unrestricted rich-text round trips.
 
-### Cards, boards and relationships
+[Zotero guide (Chinese)](https://sugrsertraline.github.io/neuink/zotero.html) · [Beta updates and limits](https://sugrsertraline.github.io/neuink/updates.html)
 
-| Object | Purpose | How to assess it |
-| --- | --- | --- |
-| Paper card | Capture a paper's background, problem, method, component, assumptions, constraints, results or limitations. | Follow available source evidence back to the paper; unsupported content still needs review. |
-| Personal card | Record your own research question, explanation or proposed direction. | Maintained by the user, not automatically a claim made by the paper. |
-| Inspiration-pattern card | Suggest methods and combinations for developing ideas. | Keep reference patterns distinct from facts about your materials and retain their attribution. |
-| Ideation board | Place selected cards into a research-question workspace and retain its layout and viewport. | Manage multiple ideas independently and reuse materials across questions. |
-| Link or branch | Express a relationship, possible next step or connection requiring validation. | Distinguish user-created links from model suggestions; a link alone does not establish causality or novelty. |
+Paper cards remain visible. Experimental ideation opens only by entering `/inspiration` in search; background, questions and method steps accept cards or private descriptions. Recommendations require adoption and reports require explicit saving. It does not execute experiments.
 
-### From papers to an idea discussion
-
-1. Generate and review cards under a paper’s Reading Content → Paper Cards page.
-2. Enter `/inspiration` in search and select Open Research Ideation or press Enter.
-3. Add cards to background, questions and method steps. Dashed placeholders open recommendations and the full library; Describe creates content private to the current idea.
-4. Reorder within sections; method order is sent to the model. Recommendations require explicit adoption.
-5. Compose an outline or start research. Shared tasks show actual stages and support stopping and retrying.
-6. Review the report and explicitly save it to create a local report entry. Generation alone does not create entries or execute experiments.
-
-### What requires a model
-
-Browsing saved cards, creating boards, manual editing, dragging, linking, zooming and saving layouts do not require generation. Paper-card extraction and research-plan evaluation use the selected assistant model, which receives the relevant paper or idea context. Generated drafts require review; having a draft does not mean it has been accepted into the board.
-
-This branch does not promise automatic judgments of academic novelty, proof of research claims or execution of experiments. Evidence links support checking rather than replacing source reading. Model drafts, personal ideas and reference patterns have different origins and should be assessed accordingly.
-
-### Managing paper cards
-
-Open Reading Content → Paper Cards to view independent cards for one paper. Create, search, filter by type, inspect, edit or delete individual cards. Faces emphasize abstractions; details retain paper examples and sources. Deletion confirms the affected canvas-node count before removing that card and its references. Other cards and papers remain, and local canvas overrides are not overwritten by library edits. An empty draft retains its processing record to prevent automatic regeneration after deleting the last card.
-
-### Templates and processing limits
-
-Method/component cards now lead with a reusable abstract mechanism and place paper-specific implementations in a separate example field. Abstraction is not evidence of transferability; existing drafts require explicit regeneration. Card templates distinguish background/problems, method/component interfaces, constraints/assumptions, measured results, limitations and personal hypotheses. Missing paper facts remain explicitly unspecified. Manual template insertion never replaces existing card text; older cards remain editable.
-
-Parsed paper text is processed in source-preserving batches rather than sampled from the beginning and end. Personal annotations are excluded. Manual and background extraction show batch progress and use the configured assistant connection, context and generation settings. Successful batches survive individual format failures; authentication failure or cancellation ends the task. Exact duplicates merge their sources. Limits are 100 batches, 300 cards, 600 relations and a 10 MB draft file. Reaching the card limit marks partial coverage. Cross-batch relationships, automatic semantic deduplication and checkpoint resume are not implemented; rerunning extraction makes new model requests and may incur costs. Old partial drafts are not automatically completed.
-
-Evaluation accepts 1–40 selected cards, checks at most 80 distinct source segments and supplies up to 2400 characters per verified segment. Changed or unavailable sources are labeled accordingly. A real source marker does not prove a generated interpretation. User links and inspiration patterns are hypotheses, not paper evidence.
-
-Results remain temporary until explicitly saved as an AI draft card, with input snapshots. Oversized reports require fewer selected cards. Failed saves preserve the current card and retries do not insert duplicates. Closing an unsaved preview discards that temporary result. No web novelty search, experiment execution or unsupported success probability is provided. Native Tauri visuals and real-provider output quality require separate acceptance testing.
-
-### Local interaction preview
-
-From a checkout containing these changes, after safely preserving previous working-tree edits, install dependencies and start the frontend:
-
-```powershell
-npm ci
-npm --workspace apps/desktop run dev:frontend
-```
-
-Open `/ideation-showcase.html` under the address printed by the development server; the default is `http://127.0.0.1:1420/ideation-showcase.html`. The preview uses synthetic papers, cards and mocked IPC to exercise the canvas and sidebar. It does not connect to a real workspace or call models, and its sample state is not persistent research output.
-
-Real persistence and source access require the native application. The workspace module stores ideation state and per-paper card drafts, while boards retain independent layouts. Prior browser checks and automated tests do not establish completed native Tauri or real-model acceptance testing.
-
-### How exploration reaches a release
-
-Exploratory features evolve on alpha, enter beta after code and interaction review, and reach users through an approved main release. Alpha retains the card feature without automatically importing every beta reading-detail or source-management change. When reporting an issue, include the branch, commit, reproduction steps, and whether it occurred in the isolated preview or native app.
-
----
+PDF replacement has runtime rollback but no crash/power-loss recovery journal; this beta limitation was explicitly accepted. The integrated version passed 4,182 frontend and 670 backend tests, type checking and frontend production build; opt-in acceptance tests were skipped. Real-model and native visual acceptance were not completed in this integration pass.
 
 <p align="center">
   <strong><a href="https://sugrsertraline.github.io/neuink/">Explore Neuink — Product Website →</a></strong><br>
@@ -427,36 +385,3 @@ Reading detail adapts the paragraph prompt and assembly, source-word alignment a
 Translation settings provide one **Default translation source** selector for dedicated translation services and saved LLM connections. Each behavior can follow this default or keep its own override. Changing the default does not overwrite explicit choices or existing translations; legacy settings preserve their previous sources.
 
 Translation requests normalize PDF selection line wraps locally without changing annotations. Dedicated services keep superscripts, formula and code markers locally; individual request failures remain attached to their segments and do not stop the remaining work. PDF hover settings nest paragraph/sentence choices under source and translation visibility, with explicit paragraph fallback notices. Library headers cycle ascending, descending, then the current view default.
-
-Research cards are generated only on explicit user action. Opening the library never generates cards or retries old failures. AI cards require confirmation before canvas placement or research-plan generation. Review actions open the source paper’s card-management page.
-
-The research dialog accepts optional background, available inputs, and expected outputs, including reviews and analysis reports. Generated reports can be reviewed and edited before explicit confirmation creates a local entry. Closing discards unsaved dialog drafts; generation alone does not create an entry.
-
-The canvas can suggest relationships using the configured assistant model. Proposed links remain transient dashed previews until explicit acceptance, with editable types, reasoning, and conditions. Existing links are preserved. Research on an unconnected multi-card board offers this step but can proceed without it. Wheel zoom is centered on the pointer.
-
-### Alpha: sparse research relationships
-
-Relationship suggestions prioritize the background, core question, main method and validation plan. Evidence, constraints and alternatives are not connected by default; composition details remain in card content and suggestion rationale. No composite cards are created automatically. AI additions count existing links against a budget of at most eight links and one fewer than the non-constraint card count, and avoid cycles. Modifications and deletions require individual confirmation. Manual links retain custom descriptions, bidirectional arrows and no-arrow connections, including feedback loops when needed. This conservative default is not a restriction on research structure.
-
-### Alpha: method-guided research worksheet
-
-The default ideation page now contains background, question, methods, requirements and a composition plan. Users add cards with buttons rather than arranging a canvas. Existing cards and historical links remain stored, but worksheet reports exclude old graph links.
-
-Adding a method requests up to three recommendations from the configured assistant model, restricted to confirmed library methods/components and manual methods. Recommendations distinguish complements from alternatives and explain fit, integration and conditions. Adding recommendations and adopting composition drafts require explicit actions. No historical co-use statistics, vector ranking or verified compatibility is claimed. Requests include at most 120 candidates with 2,000-character excerpts; limited scope and context-budget errors are surfaced.
-
-Worksheet fields and adopted plans use existing autosave; unaccepted suggestions remain session-local. Input changes invalidate pending results, and leaving or stopping cancels requests. Reports still require confirmation before creating a local entry. Automated tests validate state and request behavior; live-model recommendation quality and native visual acceptance remain to be assessed.
-
-All five worksheet sections accept multiple cards, either from the sidebar or as private descriptions belonging to the current idea. Cards normally fit three per row and wrap on narrower pages. Method steps have explicit numbering and move-earlier/later controls. Their persisted order is sent to recommendation and report generation as a proposed sequence, not verified compatibility. Reordering invalidates previous suggestions without triggering another model request.
-
-### Current Alpha: three research-material sections
-
-The worksheet now has Background, Research questions, and Method steps. Constraints, inputs/outputs and existing findings belong to Background; historical composition content remains under the research-thinking draft. Each section has a Describe action for private cards and a white, dashed empty slot that opens matching AI recommendations at the top of the sidebar, with all cards and manual filters below. Placement roles preserve the source card's original type and content.
-
-Drag cards by their handles within a section, or use earlier/later buttons and handle arrow keys. Only a completed drop saves the order; Escape and focus loss cancel. Method numbering and order are supplied to the model, while other ordering indicates display priority. Reordering does not trigger model calls. Recommendations are snapshot-bound, cancellable and limited to confirmed candidates; all library cards remain available when recommendation fails. Native desktop visual/drag acceptance and live-model quality evaluation remain outstanding.
-
-Research card recommendations, composition and report generation now use the shared task list and notifications, with actual stage messages, cancellation and completion/failure feedback. Retrying replaces previous terminal notifications of the same kind. Composition only reads selected cards; reports remain drafts until explicitly saved. All 171 relevant tests and type checking pass. Isolated browser checks cover core interactions and three viewport widths; native Tauri visuals and real-model output quality have not been validated in this pass.
-
-
-### Experimental entry point
-
-Per-paper AI cards remain available in reading content and are generated only on request. The ideation navigation entry is hidden. Type `/inspiration` in global or sidebar search, then select the result or press Enter to open the workspace. A ready library is required; the command does not run AI. Experimental tabs and the sidebar do not reopen on restart; saved cards and ideas are preserved.
