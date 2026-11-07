@@ -1,3 +1,4 @@
+import { arxivGateMessage } from '@/shared/lib/arxivGateStatus';
 import type { BrowserTabTarget } from '@/shared/ipc/browserApi';
 import { jsonSchema, tool, type JSONSchema7, type ToolSet } from 'ai';
 import { AgentLocalLimitError, AgentStoppedError } from '../agent-core/agent';
@@ -6,6 +7,7 @@ import { createBrowserTabTool } from './browserTabTool';
 import { buildDiagramArtifact } from './diagramArtifact';
 import { PDF_TOOL_NAMES } from './pdfTools';
 import { assertResearchRetry } from './researchRecovery';
+import { bindPaperSelections, resolvePaperSelections } from '../research/researchPaperSelection';
 import { loadAssistantToolCatalog } from './toolCatalog';
 import {
   safeToolErrorEvent,
@@ -94,7 +96,7 @@ import { resolveModelProfile } from './modelTasks';
 
 const SUPPORTED_TOOL_NAMES = new Set([
   ...PDF_TOOL_NAMES,
-  'search_papers', 'search_web', 'read_webpage', 'import_papers',
+  'search_papers', 'arxiv_search', 'search_web', 'read_webpage', 'import_papers',
   'search_segments',
   'read_segment_content',
   'read_entry_assistant_context',
@@ -494,6 +496,8 @@ export async function createAssistantTools({
           observations.push({ output: output.modelOutput, toolName });
           if (isAgentToolFailure(output.modelOutput)) {
             if (fingerprint) loopGuard?.recordFailure(fingerprint);
+            if (output.modelOutput.arxivGate) emit({id:toolCallId,toolName,status:'error',
+              arxivGate:output.modelOutput.arxivGate,error:arxivGateMessage(output.modelOutput.arxivGate)});
             return output.modelOutput;
           }
           loopGuard?.recordSuccess(output.modelOutput);
@@ -503,6 +507,9 @@ export async function createAssistantTools({
             input: publicInput(normalizedInput),
             sources: output.sources,
             researchPapers: 'researchPapers' in output ? output.researchPapers : undefined,
+            researchSearch: 'researchSearch' in output ? output.researchSearch : undefined,
+            researchCacheSource: 'researchCacheSource' in output ? output.researchCacheSource : undefined,
+            arxivGate: 'arxivGate' in output ? output.arxivGate : undefined,
             status: 'done',
             summary: output.summary,
             toolName
@@ -879,6 +886,7 @@ export async function createAssistantTools({
   }
   const toolNames = Object.keys(tools);
   trackToolFailures(tools, emit, abortSignal);
+  if (tools.import_papers) bindPaperSelections(tools.import_papers, input => resolvePaperSelections(events, input));
   const identityToolNames = restoredState?.toolNames ? [...restoredState.toolNames] : toolNames;
   return {
     availabilityNotes,

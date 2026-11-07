@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { safeAssistantReadFailure } from './assistantReadFailure';
+import { safeArxivGateMessage } from './arxivGateStatus';
 import { safeAssistantModelError } from './assistantModelErrors';
 
 export const ASSISTANT_DEBUG_STORAGE_KEY = 'neuink.assistant.debug';
@@ -97,7 +98,7 @@ export function formatAssistantError(error: unknown, options: { debug?: boolean;
   // Once processing has ended, a fixed host-classified read failure is actionable without
   // exposing debug data or falsely warning that a read may have changed user content.
   const message = fallback === ASSISTANT_TOOL_PENDING || fallback === ASSISTANT_TOOL_STOPPED
-    ? fallback : safeAssistantReadFailure(error) ?? safeLocalAgentError(error) ?? safeAssistantModelError(error) ?? fallback;
+    ? fallback : safeArxivGateMessage(error) ?? safeAssistantReadFailure(error) ?? safeLocalAgentError(error) ?? safeAssistantModelError(error) ?? fallback;
   return options.debug ? `${message} 调试：${assistantErrorDiagnostic(error)}` : message;
 }
 

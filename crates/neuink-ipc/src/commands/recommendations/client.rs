@@ -21,12 +21,17 @@ const REQUIREMENTS: &str =
 pub struct FetchError {
     pub message: String,
     pub retry_after_seconds: i64,
+    pub gate: Option<super::super::research::arxiv_gate::GateError>,
 }
 impl From<String> for FetchError {
     fn from(message: String) -> Self {
+        if let Some(error)=super::super::research::arxiv_gate::from_wire(&message) {
+            return Self {message:error.message(),retry_after_seconds:error.retry_after_seconds.unwrap_or(60) as i64,gate:Some(error)};
+        }
         Self {
             message,
             retry_after_seconds: 60,
+            gate: None,
         }
     }
 }
@@ -87,7 +92,8 @@ async fn invoke(python: &Path, script: &Path, payload: Value) -> Result<Value, S
         .await
         .map_err(|_| "检索请求发送失败")?;
     let mut reader = BufReader::new(child.stdout.take().ok_or("检索输出不可用")?);
-    let result = tokio::time::timeout(Duration::from_secs(120), async {
+    let watchdog = if payload.get("gate_url").is_some() { 122 } else { 120 };
+    let result = tokio::time::timeout(Duration::from_secs(watchdog), async {
         let mut buffer = Vec::new();
         let line = read_line(&mut reader, &mut buffer)
             .await
@@ -105,7 +111,13 @@ async fn invoke(python: &Path, script: &Path, payload: Value) -> Result<Value, S
         Ok(value)
     })
     .await
-    .unwrap_or_else(|_| Err("arXiv 连接超时，请稍后重试".into()));
+    .unwrap_or_else(|_| {
+        if payload.get("gate_url").is_some() {
+            let mut error=super::super::research::arxiv_gate::GateError::new("total_timeout");
+            error.phase="task".into();error.source="recommendations".into();
+            Err(error.wire())
+        } else {Err("arXiv 连接超时，请稍后重试".into())}
+    });
     if result.is_err() {
         let _ = child.kill().await;
     }
@@ -170,9 +182,15 @@ async fn prepare(cache: &Path) -> Result<(PathBuf, PathBuf), String> {
 }
 pub async fn fetch(cache: &Path, query: &str) -> Result<Vec<RecommendedPaper>, FetchError> {
     let (python, script) = prepare(cache).await?;
-    // Coordinate with ordinary assistant/Research arXiv calls, including the client's retry.
-    let _guard = super::super::research::providers::arxiv_request_slot().await;
-    let value = invoke(&python, &script, json!({"query":query})).await?;
+    let context=super::super::research::arxiv_gate::Context::new("recommendations",120);
+    let bridge=super::super::research::arxiv_bridge::Bridge::start(context).await.map_err(|e|e.wire())?;
+    let value = invoke(&python, &script, json!({"query":query,"gate_url":bridge.endpoint,"gate_token":bridge.token})).await?;
+    if let Some(raw)=value.get("gate_error") {
+        if let Ok(error)=serde_json::from_value::<super::super::research::arxiv_gate::GateError>(raw.clone()) {
+            return Err(FetchError { message:error.message(),retry_after_seconds:error.retry_after_seconds.unwrap_or(60) as i64, gate:Some(error) });
+        }
+        return Err("arXiv 门卫返回无效状态".to_string().into());
+    }
     if let Some(code) = value["error"].as_str() {
         let (message, retry_after_seconds) = match code {
             "rate_limited" => ("arXiv 暂时限制请求（HTTP 429），已有推荐已保留。冷却后可重试，恢复时间由 arXiv 决定。".to_string(), value["retry_after_seconds"].as_i64().unwrap_or(300).clamp(60, 86400)),
@@ -184,6 +202,7 @@ pub async fn fetch(cache: &Path, query: &str) -> Result<Vec<RecommendedPaper>, F
         return Err(FetchError {
             message,
             retry_after_seconds,
+            gate: None,
         });
     }
     serde_json::from_value(value["papers"].clone())

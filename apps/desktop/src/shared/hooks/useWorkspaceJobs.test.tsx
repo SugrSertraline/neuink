@@ -121,3 +121,17 @@ it('falls back to the snapshot when event registration rejects without an unhand
   await waitFor(() => expect(view.result.current.jobs).toHaveLength(1));
   view.unmount();
 });
+
+it('shows canonical Windows download jobs from both the snapshot and live events without mixing libraries', async () => {
+  const root = String.raw`E:\NeuInk\data\library`;
+  const nativeRoot = String.raw`\\?\E:\NeuInk\data\library`;
+  vi.mocked(listJobs).mockResolvedValue([
+    job('native-download', 'processing', nativeRoot),
+    job('foreign-download', 'processing', String.raw`\\?\E:\Other\data\library`),
+  ]);
+  const view = renderHook(() => useWorkspaceJobs(root));
+  await waitFor(() => expect(view.result.current.jobs.map(row => row.id)).toEqual(['native-download']));
+  act(() => emit(event(job('native-download', 'succeeded', nativeRoot, '2026-10-03T00:00:03Z'))));
+  expect(view.result.current.jobs[0].status).toBe('succeeded');
+  expect(view.result.current.activeJobs).toHaveLength(0);
+});

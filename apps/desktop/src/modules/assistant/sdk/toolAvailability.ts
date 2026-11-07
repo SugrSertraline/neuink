@@ -2,7 +2,7 @@ import { InvalidToolInputError, NoSuchToolError, type ModelMessage, type ToolSet
 import { isAgentToolFailure } from '../agent-core/toolFailure';
 
 const SEARCH_TOOLS = new Set([
-  'search_sciverse_evidence', 'search_sciverse_metadata', 'search_sciverse_paper_schema', 'search_papers', 'search_web'
+  'search_sciverse_evidence', 'search_sciverse_metadata', 'search_sciverse_paper_schema', 'search_papers', 'arxiv_search', 'search_web'
 ]);
 const MAX_SEARCH_ROUNDS = 6;
 const LOCAL_SEARCH_TOOLS = new Set(['search_segments', 'search_pdf_text']);

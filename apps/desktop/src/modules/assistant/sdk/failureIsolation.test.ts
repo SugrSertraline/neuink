@@ -5,7 +5,7 @@ import { answerWithGroundedAgent } from './qna';
 import { createAssistantTools } from './tools';
 import { DEFAULT_AGENT_RUNTIME_SETTINGS } from '@/shared/lib/agentRuntimeSettings';
 import { invokeAssistantTool, invokeMcpTool, listTools, listMcpTools, loadPrompt, type LlmProfile } from '@/shared/ipc/assistantApi';
-import { ResearchImportNotApprovedError, runResearchTool, previewResearchImport } from '@/shared/ipc/researchApi';
+import { ResearchImportNotApprovedError, runResearchTool, previewResearchImport, previewSelectedImport } from '@/shared/ipc/researchApi';
 import { requestToolApproval, getToolApprovals } from '../runtime/toolApproval';
 import { saveAgentExecution } from '@/shared/ipc/agentExecutionApi';
 import { DurableExecution } from '../runtime/durableExecution';
@@ -15,7 +15,7 @@ import { AgentPersistenceError, AgentStoppedError, RunBudget, type AgentCheckpoi
 vi.mock('./provider', () => ({ createNeuinkModel: vi.fn(), generationSettings: () => ({}) }));
 vi.mock('@/shared/ipc/assistantApi', async original => ({ ...await original<typeof import('@/shared/ipc/assistantApi')>(),
   listTools: vi.fn(), listMcpTools: vi.fn(), invokeAssistantTool: vi.fn(), invokeMcpTool: vi.fn(), loadPrompt: vi.fn() }));
-vi.mock('@/shared/ipc/researchApi', async original => ({ ...await original<typeof import('@/shared/ipc/researchApi')>(), runResearchTool: vi.fn(), previewResearchImport: vi.fn() }));
+vi.mock('@/shared/ipc/researchApi', async original => ({ ...await original<typeof import('@/shared/ipc/researchApi')>(), runResearchTool: vi.fn(), previewResearchImport: vi.fn(), previewSelectedImport: vi.fn() }));
 vi.mock('@/shared/ipc/agentExecutionApi', () => ({ saveAgentExecution: vi.fn() }));
 const profile = { id: 'test', model: 'test', base_url: 'https://example.invalid', api_key: null } as LlmProfile;
 const scope = { entry_ids: ['entry'], entry_titles: ['Paper'], tag_ids: [], tag_names: [] };
@@ -61,23 +61,30 @@ beforeEach(() => {
   vi.mocked(saveAgentExecution).mockImplementation(async (_, record) => ({ ...record, revision: record.revision + 1 }));
 });
 
+const searchPapersTool = { name: 'search_papers', description: 'Search', parameters_schema: {
+  type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } };
+const importPaper = (id: string, pdf_url: string | null = 'https://example.org/paper.pdf') => ({
+  id, title: id, authors: [], year: '', abstract_text: '', doi: '', url: 'https://example.org/' + id,
+  pdf_url, provider: 'crossref', evidence_level: 'metadata' });
+
 describe('ordinary failures stay inside the tool boundary', () => {
   it('returns missing public PDFs to the model without confirmation, writes or an uncertain outcome', async () => {
-    vi.mocked(listTools).mockResolvedValue([{ name: 'import_papers', description: 'Import', parameters_schema: {
+    vi.mocked(listTools).mockResolvedValue([searchPapersTool, { name: 'import_papers', description: 'Import', parameters_schema: {
       type: 'object', properties: { paper_ids: { type: 'array', items: { type: 'string' } } }, required: ['paper_ids'] } }]);
-    vi.mocked(previewResearchImport).mockResolvedValue([{ id: 'paper-1', title: 'Paper', authors: [], year: '',
-      abstract_text: '', doi: '', url: 'https://example.org/paper', pdf_url: null, provider: 'crossref', evidence_level: 'metadata' }]);
+    vi.mocked(previewSelectedImport).mockResolvedValue([importPaper('paper-1', null)]);
+    vi.mocked(runResearchTool).mockResolvedValue({ papers: [importPaper('paper-1', null)] });
     const input = options();
-    const provider = model([{ call: { name: 'import_papers', args: { paper_ids: ['paper-1'] } } },
-      { text: '这条检索记录没有公开 PDF，未下载。' }]);
+    const provider = model([{ call: { name: 'search_papers', args: { query: 'paper' } } }, { call: { name: 'import_papers', args: { paper_ids: ['paper-1'] } } },
+      { text: '这条检索记录没有公开 PDF，未下载。[记录](https://example.org/paper-1)。' }]);
     const result = await answerWithGroundedAgent({ ...input, requestToolApproval: requestToolApproval('fixture', 'conversation') });
     expect(result.answer).toContain('未下载');
     expect(getToolApprovals()).toHaveLength(0);
-    expect(runResearchTool).not.toHaveBeenCalled();
+    expect(runResearchTool).toHaveBeenCalledOnce();
+    expect(vi.mocked(runResearchTool).mock.calls[0][0]).toBe('search_papers');
     expect(input.budget.writesBlocked).toBe(false);
-    expect(JSON.stringify(provider.doStreamCalls[1].prompt)).toContain('TOOL_NO_PUBLIC_PDF');
-    expect(JSON.stringify(provider.doStreamCalls[1].prompt)).toContain('没有可下载的公开 PDF');
-    expect(JSON.stringify(provider.doStreamCalls[1].prompt)).toContain('必须在面向用户的回复正文中明确提示');
+    expect(JSON.stringify(provider.doStreamCalls[2].prompt)).toContain('TOOL_NO_PUBLIC_PDF');
+    expect(JSON.stringify(provider.doStreamCalls[2].prompt)).toContain('没有可下载的公开 PDF');
+    expect(JSON.stringify(provider.doStreamCalls[2].prompt)).toContain('必须在面向用户的回复正文中明确提示');
     expect(result.agentLoopState?.status).toBe('completed');
   });
   it('lets the model correct a diagram semantic error in a durable run', async () => {
@@ -368,23 +375,23 @@ describe('SDK failure results reach the model through production wiring', () => 
   });
 
   it('keeps partial paper import identities and tells the model not to retry the entire batch', async () => {
-    vi.mocked(listTools).mockResolvedValue([{ name: 'import_papers', description: 'Import', parameters_schema: {
+    vi.mocked(listTools).mockResolvedValue([searchPapersTool, { name: 'import_papers', description: 'Import', parameters_schema: {
       type: 'object', properties: { paper_ids: { type: 'array', items: { type: 'string' } } }, required: ['paper_ids'] } }]);
-    vi.mocked(runResearchTool).mockResolvedValue({ results: [
+    vi.mocked(runResearchTool).mockResolvedValueOnce({ papers: [importPaper('paper-1'), importPaper('paper-2')] }).mockResolvedValueOnce({ results: [
       { id: 'paper-1', entry_id: 'entry-new', status: 'imported' },
       { id: 'paper-2', status: 'failed', error: 'HTTP 404 https://private.invalid/?token=secret-value' }
     ] });
-    const provider = model([{ call: { name: 'import_papers', args: { paper_ids: ['paper-1', 'paper-2'] } } },
-      { text: '一篇已入库，另一篇未完成；请核对资料库。' }]);
+    const provider = model([{ call: { name: 'search_papers', args: { query: 'paper' } } }, { call: { name: 'import_papers', args: { paper_ids: ['paper-1', 'paper-2'] } } },
+      { text: '一篇已入库，另一篇未完成；请核对资料库。[记录](https://example.org/paper-1)。' }]);
     const result = await answerWithGroundedAgent({ ...options(), requestToolApproval: async () => true });
     expect(result.agentLoopState?.status).toBe('completed');
     expect(result.toolEvents).toContainEqual(expect.objectContaining({ toolName: 'import_papers', status: 'error' }));
-    const prompt = JSON.stringify(provider.doStreamCalls[1].prompt);
+    const prompt = JSON.stringify(provider.doStreamCalls[2].prompt);
     expect(prompt).toContain('TOOL_PARTIAL_FAILURE');
     expect(prompt).toContain('entry-new');
     expect(prompt).toContain('不要自动重试整个批次');
     expect(prompt).not.toContain('secret-value');
-    expect(runResearchTool).toHaveBeenCalledOnce();
+    expect(runResearchTool).toHaveBeenCalledTimes(2);
   });
 
   it('marks missing native import consent as not executed and continues with reads', async () => {

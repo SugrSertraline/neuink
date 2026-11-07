@@ -1,8 +1,8 @@
 import { AgentStoppedError, AgentToolNotExecutedError } from '../agent-core/agent';
-import { previewResearchImport, type ResearchPaper } from '@/shared/ipc/researchApi';
+import { previewResearchImport, previewSelectedImport, type PaperSelection, type ResearchPaper } from '@/shared/ipc/researchApi';
 import { allowLocalAgentPermission, hasLocalAgentPermission, localAgentPermission } from '@/shared/lib/localAgentPermissions';
 
-export type ToolApprovalRequest = { toolCallId: string; toolName: string; input: unknown };
+export type ToolApprovalRequest = { toolCallId: string; toolName: string; input: unknown; paperSelections?: PaperSelection[] };
 export type RequestToolApproval = (request: ToolApprovalRequest, signal?: AbortSignal) => Promise<boolean>;
 export type PendingToolApproval = Readonly<ToolApprovalRequest & {
   id: string; root: string; conversationId: string; researchPapers?: ResearchPaper[];
@@ -34,7 +34,10 @@ export function requestToolApproval(root: string, conversationId: string): Reque
       if (!Array.isArray(ids) || !ids.length || !ids.every(id => typeof id === 'string')) {
         throw new AgentToolNotExecutedError(undefined, 'TOOL_INVALID_ARGUMENTS');
       }
-      try { researchPapers = await previewResearchImport(root, ids); }
+      if (frozenRequest.paperSelections && JSON.stringify(ids) !== JSON.stringify(frozenRequest.paperSelections.map(item => item.paperId))) {
+        throw new AgentToolNotExecutedError(undefined, 'TOOL_INVALID_ARGUMENTS');
+      }
+      try { researchPapers = frozenRequest.paperSelections ? await previewSelectedImport(root, frozenRequest.paperSelections) : await previewResearchImport(root, ids); }
       catch {
         signal?.throwIfAborted();
         throw new AgentToolNotExecutedError(undefined, 'TOOL_PREFLIGHT_FAILED');

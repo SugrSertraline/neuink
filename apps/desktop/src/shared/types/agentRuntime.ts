@@ -2,6 +2,7 @@ export type AgentToolId =
   | 'read_pdf_pages'
   | 'search_pdf_text'
   | 'search_papers'
+  | 'arxiv_search'
   | 'search_web'
   | 'read_webpage'
   | 'read_browser_tab'

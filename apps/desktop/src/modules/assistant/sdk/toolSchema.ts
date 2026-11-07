@@ -221,6 +221,8 @@ export function proposalToolDescription(toolName: string) {
 
 export function modelInputSchema(descriptor: AssistantToolDescriptor): JSONSchema7 {
   const schema = cloneJsonSchema(descriptor.parameters_schema);
+  // Keep the model-only discriminated union intact.
+  if (descriptor.name === 'arxiv_search') return schema;
   const objectSchema = schema as JSONSchema7 & {
     properties?: Record<string, JSONSchema7>;
     required?: string[];

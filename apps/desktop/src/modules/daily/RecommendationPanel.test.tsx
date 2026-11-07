@@ -5,7 +5,7 @@ import { DailyProvider } from './DailyContext';
 import { RecommendationPanel } from './RecommendationPanel';
 import { DailyDashboardView } from './DailyDashboard';
 import { formatLocalDate } from '@/modules/reader/components/libraryReading';
-const ipc=vi.hoisted(()=>({invoke:vi.fn()}));vi.mock('@tauri-apps/api/core',()=>({invoke:ipc.invoke}));
+const ipc=vi.hoisted(()=>({invoke:vi.fn()}));vi.mock('@tauri-apps/api/core',async original=>({...await original<typeof import('@tauri-apps/api/core')>(),invoke:ipc.invoke}));
 let generated:number;const today=formatLocalDate(new Date());
 const daily={version:1,widgets:[],lists:[],todos:[],recommendation_preferences:{interests:['diffusion'],exclusions:[],enabled:false}};
 let state:any;

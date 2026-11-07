@@ -1,6 +1,9 @@
 //! Bounded public-network transport. Revalidate and pin DNS on EVERY redirect.
+#[path = "network_status.rs"]
+mod status;
 use reqwest::{redirect::Policy, Client, Url};
 use serde_json::Value;
+pub use status::{get_status, StatusResponse};
 use std::{
     net::{IpAddr, SocketAddr},
     time::Duration,
@@ -109,6 +112,11 @@ async fn client(url: &Url) -> Result<Client, String> {
 
 async fn bounded(response: reqwest::Response, max: usize) -> Result<Vec<u8>, String> {
     bounded_with_body_timeout(response, max, None).await
+}
+
+#[cfg(test)]
+pub(super) async fn download_probe_body(response: reqwest::Response, max: usize) -> Result<Vec<u8>, String> {
+    bounded(response, max).await
 }
 
 async fn bounded_with_body_timeout(
@@ -231,6 +239,30 @@ pub async fn tavily(endpoint: &str, key: &str, body: Value) -> Result<Value, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn step1_arxiv_response_size_boundary_is_explicit_not_truncated() {
+        let max = 2 * 1024 * 1024;
+        for size in [max - 1, max, max + 1] {
+            let response = reqwest::Response::from(
+                tauri::http::Response::builder()
+                    .status(200)
+                    .body(vec![b'x'; size])
+                    .unwrap(),
+            );
+            let result = bounded(response, max).await;
+            println!(
+                "STEP1_JSON {}",
+                serde_json::json!({"case_id":"T-STEP1-RESPONSE-BYTES", "actual":{
+                    "input_bytes":size,"maximum_bytes":max,"returned_bytes":result.as_ref().ok().map(Vec::len),"error":result.as_ref().err()
+                }})
+            );
+            if size <= max {
+                assert_eq!(result.unwrap().len(), size);
+            } else {
+                assert_eq!(result.unwrap_err(), "响应超过大小限制");
+            }
+        }
+    }
     #[tokio::test]
     async fn response_limits_and_errors_do_not_expose_remote_content() {
         let body = reqwest::Body::wrap_stream(futures_util::stream::iter([

@@ -35,6 +35,7 @@ pub mod reading_pdf;
 #[cfg(test)]
 mod reading_pdf_tests;
 pub mod reading_state;
+mod read_only;
 pub mod search;
 pub mod source_availability;
 pub mod source_notes;
@@ -56,6 +57,7 @@ pub use annotation_index::{
 pub use atomic_write::{atomic_write, atomic_write_json};
 pub use error::WorkspaceError;
 pub use layout::WorkspaceLayout;
+pub use read_only::validate_workspace_read_only;
 pub use search::{WorkspaceSearchOptions, WorkspaceSearchRecord, WorkspaceSearchRecordKind};
 pub use trash::{TrashItem, TrashItemKind};
 pub use workspace::{

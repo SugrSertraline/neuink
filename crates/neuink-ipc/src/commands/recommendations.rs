@@ -179,9 +179,9 @@ where
             workspace
                 .update_recommendations(|state| {
                     state.last_error = Some(error.message.clone());
-                    state.retry_after = Some(
+                    state.retry_after = error.gate.as_ref().and_then(|g|g.cooldown_until.clone()).or_else(||Some(
                         (Utc::now() + Duration::seconds(error.retry_after_seconds)).to_rfc3339(),
-                    );
+                    ));
                     Ok(())
                 })
                 .map_err(|e| e.to_string())?;
@@ -269,6 +269,8 @@ fn refresh_delay(
 }
 
 mod client;
+#[cfg(test)]
+pub(super) use client::fetch as acceptance_fetch;
 mod query;
 mod ranking;
 use ranking::{interests, rank};

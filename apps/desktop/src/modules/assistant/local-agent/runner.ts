@@ -36,6 +36,7 @@ import { SourceLedger } from '../runtime/sourceLedger';
 import { createCompiledTaskState, transitionTaskState } from '../runtime/taskState';
 import { finalizeVerifiedProposals } from '../runtime/verifiedProposal';
 import { agentExecutors } from '../sdk/agentDriver';
+import { researchPapersFromEvents } from '../research/researchPaperSelection';
 import { answerVerification } from '../sdk/answerVerification';
 import {
   matchedExternalCitationUrls,
@@ -280,7 +281,8 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
     verifyGroundedProposals({ composerSnapshot:options.composerSnapshot, assistantContext:options.assistantContext,
       contextPlan:options.contextPlan, currentSurface:options.currentSurface, history:options.conversationHistory, proposals, sources });
     const cited = normalizeCitedSources(answer, ledger.sources, events);
-    const records = paperRecords(runtime.events.flatMap(event => event.status === 'done' ? event.researchPapers ?? [] : []), sources);
+    const selectedPapers = researchPapersFromEvents(runtime.events);
+    const records = paperRecords(selectedPapers.map(item => item.paper), sources, selectedPapers);
     const readingNotice = [parsedEntryReadingNotice(runtime.observations), stream.pdfReading.notice()].filter(Boolean).join('\n');
     const grounded: GroundedAnswer = {...cited, localAgentSession:session, plan, entryMetaProposals, tagProposals, answer:[readingNotice,cited.answer].filter(Boolean).join('\n\n'),
       sources:uniqueConversationSources([...cited.sources,

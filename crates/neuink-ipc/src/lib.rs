@@ -2,6 +2,10 @@ pub mod commands;
 pub mod storage;
 pub mod translation_log;
 
+pub fn initialize_arxiv_gate<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    commands::research::arxiv_gate::initialize(app);
+}
+
 pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     let handler: Box<dyn Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync> =
         Box::new(tauri::generate_handler![
@@ -40,6 +44,9 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
             commands::research::cancel_research_call,
             commands::research::preview_research_import,
             commands::research::approve_research_import,
+            commands::research::preview_arxiv_import,
+            commands::research::approve_arxiv_import,
+            commands::research::run_arxiv_import,
             commands::translation::paragraph::read_paragraph_translations,
             commands::sentence_translation::sentence_translation,
             commands::translation::paragraph::translate_paragraph,

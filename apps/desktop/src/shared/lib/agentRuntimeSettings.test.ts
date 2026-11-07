@@ -35,7 +35,7 @@ describe('agent capability policy', () => {
     const old = structuredClone(DEFAULT_AGENT_RUNTIME_SETTINGS); old.capabilityRevision = 2;
     old.mainAssistant.enabledToolIds = old.mainAssistant.enabledToolIds.filter(id => id !== 'read_browser_tab');
     const migrated = normalizeAgentRuntimeSettings(old);
-    expect(migrated.capabilityRevision).toBe(3);
+    expect(migrated.capabilityRevision).toBe(4);
     expect(migrated.mainAssistant.enabledToolIds).toContain('read_browser_tab');
     migrated.mainAssistant.enabledToolIds = migrated.mainAssistant.enabledToolIds.filter(id => id !== 'read_browser_tab');
     expect(normalizeAgentRuntimeSettings(migrated).mainAssistant.enabledToolIds).not.toContain('read_browser_tab');
