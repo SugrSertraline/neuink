@@ -4,9 +4,9 @@
 
 <h1 align="center">Neuink</h1>
 
-## Current branch: alpha — research cards and ideation
+## Current branch: beta — everyday development and integration
 
-`alpha` is Neuink's **public exploration branch**. It preserves the card and research-ideation work previously developed on `demo/ideation-evaluation`, for evaluating new reading, evidence organization and ideation interactions. Features, interfaces and data structures are still evolving; this branch is not a source for official releases.
+`beta` includes the synchronized paper-card workflow. Per-paper cards stay visible; experimental ideation is hidden from navigation and opens only through `/inspiration` in search. Exploration continues on `alpha`; official releases still come from `main`.
 
 | Branch | Purpose |
 | --- | --- |
@@ -14,14 +14,7 @@
 | [beta](https://github.com/SugrSertraline/neuink/tree/beta) | Everyday development and integration validation. |
 | [alpha](https://github.com/SugrSertraline/neuink/tree/alpha) | Exploratory features such as research cards and ideation; reviewed changes can move into beta individually. |
 
-Exploratory features retained in this branch:
-
-- **Paper cards:** organize or generate cards for research background, problems, methods, results, assumptions and limitations, with access to source evidence.
-- **Ideation canvases:** manage multiple research ideas, drag in cards, pan, zoom and arrange nodes, and edit relationships between cards.
-- **Branch exploration:** choose follow-up cards around an existing node, add research questions, and retain the idea's relationships and layout.
-- **Research plans:** select cards and relationships, evaluate compatibility, evidence gaps and risks with the assistant model, then review and explicitly save a technical plan and minimum validation experiments as a card.
-
-“Branch exploration” above refers to paths on the ideation canvas. `alpha` does not automatically merge into `beta` or `main`, and may not contain beta's latest development changes. Official download packages are maintained separately from this exploratory branch.
+The synchronized features include manually generated and reviewed paper cards, a three-section research worksheet (background, questions and method steps), private idea content, model recommendations and report drafts. Reports become local entries only after explicit confirmation. Legacy canvas data remains compatible, but the current workflow does not require manual connections. Native visuals and real-model output quality still need separate acceptance testing.
 
 The [isolated interaction preview](apps/desktop/ideation-showcase.html) uses sample data and mocked IPC. It does not read real papers or call models, and does not establish that the native app or real model integrations have passed acceptance testing.
 
@@ -39,15 +32,12 @@ Bundled research-inspiration references retain the [Microsoft ResearchStudio att
 
 ### From papers to an idea discussion
 
-1. Prepare the relevant papers and available source text, create an idea in the research-ideation view, and describe its question or goal.
-2. Browse the card library by source, type or keyword. Create a card manually or use the configured assistant model to extract paper cards.
-3. Review generated drafts, source passages and suggested relationships before choosing what to retain. Check unsupported content instead of treating model output as fact.
-4. Drag cards onto the current board or use its add action. Pan, zoom, fit the view, and use automatic arrangement or manual positioning.
-5. Select a node, choose suitable follow-up cards, add your own questions and edit relationships. These branches are idea paths, unrelated to Git branches such as alpha and beta.
-6. Open the evaluation dialog, select cards and enter a research goal. Start or stop the task explicitly.
-7. Review compatibility, risks, evidence gaps, implementation steps, experiments, stopping criteria and alternatives. Save the result as a plan card only after review; input cards, links and source-check status are preserved as a snapshot. Changed inputs require a new evaluation.
-
-This is a dedicated model task; automatic attachment of the board to assistant chat is not implemented.
+1. Generate and review cards under a paper’s Reading Content → Paper Cards page.
+2. Enter `/inspiration` in search and select Open Research Ideation or press Enter.
+3. Add cards to background, questions and method steps. Dashed placeholders open recommendations and the full library; Describe creates content private to the current idea.
+4. Reorder within sections; method order is sent to the model. Recommendations require explicit adoption.
+5. Compose an outline or start research. Shared tasks show actual stages and support stopping and retrying.
+6. Review the report and explicitly save it to create a local report entry. Generation alone does not create entries or execute experiments.
 
 ### What requires a model
 
@@ -71,7 +61,7 @@ Results remain temporary until explicitly saved as an AI draft card, with input 
 
 ### Local interaction preview
 
-After switching a source checkout to alpha and safely preserving any previous working-tree edits, install dependencies and start the frontend:
+From a checkout containing these changes, after safely preserving previous working-tree edits, install dependencies and start the frontend:
 
 ```powershell
 npm ci
