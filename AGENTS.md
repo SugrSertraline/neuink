@@ -3,8 +3,11 @@
 ## Branch workflow
 
 - `main` is the approved release branch and the GitHub default branch.
-- Use `beta` for everyday feature development. Validate changes and obtain the user's confirmation before merging new features into `main`.
-- Use the public `alpha` branch for exploratory work before promoting reviewed changes to `beta`. It preserves the research ideation card canvas previously developed on `demo/ideation-evaluation`; keep its experimental scope and limitations clear in its README.
+- Use `alpha` for everyday feature development and integration of the latest capabilities. Base new feature branches on `alpha`; keep accepted fixes from `beta` and `main` flowing back into `alpha`.
+- Use `beta` for stability testing of a reviewed candidate from `alpha`. Before promotion, record the source commit, retained features, intentional behavior/entry-point changes, data compatibility, validation and known limitations in `docs/development/dev-plan.md`, and obtain the user's confirmation that the feature set should be retained. Do not merge unrelated unfinished alpha work into an active beta candidate.
+- Promote the tested `beta` candidate to `main` only after stability and effect/experience acceptance and the user's confirmation. Passing CI alone is not release approval. No automatic alpha-to-beta or beta-to-main promotion.
+- Preserve research cards, ideation data and their compatibility when evolving the former `demo/ideation-evaluation` functionality. Explicitly document replaced or hidden interactions; retained source code alone does not prove feature or native Tauri acceptance.
+- Development validation runs on alpha/beta pushes and pull requests through `.github/workflows/branch-validation.yml`; it does not publish release artifacts. See `docs/development/engineering-guidelines.md` for promotion evidence and scope.
 - Keep `seal-campus-travel` local-only and separate for the campus travel prototype.
 - The public `origin` may expose `main`, `beta` and `alpha` branches. Keep `seal-campus-travel`, local archive refs and work-in-progress snapshots local. The local pre-push hook preserves Git LFS handling and guards this policy; it is not a server-side permission rule.
 - Before removing obsolete branches, verify their changes are merged or patch-equivalent and preserve a local recovery ref. Local branch-cleanup manifests and working-file backups live in `.git/branch-archives/`; archive refs are outside `refs/heads/`.

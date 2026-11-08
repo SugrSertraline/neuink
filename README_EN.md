@@ -4,6 +4,18 @@
 
 <h1 align="center">Neuink</h1>
 
+## Development and release branches
+
+`alpha → beta → main`: develop the latest features on alpha, confirm the feature set and data compatibility before handing a candidate to beta, then promote to main after stability, user-experience acceptance and user approval.
+
+| Branch | Responsibility |
+| --- | --- |
+| [alpha](https://github.com/SugrSertraline/neuink/tree/alpha) | Latest feature development and integration, including paper cards and experimental ideation. |
+| [beta](https://github.com/SugrSertraline/neuink/tree/beta) | Stability testing and fixes for an approved feature candidate. |
+| [main](https://github.com/SugrSertraline/neuink/tree/main) | Approved source for public desktop releases and website deployments. |
+
+Alpha/beta validation neither publishes installers nor promotes branches automatically. Handoffs record retained features, changed entry points, data compatibility and known limitations. Feed beta/main fixes back into alpha. See the [engineering guidelines](docs/development/engineering-guidelines.md#分支与交付) and [development plan](docs/development/dev-plan.md) for acceptance requirements and evidence.
+
 ## Continue from your Zotero library
 
 Neuink is a local-first workspace for paper reading and evidence-linked notes. Connect existing papers, read PDF or reflowed content, translate, retain sources and use your own model for research assistance.
@@ -289,7 +301,7 @@ Tag management provides a hierarchical tree, expand/collapse controls, panning, 
 
 | Symptom | Explanation and next step |
 | --- | --- |
-| A downloaded package lacks a feature described here | This README describes beta. Check whether the feature reached main and a new release. Alpha card features do not automatically appear in beta or main. |
+| A downloaded package lacks a feature described here | Source capabilities and public downloads have separate scopes. Alpha features enter beta after confirmation, then main after stability acceptance and a new release. Updating a source branch does not update downloaded packages. |
 | A PDF opens but no Reflow content is available | Original PDF reading does not require parsing. Import matching MinerU output or complete parsing through the configured service. |
 | Many paragraphs are unavailable for generation | Check body type, the 20-word/40-character minimum, math or rich content, continuation groups and the input-length limit. These exclusions are intentional. |
 | Selecting Key points still shows original text | The paragraph may have no valid cached result. Inspect its hint or task row instead of repeatedly changing levels. |

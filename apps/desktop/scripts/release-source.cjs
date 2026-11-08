@@ -20,7 +20,7 @@ function validateReleaseSource(root = DEFAULT_ROOT, context = process.env) {
     }
     return 'main-release-tag';
   }
-  throw new Error('Release builds require main. Develop on beta and merge after approval; PRs targeting main run validation only.');
+  throw new Error('Release builds require main. Develop on alpha, validate stability on beta, then merge after approval; PRs targeting main run validation only.');
 }
 
 module.exports = { validateReleaseSource };

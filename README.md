@@ -4,6 +4,18 @@
 
 <h1 align="center">Neuink</h1>
 
+## 开发与发布分支
+
+`alpha → beta → main`：最新功能先在 alpha 完成，确认需要保留的功能与数据兼容后交付 beta；beta 验证稳定性和实际使用效果，用户确认后再合入 main。
+
+| 分支 | 职责 |
+| --- | --- |
+| [alpha](https://github.com/SugrSertraline/neuink/tree/alpha) | 最新功能开发与集成；包含研究卡片和构思探索，实验能力仍需验收。 |
+| [beta](https://github.com/SugrSertraline/neuink/tree/beta) | 已确认功能候选的稳定性测试与修复。 |
+| [main](https://github.com/SugrSertraline/neuink/tree/main) | 已批准的正式发布来源；安装包和官网从这里发布。 |
+
+alpha/beta 自动校验不发布安装包，也不自动晋级。交付时核对功能、入口变化、已有数据和已知限制；beta/main 修复及时回流 alpha。具体要求见[工程规范](docs/development/engineering-guidelines.md#分支与交付)，每次交付证据记录在[开发计划](docs/development/dev-plan.md)。
+
 ## 从 Zotero 资料库，继续深入阅读
 
 Neuink 是本地优先的文献阅读与证据笔记工作台：接入已有论文，在 PDF／重排视图中阅读和翻译，整理带来源的笔记，再用自己的模型辅助检索与归纳。
@@ -331,7 +343,7 @@ Neuink 区分直接管理的本地条目，以及从 Zotero／MinerU 目录识�
 
 | 现象 | 原因与处理方式 |
 | --- | --- |
-| 下载包里没有本文的某个功能 | 本文描述 beta；检查该能力是否已经合入 main 并重新发布。alpha 的卡片功能也不会自动出现在 beta 下载或 main 发行中。 |
+| 下载包里没有本文的某个功能 | 源码能力与正式下载包分别标明；alpha 新功能先经确认进入 beta，再经稳定性验收进入 main 并重新发布。仅切换或更新源码分支不会更新下载包。 |
 | PDF 可以看，但没有可用的重排正文 | PDF 原版面不依赖结构化解析。先导入匹配的 MinerU 结果或完成配置服务的解析，再使用重排。 |
 | 很多段落没有出现在生成范围内 | 检查是否为正文、是否达到 20 词／40 中文字符，以及是否含公式、复杂内容、跨页续接或超长文本。跳过这些内容是当前适配规则。 |
 | 选了“要点”却还是原文 | 该段可能还没有有效缓存。查看粒度提示或任务窗口，而不是反复切换级别。 |
