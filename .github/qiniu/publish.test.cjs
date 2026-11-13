@@ -271,3 +271,17 @@ test('server fetch rejects wrong bytes, existing versions and unexpected source 
     await assert.rejects(fetchChecked(storage, key, { ...file, sourceUrl }), /Unexpected/);
   }
 });
+
+test('installer assets are included in checksum verification when present', async t => {
+  const { directory, group } = await fixture(t);
+  const extras = ['Neuink-windows-x64-setup.exe', 'installer-info.json'];
+  for (const name of extras) {
+    fs.writeFileSync(path.join(directory, name), 'fixture');
+    fs.appendFileSync(path.join(directory, group.sums), `${(await fingerprint(path.join(directory, name))).sha256}  ${name}\n`);
+  }
+  const groups = releaseFiles({...release, assets:[group.zip,group.info,group.sums,...extras].map(name=>({name}))}, tag);
+  assert.equal((await verifyArtifacts(directory, groups, tag, commit)).length, 5);
+  fs.writeFileSync(path.join(directory, extras[0]), 'tampered');
+  await assert.rejects(verifyArtifacts(directory, groups, tag, commit), /Checksum mismatch/);
+  assert.throws(()=>releaseFiles({...release,assets:[group.zip,group.info,group.sums,extras[0]].map(name=>({name}))},tag),/Incomplete installer/);
+});
