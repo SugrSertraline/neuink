@@ -1,28 +1,13 @@
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
 const DEFAULT_ROOT = path.resolve(__dirname, '../../..');
-
 function validateReleaseSource(root = DEFAULT_ROOT, context = process.env) {
-  const event = context.GITHUB_EVENT_NAME;
-  const ref = context.GITHUB_REF;
-  if (event === 'pull_request' && context.GITHUB_BASE_REF === 'main') {
-    return 'pull-request-validation';
-  }
-  if (['push', 'workflow_dispatch'].includes(event) && ref === 'refs/heads/main') {
-    return 'main';
-  }
-  if (event === 'push' && /^refs\/tags\/v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(ref || '')) {
-    const result = spawnSync('git', ['merge-base', '--is-ancestor', 'HEAD', 'refs/remotes/origin/main'], {
-      cwd: root, stdio: 'ignore', windowsHide: true, timeout: 15000,
-    });
-    if (result.status !== 0) {
-      throw new Error('Release tag must point to a commit already included in origin/main. Full checkout history is required.');
-    }
-    return 'main-release-tag';
-  }
-  throw new Error('Release builds require main. Develop on alpha, validate stability on beta, then merge after approval; PRs targeting main run validation only.');
+  const event = context.GITHUB_EVENT_NAME, ref = context.GITHUB_REF;
+  const branches = ['main', 'beta', 'alpha'];
+  if (event === 'pull_request' && branches.includes(context.GITHUB_BASE_REF)) return 'pull-request-validation';
+  if (['push', 'workflow_dispatch'].includes(event) && branches.some(branch => ref === `refs/heads/${branch}`)) return ref.slice(11);
+  if (event === 'push' && /^refs\/tags\/v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(ref || '')) return 'release-tag';
+  throw new Error('Release builds require a public product branch or version tag; PRs validate only.');
 }
-
 module.exports = { validateReleaseSource };
 if (require.main === module) {
   try { console.log(`Release source verified: ${validateReleaseSource()}`); }

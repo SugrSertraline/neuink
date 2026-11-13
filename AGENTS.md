@@ -2,7 +2,7 @@
 
 ## Branch workflow
 
-- `main` is the approved release branch and the GitHub default branch.
+- `main` is the GitHub default branch; publication is not restricted to it.
 - Use `alpha` for everyday feature development and integration of the latest capabilities. Base new feature branches on `alpha`; keep accepted fixes from `beta` and `main` flowing back into `alpha`.
 - Use `beta` for stability testing of a reviewed candidate from `alpha`. Before promotion, record the source commit, retained features, intentional behavior/entry-point changes, data compatibility, validation and known limitations in `docs/development/dev-plan.md`, and obtain the user's confirmation that the feature set should be retained. Do not merge unrelated unfinished alpha work into an active beta candidate.
 - Promote the tested `beta` candidate to `main` only after stability and effect/experience acceptance and the user's confirmation. Passing CI alone is not release approval. No automatic alpha-to-beta or beta-to-main promotion.
@@ -12,7 +12,7 @@
 - The public `origin` may expose `main`, `beta` and `alpha` branches. Keep `seal-campus-travel`, local archive refs and work-in-progress snapshots local. The local pre-push hook preserves Git LFS handling and guards this policy; it is not a server-side permission rule.
 - Before removing obsolete branches, verify their changes are merged or patch-equivalent and preserve a local recovery ref. Local branch-cleanup manifests and working-file backups live in `.git/branch-archives/`; archive refs are outside `refs/heads/`.
 - Name branches by purpose without a `codex/` prefix.
-- Desktop release artifacts and website deployments must come from `main`; release tags must point to commits already included in `main`. Pull requests targeting `main` may run validation without publishing artifacts.
+- Website and desktop releases may use a user-approved alpha, beta or main commit; merging to main is not a publishing prerequisite. Record the source commit and validation. PRs validate only. Preserve version/tag consistency, clean packages, credential exclusion and download verification.
 - Keep unrelated uncommitted work out of maintenance commits and preserve it when switching branches.
 
 ## Local testing preference

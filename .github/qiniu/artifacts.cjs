@@ -53,8 +53,6 @@ function sourceCommit(root, tag) {
   if (!TAG_PATTERN.test(tag)) throw new Error('Invalid release tag');
   const commit = execFileSync('git', ['rev-parse', '--verify', `refs/tags/${tag}^{commit}`], { cwd: root, encoding: 'utf8', windowsHide: true }).trim();
   if (!/^[a-f0-9]{40}$/.test(commit)) throw new Error('Invalid source commit');
-  const included = spawnSync('git', ['merge-base', '--is-ancestor', commit, 'refs/remotes/origin/main'], { cwd: root, windowsHide: true, stdio: 'ignore' });
-  if (included.status !== 0) throw new Error('Release tag is not included in origin/main');
   const version = JSON.parse(execFileSync('git', ['show', `${commit}:package.json`], { cwd: root, encoding: 'utf8', windowsHide: true })).version;
   if (`v${version}` !== tag) throw new Error('Tag does not match the source version');
   return commit;

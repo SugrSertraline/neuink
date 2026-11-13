@@ -51,7 +51,7 @@ Paper cards are generated on request and reviewed individually. Experimental ide
 
 ## Development and release branches
 
-`alpha → beta → main`: alpha holds current development and internal tests; beta validates an approved candidate; main is the approved source for public programs and the website. CI does not automatically promote or publish. See the [engineering guidelines](docs/development/engineering-guidelines.md) and [development plan](docs/development/dev-plan.md).
+`alpha → beta → main`: alpha holds current development and internal tests; beta validates an approved candidate; main is the default branch; approved alpha or beta commits may also publish programs and the website. CI does not automatically promote or publish. See the [engineering guidelines](docs/development/engineering-guidelines.md) and [development plan](docs/development/dev-plan.md).
 
 The historical preview notes below do not imply that the current alpha features have shipped publicly.
 

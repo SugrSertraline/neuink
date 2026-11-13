@@ -1,5 +1,8 @@
 # Neuink 产品介绍与使用手册
 
+> 2026-11-13 发布规则更新：经用户确认的 alpha、beta 或 main 提交均可发布官网和发行包，不再要求先合并 main。保留来源提交记录、版本一致性、测试、空 data、凭据排除及下载校验。下文历史流程中限定 main 的表述不再适用。
+
+
 **[打开 Neuink 官网 →](https://sugrsertraline.github.io/neuink/)**
 
 在线了解完整功能、实机界面与使用方法：[开始阅读](https://sugrsertraline.github.io/neuink/start.html) · [核心概念](https://sugrsertraline.github.io/neuink/concepts.html) · [实机界面图解](https://sugrsertraline.github.io/neuink/screenshots.html)。

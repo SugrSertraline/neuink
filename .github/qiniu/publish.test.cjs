@@ -92,7 +92,7 @@ test('checksum manifests cannot introduce paths or omit metadata', async t => {
   await assert.rejects(verifyArtifacts(directory, [group], tag, commit), /Invalid checksum/);
 });
 
-test('a release tag must be included in main and match the committed version', t => {
+test('a release tag may originate from beta and must match the committed version', t => {
   const root = temp(t);
   const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
   git('init', '--initial-branch=main');
@@ -109,7 +109,7 @@ test('a release tag must be included in main and match the committed version', t
   git('add', 'package.json');
   git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-m', 'unapproved feature');
   git('tag', 'v0.1.2');
-  assert.throws(() => sourceCommit(root, 'v0.1.2'), /not included/);
+  assert.match(sourceCommit(root, 'v0.1.2'), /^[a-f0-9]{40}$/);
 });
 
 test('archives finish before fixed URLs change, and the manifest is written last', async t => {

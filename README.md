@@ -63,9 +63,9 @@ Neuink 是本地优先的文献阅读与证据笔记工作台。接入 Zotero �
 | --- | --- |
 | [alpha](https://github.com/SugrSertraline/neuink/tree/alpha) | 最新功能开发与内部测试。 |
 | [beta](https://github.com/SugrSertraline/neuink/tree/beta) | 已确认候选的稳定性与使用效果验收。 |
-| [main](https://github.com/SugrSertraline/neuink/tree/main) | 已批准的正式发布来源；公开程序包和官网从这里发布。 |
+| [main](https://github.com/SugrSertraline/neuink/tree/main) | 默认分支；官网与程序包也可从用户确认的 alpha / beta 提交发布。 |
 
-按 `alpha → beta → main` 推进，自动校验不自动发布或晋级。功能范围、数据兼容和验收证据按[工程规范](docs/development/engineering-guidelines.md)记录；更新文档不等于已发布程序。
+开发按 `alpha → beta → main` 整理，但发布无需先合并 main；用户确认的候选可直接发布。功能范围、数据兼容和验收证据按[工程规范](docs/development/engineering-guidelines.md)记录；更新文档不等于已发布程序。
 
 以下版本记录属于既有公开预览版本，不能代表上方 alpha 内测功能均已发布。
 

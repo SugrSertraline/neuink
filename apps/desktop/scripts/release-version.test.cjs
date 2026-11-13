@@ -68,40 +68,14 @@ test('Windows resource downloads suppress progress rather than filling child-pro
   }
 });
 
-test('only main builds artifacts; main PRs remain validation-only', () => {
-  for (const event of ['push', 'workflow_dispatch']) {
-    assert.equal(validateReleaseSource(undefined, { GITHUB_EVENT_NAME: event, GITHUB_REF: 'refs/heads/main' }), 'main');
-    for (const ref of ['refs/heads/beta', 'refs/heads/seal-campus-travel', 'refs/heads/main-copy', 'refs/tags/not-a-version', '']) {
-      assert.throws(() => validateReleaseSource(undefined, { GITHUB_EVENT_NAME: event, GITHUB_REF: ref }), /require main/);
-    }
+test('product branches and version tags can build; unrelated events cannot', () => {
+  for (const branch of ['main', 'beta', 'alpha']) for (const event of ['push', 'workflow_dispatch']) {
+    assert.equal(validateReleaseSource(undefined, {GITHUB_EVENT_NAME:event,GITHUB_REF:`refs/heads/${branch}`}),branch);
   }
-  assert.equal(validateReleaseSource(undefined, { GITHUB_EVENT_NAME: 'pull_request', GITHUB_BASE_REF: 'main', GITHUB_REF: 'refs/pull/1/merge' }), 'pull-request-validation');
-  for (const base of ['beta', 'seal-campus-travel', '']) {
-    assert.throws(() => validateReleaseSource(undefined, { GITHUB_EVENT_NAME: 'pull_request', GITHUB_BASE_REF: base }), /require main/);
-  }
-  for (const event of ['pull_request_target', 'schedule', undefined]) {
-    assert.throws(() => validateReleaseSource(undefined, { GITHUB_EVENT_NAME: event, GITHUB_REF: 'refs/heads/main' }), /require main/);
-  }
-});
-
-test('version tags may release main history but cannot release beta-only commits', t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'neuink-release-source-test-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const git = (...args) => execFileSync('git', args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }).toString().trim();
-  git('init', '--initial-branch=main');
-  git('-c', 'user.name=Neuink test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-m', 'approved main');
-  git('update-ref', 'refs/remotes/origin/main', 'HEAD');
-  for (const tag of ['refs/tags/v0.1.0', 'refs/tags/v0.1.0-beta.2']) {
-    assert.equal(validateReleaseSource(root, { GITHUB_EVENT_NAME: 'push', GITHUB_REF: tag }), 'main-release-tag');
-  }
-  assert.throws(() => validateReleaseSource(root, { GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/tags/v0.1.0' }), /require main/);
-  git('switch', '-c', 'beta');
-  git('-c', 'user.name=Neuink test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-m', 'unapproved feature');
-  assert.throws(() => validateReleaseSource(root, { GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/tags/v0.1.0-beta.2' }), /already included/);
-  git('update-ref', 'refs/remotes/origin/main', 'HEAD');
-  assert.equal(validateReleaseSource(root, { GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/tags/v0.1.0' }), 'main-release-tag');
-  git('update-ref', '-d', 'refs/remotes/origin/main');
-  assert.throws(() => validateReleaseSource(root, { GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/tags/v0.1.0' }), /Full checkout history/);
+  assert.equal(validateReleaseSource(undefined,{GITHUB_EVENT_NAME:'push',GITHUB_REF:'refs/tags/v0.2.0'}),'release-tag');
+  assert.equal(validateReleaseSource(undefined,{GITHUB_EVENT_NAME:'pull_request',GITHUB_BASE_REF:'beta'}),'pull-request-validation');
+  for (const ref of ['refs/heads/seal-campus-travel','refs/tags/not-version','']) assert.throws(()=>validateReleaseSource(undefined,{GITHUB_EVENT_NAME:'push',GITHUB_REF:ref}));
+  assert.throws(()=>validateReleaseSource(undefined,{GITHUB_EVENT_NAME:'pull_request_target',GITHUB_REF:'refs/heads/main'}));
 });
 
 test('release source gate runs before dependency installation, and all packages depend on verification', () => {
@@ -113,6 +87,6 @@ test('release source gate runs before dependency installation, and all packages 
     assert.match(workflow.split(`\n  ${name}:`)[1], /^\r?\n    needs: verify/);
   }
   const pages = fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows/pages.yml'), 'utf8');
-  assert.match(pages, /pull_request:\r?\n    branches: \[main\]/);
-  assert.match(pages, /build:\r?\n    if: github.event_name == 'pull_request' \|\| github.ref == 'refs\/heads\/main'/);
+  assert.match(pages, /pull_request:\r?\n    branches: \[main, beta, alpha\]/);
+  assert.match(pages, /workflow_dispatch/);
 });
