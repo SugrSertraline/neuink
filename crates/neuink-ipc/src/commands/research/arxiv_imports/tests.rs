@@ -158,11 +158,12 @@ fn expiry_capacity_and_invalid_batches_do_not_cross_caches() {
         other_version.id
     );
     {
+        // Expire at the current instant: subtracting a TTL can underflow on freshly booted Windows.
         let mut rows = arxiv_cache::cache().lock().unwrap();
         rows.iter_mut()
             .find(|r| r.root == root && r.paper.id == a.id)
             .unwrap()
-            .at = Instant::now() - Duration::from_secs(3601);
+            .expires_at = Instant::now();
     }
     assert!(preview(Preview {
         root: root.clone(),
@@ -224,7 +225,7 @@ fn expiry_capacity_and_invalid_batches_do_not_cross_caches() {
         .iter_mut()
         .find(|g| g.id == "expiry")
         .unwrap()
-        .at = Instant::now() - Duration::from_secs(301);
+        .expires_at = Instant::now();
     assert!(consume(Preview { root, selections }, "expiry").is_err());
 }
 #[test]

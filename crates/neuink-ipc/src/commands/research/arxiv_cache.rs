@@ -9,7 +9,7 @@ use std::{
 pub(super) struct CachedPaper {
     pub root: PathBuf,
     pub paper: ArxivPaper,
-    pub at: Instant,
+    pub expires_at: Instant,
 }
 pub(super) fn cache() -> &'static Mutex<Vec<CachedPaper>> {
     static PAPERS: OnceLock<Mutex<Vec<CachedPaper>>> = OnceLock::new();
@@ -17,13 +17,13 @@ pub(super) fn cache() -> &'static Mutex<Vec<CachedPaper>> {
 }
 pub(super) fn remember(root: &PathBuf, papers: &[ArxivPaper]) -> Result<(), String> {
     let mut rows = cache().lock().map_err(|_| "检索缓存不可用")?;
-    rows.retain(|p| p.at.elapsed() < Duration::from_secs(3600));
+    rows.retain(|p| Instant::now() < p.expires_at);
     for paper in papers {
         rows.retain(|p| p.root != *root || p.paper.id != paper.id);
         rows.push(CachedPaper {
             root: root.clone(),
             paper: paper.clone(),
-            at: Instant::now(),
+            expires_at: Instant::now() + Duration::from_secs(3600),
         });
     }
     let excess = rows.len().saturating_sub(512);
@@ -47,7 +47,7 @@ pub(super) fn selected(request: &Selection) -> Result<Vec<ArxivPaper>, String> {
                 .find(|p| {
                     p.root == root
                         && p.paper.id == *id
-                        && p.at.elapsed() < Duration::from_secs(3600)
+                        && Instant::now() < p.expires_at
                 })
                 .ok_or("论文检索结果已过期，请重新检索并确认")?
                 .paper

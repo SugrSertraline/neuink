@@ -40,7 +40,7 @@ struct Grant {
     selections: Vec<PaperSelection>,
     papers: Vec<ArxivPaper>,
     id: String,
-    at: Instant,
+    expires_at: Instant,
 }
 fn grants() -> &'static Mutex<Vec<Grant>> {
     static GRANTS: OnceLock<Mutex<Vec<Grant>>> = OnceLock::new();
@@ -84,7 +84,7 @@ pub fn approve(request: Approval) -> Result<(), String> {
         return Err("论文信息已变化，请重新预览后确认".into());
     }
     let mut rows = grants().lock().map_err(|_| "确认状态不可用")?;
-    rows.retain(|g| g.at.elapsed() < Duration::from_secs(300));
+    rows.retain(|g| Instant::now() < g.expires_at);
     if rows.len() >= 32 || rows.iter().any(|g| g.id == request.approval_id) {
         return Err("确认状态冲突".into());
     }
@@ -93,14 +93,14 @@ pub fn approve(request: Approval) -> Result<(), String> {
         selections: request.selections,
         papers,
         id: request.approval_id,
-        at: Instant::now(),
+        expires_at: Instant::now() + Duration::from_secs(300),
     });
     Ok(())
 }
 pub(super) fn consume(request: Preview, id: &str) -> Result<Vec<ArxivPaper>, String> {
     let canonical = root(&request.root)?;
     let mut rows = grants().lock().map_err(|_| "确认状态不可用")?;
-    rows.retain(|g| g.at.elapsed() < Duration::from_secs(300));
+    rows.retain(|g| Instant::now() < g.expires_at);
     let index = rows
         .iter()
         .position(|g| g.root == canonical && g.id == id && g.selections == request.selections)
