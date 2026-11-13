@@ -3,14 +3,16 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { WorkspaceSurfaceLayout } from '@/app/workspaceSurface';
 import { useHeavyReaderRetention } from './useHeavyReaderRetention';
+import { readerRuntimeBudget } from '@/shared/lib/runtimeBudget';
 import { setSegmentEditorDirty } from './segmentEditorDirtyRegistry';
-import { HEAVY_READER_IDLE_UNMOUNT_MS as IDLE, HEAVY_READER_SWEEP_INTERVAL_MS as SWEEP } from './readerRetention';
+import { HEAVY_READER_SWEEP_INTERVAL_MS as SWEEP } from './readerRetention';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); setSegmentEditorDirty('pdf:a', 'owner', false); });
 const layout: WorkspaceSurfaceLayout = { focusedPane: 'left', left: { kind: 'library' }, leftTabs: [{ kind: 'library' }, { kind: 'pdf', entryId: 'a' }], right: null, rightTabs: [] };
 
 it('retains dirty hidden readers and restarts their idle period after saving', () => {
   vi.useFakeTimers();
+  const IDLE = readerRuntimeBudget().idleReaderMs;
   setSegmentEditorDirty('entry-content:a|pdf', 'owner', true);
   const { result } = renderHook(() => useHeavyReaderRetention(layout));
   act(() => vi.advanceTimersByTime(IDLE * 2));
@@ -25,6 +27,7 @@ it('retains dirty hidden readers and restarts their idle period after saving', (
 
 it('does not expire an active reader even after a long period', () => {
   vi.useFakeTimers();
+  const IDLE = readerRuntimeBudget().idleReaderMs;
   const { result } = renderHook(() => useHeavyReaderRetention({ ...layout, left: { kind: 'pdf', entryId: 'a' } }));
   act(() => vi.advanceTimersByTime(IDLE * 3));
   expect(result.current.size).toBe(0);
@@ -32,6 +35,7 @@ it('does not expire an active reader even after a long period', () => {
 
 it('releases sweep timers during repeated mount, layout change and unmount', () => {
   vi.useFakeTimers();
+  const IDLE = readerRuntimeBudget().idleReaderMs;
   for (let i = 0; i < 100; i++) {
     const view = renderHook(({ value }) => useHeavyReaderRetention(value), { initialProps: { value: layout } });
     expect(vi.getTimerCount()).toBe(1);
@@ -51,3 +55,4 @@ it('bounds hidden readers on a two-core device while protecting active and unsav
   expect(result.current.has('pdf:d')).toBe(false);
   expect(result.current.size).toBe(1);
 });
+
