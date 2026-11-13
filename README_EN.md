@@ -4,55 +4,56 @@
 
 <h1 align="center">Neuink</h1>
 
+**Keep your reading connected to evidence.**
+
+Neuink is a local-first workspace for papers, PDF and reflow reading, translation, source-linked notes and research with models you configure.
+
+[Website and guides](https://sugrsertraline.github.io/neuink/) · [Public releases](https://github.com/SugrSertraline/neuink/releases) · [简体中文](README.md)
+
+## Current scope: alpha internal testing
+
+**2026-11-13:** this README describes the current alpha implementation, not a newly published installer. Public downloads follow their release notes and may not contain these changes.
+
+| Workflow | Current capabilities |
+| --- | --- |
+| Sources | Browse local Zotero / MinerU sources. Cached sources remain sources; only an explicit import creates an independent local paper. |
+| Reading | PDF/reflow, split views, paragraph detail levels, bilingual and sentence reading with configurable translation providers. |
+| Evidence | Notes, annotations, hierarchical tags, source links, backlinks and selective exports. |
+| Library | Table-only, tag folders, or both; open papers inside folders, switch library scopes from the tab, resize columns and reveal overflow actions through More. |
+| Account | Profile/avatar, password, server, devices and storage; local data location is now under Account. |
+| Cloud sync (internal test) | Explicit binding confirmation, automatic/manual sync, resumable attachments, server content lists, conflicts and maintenance previews. |
+| Tasks | Zotero reads and sync appear in the bottom-right task area, with navigation to issues. |
+| AI and research | User-configured models and local Agents, context compaction, paper discovery, reviewed changes and on-demand paper cards. |
+
+### Browse papers your way
+
+The Tag navigation menu offers **table only, tag folders only, or tags with a table**, saved on this computer. Folder mode provides an Up button and clickable paths. Select with one click; double-click or press Enter to open a folder or paper. Each folder shows papers assigned directly to that tag; the root shows untagged papers. Tags do not move or duplicate PDF files.
+
+The library tab reflects the current scope, such as Recent reading or Trash, with hover shortcuts for switching. Long paths stay bounded and actions that do not fit move into More. See the [library guide (Chinese)](website/content/library.md).
+
+### Testing synchronization
+
+Fresh installations start with sync off and a blank server URL. Verify the connection before signing in, then explicitly confirm the sync scope to enable it. Upgrades preserve existing user choices.
+
+Use the **Northeastern University campus network**. Open Settings → Account, enter the server address supplied by the test administrator, connect successfully, then log in. Review the scope and space estimate before enabling sync. Existing cloud content can also download to the local library.
+
+Supported content includes local papers, reading snapshots, notes, annotations, tags, translations, reading detail levels and confirmed ideation. Zotero source caches are excluded; explicitly imported copies can participate. The library status column distinguishes pending, confirmed, conflicting and unavailable content. Account settings expose server records; this is not an online PDF editor.
+
+Status inspection reuses short-lived results for unchanged entries; uploads still verify actual content. Sync is not a complete backup of data, credentials, chats or runtimes, and it is not real-time team collaboration. Keep independent backups. See the [internal sync guide (Chinese)](website/content/sync.md).
+
+Certificate provisioning is deferred during this internal test phase. New machines need a connection environment arranged by the administrator; HTTPS validation remains enabled. An unsigned Windows EXE can be built, but warnings or device policies may block execution. Clean Windows 10/11, cross-device, native visual and real-model acceptance remain incomplete.
+
+### Zotero and experimental features
+
+Connecting a source does not import the whole library as ordinary local papers. Hiding sources does not delete originals or imported copies. Notes can be imported selectively; writeback is explicit, version-checked and requires Zotero 10+ running with local access allowed. Image-containing notes cannot currently be written back directly.
+
+Paper cards are generated on request and reviewed individually. Experimental ideation opens with `/inspiration`; reports require confirmation before saving, and experiments are not executed. Existing ideation data is retained. The in-app onboarding entry is temporarily hidden; follow the written guides.
+
 ## Development and release branches
 
-`alpha → beta → main`: develop the latest features on alpha, confirm the feature set and data compatibility before handing a candidate to beta, then promote to main after stability, user-experience acceptance and user approval.
+`alpha → beta → main`: alpha holds current development and internal tests; beta validates an approved candidate; main is the approved source for public programs and the website. CI does not automatically promote or publish. See the [engineering guidelines](docs/development/engineering-guidelines.md) and [development plan](docs/development/dev-plan.md).
 
-| Branch | Responsibility |
-| --- | --- |
-| [alpha](https://github.com/SugrSertraline/neuink/tree/alpha) | Latest feature development and integration, including paper cards and experimental ideation. |
-| [beta](https://github.com/SugrSertraline/neuink/tree/beta) | Stability testing and fixes for an approved feature candidate. |
-| [main](https://github.com/SugrSertraline/neuink/tree/main) | Approved source for public desktop releases and website deployments. |
-
-Alpha/beta validation neither publishes installers nor promotes branches automatically. Handoffs record retained features, changed entry points, data compatibility and known limitations. Feed beta/main fixes back into alpha. See the [engineering guidelines](docs/development/engineering-guidelines.md#分支与交付) and [development plan](docs/development/dev-plan.md) for acceptance requirements and evidence.
-
-## Continue from your Zotero library
-
-Neuink is a local-first workspace for paper reading and evidence-linked notes. Connect existing papers, read PDF or reflowed content, translate, retain sources and use your own model for research assistance.
-
-**Updated 2026-11-07: the following capabilities are integrated in beta.** Public downloads follow [Releases](https://github.com/SugrSertraline/neuink/releases); beta source features are not a claim that a new installer has shipped.
-
-| Workflow | Current beta capability |
-| --- | --- |
-| Zotero sources | Connect a local data directory, browse source entries, review changes and explicitly import independent copies. |
-| Zotero notes | Select notes to import, compare original and local changes, save locally or explicitly confirm source replacement. |
-| Reading | PDF/reflow, paragraph detail levels, bilingual reading and per-behavior translation routing. |
-| Paper cards | Generate on request, review and edit abstractions with paper examples and source evidence. |
-| Assistant | Context usage, manual/automatic compaction, cross-turn tool results and an ordered execution timeline. |
-| arXiv | Structured discovery, paged candidates and downloads only after user approval. |
-| MinerU PDFs | Pair parsed output with an original PDF or replace a verified reading PDF while retaining parsed content and reading work. |
-
-### Zotero workflow and boundaries
-
-1. Enable a local Zotero data directory in settings; papers can remain organized in Zotero.
-2. Browse source entries and explicitly import independent copies when needed. Local edits do not automatically alter Zotero.
-3. Import selected notes while retaining their source association.
-4. Compare source, local content and differences before choosing local save or confirmed source replacement.
-5. Recheck version or permission errors; local-save and writeback outcomes are reported separately.
-
-Local saves do not require Zotero to run. Writeback currently requires **Zotero 10 or later running with local access allowed**. Image-containing notes cannot be written back directly. Disabling a source hides its entries without deleting originals or imported copies. This is local integration and controlled writeback, not cloud synchronization or unrestricted rich-text round trips.
-
-[Zotero guide (Chinese)](https://sugrsertraline.github.io/neuink/zotero.html) · [Beta updates and limits](https://sugrsertraline.github.io/neuink/updates.html)
-
-Paper cards remain visible. Experimental ideation opens only by entering `/inspiration` in search; background, questions and method steps accept cards or private descriptions. Recommendations require adoption and reports require explicit saving. It does not execute experiments.
-
-PDF replacement has runtime rollback but no crash/power-loss recovery journal; this beta limitation was explicitly accepted. The integrated version passed 4,182 frontend and 670 backend tests, type checking and frontend production build; opt-in acceptance tests were skipped. Real-model and native visual acceptance were not completed in this integration pass.
-
-<p align="center">
-  <strong><a href="https://sugrsertraline.github.io/neuink/">Explore Neuink — Product Website →</a></strong><br>
-  Features, real app screenshots, core concepts, and step-by-step tutorials.<br>
-  <a href="https://sugrsertraline.github.io/neuink/start.html">Start reading</a> · <a href="https://sugrsertraline.github.io/neuink/screenshots.html">Screenshot guide</a> · <a href="https://cdn.sugrsertraline.top/Neuink-windows-x64-portable.zip">Download for Windows</a>
-</p>
+The historical preview notes below do not imply that the current alpha features have shipped publicly.
 
 ## What's new in the 0.1.3 preview
 
@@ -352,7 +353,7 @@ For parsing, reflow, or translation, follow the [PDF import and parsing tutorial
 | Online paper / web research | Network access; optional services also depend on credentials, permissions, and quotas. |
 | Embedded web pages / video captions | Native embedding currently runs on Windows; the bundled video runtime currently targets Windows x64. |
 
-A Workspace is a normal local folder containing PDFs, notes, annotations, tags, translations, and conversations. Search caches can be rebuilt. API keys are not part of the Workspace or sharing bundles. Workspace migration copies and verifies data while retaining the original directory.
+A Workspace is a normal local folder containing PDFs, notes, annotations, tags, translations, and conversations. Search caches can be rebuilt. API keys are not part of the Workspace or sharing bundles, but settings in the complete data folder can contain credentials and must not be publicly shared. Current Windows builds carry data beside the program; save, exit and back up before moving the folder.
 
 **Scope:** the local graph displays existing relationships. Automated research-direction maps, evidence comparison tables, dragging tabs into separate native windows, and team cloud collaboration are not among the implemented features described here. The [development plan](docs/development/dev-plan.md) tracks completion and remaining work.
 

@@ -1,11 +1,9 @@
-use std::{collections::BTreeMap, fs, sync::Mutex};
+use std::{collections::BTreeMap, fs};
 
 use neuink_domain::{EntryId, SegmentUid};
 use serde::{Deserialize, Serialize};
 
-use crate::{atomic_write_json, Workspace, WorkspaceError};
-
-static WRITE_LOCK: Mutex<()> = Mutex::new(());
+use crate::{Workspace, WorkspaceError};
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -79,6 +77,7 @@ impl Workspace {
             .layout()
             .entry_dir(entry_id)
             .join("paper.paragraph-translations.json");
+        self.validate_note_workspace_path(&path)?;
         if !path.exists() {
             return Ok(BTreeMap::new());
         }
@@ -94,16 +93,17 @@ impl Workspace {
             Option<ParagraphTranslation>,
         ) -> Result<ParagraphTranslation, WorkspaceError>,
     ) -> Result<ParagraphTranslation, WorkspaceError> {
-        let _guard = WRITE_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _guard = self.begin_tag_safe_mutation()?;
         let mut records = self.read_paragraph_translations(entry_id)?;
         let record = update(records.remove(segment_uid.as_str()))?;
         records.insert(segment_uid.to_string(), record.clone());
-        atomic_write_json(
-            self.layout()
-                .entry_dir(entry_id)
-                .join("paper.paragraph-translations.json"),
-            &records,
+        let change = self.content_change(
+            crate::content_transaction::ContentTarget::ParagraphTranslations {
+                entry_id: entry_id.clone(),
+            },
+            serde_json::to_vec_pretty(&records)?,
         )?;
+        self.commit_content_transaction(vec![change])?;
         Ok(record)
     }
 }

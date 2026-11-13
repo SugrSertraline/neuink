@@ -82,14 +82,14 @@ it('removes the hidden Zotero view when that source is disabled', () => {
   expect(within(view.getByRole('region', { name: '快速视图' })).getByRole('button', { name: '全部 1' })).toBeTruthy();
 });
 
-it('keeps hidden navigation and the hide action available while previewing entry details', () => {
+it('keeps the hide action without hidden navigation in entry details', () => {
   const onSelectView = vi.fn(), onToggleSourceHidden = vi.fn();
   const view = renderSidebar({ entryExplorerOpen: true, hiddenSourceCount: 2, onSelectView, onToggleSourceHidden,
     selectedEntry: { ...entry, sourceInfo: { kinds: ['zotero'], zotero_hidden: false } } });
   fireEvent.click(view.getByRole('button', { name: '从条目库隐藏当前来源论文' }));
   expect(onToggleSourceHidden).toHaveBeenCalledExactlyOnceWith(entry.id);
-  fireEvent.click(view.getByRole('button', { name: '查看已隐藏论文 2' }));
-  expect(onSelectView).toHaveBeenCalledExactlyOnceWith('hidden');
+  expect(view.queryByRole('button', { name: /查看已隐藏论文/ })).toBeNull();
+  expect(onSelectView).not.toHaveBeenCalled();
 });
 
 it('identifies Zotero notes in the selected entry details', () => {

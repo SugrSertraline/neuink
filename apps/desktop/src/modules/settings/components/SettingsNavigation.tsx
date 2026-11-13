@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { SETTINGS_CATALOG, SETTINGS_CATEGORIES, searchSettings, settingsCategory, type SettingDefinition, type SettingsNavigationTarget, type SettingsTab } from '../settingsCatalog';
 
 export const SETTINGS_TAB_LABELS: Record<SettingsTab, string> = {
+  account: '账户',
   'getting-started': '入门与教程', appearance: '外观与界面', reader: '阅读与批注', translation: '翻译', parser: '导入与解析', data: '资料与存储',
   models: '模型与助手', 'main-agent': '主助手', subagents: '子助手', 'external-tools': '检索与工具'
 };

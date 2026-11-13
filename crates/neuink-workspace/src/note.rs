@@ -135,8 +135,9 @@ impl Workspace {
         expected_revision: Option<&str>,
     ) -> Result<NoteDocument, WorkspaceError> {
         let title = normalize_note_title(title.into());
+        // Same lock order as delete/restore, and recover before taking a snapshot.
+        let _metadata_guard = self.begin_tag_safe_mutation()?;
         let note_path = self.layout().entry_note_file(entry_id, note_id);
-        let links_path = self.layout().entry_note_links_file(entry_id, note_id);
         let write_lock = note_write_lock(&note_path);
         let _write_guard = write_lock
             .lock()
@@ -156,8 +157,6 @@ impl Workspace {
             Some(links) => validate_and_prune_note_links(entry_id, note_id, &markdown, links)?,
             None => prune_note_links(&markdown, &previous_links),
         };
-        let previous_links_file = fs::read(&links_path).ok();
-        let _metadata_guard = self.begin_tag_safe_mutation()?;
         let mut entry = self.read_entry(entry_id)?;
         let mut note_found = false;
 
@@ -185,26 +184,31 @@ impl Workspace {
             Utc::now().to_rfc3339(),
             markdown.trim_start()
         );
-        let asset_transaction =
-            self.prepare_note_asset_maintenance(entry_id, note_id, &markdown)?;
-        if let Err(error) = atomic_write(&note_path, body.as_bytes()) {
-            rollback_note_asset_transaction(asset_transaction);
-            return Err(error);
-        }
-        if let Err(error) = atomic_write_json(&links_path, &links) {
-            let _ = atomic_write(&note_path, previous_note.as_bytes());
-            rollback_note_asset_transaction(asset_transaction);
-            return Err(error);
-        }
         entry.updated_at = Utc::now();
-        if let Err(error) = atomic_write_json(self.layout().entry_meta_file(entry_id), &entry) {
-            // The aggregate spans three files. Each write is atomic and the earlier
-            // files are restored if a later write fails.
-            let _ = atomic_write(&note_path, previous_note.as_bytes());
-            restore_optional_file(&links_path, previous_links_file.as_deref());
-            rollback_note_asset_transaction(asset_transaction);
-            return Err(error);
-        }
+        use crate::content_transaction::ContentTarget;
+        let changes = vec![
+            self.content_change(
+                ContentTarget::NoteBody {
+                    entry_id: entry_id.clone(),
+                    note_id: note_id.clone(),
+                },
+                body.into_bytes(),
+            )?,
+            self.content_change(
+                ContentTarget::NoteLinks {
+                    entry_id: entry_id.clone(),
+                    note_id: note_id.clone(),
+                },
+                serde_json::to_vec_pretty(&links)?,
+            )?,
+            self.content_change(
+                ContentTarget::EntryMeta {
+                    entry_id: entry_id.clone(),
+                },
+                serde_json::to_vec_pretty(&entry)?,
+            )?,
+        ];
+        self.commit_content_transaction(changes)?;
         drop(_write_guard);
         self.read_note(entry_id, note_id)
     }
@@ -215,7 +219,7 @@ impl Workspace {
         note_id: &NoteId,
     ) -> Result<EntryMeta, WorkspaceError> {
         let _metadata_guard = self.begin_tag_safe_mutation()?;
-        let mut entry = self.read_entry(entry_id)?;
+        let entry = self.read_entry(entry_id)?;
         let (original_index, title) = entry
             .contents
             .iter()
@@ -229,16 +233,7 @@ impl Workspace {
             })
             .ok_or_else(|| WorkspaceError::NoteMissing(note_id.to_string()))?;
         self.store_deleted_markdown_note(entry_id, note_id, title, original_index)?;
-        entry.contents.retain(|content| match content {
-            ContentItem::Note {
-                note_id: content_note_id,
-                ..
-            } => content_note_id != note_id,
-        });
-
-        entry.updated_at = Utc::now();
-        atomic_write_json(self.layout().entry_meta_file(entry_id), &entry)?;
-        Ok(entry)
+        self.read_entry(entry_id)
     }
 
     pub fn create_note_source_link(
@@ -248,6 +243,7 @@ impl Workspace {
         source_entry_id: &EntryId,
         segment_uid: SegmentUid,
     ) -> Result<SourceLink, WorkspaceError> {
+        let _metadata_guard = self.begin_tag_safe_mutation()?;
         let link =
             self.build_note_source_link(owner_entry_id, note_id, source_entry_id, segment_uid)?;
 
@@ -261,10 +257,14 @@ impl Workspace {
         }
         let mut links = self.read_note_links(owner_entry_id, note_id)?;
         links.push(link.clone());
-        atomic_write_json(
-            self.layout().entry_note_links_file(owner_entry_id, note_id),
-            &links,
+        let change = self.content_change(
+            crate::content_transaction::ContentTarget::NoteLinks {
+                entry_id: owner_entry_id.clone(),
+                note_id: note_id.clone(),
+            },
+            serde_json::to_vec_pretty(&links)?,
         )?;
+        self.commit_content_transaction(vec![change])?;
         Ok(link)
     }
 
@@ -339,6 +339,7 @@ impl Workspace {
         note_id: &NoteId,
         links: &[SourceLink],
     ) -> Result<(), WorkspaceError> {
+        let _metadata_guard = self.begin_tag_safe_mutation()?;
         let note_path = self.layout().entry_note_file(entry_id, note_id);
         let write_lock = note_write_lock(&note_path);
         let _write_guard = write_lock
@@ -354,10 +355,14 @@ impl Workspace {
             strip_frontmatter(&note_source),
             links,
         )?;
-        atomic_write_json(
-            self.layout().entry_note_links_file(entry_id, note_id),
-            &links,
-        )
+        let change = self.content_change(
+            crate::content_transaction::ContentTarget::NoteLinks {
+                entry_id: entry_id.clone(),
+                note_id: note_id.clone(),
+            },
+            serde_json::to_vec_pretty(&links)?,
+        )?;
+        self.commit_content_transaction(vec![change])
     }
 
     fn read_note_links(
@@ -372,6 +377,20 @@ impl Workspace {
         Ok(serde_json::from_slice(&fs::read(path)?)?)
     }
 
+    pub(crate) fn prepare_content_note_assets(
+        &self,
+        entry_id: &EntryId,
+        note_id: &NoteId,
+        body: &[u8],
+    ) -> Result<(), WorkspaceError> {
+        let body = std::str::from_utf8(body)
+            .map_err(|_| WorkspaceError::InvalidNoteDocument("note body must be UTF-8".into()))?;
+        // Called only after durable intent exists. Replay can restore an image
+        // again without moving it out of a newly recovered note.
+        self.prepare_note_asset_maintenance(entry_id, note_id, strip_frontmatter(body))?;
+        Ok(())
+    }
+
     fn prepare_note_asset_maintenance(
         &self,
         entry_id: &EntryId,
@@ -379,11 +398,13 @@ impl Workspace {
         markdown: &str,
     ) -> Result<Option<NoteAssetTransaction>, WorkspaceError> {
         let asset_dir = self.layout().entry_note_assets_dir(entry_id, note_id);
+        self.validate_note_workspace_path(&asset_dir)?;
         if !asset_dir.exists() {
             return Ok(None);
         }
 
         let manifest_path = asset_dir.join(NOTE_ASSET_ORPHAN_MANIFEST);
+        self.validate_note_workspace_path(&manifest_path)?;
         let previous_manifest = if manifest_path.exists() {
             Some(fs::read(&manifest_path)?)
         } else {
@@ -395,6 +416,7 @@ impl Workspace {
         };
         let referenced = referenced_note_asset_names(markdown, note_id);
         let quarantine_dir = asset_dir.join(NOTE_ASSET_ORPHAN_DIR);
+        self.validate_note_workspace_path(&quarantine_dir)?;
         let mut transaction = NoteAssetTransaction {
             manifest_path: manifest_path.clone(),
             moves: Vec::new(),
@@ -405,6 +427,8 @@ impl Workspace {
             for file_name in &referenced {
                 let active_path = asset_dir.join(file_name);
                 let quarantined_path = quarantine_dir.join(file_name);
+                self.validate_note_workspace_path(&active_path)?;
+                self.validate_note_workspace_path(&quarantined_path)?;
                 if !active_path.exists() && quarantined_path.is_file() {
                     fs::rename(&quarantined_path, &active_path)?;
                     transaction.moves.push((quarantined_path, active_path));
@@ -415,6 +439,7 @@ impl Workspace {
             let now = Utc::now().timestamp();
             for entry in fs::read_dir(&asset_dir)? {
                 let path = entry?.path();
+                self.validate_note_workspace_path(&path)?;
                 if !path.is_file() {
                     continue;
                 }
@@ -443,6 +468,7 @@ impl Workspace {
 
                 fs::create_dir_all(&quarantine_dir)?;
                 let quarantined_path = quarantine_dir.join(&file_name);
+                self.validate_note_workspace_path(&quarantined_path)?;
                 if quarantined_path.exists() {
                     continue;
                 }
@@ -675,7 +701,7 @@ fn restore_optional_file(path: &Path, previous: Option<&[u8]>) {
     }
 }
 
-fn strip_frontmatter(markdown: &str) -> &str {
+pub(crate) fn strip_frontmatter(markdown: &str) -> &str {
     let Some(rest) = markdown.strip_prefix("---\n") else {
         return markdown;
     };

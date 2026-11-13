@@ -1,3 +1,4 @@
+import { ReaderLoading } from './pdf-reader/ReaderLoading';
 import { OtherSourceImportPage } from '@/modules/import/OtherSourceImportPage';
 import type { LibrarySourceSync } from '@/modules/import/useLibrarySourceSync';
 import type { LibrarySourceCatalog } from '@/modules/library/useLibrarySourceCatalog';
@@ -799,7 +800,7 @@ export function ReaderPane({
     const externalPdfJump = jumpForSurface(pdfJumpByEntryId[parsed.entryId] ?? null, editorScopeOverride ?? surfaceKey(currentSurface));
 
     return (
-      <Suspense fallback={<div className="grid h-full min-h-0 place-items-center text-sm text-muted-foreground" role="status">正在载入阅读器…</div>}>
+      <Suspense fallback={<ReaderLoading />}>
       <EntryWorkspaceView
         editRequestId={editRequestId}
         activeContentId={parsed.contentId}
@@ -1123,7 +1124,7 @@ export function ReaderPane({
           onOpenLibrary={() => onOpenSurface({ kind: 'library' })} />;
       case 'ideation':
         return workspaceRoot ? <IdeationWorkspace key={workspaceRoot} root={workspaceRoot} entries={entries}
-          onOpenEntry={onOpenEntryExplorer} onOpenSource={onOpenSourceLink} /> : <p className="p-4 text-sm text-muted-foreground">请先打开资料库。</p>;
+          trashedEntries={trashedEntries} onOpenTrash={onOpenTrash} onOpenEntry={onOpenEntryExplorer} onOpenSource={onOpenSourceLink} /> : <p className="p-4 text-sm text-muted-foreground">请先打开资料库。</p>;
       case 'relations':
         return <RelationsPage key={workspaceRoot} entries={entries} tags={tags} trashedEntries={trashedEntries}
           active={surfaceLayout[pane]?.kind === 'relations'}

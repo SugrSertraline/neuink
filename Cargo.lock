@@ -3300,6 +3300,7 @@ dependencies = [
  "neuink-parser",
  "neuink-sciverse",
  "neuink-search",
+ "neuink-sync",
  "neuink-workspace",
  "neuink-zotero",
  "quick-xml 0.39.4",
@@ -3371,6 +3372,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "neuink-sync"
+version = "0.1.3"
+dependencies = [
+ "blake3",
+ "futures-util",
+ "image",
+ "neuink-domain",
+ "neuink-sync-protocol",
+ "neuink-workspace",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "neuink-sync-protocol"
+version = "0.1.3"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "neuink-workspace"
 version = "0.1.3"
 dependencies = [
@@ -3380,6 +3407,8 @@ dependencies = [
  "docx-rs",
  "image",
  "neuink-domain",
+ "neuink-parser",
+ "neuink-sync-protocol",
  "neuink-zotero",
  "pulldown-cmark",
  "scraper",

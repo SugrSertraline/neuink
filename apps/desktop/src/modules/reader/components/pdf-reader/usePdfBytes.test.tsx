@@ -9,8 +9,8 @@ vi.mock('@/shared/ipc/workspaceApi', () => ({ readPdfBytes }));
 
 import { usePdfBytes } from './usePdfBytes';
 
+beforeEach(() => vi.clearAllMocks());
 describe('usePdfBytes', () => {
-  beforeEach(() => vi.clearAllMocks());
 
   it('reloads bytes into a new array when the content hash changes at the same path', async () => {
     readPdfBytes
@@ -49,3 +49,18 @@ describe('usePdfBytes', () => {
     }
   });
 });
+
+ it('shares an in-flight read between simultaneous surfaces and releases it afterwards', async () => {
+   let resolve!: (bytes: ArrayBuffer) => void;
+   readPdfBytes.mockImplementationOnce(() => new Promise<ArrayBuffer>(done => { resolve = done; }));
+   const first = renderHook(() => usePdfBytes('shared.pdf', 'v1'));
+   const second = renderHook(() => usePdfBytes('shared.pdf', 'v1'));
+   expect(readPdfBytes).toHaveBeenCalledTimes(1);
+   await act(async () => resolve(new Uint8Array([7]).buffer));
+   expect(first.result.current.status).toBe('ready');
+   expect(second.result.current.status).toBe('ready');
+   readPdfBytes.mockResolvedValueOnce(new Uint8Array([8]).buffer);
+   const third = renderHook(() => usePdfBytes('shared.pdf', 'v1'));
+   await waitFor(() => expect(third.result.current.status).toBe('ready'));
+   expect(readPdfBytes).toHaveBeenCalledTimes(2);
+ });

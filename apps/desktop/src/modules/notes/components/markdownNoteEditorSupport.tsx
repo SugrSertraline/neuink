@@ -1,3 +1,4 @@
+import { preferredScrollBehavior } from '@/shared/lib/motionPolicy';
 import type { Editor } from '@tiptap/core';
 import { TextSelection } from '@tiptap/pm/state';
 
@@ -214,7 +215,7 @@ export function revealInsertedSourceLink(scrollElement: HTMLDivElement | null, a
       return;
     }
 
-    target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+    target.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'center', inline: 'nearest' });
     target.classList.add('source-link-inserted-flash');
     window.setTimeout(() => target.classList.remove('source-link-inserted-flash'), 1800);
   });

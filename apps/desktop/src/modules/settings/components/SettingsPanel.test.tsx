@@ -401,3 +401,16 @@ describe('settings information architecture and navigation', () => {
     expect(mocks.saveLlmSettings).not.toHaveBeenCalled();
   });
 });
+
+it('merges storage into account and opens reset only through the full command result', async () => {
+  const { ADMIN_PASSWORD_RESET_COMMAND } = await import('../settingsCatalog');
+  render(<Harness />);
+  expect(screen.queryByRole('button', { name: '资料与存储' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '账户' }));
+  expect(screen.getByText('本机资料与存储')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '使用管理员重置凭据' })).toBeNull();
+  fireEvent.change(screen.getByRole('textbox', { name: '搜索设置' }), { target: { value: ADMIN_PASSWORD_RESET_COMMAND } });
+  expect(screen.queryByRole('dialog', { name: '重置当前管理员密码' })).toBeNull();
+  fireEvent.click(await screen.findByRole('button', { name: /重置当前管理员密码/ }));
+  expect(await screen.findByRole('dialog', { name: '重置当前管理员密码' })).toBeTruthy();
+});

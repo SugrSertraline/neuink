@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { runLocalBackgroundJob, type LocalJobReporter } from '@/shared/lib/localBackgroundJobs';
 import { getZoteroSettings, importZoteroPaper, onZoteroSettingsChanged, scanZotero } from '@/shared/ipc/zoteroApi';
 import { getMineruSettings, importMineruItem, onMineruSettingsChanged, scanMineru } from '@/shared/ipc/mineruApi';
 
@@ -45,9 +46,9 @@ export function useLibrarySourceSync(root: string | null, ready: boolean, onEntr
     let running = false;
     let requested = false;
     let lastRunAt = 0;
-    const runOnce = async () => {
+    const runOnce = async (report: LocalJobReporter) => {
       const [zoteroSettings, mineruSettings] = await Promise.all([getZoteroSettings(), getMineruSettings()]);
-      if (cancelled) return;
+      if (cancelled) throw new DOMException('已停止来源检查', 'AbortError');
       const enabledSources = { zotero: zoteroSettings.enabled !== false, mineru: mineruSettings.enabled !== false };
       setState(previous => ({ ...previous, enabledSources }));
       let imported = 0;
@@ -60,7 +61,11 @@ export function useLibrarySourceSync(root: string | null, ready: boolean, onEntr
       let truncated = false;
       let entriesChanged = false;
       let error: string | null = null;
-      const update = (current: string) => { if (!cancelled) setState(previous => ({ ...previous, running: true, current, completed, total, imported, unresolved, changedEntryIds, changes, issues, truncated, error })); };
+      const update = (current: string) => {
+        if (cancelled) return;
+        report({ current: completed, total, percent: total ? Math.min(100, completed / total * 100) : 0 }, { message: current });
+        setState(previous => ({ ...previous, running: true, current, completed, total, imported, unresolved, changedEntryIds, changes, issues, truncated, error }));
+      };
       if (enabledSources.zotero && zoteroSettings.data_directory) {
         try {
           update('正在检查 Zotero');
@@ -68,7 +73,7 @@ export function useLibrarySourceSync(root: string | null, ready: boolean, onEntr
           if (snapshot.organization_updated) entriesChanged = true;
           const currentPaperIds = new Set(snapshot.library.papers.map(paper => paper.id));
           for (const [paperId, entryId] of Object.entries(snapshot.existing)) {
-            if (!currentPaperIds.has(paperId)) issues.push({ source: 'zotero', title: paperId, entryId, reason: '来源论文已不在当前 Zotero 资料库；NeuInk 本地副本仍保留。' });
+            if (!currentPaperIds.has(paperId)) issues.push({ source: 'zotero', title: paperId, entryId, reason: '来源论文已不在当前 Zotero 资料库；已保存的来源缓存仍保留。' });
           }
           const changedIds = new Set(snapshot.changed ?? []);
           changes = changes.concat(snapshot.library.papers.filter(paper => changedIds.has(paper.id) && snapshot.existing[paper.id]).map(paper => ({
@@ -79,7 +84,7 @@ export function useLibrarySourceSync(root: string | null, ready: boolean, onEntr
           changedEntryIds = changes.map(change => change.entryId);
           const candidates = snapshot.library.papers.filter(paper => !snapshot.existing[paper.id]);
           total += candidates.length;
-          update('正在同步 Zotero');
+          update('正在更新 Zotero 来源缓存');
           for (const paper of candidates) {
             if (cancelled) break;
             try {
@@ -101,7 +106,7 @@ export function useLibrarySourceSync(root: string | null, ready: boolean, onEntr
           const snapshot = await scanMineru(root, `library-sync-${Date.now()}`, true);
           const currentItemIds = new Set(snapshot.items.map(item => item.id));
           if (!snapshot.truncated) for (const [itemId, entryId] of Object.entries(snapshot.existing ?? {})) {
-            if (!currentItemIds.has(itemId)) issues.push({ source: 'mineru', title: itemId, entryId, reason: '来源结果已不在当前 MinerU 目录；NeuInk 本地副本仍保留。' });
+            if (!currentItemIds.has(itemId)) issues.push({ source: 'mineru', title: itemId, entryId, reason: '来源结果已不在当前 MinerU 目录；已保存的来源缓存仍保留。' });
           }
           const changedIds = new Set(snapshot.changed ?? []);
           changes = changes.concat(snapshot.items.filter(item => changedIds.has(item.id) && snapshot.existing?.[item.id]).map(item => ({
@@ -132,6 +137,8 @@ export function useLibrarySourceSync(root: string | null, ready: boolean, onEntr
         const pending = changes.filter(change => !isAcknowledged(root, change));
         return { root, enabledSources, running: false, current: '', completed, total, imported, unresolved, changedEntryIds: [...new Set(pending.map(change => change.entryId))], changes: pending, issues, scanVersion: previous.scanVersion + 1, truncated, error };
       });
+      if (cancelled) throw new DOMException('已停止来源检查', 'AbortError');
+      if (error || unresolved || truncated) throw new Error(error || '部分来源需要处理，请查看来源动态');
     };
     const run = async () => {
       if (running) { requested = true; return; }
@@ -140,7 +147,8 @@ export function useLibrarySourceSync(root: string | null, ready: boolean, onEntr
         requested = false;
         lastRunAt = Date.now();
         setState(previous => ({ ...(previous.root === root ? previous : initial), root, running: true, current: '正在检查来源', completed: 0, total: 0, imported: 0, unresolved: 0, changedEntryIds: [], changes: [], issues: [], truncated: false, error: null }));
-        try { await runOnce(); }
+        try { await runLocalBackgroundJob({ kind: 'sync', scope: { kind: 'workspace', root }, idPrefix: 'library-source-sync',
+          message: '正在读取本地来源配置', successMessage: '本地来源缓存检查完成', failureMessage: '来源同步有待处理内容，请查看来源动态' }, runOnce); }
         catch (caught) { if (!cancelled) setState(previous => ({ ...previous, running: false, current: '', error: `来源检查失败：${String(caught)}` })); }
       } while (requested && !cancelled);
       running = false;

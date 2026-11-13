@@ -14,9 +14,9 @@ export function SettingsPage({ tab, title, description, children }: { tab: Setti
   </TabsContent>;
 }
 
-export function SettingsGroup({ id, title, description, children, action }: { id?: string; title: string; description?: string; children: ReactNode; action?: ReactNode }) {
+export function SettingsGroup({ id, title, description, children, action }: { id?: string; title?: string; description?: string; children: ReactNode; action?: ReactNode }) {
   return <section data-setting-id={id} tabIndex={id ? -1 : undefined} className="settings-group">
-    <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-semibold">{title}</h3>{action}</div>
+    {(title || action) && <div className="flex flex-wrap items-center justify-between gap-2">{title && <h3 className="text-sm font-semibold">{title}</h3>}{action}</div>}
     {description && <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>}
     <div className="mt-2">{children}</div>
   </section>;

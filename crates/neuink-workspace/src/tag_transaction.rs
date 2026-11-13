@@ -11,6 +11,14 @@ use crate::{atomic_write, atomic_write_json, tag_reading::validate_id, Workspace
 
 static METADATA_LOCK: Mutex<()> = Mutex::new(());
 
+// Export must never recover or create workspace files. Share the writers' lock
+// so a note and its source-link sidecar cannot be observed halfway through save.
+pub(crate) fn lock_metadata() -> Result<MutexGuard<'static, ()>, WorkspaceError> {
+    METADATA_LOCK
+        .lock()
+        .map_err(|_| WorkspaceError::TagReading("资料库写入锁不可用，请重启后重试".into()))
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) enum TagTransactionTarget {
     Workspace,
@@ -35,11 +43,13 @@ impl Workspace {
     pub(crate) fn begin_tag_safe_mutation(
         &self,
     ) -> Result<MutexGuard<'static, ()>, WorkspaceError> {
-        let guard = METADATA_LOCK
-            .lock()
-            .map_err(|_| WorkspaceError::TagReading("资料库写入锁不可用，请重启后重试".into()))?;
+        let guard = lock_metadata()?;
         self.recover_tag_transaction()?;
         self.recover_source_note_import()?;
+        self.recover_content_transaction()?;
+        self.recover_sync_apply()?;
+        self.recover_entry_lifecycle()?;
+        self.recover_child_trash()?;
         Ok(guard)
     }
 

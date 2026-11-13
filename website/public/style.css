@@ -16,3 +16,6 @@
 
 /* Product screenshots keep original pixels and open as native full-size images. */
 .screenshot-showcase{padding-top:20px}.screenshot-showcase h2{font-size:clamp(28px,3vw,40px)}.product-shot{margin:28px 0 18px}.product-shot img,.prose .screenshot-link img{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:7px;background:white}.product-shot a,.prose .screenshot-link{display:block;cursor:zoom-in}.product-shot figcaption{font-size:13px;line-height:1.8;color:var(--muted);margin-top:16px}.product-shot figcaption strong{color:var(--ink)}.prose .screenshot-link{margin:24px 0 12px}.prose .screenshot-link:hover img{border-color:var(--accent)}
+
+/* Keep preview scope visible without changing page scroll or keyboard ownership. */
+.release-banner{display:flex;flex-wrap:wrap;align-items:center;gap:6px 20px;padding:12px max(24px,calc((100vw - 1200px)/2));border-bottom:1px solid var(--line);background:var(--accent-soft);color:var(--ink);font-size:13px}.release-banner strong{font-weight:650}.release-banner span{color:var(--muted)}.release-banner a{color:var(--accent);text-decoration:underline;text-underline-offset:3px}

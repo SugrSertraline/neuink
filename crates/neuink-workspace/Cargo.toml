@@ -15,6 +15,8 @@ pulldown-cmark = { version = "0.13", default-features = false, features = ["html
 scraper = { version = "0.24", default-features = false }
 sha2 = "0.10"
 neuink-domain = { path = "../neuink-domain" }
+neuink-parser = { path = "../neuink-parser" }
+neuink-sync-protocol = { path = "../neuink-sync-protocol" }
 neuink-zotero = { path = "../neuink-zotero" }
 serde.workspace = true
 serde_json.workspace = true

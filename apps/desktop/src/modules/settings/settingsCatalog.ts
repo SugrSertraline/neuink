@@ -3,18 +3,19 @@ import { ONBOARDING_GUIDE_VISIBLE } from '@/modules/onboarding/availability';
 // Temporary tester-facing surface. Existing runtime configuration stays intact.
 export const ADVANCED_ASSISTANT_SETTINGS_VISIBLE = false;
 const ALL_SETTINGS_CATEGORIES = [
+  { id: 'account', title: '账户', tabs: ['account', 'data'] },
   { id: 'getting-started', title: '入门与教程', tabs: ['getting-started'] },
   { id: 'appearance', title: '外观与界面', tabs: ['appearance'] },
   { id: 'reader', title: '阅读与批注', tabs: ['reader'] },
   { id: 'translation', title: '翻译', tabs: ['translation'] },
   { id: 'parser', title: '导入与解析', tabs: ['parser'] },
   { id: 'models', title: '模型与助手', tabs: ['models', 'main-agent', 'subagents'] },
-  { id: 'external-tools', title: '检索与工具', tabs: ['external-tools'] },
-  { id: 'data', title: '资料与存储', tabs: ['data'] }
+  { id: 'external-tools', title: '检索与工具', tabs: ['external-tools'] }
 ] as const;
 
 export type SettingsTab = typeof ALL_SETTINGS_CATEGORIES[number]['tabs'][number];
 export function visibleSettingsTab(tab: SettingsTab): SettingsTab {
+  if (tab === 'data') return 'account';
   if (!ONBOARDING_GUIDE_VISIBLE && tab === 'getting-started') return 'appearance';
   if (ADVANCED_ASSISTANT_SETTINGS_VISIBLE) return tab;
   if (tab === 'main-agent' || tab === 'subagents') return 'models';
@@ -35,6 +36,8 @@ export type SettingDefinition = {
 
 // Metadata only: never index user values, credentials, paths or document content.
 const ALL_SETTINGS_CATALOG: SettingDefinition[] = [
+  { id: 'data-cloud-sync', tab: 'account', title: '云端同步与问题处理', description: '查看同步失败、依赖未就绪及版本冲突，重试同步。', keywords: '同步 失败 未就绪 冲突 配额' },
+  { id: 'data-cloud-account', tab: 'account', title: '个人账户', description: '连接私有服务器，注册登录、管理设备与云端资料库。', keywords: '同步 账号 登录 注册 服务器 云端 设备 局域网' },
   { id: 'parser-zotero', tab: 'parser', title: 'Zotero 本地资料', description: '设置 Zotero 目录，读取论文列表并选择导入。', keywords: 'zotero 文献 论文 导入 数据目录 文件夹 附件' },
   { id: 'tools-local-agent', tab: 'external-tools', title: '本地 Agent', description: '检测本地 Agent，管理已记住的操作授权。', keywords: 'claudecode Claude Code Codex OpenCode 本地 agent 智能体 工具 检测 权限 授权 以后都允许 撤销 恢复询问' },
   { id:'data-onboarding', tab:'getting-started', title:'新手引导', description:'继续或回放聚焦式任务教程。', keywords:'教程 onboarding 入门 引导 回放 Attention 论文 示例' },
@@ -64,7 +67,7 @@ const ALL_SETTINGS_CATALOG: SettingDefinition[] = [
   { id: 'parser-service', tab: 'parser', title: 'MinerU 服务连接', description: '配置解析服务地址和可选 API Key。', keywords: 'MinerU URL 密钥 API Key token 凭据 解析 Base URL' },
   { id: 'parser-zip', tab: 'parser', title: '导入 MinerU 客户端结果', description: '使用客户端生成的结果目录、ZIP 或 RAR。', keywords: '离线 解析 导入 目录 ZIP RAR content_list' },
   { id: 'parser-mineru-local', tab: 'parser', title: 'MinerU 本地结果目录', description: '选择或自动查找 MinerU 解析结果所在的文件夹。', keywords: 'MinerU 本地 自动查找 下载 结果目录 导入' },
-  { id: 'data-workspace', tab: 'data', title: '数据位置', description: '数据固定保存在程序文件夹内，随程序一起移动。', keywords: '工作区 workspace 位置 路径 目录 data 便携 U盘 USB' },
+  { id: 'data-workspace', tab: 'account', title: '数据位置', description: '数据固定保存在程序文件夹内，随程序一起移动。', keywords: '工作区 workspace 位置 路径 目录 data 便携 U盘 USB' },
   { id: 'models-connections', tab: 'models', title: '模型连接配置', description: '选择公开模型预设，自动填入参数；配置 API Key、接口地址和模型 ID。', keywords: '大模型 大语言模型 密钥 API Key token 凭据 Base URL Provider Ollama OpenAI 模型预设 models.dev OpenRouter 公开目录 自动填充' },
   { id: 'models-advanced', tab: 'models', title: '模型高级参数', description: '在模型编辑中设置上下文、最大输出、Temperature 和 Top P。', keywords: '采样 温度 token 上下文窗口 参数' },
   { id: 'models-assistant', tab: 'models', title: '助手对话模型', description: '指定对话与资料问答使用的模型。', keywords: '任务模型 助手 对话 AI' },
@@ -87,7 +90,10 @@ export function settingsCategory(tab: SettingsTab) {
   return SETTINGS_CATEGORIES.find(category => category.tabs.includes(visibleSettingsTab(tab)))!;
 }
 
+export const ADMIN_PASSWORD_RESET_COMMAND = '/neuink::admin/account/password-reset --revoke-all-sessions --confirm-intent';
+export const ADMIN_PASSWORD_RESET_TARGET = 'account-admin-password-reset';
 export function searchSettings(query: string): SettingDefinition[] {
+  if (query.trim() === ADMIN_PASSWORD_RESET_COMMAND) return [{ id: ADMIN_PASSWORD_RESET_TARGET, tab: 'account', title: '重置当前管理员密码', description: '验证管理员身份后设置新密码，并撤销全部设备登录。', keywords: '' }];
   const terms = query.trim().normalize('NFKC').toLocaleLowerCase().split(/\s+/).filter(Boolean);
   if (!terms.length) return [];
   return SETTINGS_CATALOG.map((item, index) => {

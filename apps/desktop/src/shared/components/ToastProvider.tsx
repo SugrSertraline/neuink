@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { CheckCircle2, Bell, CircleAlert, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { rememberNotification } from '../lib/notificationHistory';
 import { Toaster } from '@/components/ui/sonner';
 
 import {
@@ -22,6 +23,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const notify = useCallback(
     ({
       action,
+      navigation,
       description,
       durationMs = TOAST_DURATION_MS,
       onDismiss,
@@ -31,6 +33,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       tone = 'default'
     }: ToastInput) => {
       const id = crypto.randomUUID();
+      rememberNotification(id, { title, description, tone, navigation });
       const toneStyles =
         tone === 'success'
           ? {
@@ -139,6 +142,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       <Toaster
         closeButton
         position="bottom-right"
+        offset={{ bottom: 40, right: 16 }}
         toastOptions={{
           classNames: {
             toast:

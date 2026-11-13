@@ -104,3 +104,29 @@ describe('window-local background task projection', () => {
     expect(registry.getLocalBackgroundJobs().every(row => row.status === 'succeeded')).toBe(true);
   });
 });
+
+ it('ignores a late progress callback after completion', async () => {
+   const registry = await import('./localBackgroundJobs');
+   let late!: import('./localBackgroundJobs').LocalJobReporter;
+   await registry.runLocalBackgroundJob(options, async report => { late = report; });
+   late({ current: 1, total: 2, percent: 50 }, { status: 'processing' });
+   expect(registry.getLocalBackgroundJobs()[0].status).toBe('succeeded');
+ });
+
+it('coalesces progress bursts but publishes completion immediately', async () => {
+  vi.useFakeTimers();
+  try {
+    const registry = await import('./localBackgroundJobs');
+    const observer = vi.fn();
+    const unsubscribe = registry.subscribeLocalBackgroundJobs(observer);
+    await registry.runLocalBackgroundJob(options, async report => {
+      for (let current = 1; current <= 200; current++) report({ current, total: 200, percent: current / 2 });
+      expect(observer).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(100);
+      expect(observer).toHaveBeenCalledTimes(2);
+    });
+    expect(observer).toHaveBeenCalledTimes(3);
+    expect(registry.getLocalBackgroundJobs()[0].status).toBe('succeeded');
+    unsubscribe();
+  } finally { vi.useRealTimers(); }
+});

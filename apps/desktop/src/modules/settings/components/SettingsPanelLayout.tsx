@@ -1,3 +1,4 @@
+import { visibleSettingsTab } from '../settingsCatalog';
 import { ArrowLeft } from 'lucide-react';
 import { useLayoutEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
@@ -140,7 +141,8 @@ export type SettingsPanelLayoutProps = {
 };
 
 export function SettingsPanelLayout(props: SettingsPanelLayoutProps) {
-  const { activeSettingsTab, onSetActiveSettingsTab, onBack } = props;
+  const { onSetActiveSettingsTab, onBack } = props;
+  const activeSettingsTab = visibleSettingsTab(props.activeSettingsTab);
   const navigation = useSettingsNavigation(activeSettingsTab, onSetActiveSettingsTab, props.navigationTarget);
   const category = settingsCategory(activeSettingsTab);
   const scrollPositions = useRef(new Map<string, number>());
@@ -169,7 +171,7 @@ export function SettingsPanelLayout(props: SettingsPanelLayoutProps) {
           <fieldset disabled={props.recoveryBlocked} hidden={Boolean(navigation.query.trim())} className="min-w-0">
             <ModelSettingsSection props={props} />
             <GeneralSettingsSections props={props} />
-            <DataSettingsSection props={props} navigationTarget={navigation.pending} />
+            <DataSettingsSection props={{ ...props, activeSettingsTab }} navigationTarget={navigation.pending} />
             <ExternalToolsSettingsSection props={props} />
           </fieldset>
         </div>

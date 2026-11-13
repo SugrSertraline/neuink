@@ -26,11 +26,22 @@ export function subscribeLocalBackgroundJobs(listener: () => void): () => void {
   return () => { listeners.delete(listener); };
 }
 
-function publish(job: Job): void {
-  jobs = recentBackgroundJobs([job, ...jobs.filter(current => current.id !== job.id)], 24);
+let notificationTimer: ReturnType<typeof setTimeout> | undefined;
+function notifyListeners() {
+  if (notificationTimer !== undefined) clearTimeout(notificationTimer);
+  notificationTimer = undefined;
   for (const listener of [...listeners]) {
-    // A disposed/broken display subscriber must never cancel the real operation.
-    try { listener(); } catch { /* Task state is available to the next subscriber. */ }
+    try { listener(); } catch { /* A display subscriber cannot cancel the real operation. */ }
+  }
+}
+export function publishLocalBackgroundJob(job: Job): void {
+  const previous = jobs.find(current => current.id === job.id);
+  jobs = recentBackgroundJobs([job, ...jobs.filter(current => current.id !== job.id)], 24);
+  // Keep true state immediately readable, while limiting progress-only UI updates to 10 Hz.
+  if (!previous || previous.status !== job.status || !['processing', 'queued'].includes(job.status)) {
+    notifyListeners();
+  } else if (notificationTimer === undefined) {
+    notificationTimer = setTimeout(notifyListeners, 100);
   }
 }
 
@@ -47,11 +58,13 @@ export async function runLocalBackgroundJob<T>(options: LocalJobOptions, execute
     created_at: now,
     updated_at: now
   };
-  publish(job);
+  let finished = false;
+  publishLocalBackgroundJob(job);
   try {
     const result = await execute((progress, update) => {
+      if (finished) return;
       job = { ...job, ...update, progress, updated_at: new Date().toISOString() };
-      publish(job);
+      publishLocalBackgroundJob(job);
     });
     job = { ...job, status: 'succeeded', message: options.successMessage };
     return result;
@@ -63,6 +76,7 @@ export async function runLocalBackgroundJob<T>(options: LocalJobOptions, execute
     job = { ...job, status: canceled ? 'canceled' : 'failed', message: duplicateCanceled ? '已取消添加重复的 PDF' : canceled ? '操作已停止，已完成的内容保留' : options.failureMessage, error: canceled ? null : assistantErrorDiagnostic(error) };
     throw error;
   } finally {
-    publish({ ...job, updated_at: new Date().toISOString() });
+    finished = true;
+    publishLocalBackgroundJob({ ...job, updated_at: new Date().toISOString() });
   }
 }

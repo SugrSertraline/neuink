@@ -1,3 +1,4 @@
+import { runLocalBackgroundJob } from '../lib/localBackgroundJobs';
 import { invoke } from '@tauri-apps/api/core';
 
 export type ReadingExportKind = 'note' | 'segment_note' | 'annotation' | 'translation';
@@ -27,5 +28,7 @@ export function exportReading(request: {
   target_path: string;
   allow_incomplete: boolean;
 }) {
-  return invoke<void>('export_reading', { request });
+  return runLocalBackgroundJob({ kind: 'export', scope: { kind: 'entry', root: request.root, entry_id: request.entry_id },
+    message: '正在导出阅读成果', successMessage: '导出阅读成果完成', failureMessage: '导出阅读成果失败，请返回导出窗口重试',
+  }, () => invoke<void>('export_reading', { request }));
 }

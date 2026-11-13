@@ -1,3 +1,4 @@
+import { runLocalBackgroundJob } from '../lib/localBackgroundJobs';
 import { invoke } from '@tauri-apps/api/core';
 import type { NoteDocument, NoteOwner, NoteTarget, SourceLink } from '@/shared/types/domain';
 import { createNote, createNoteSourceLink, importNoteAsset, openNoteFile, readNote, revealNoteFile, saveNoteAssetBytes, updateNote } from './workspaceApi';
@@ -51,4 +52,4 @@ export const openOwnedNoteFile = (root: string, owner: NoteOwner, noteId: string
 export const inspectTagNoteExport = (root: string, tagId: string, noteId?: string) =>
   tagNote<ReadingExportCatalog>(root, tagId, { kind: 'inspect_export', note_id: noteId ?? null });
 export const exportTagNotes = (root: string, tagId: string, options: { selected: { id: string; fingerprint: string }[]; format: ReadingExportFormat; target_path: string; allow_incomplete: boolean }) =>
-  tagNote<void>(root, tagId, { kind: 'export', ...options });
+  runLocalBackgroundJob({ kind: 'export', scope: { kind: 'workspace', root }, message: '正在导出标签笔记', successMessage: '标签笔记导出完成', failureMessage: '标签笔记导出失败，请返回导出窗口重试' }, () => tagNote<void>(root, tagId, { kind: 'export', ...options }));

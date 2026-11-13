@@ -1,0 +1,7 @@
+# Supply a tested Java 21 runtime image; build the jar separately with Maven.
+ARG RUNTIME_IMAGE=eclipse-temurin:21-jre
+FROM ${RUNTIME_IMAGE}
+WORKDIR /app
+COPY neuink-server.jar /app/neuink-server.jar
+EXPOSE 8790
+ENTRYPOINT ["java", "-jar", "/app/neuink-server.jar"]

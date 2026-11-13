@@ -1,3 +1,6 @@
+import { getLibraryViewTitle } from '@/modules/library/utils/libraryView';
+import { useCloudSync } from './useCloudSync';
+import { sameWorkspacePath } from '@/shared/lib/workspacePath';
 import { SidebarBoundaryControl } from './SidebarBoundaryControl';
 import { useLibrarySourceSync } from '@/modules/import/useLibrarySourceSync';
 import { LibrarySourceReviewDialog } from '@/modules/import/LibrarySourceReviewDialog';
@@ -262,6 +265,7 @@ function isHttpEndpoint(value: string) {
 export function App() {
   const duplicateReview = usePdfDuplicateReview();
   const workspace = useWorkspace(duplicateReview.confirm);
+  useCloudSync(workspace.root, workspace.status === 'ready', root => openSyncIssues(root));
   const librarySourceSync = useLibrarySourceSync(workspace.root, workspace.status === 'ready', workspace.refreshEntries);
   const librarySourceCatalog = useLibrarySourceCatalog(workspace.root, workspace.entries);
   const [hiddenActionEntryId, setHiddenActionEntryId] = useState<string | null>(null);
@@ -746,6 +750,13 @@ export function App() {
   const settingsNavigationNonce = useRef(0);
   const openSetting = (id: string) => {
     dispatchSurface({ type: 'open', surface: { kind: 'settings', target: { id, nonce: ++settingsNavigationNonce.current } } });
+  };
+  const openSyncIssues = (root: string) => {
+    if (!workspace.root || !sameWorkspacePath(root, workspace.root)) {
+      notify({ title: '请先切换到对应资料库', description: '这条同步记录属于其他资料库，未自动切换当前资料。' });
+      return;
+    }
+    openSetting('data-cloud-sync');
   };
   const pdfParseAction: PdfParseAction = {
     configured: Boolean(mineruEndpoint.trim()),
@@ -1959,6 +1970,7 @@ export function App() {
         style={shellStyle}
       >
         <WorkspaceTabsBar
+          libraryNavigation={{ view: libraryView, title: activeTag ? (workspace.tags.find(tag => tag.id === activeTag)?.name ?? getLibraryViewTitle(libraryView)) : getLibraryViewTitle(libraryView), onSwitch: selectLibraryView }}
           readingLinkMode={readerPreferences.readingLinkMode}
           onReadingLinkModeChange={(readingLinkMode) => updateReaderPreferences({ ...readerPreferences, readingLinkMode })}
           onNewTab={() => dispatchSurface({ type: 'open', surface: { kind: 'new-tab', id: crypto.randomUUID() } })}
@@ -2405,7 +2417,9 @@ export function App() {
             if (taskId) researchModel.select(taskId);
             setResearchOpenRequest(value => value + 1); showAssistantTasks();
           }} onStopAssistantTask={id => { if (id === RESEARCH_DOCK_ID) void researchModel.command({ kind: 'cancel' }); else assistantTaskDock.stopTask(id); }}
+          onOpenNotification={item => { if (item.navigation?.kind === 'cloud-sync') openSyncIssues(item.navigation.root); }}
           onOpenJob={job => {
+            if (job.id.startsWith('cloud-task:') && job.scope) { openSyncIssues(job.scope.root); return; }
             const scope = job.scope;
             if (scope?.root !== workspace.root || scope.kind !== 'entry') return;
             const entry = workspace.entries.find(item => item.id === scope.entry_id);

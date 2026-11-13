@@ -9,6 +9,7 @@ pub fn initialize_arxiv_gate<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     let handler: Box<dyn Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync> =
         Box::new(tauri::generate_handler![
+            commands::cloud_account::cloud_account,
             commands::zotero::zotero,
             commands::mineru::mineru,
             commands::import_preview::read_import_preview,

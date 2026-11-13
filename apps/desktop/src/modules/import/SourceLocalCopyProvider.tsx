@@ -82,21 +82,26 @@ export function SourceLocalCopyMenuItems({ entry, mode }: { entry: LibraryEntry;
     {copied && <Item disabled={Boolean(actions.busyEntryId)} onSelect={() => actions.importCopy(entry.id, true)}><CopyPlus aria-hidden="true" />另建一份本地副本</Item>}</>;
 }
 
-export function SourceLocalCopyButtons({ entry, onAction, iconOnly = false }: { entry: LibraryEntry; onAction?: () => void; iconOnly?: boolean }) {
+export function useSourceLocalCopyButtonItems(entry: LibraryEntry, onAction?: () => void) {
   const actions = useContext(SourceLocalCopyContext);
-  if (!actions) return null;
+  if (!actions) return (_iconOnly: boolean, _panel = false): ReactNode[] => [];
   const copied = Boolean(entry.sourceInfo?.local_copy_ids?.length);
   const disabled = Boolean(actions.busyEntryId);
   const busy = actions.busyEntryId === entry.id;
-  return <>
-    <SourceCopyButton iconOnly={iconOnly} icon={busy ? LoaderCircle : copied ? FolderOpen : Download} busy={busy}
-      label={busy ? '正在导入本地…' : copied ? '打开本地副本' : '导入到本地'} disabled={disabled} onClick={() => { onAction?.(); actions.importCopy(entry.id); }} />
-    {copied && <SourceCopyButton iconOnly={iconOnly} icon={CopyPlus} label={iconOnly ? '另建一份本地副本' : '另建一份'} variant="ghost" disabled={disabled} onClick={() => { onAction?.(); actions.importCopy(entry.id, true); }} />}
-    {actions.canImportNotes(entry) && <SourceCopyButton iconOnly={iconOnly} icon={FileDown} label="导入 Zotero 笔记" disabled={disabled} onClick={() => { onAction?.(); actions.importNotes(entry); }} />}
-  </>;
+  return (iconOnly: boolean, panel = false): ReactNode[] => [
+    <SourceCopyButton key="copy" panel={panel} iconOnly={iconOnly} icon={busy ? LoaderCircle : copied ? FolderOpen : Download} busy={busy}
+      label={busy ? '正在导入本地…' : copied ? '打开本地副本' : '导入到本地'} disabled={disabled} onClick={() => { onAction?.(); actions.importCopy(entry.id); }} />,
+    ...(copied ? [<SourceCopyButton key="another-copy" panel={panel} iconOnly={iconOnly} icon={CopyPlus} label={iconOnly || panel ? '另建一份本地副本' : '另建一份'} variant="ghost" disabled={disabled} onClick={() => { onAction?.(); actions.importCopy(entry.id, true); }} />] : []),
+    ...(actions.canImportNotes(entry) ? [<SourceCopyButton key="notes" panel={panel} iconOnly={iconOnly} icon={FileDown} label="导入 Zotero 笔记" disabled={disabled} onClick={() => { onAction?.(); actions.importNotes(entry); }} />] : []),
+  ];
 }
 
-function SourceCopyButton({ iconOnly, icon: Icon, busy, label, ...props }: ComponentProps<typeof Button> & { iconOnly: boolean; icon: LucideIcon; busy?: boolean; label: string }) {
+export function SourceLocalCopyButtons({ entry, onAction, iconOnly = false }: { entry: LibraryEntry; onAction?: () => void; iconOnly?: boolean }) {
+  return <>{useSourceLocalCopyButtonItems(entry, onAction)(iconOnly)}</>;
+}
+
+function SourceCopyButton({ iconOnly, panel, icon: Icon, busy, label, ...props }: ComponentProps<typeof Button> & { iconOnly: boolean; panel?: boolean; icon: LucideIcon; busy?: boolean; label: string }) {
+  if (panel) return <Button {...props} type="button" size="sm" variant="ghost" className="w-full justify-start gap-2 px-2 text-foreground"><Icon aria-hidden="true" className={busy ? 'size-4 animate-spin motion-reduce:animate-none' : 'size-4'} />{label}</Button>;
   if (iconOnly) return <TooltipIconButton {...props} label={label} variant="ghost" className="text-muted-foreground hover:text-foreground">
     <Icon aria-hidden="true" className={busy ? 'size-4 animate-spin motion-reduce:animate-none' : 'size-4'} />
   </TooltipIconButton>;

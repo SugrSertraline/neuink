@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { TagDescriptionField } from '@/modules/library/components/TagDescriptionField';
 import type { TagMeta } from '@/shared/types/domain';
 import type { LibraryView } from '@/modules/library/utils/libraryView';
+import { LibraryHeadingActions } from './LibraryHeadingActions';
 import { LibraryViewMenu } from './LibraryViewMenu';
 
 export function LibraryHeading({ title, summary, tag, ancestors, hasTagContext, view, onSelectView, onClearFilters, onManageTags, onNavigate, onDescription, disabled, workspaceRoot, actions }: {
@@ -16,9 +17,9 @@ export function LibraryHeading({ title, summary, tag, ancestors, hasTagContext, 
   actions: ReactNode;
 }) {
   return <header aria-label="条目库页眉" data-material="workspace-heading" className="@container/library-heading shrink-0 border-b bg-card px-3 py-2">
-    <div className={cn('flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2', hasTagContext && '@max-[1100px]/library-heading:grid @max-[1100px]/library-heading:grid-cols-[minmax(0,1fr)_auto] @max-[480px]/library-heading:grid-cols-1')}>
-    <div className={cn('flex min-w-0 flex-[1_1_240px] flex-wrap items-center gap-x-3 gap-y-1', hasTagContext && '@max-[1100px]/library-heading:contents')}>
-    <nav aria-label="条目库浏览路径" className="col-span-full flex min-h-8 min-w-0 max-w-full flex-wrap items-center gap-1">
+    <div className="flex min-w-0 flex-nowrap items-center gap-3">
+    <div className="flex min-w-0 w-[400px] max-w-[45%] shrink flex-col items-start gap-1">
+    <nav aria-label="条目库浏览路径" className="flex min-h-8 w-full min-w-0 flex-nowrap items-center gap-1 overflow-hidden">
       <div className="flex shrink-0 items-center gap-1">
         <Button size="xs" variant="ghost" className="shrink-0 px-1 text-muted-foreground" title="清除所有筛选并显示全部条目" onClick={onClearFilters}>显示全部</Button>
         <ChevronRight size={12} className="text-muted-foreground" aria-hidden="true" />
@@ -46,15 +47,16 @@ export function LibraryHeading({ title, summary, tag, ancestors, hasTagContext, 
         <h1 aria-current="location" className="min-w-0 truncate text-base font-semibold" title={title}>{title}</h1>
       </div> : null}
     </nav>
-      <p className="min-w-0 truncate text-xs tabular-nums text-muted-foreground" title={summary}>{summary}</p>
+      <p className="min-w-0 max-w-full truncate text-xs tabular-nums text-muted-foreground" title={summary}>{summary}</p>
     </div>
-    <div aria-label="条目库操作" className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-1.5">
-      <Button size="default" variant="ghost" className="gap-1.5 text-xs text-muted-foreground" onClick={onManageTags} disabled={disabled}><Tags size={14} aria-hidden="true" />标签管理</Button>
+    <LibraryHeadingActions>
+      <Button size="default" variant="outline" className="gap-1.5 text-xs" onClick={onManageTags} disabled={disabled}><Tags size={14} aria-hidden="true" />标签管理</Button>
       {actions}
-    </div>
+    </LibraryHeadingActions>
     </div>
     {tag && onDescription ? <div className="mt-1 grid min-h-7 min-w-0 grid-cols-[0_minmax(32px,1fr)_auto] items-center">
       <TagDescriptionField key={`${workspaceRoot}:${tag.id}`} tag={tag} scope={`library/tag:${tag.id}`} disabled={disabled} onSave={onDescription} inline />
     </div> : null}
   </header>;
 }
+

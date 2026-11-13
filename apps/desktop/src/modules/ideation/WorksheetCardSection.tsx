@@ -8,6 +8,7 @@ import { CardTypeLabel } from './CardTypeLabel';
 import { worksheetSections, type worksheetNodes, type WorksheetSection } from './researchWorksheet';
 type Node = ReturnType<typeof worksheetNodes>[number];
 type Props = {
+  sourceStatus?: (entryId: string) => string | undefined;
   boardId: string; section: WorksheetSection; nodes: Node[]; active: boolean;
   onChoose: () => void; onDescribe: () => void; onView: (node: Node) => void; onEdit: (node: Node) => void; onRemove: (id: string) => void;
   onReorder: (source: string, target: string, after: boolean) => void;
@@ -49,6 +50,7 @@ export function WorksheetCardSection(props: Props) {
           <Button size="icon-sm" variant="ghost" title="从构思移除" aria-label={`移除${node.card.title}`} onClick={()=>props.onRemove(node.id)}><X /></Button>
         </div>
         <div className="flex-1 space-y-2 px-4 py-3"><button className="line-clamp-2 min-h-10 w-full text-left text-sm font-medium leading-5 hover:text-primary focus-visible:ring-2 focus-visible:ring-ring" onClick={()=>props.onView(node)}>{node.card.title}</button><div className="[&>div]:border-0 [&>div]:pt-0 [&>div]:text-[13px]"><PaperCardBody card={node.card} /></div></div>
+        {props.sourceStatus?.(node.card.entry_id) && <p className="px-4 pb-2 text-xs text-muted-foreground">{props.sourceStatus(node.card.entry_id)} · 卡片快照已保留</p>}
         <div className="flex items-center gap-1 border-t px-3 py-2"><span className="mr-auto text-[11px] text-muted-foreground">{node.card_id.startsWith('local-idea-')?'仅本构思':section==='method'?'候选步骤 · 待验证':'已选素材'}</span><Button variant="ghost" size="icon-sm" title="前移" aria-label={`前移${node.card.title}`} disabled={index===0} onClick={()=>move(index,-1)}><ArrowUp /></Button><Button variant="ghost" size="icon-sm" title="后移" aria-label={`后移${node.card.title}`} disabled={index===nodes.length-1} onClick={()=>move(index,1)}><ArrowDown /></Button></div>
       </article>)}
       <button onClick={props.onChoose} aria-label={`添加${field.label}`} aria-pressed={props.active} className={`flex min-h-44 w-[min(320px,100%)] shrink-0 flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed bg-card p-5 text-card-foreground transition-colors hover:border-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${props.active?'border-primary':'border-border'}`}><Plus className="size-5 text-primary" /><span className="text-sm font-medium">添加{field.label}</span><span className="text-center text-xs leading-5 text-muted-foreground">点击在左侧查看推荐与全部卡片<br />也可用右上角“自己描述”添加</span></button>

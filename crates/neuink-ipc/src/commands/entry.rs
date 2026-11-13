@@ -98,6 +98,8 @@ pub struct EntryDeletionImpact {
     pub note_count: usize,
     pub annotation_count: usize,
     pub incoming_source_link_count: usize,
+    pub ideation_card_count: usize,
+    pub ideation_link_count: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -562,6 +564,7 @@ pub fn get_entry_deletion_impact(
         }
     }
 
+    let ideation = workspace.read_ideation().map_err(|error| error.to_string())?;
     Ok(EntryDeletionImpact {
         has_pdf: entry.pdf.is_some(),
         parsed_block_count: workspace
@@ -578,6 +581,8 @@ pub fn get_entry_deletion_impact(
             .map_err(|error| error.to_string())?
             .len(),
         incoming_source_link_count,
+        ideation_card_count: ideation.state.cards.iter().filter(|card| card.entry_id == request.entry_id.as_str()).count(),
+        ideation_link_count: ideation.state.links.iter().filter(|link| link.entry_id.as_deref() == Some(request.entry_id.as_str())).count(),
     })
 }
 

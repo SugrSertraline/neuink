@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { importZoteroPaper, scanZotero, setZoteroPaperHidden, type ZoteroImportResult, type ZoteroSnapshot } from '@/shared/ipc/zoteroApi';
+import { importZoteroLocalCopy, importZoteroPaper, scanZotero, setZoteroPaperHidden, type ZoteroImportResult, type ZoteroSnapshot } from '@/shared/ipc/zoteroApi';
 import { useConfirmPdfDuplicate } from '@/shared/lib/pdfDuplicate';
+import { copySourceToLocal } from '@/shared/ipc/workspaceApi';
 import { runLocalBackgroundJob } from '@/shared/lib/localBackgroundJobs';
 import { registerSegmentEditorCloseHandler, setSegmentEditorDirty } from '@/modules/reader/components/segmentEditorDirtyRegistry';
 
@@ -43,12 +44,17 @@ export function useZoteroImport(root: string, scope = 'library') {
     const id = ++epoch.current;
     setLoading(true); setError('');
     try {
-      const next = await scanZotero(root);
+      const next = await runLocalBackgroundJob({ kind: 'sync', scope: { kind: 'workspace', root }, idPrefix: 'zotero-read',
+        message: '正在读取本地 Zotero 资料库', successMessage: 'Zotero 资料库读取完成', failureMessage: 'Zotero 读取失败，请在来源页面重试' }, async () => {
+        const value = await scanZotero(root);
+        if (!mounted.current || epoch.current !== id) throw new DOMException('读取已被替代', 'AbortError');
+        return value;
+      });
       if (!mounted.current || epoch.current !== id) return;
       setSnapshot(next);
       const ids = new Set(next.library.papers.map(p => p.id));
       const hidden = new Set(next.hidden);
-      setSelected(previous => new Set([...previous].filter(id => ids.has(id) && !hidden.has(id) && !next.existing[id])));
+      setSelected(previous => new Set([...previous].filter(id => ids.has(id) && !hidden.has(id))));
       setAttachments(previous => Object.fromEntries(next.library.papers.map(p => [p.id, previous[p.id] ?? p.attachments.find(a => a.available)?.key ?? null])));
     } catch (e) { if (mounted.current && epoch.current === id) setError(typeof e === 'string' ? e : '读取 Zotero 论文列表失败，请重试。'); }
     finally { if (mounted.current && epoch.current === id) setLoading(false); }
@@ -69,7 +75,7 @@ export function useZoteroImport(root: string, scope = 'library') {
   const start = async () => {
     if (pending.current || !snapshot || !selected.size) return;
     pending.current = true; canceled.current = false; setBusy(true); setError('');
-    const ids = [...selected].filter(id => !snapshot.existing[id] && !snapshot.hidden.includes(id) && !outcomes[id]?.result);
+    const ids = [...selected].filter(id => !snapshot.hidden.includes(id) && !outcomes[id]?.result);
     const attachmentSelection = { ...attachments };
     const savedSnapshot = snapshot.snapshot_id;
     setProgress({ completed: 0, total: ids.length, current: '', stopped: false });
@@ -83,17 +89,27 @@ export function useZoteroImport(root: string, scope = 'library') {
           let outcome: ImportOutcome = {};
           try {
             const attachmentKey = attachmentSelection[id] ?? null;
+            let forceNew = false;
             const paper = snapshot.library.papers.find(p => p.id === id);
-            let result = await importZoteroPaper(root, savedSnapshot, id, attachmentKey);
+            let result: ZoteroImportResult = snapshot.existing[id]
+              ? { entry_id: snapshot.existing[id], title: paper?.title ?? '', status: 'skipped', has_pdf: Boolean(attachmentKey) }
+              : await importZoteroPaper(root, savedSnapshot, id, attachmentKey);
             if (result.status === 'duplicate' && result.duplicate && confirmPdfDuplicate) {
               const sourcePath = paper?.attachments.find(a => a.key === attachmentKey)?.file_name ?? 'Zotero PDF';
               const confirmed = await confirmPdfDuplicate({ candidateTitle: paper?.title ?? result.title, sourcePath, duplicate: result.duplicate });
-              if (confirmed && !canceled.current && mounted.current) result = await importZoteroPaper(root, savedSnapshot, id, attachmentKey, result.duplicate.contentHash);
+              if (confirmed && !canceled.current && mounted.current) { forceNew = true; result = await importZoteroPaper(root, savedSnapshot, id, attachmentKey, result.duplicate.contentHash); }
               else { outcome = { cancelled: true }; }
             } else if (result.status === 'duplicate') {
               outcome = { error: '该 PDF 与已有论文重复，请查看已有条目。' };
             }
-            if (!outcome.error && !outcome.cancelled) outcome = { result };
+            if (!outcome.error && !outcome.cancelled) {
+              // Reading/indexing creates a managed source; this explicit action
+              // alone publishes an independent local paper.
+              const local = snapshot.existing[id]
+                ? await importZoteroLocalCopy(root, result.entry_id)
+                : await copySourceToLocal(root, result.entry_id, forceNew);
+              outcome = { result: { ...result, entry_id: local.entry_id, status: local.created ? 'imported' : 'skipped' } };
+            }
           }
           catch (e) { failed = true; outcome = { error: typeof e === 'string' ? e : '导入失败，请重试。' }; }
           report({ current: index + 1, total: ids.length, percent: Math.round((index + 1) / ids.length * 100) });

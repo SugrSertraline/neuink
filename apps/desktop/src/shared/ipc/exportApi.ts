@@ -1,3 +1,4 @@
+import { runLocalBackgroundJob } from '../lib/localBackgroundJobs';
 import { invoke } from '@tauri-apps/api/core';
 
 export type PaperExportKind = 'source' | 'translation' | 'bilingual';
@@ -58,5 +59,7 @@ export function exportPaper(request: {
   options: PaperExportOptions;
   rendered_diagrams: RenderedExportDiagram[];
 }) {
-  return invoke<PaperExportInspection>('export_paper', { request });
+  return runLocalBackgroundJob({ kind: 'export', scope: { kind: 'entry', root: request.root, entry_id: request.entry_id },
+    message: '正在导出论文', successMessage: '导出论文完成', failureMessage: '导出论文失败，请返回导出窗口重试',
+  }, () => invoke<PaperExportInspection>('export_paper', { request }));
 }

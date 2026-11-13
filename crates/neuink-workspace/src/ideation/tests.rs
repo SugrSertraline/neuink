@@ -1,4 +1,3 @@
-
 use super::*;
 
 #[test]
@@ -105,7 +104,8 @@ fn links_round_trip_and_cannot_reference_missing_placements() {
     state.links[0].direction = Some("both".into());
     state.placements[0].x = -120.0;
     validate(&state).unwrap();
-    let saved: IdeationState = serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
+    let saved: IdeationState =
+        serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
     assert_eq!(saved.links[0].direction.as_deref(), Some("both"));
     assert_eq!(saved.placements[0].x, -120.0);
     state.links[0].direction = Some("bad".into());
@@ -266,29 +266,90 @@ fn batched_paper_drafts_allow_more_than_thirty_cards_and_preserve_previous_on_ov
     let dir = tempfile::tempdir().unwrap();
     let workspace = Workspace::create(dir.path()).unwrap();
     let mut draft = IdeationDraft {
-        entry_id: "paper".into(), status: "ready".into(), partial: false,
-        model: "model".into(), error_code: None, relations: Vec::new(),
-        cards: (0..300).map(|i| IdeationCard {
-            id: format!("card-{i}"), entry_id: "paper".into(), title: "方法".into(),
-            body: "来源清晰的整理".repeat(100), kind: "method".into(),
-            origin: Some("ai_draft".into()), pattern_ids: Vec::new(), sources: Vec::new(),
-        }).collect(),
+        entry_id: "paper".into(),
+        status: "ready".into(),
+        partial: false,
+        model: "model".into(),
+        error_code: None,
+        relations: Vec::new(),
+        cards: (0..300)
+            .map(|i| IdeationCard {
+                id: format!("card-{i}"),
+                entry_id: "paper".into(),
+                title: "方法".into(),
+                body: "来源清晰的整理".repeat(100),
+                kind: "method".into(),
+                origin: Some("ai_draft".into()),
+                pattern_ids: Vec::new(),
+                sources: Vec::new(),
+            })
+            .collect(),
     };
-    let saved = workspace.save_ideation_draft("missing", draft.clone()).unwrap();
-    assert_eq!(workspace.read_ideation_draft("paper").unwrap().draft.unwrap().cards.len(), 300);
-    let mut extra = draft.cards[0].clone(); extra.id = "overflow".into(); draft.cards.push(extra);
-    assert!(workspace.save_ideation_draft(&saved.revision, draft).is_err());
-    assert_eq!(workspace.read_ideation_draft("paper").unwrap().revision, saved.revision);
+    let saved = workspace
+        .save_ideation_draft("missing", draft.clone())
+        .unwrap();
+    assert_eq!(
+        workspace
+            .read_ideation_draft("paper")
+            .unwrap()
+            .draft
+            .unwrap()
+            .cards
+            .len(),
+        300
+    );
+    let mut extra = draft.cards[0].clone();
+    extra.id = "overflow".into();
+    draft.cards.push(extra);
+    assert!(workspace
+        .save_ideation_draft(&saved.revision, draft)
+        .is_err());
+    assert_eq!(
+        workspace.read_ideation_draft("paper").unwrap().revision,
+        saved.revision
+    );
     assert!(workspace.read_ideation().unwrap().state.cards.is_empty());
 }
 #[test]
 fn user_can_delete_last_draft_card_without_triggering_automatic_regeneration() {
     let dir = tempfile::tempdir().unwrap();
     let workspace = Workspace::create(dir.path()).unwrap();
-    let draft = IdeationDraft { entry_id: "paper".into(), status: "ready".into(), partial: false, model: "model".into(), error_code: None, relations: Vec::new(), cards: Vec::new() };
+    let draft = IdeationDraft {
+        entry_id: "paper".into(),
+        status: "ready".into(),
+        partial: false,
+        model: "model".into(),
+        error_code: None,
+        relations: Vec::new(),
+        cards: Vec::new(),
+    };
     workspace.save_ideation_draft("missing", draft).unwrap();
     let records = workspace.list_ideation_drafts().unwrap();
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].count, 0);
     assert_eq!(records[0].status, "ready");
+}
+
+#[test]
+fn saving_confirmed_ideation_records_durable_sync_work() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Workspace::create(dir.path()).unwrap();
+    let binding = crate::sync_journal::WorkspaceSyncBinding {
+        server_id: "1".repeat(64),
+        account_id: "2".repeat(64),
+        library_id: "3".repeat(64),
+        epoch: "4".repeat(64),
+    };
+    workspace.bind_sync(&binding).unwrap();
+    let snapshot = workspace.read_ideation().unwrap();
+    workspace
+        .save_ideation(&snapshot.revision, snapshot.state)
+        .unwrap();
+    let reopened = Workspace::open_existing(dir.path()).unwrap();
+    let events = reopened.pending_content_events().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0].affected_entities().unwrap(),
+        std::collections::BTreeSet::from(["board:ideation".into()])
+    );
 }

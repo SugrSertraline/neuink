@@ -43,6 +43,7 @@ class TestPointerEvent extends MouseEvent {
 
 beforeEach(() => {
   window.localStorage.clear();
+  window.localStorage.setItem('neuink.entryLibraryCloudColumnMigrated.v1', '1');
   vi.stubGlobal('PointerEvent', TestPointerEvent);
 });
 afterEach(() => {
@@ -50,6 +51,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
+
+function chooseNavigationMode(label?: string) {
+  const trigger = screen.getByRole('button', { name: '标签导航' });
+  const next = label ?? (trigger.getAttribute('aria-pressed') === 'true' ? '纯条目表格' : '标签与表格');
+  fireEvent.keyDown(trigger, { key: 'Enter' });
+  fireEvent.click(screen.getByRole('menuitemradio', { name: next }));
+}
 
 function SelectedLibraryView(props: ComponentProps<typeof EntryLibraryView>) {
   const [selectedEntryId, setSelectedEntryId] = useState(props.selectedEntryId);
@@ -115,11 +123,13 @@ it('sorts from column headers, synchronizes toolbar direction, and preserves sel
   fireEvent.click(screen.getByRole('button', { name: '按标题升序排列' }));
   expect(rowOrder()).toEqual(['first', 'second']);
   expect(screen.getByRole('columnheader', { name: '标题' }).getAttribute('aria-sort')).toBe('ascending');
-  expect(screen.getByRole('combobox', { name: '条目排序' }).textContent).toContain('标题');
+  expect(screen.queryByRole('combobox', { name: '条目排序' })).toBeNull();
   expect(screen.getByRole('checkbox', { name: '选择 Paper 2' }).getAttribute('aria-checked')).toBe('true');
   fireEvent.click(screen.getByRole('button', { name: '按标题降序排列' }));
   expect(rowOrder()).toEqual(['second', 'first']);
   expect(screen.getByRole('columnheader', { name: '标题' }).getAttribute('aria-sort')).toBe('descending');
+  fireEvent.click(screen.getByRole('button', { name: '退出选择' }));
+  expect(screen.getByRole('combobox', { name: '条目排序' }).textContent).toContain('标题');
   fireEvent.click(screen.getByRole('button', { name: '降序排列，切换为升序' }));
   expect(rowOrder()).toEqual(['first', 'second']);
   expect(table.parentElement!.scrollTop).toBe(48);
@@ -293,6 +303,25 @@ it('combines the existing tag view with source filtering and restores hidden Zot
   expect(setHidden).toHaveBeenCalledExactlyOnceWith(entry.id, false);
 });
 
+it('toggles the hidden filter back to the previous normal view without unhiding entries', () => {
+  const setHidden = vi.fn(async () => undefined);
+  const { props, rerenderLibrary } = renderLibrary({ libraryView: 'recent',
+    librarySourceCatalog: { sources: {}, loading: false, error: false, setHidden } });
+  fireEvent.click(screen.getByRole('button', { name: /^已隐藏 / }));
+  expect(props.onSelectView).toHaveBeenLastCalledWith('hidden');
+  rerenderLibrary({ libraryView: 'hidden' });
+  expect(screen.getByRole('button', { name: /^已隐藏 / }).getAttribute('aria-pressed')).toBe('true');
+  fireEvent.click(screen.getByRole('button', { name: /^已隐藏 / }));
+  expect(props.onSelectView).toHaveBeenLastCalledWith('recent');
+  expect(setHidden).not.toHaveBeenCalled();
+});
+
+it('returns to all entries when the hidden view has no prior normal view', () => {
+  const { props } = renderLibrary({ libraryView: 'hidden' });
+  fireEvent.click(screen.getByRole('button', { name: /^已隐藏 / }));
+  expect(props.onSelectView).toHaveBeenCalledWith('all');
+});
+
 it('restores directly from the hidden list without opening a paper', () => {
   const setHidden = vi.fn(async () => undefined);
   const { props } = renderLibrary({ workspaceRoot: 'workspace', libraryView: 'hidden',
@@ -410,14 +439,14 @@ describe('EntryLibraryView context heading and toolbar', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '标签描述' }), { target: { value: '尚未保存的研究主题' } });
     fireEvent.change(screen.getByRole('textbox', { name: '搜索条目' }), { target: { value: '可视分析' } });
     fireEvent.click(screen.getByRole('radio', { name: '仅当前标签' }));
-    fireEvent.click(screen.getByRole('button', { name: '标签导航' }));
+    chooseNavigationMode();
     expect(screen.queryByText(entry.title)).toBeNull();
     fireEvent.mouseDown(screen.getByRole('tab', { name: '标签笔记' }), { button: 0, ctrlKey: false });
     expect(screen.getByRole('textbox', { name: '搜索标签笔记' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: '标签导航' })).toBeNull();
     expect(screen.queryByRole('button', { name: '创建条目' })).toBeNull();
     fireEvent.mouseDown(screen.getByRole('tab', { name: '论文' }), { button: 0, ctrlKey: false });
-    fireEvent.click(screen.getByRole('button', { name: '标签导航' }));
+    chooseNavigationMode();
     expect(screen.getByRole('radio', { name: '仅当前标签' }).getAttribute('aria-checked')).toBe('true');
     expect((screen.getByRole('textbox', { name: '搜索条目' }) as HTMLInputElement).value).toBe('可视分析');
     expect((screen.getByRole('textbox', { name: '标签描述' }) as HTMLTextAreaElement).value).toBe('尚未保存的研究主题');
@@ -618,8 +647,8 @@ describe('EntryLibraryView pinned columns', () => {
     const table = screen.getByRole('table');
     const headers = within(table).getAllByRole('columnheader');
     const cells = within(table).getAllByRole('cell');
-    expect(headers.map((cell) => cell.dataset.pinned)).toEqual(['left', ...Array(8).fill(undefined), 'right']);
-    expect(cells.map((cell) => cell.dataset.pinned)).toEqual(['left', ...Array(8).fill(undefined), 'right']);
+    expect(headers.map((cell) => cell.dataset.pinned)).toEqual(['left', ...Array(9).fill(undefined), 'right']);
+    expect(cells.map((cell) => cell.dataset.pinned)).toEqual(['left', ...Array(9).fill(undefined), 'right']);
     expect(headers.every(cell => cell.classList.contains('border-r-border/20'))).toBe(true);
     expect(cells.every(cell => cell.classList.contains('border-r-border/20'))).toBe(true);
     expect(headers[0].className).toContain('sticky');
@@ -642,10 +671,10 @@ describe('EntryLibraryView pinned columns', () => {
     expect(table.className).toContain('table-fixed');
     expect(table.className).not.toContain('w-max');
     expect(table.className).not.toContain('min-w-full');
-    expect(table.style.width).toBe('max(100%, 1718px)');
-    expect(table.style.minWidth).toBe('1718px');
+    expect(table.style.width).toBe('max(100%, 1964px)');
+    expect(table.style.minWidth).toBe('1964px');
     expect(table.style.maxWidth).toBe('none');
-    expect(table.querySelectorAll('col')).toHaveLength(10);
+    expect(table.querySelectorAll('col')).toHaveLength(11);
     expect(table.querySelector('col')?.style.maxWidth).toBe('420px');
     expect(cells[0].className).toContain('overflow-hidden');
   });
@@ -766,7 +795,7 @@ describe('EntryLibraryView pinned columns', () => {
     renderLibrary();
     const browsingTable = screen.getByRole('table', { name: '论文列表' });
 
-    fireEvent.click(screen.getByRole('button', { name: '标签导航' }));
+    chooseNavigationMode();
     const table = document.querySelector<HTMLTableElement>('[data-slot="table"]');
     expect(table).toBe(browsingTable);
     expect(table).toBeInstanceOf(HTMLTableElement);
@@ -844,7 +873,7 @@ describe('EntryLibraryView pinned columns', () => {
   ])('keeps the $status message spanning all visible columns without pinning it', ({ status, text }) => {
     renderLibrary({ entries: [], status });
     const message = screen.getByText(text);
-    expect(message.getAttribute('colspan')).toBe('10');
+    expect(message.getAttribute('colspan')).toBe('11');
     expect(message.dataset.pinned).toBeUndefined();
   });
 });
@@ -870,7 +899,7 @@ describe('EntryLibraryView tag navigation visibility', () => {
   it('remembers visibility across tag navigation and reopening, including tags with no children', () => {
     const view = renderLibrary({ tags: libraryTags });
     const toggle = screen.getByRole('button', { name: '标签导航' });
-    fireEvent.click(toggle);
+    chooseNavigationMode();
     view.rerenderLibrary({ activeTag: 'research' });
     expect(toggle.getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByRole('button', { name: '打开标签 研究/HCI' })).toBeTruthy();
@@ -880,7 +909,7 @@ describe('EntryLibraryView tag navigation visibility', () => {
     view.unmount();
     const reopened = renderLibrary({ tags: libraryTags });
     expect(screen.getByRole('navigation', { name: '标签导航' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '标签导航' }));
+    chooseNavigationMode();
     reopened.unmount();
     renderLibrary({ tags: libraryTags });
     expect(screen.getByRole('button', { name: '标签导航' }).getAttribute('aria-pressed')).toBe('false');
@@ -899,7 +928,7 @@ describe('EntryLibraryView tag navigation visibility', () => {
     const columns = table.querySelector('colgroup')!.innerHTML;
     const rows = () => Array.from(table.querySelectorAll('[data-entry-id]')).map(row => row.getAttribute('data-entry-id'));
     expect(rows()).toEqual([entry.id, untagged.id]);
-    fireEvent.click(screen.getByRole('button', { name: '标签导航' }));
+    chooseNavigationMode();
     expect(screen.getByRole('table', { name: '论文列表' })).toBe(table);
     expect(table.parentElement).toBe(scroll);
     expect([scroll.scrollTop, scroll.scrollLeft]).toEqual([120, 80]);
@@ -908,7 +937,7 @@ describe('EntryLibraryView tag navigation visibility', () => {
     expect(table.querySelector('[data-state=selected]')?.getAttribute('data-entry-id')).toBe(entry.id);
     expect(screen.getByRole('button', { name: '表头' })).toBeTruthy();
     expect(screen.getByRole('navigation', { name: '标签导航' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '标签导航' }));
+    chooseNavigationMode();
     expect(screen.queryByRole('navigation', { name: '标签导航' })).toBeNull();
     expect(screen.getByRole('table')).toBe(table);
     expect(rows()).toEqual([entry.id, untagged.id]);
@@ -982,7 +1011,7 @@ describe('EntryLibraryView tag navigation visibility', () => {
     fireEvent.keyDown(screen.getByRole('option', { name: '标题' }), { key: 'Enter' });
     const order = () => Array.from(screen.getByRole('table').querySelectorAll('[data-entry-id]')).map(row => row.getAttribute('data-entry-id'));
     expect(order()).toEqual(['another', entry.id]);
-    fireEvent.click(screen.getByRole('button', { name: '标签导航' }));
+    chooseNavigationMode();
     expect(order()).toEqual(['another', entry.id]);
     expect((screen.getByRole('textbox', { name: '搜索条目' }) as HTMLInputElement).value).toBe('论文');
     expect(screen.getByRole('combobox', { name: '条目排序' }).textContent).toContain('标题');
@@ -1075,7 +1104,7 @@ describe('EntryLibraryView tag navigation visibility', () => {
       </ToastContext.Provider></TooltipProvider>
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '标签导航' }));
+    chooseNavigationMode();
 
     expect(window.localStorage.getItem('neuink.entryLibraryShowTagNavigation')).toBe('true');
     expect(screen.getByRole('table', { name: '论文列表' })).toBeTruthy();
@@ -1159,4 +1188,77 @@ it('cycles a header through ascending, descending and the original default order
   expect(order()).toEqual(['b', 'c', 'a']);
   expect(screen.getByRole('columnheader', { name: '标题' }).getAttribute('aria-sort')).toBe('none');
   expect(screen.getByRole('button', { name: '按标题升序排列' })).toBeTruthy();
+});
+
+it('can show only tag folders and restore the paper table without losing columns', () => {
+  renderLibrary({ tags: libraryTags });
+  chooseNavigationMode('纯标签文件夹');
+  expect(screen.getByRole('navigation', { name: '标签导航' })).toBeTruthy();
+  expect(screen.queryByRole('table')).toBeNull();
+  expect(screen.queryByRole('button', { name: '选择模式' })).toBeNull();
+  expect(window.localStorage.getItem('neuink.entryLibraryTagsOnly')).toBe('true');
+  chooseNavigationMode('纯条目表格');
+  expect(screen.getByRole('table')).toBeTruthy();
+  expect(window.localStorage.getItem('neuink.entryLibraryTagsOnly')).toBe('false');
+});
+
+it('restores tags-only preference and explains an empty folder', () => {
+  window.localStorage.setItem('neuink.entryLibraryTagsOnly', 'true');
+  renderLibrary({ tags: [] });
+  expect(screen.queryByRole('table')).toBeNull();
+  expect(screen.getByText('此文件夹为空。可返回上一级，或在“标签导航”中切换显示方式。')).toBeTruthy();
+});
+
+it('browses folder mode with selection, double click, Enter and parent navigation', () => {
+  const view = renderLibrary({ tags: libraryTags });
+  chooseNavigationMode('纯标签文件夹');
+  const folder = screen.getByRole('button', { name: '打开标签 研究' });
+  fireEvent.click(folder);
+  expect(folder.getAttribute('aria-pressed')).toBe('true');
+  expect(view.props.onSelectTag).not.toHaveBeenCalled();
+  fireEvent.doubleClick(folder);
+  expect(view.props.onSelectTag).toHaveBeenCalledWith('research');
+  view.rerenderLibrary({ activeTag: 'research' });
+  fireEvent.keyDown(screen.getByRole('button', { name: '打开标签 研究/HCI' }), { key: 'Enter' });
+  expect(view.props.onSelectTag).toHaveBeenCalledWith('hci');
+  fireEvent.click(screen.getByRole('button', { name: '返回上一级' }));
+  expect(view.props.onSelectTag).toHaveBeenCalledWith(null);
+  chooseNavigationMode('标签与表格');
+  expect(screen.getByRole('table')).toBeTruthy();
+  expect(screen.getByRole('navigation', { name: '标签导航' })).toBeTruthy();
+});
+
+it('shows and opens directly assigned papers in a leaf folder without a table', () => {
+  window.localStorage.setItem('neuink.entryLibraryTagsOnly', 'true');
+  const view = renderLibrary({ tags: libraryTags, activeTag: 'hci' });
+  const paper = screen.getByRole('button', { name: '打开论文 可视分析论文' });
+  expect(screen.queryByRole('table')).toBeNull();
+  fireEvent.doubleClick(paper);
+  expect(view.props.onOpenEntryExplorer).toHaveBeenCalledWith('entry-1');
+});
+
+it('keeps child papers in their folder and untagged papers at the root', () => {
+  window.localStorage.setItem('neuink.entryLibraryTagsOnly', 'true');
+  const view = renderLibrary({ tags: libraryTags, entries: [entry, { ...entry, id: 'loose', title: '未分类文献', tagIds: [], tags: [] }] });
+  expect(screen.getByRole('button', { name: '打开论文 未分类文献' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '打开论文 可视分析论文' })).toBeNull();
+  view.rerenderLibrary({ activeTag: 'research' });
+  expect(screen.getByRole('button', { name: '打开标签 研究/HCI' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '打开论文 可视分析论文' })).toBeNull();
+  view.rerenderLibrary({ activeTag: 'hci' });
+  expect(screen.getByRole('button', { name: '打开论文 可视分析论文' })).toBeTruthy();
+});
+
+it('places folder navigation in the toolbar and disables parent navigation at root', () => {
+  window.localStorage.setItem('neuink.entryLibraryTagsOnly', 'true');
+  const view = renderLibrary({ tags: libraryTags });
+  const toolbar = screen.getByLabelText('文件夹导航工具栏');
+  expect((within(toolbar).getByRole('button', { name: '返回上一级' }) as HTMLButtonElement).disabled).toBe(true);
+  view.rerenderLibrary({ activeTag: 'hci' });
+  expect(screen.getAllByRole('button', { name: '返回上一级' })).toHaveLength(1);
+  fireEvent.click(within(toolbar).getByRole('button', { name: '返回上一级' }));
+  expect(view.props.onSelectTag).toHaveBeenCalledWith('research');
+  fireEvent.click(within(toolbar).getByRole('button', { name: '全部标签' }));
+  expect(view.props.onSelectTag).toHaveBeenCalledWith(null);
+  expect(within(toolbar).getByText('0 个文件夹 · 1 篇论文')).toBeTruthy();
 });

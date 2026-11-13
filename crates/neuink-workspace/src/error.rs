@@ -5,6 +5,8 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum WorkspaceError {
     #[error("{0}")]
+    ContentTransaction(String),
+    #[error("{0}")]
     LocalCopy(String),
     #[error("外部来源条目只能隐藏或恢复。请到 Zotero 或 MinerU 来源端删除原论文。")]
     SourceManagedEntry,

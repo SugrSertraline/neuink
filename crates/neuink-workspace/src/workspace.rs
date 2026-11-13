@@ -1,3 +1,5 @@
+#[path = "reading_snapshot.rs"]
+pub(crate) mod reading_snapshot;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     fs,
@@ -135,15 +137,17 @@ impl Workspace {
         if !entry_dir.exists() {
             return Err(WorkspaceError::EntryMissing(entry_id.to_string()));
         }
-        if crate::entry_sources::is_source_managed_dir(&entry_dir)? { return Err(WorkspaceError::SourceManagedEntry); }
+        if crate::entry_sources::is_source_managed_dir(&entry_dir)? {
+            return Err(WorkspaceError::SourceManagedEntry);
+        }
         let trashed_entry_dir = self.layout.trashed_entry_dir(entry_id);
         if trashed_entry_dir.exists() {
             return Err(WorkspaceError::EntryAlreadyExists(entry_id.to_string()));
         }
-        self.mark_entry_trashed(entry_id)?;
-        fs::create_dir_all(self.layout.trashed_entries_dir())?;
-        fs::rename(entry_dir, trashed_entry_dir)?;
-        Ok(())
+        self.move_entry_with_intent(
+            entry_id,
+            crate::entry_lifecycle::EntryLifecycleAction::Delete,
+        )
     }
 
     pub fn restore_entry(&self, entry_id: &EntryId) -> Result<EntryMeta, WorkspaceError> {
@@ -156,11 +160,10 @@ impl Workspace {
         if !trashed_entry_dir.exists() {
             return Err(WorkspaceError::EntryMissing(entry_id.to_string()));
         }
-        fs::rename(trashed_entry_dir, entry_dir)?;
-        let marker = self.layout.entry_dir(entry_id).join(".trashed.json");
-        if marker.exists() {
-            fs::remove_file(marker)?;
-        }
+        self.move_entry_with_intent(
+            entry_id,
+            crate::entry_lifecycle::EntryLifecycleAction::Restore,
+        )?;
         self.read_entry(entry_id)
     }
 
@@ -170,7 +173,9 @@ impl Workspace {
         if !trashed_entry_dir.exists() {
             return Err(WorkspaceError::EntryMissing(entry_id.to_string()));
         }
-        if crate::entry_sources::is_source_managed_dir(&trashed_entry_dir)? { return Err(WorkspaceError::SourceManagedEntry); }
+        if crate::entry_sources::is_source_managed_dir(&trashed_entry_dir)? {
+            return Err(WorkspaceError::SourceManagedEntry);
+        }
         fs::remove_dir_all(trashed_entry_dir)?;
         Ok(())
     }
@@ -206,10 +211,22 @@ impl Workspace {
             frontmatter_title,
             title
         );
-        atomic_write(note_path, body.as_bytes())?;
+        let note_change = self.content_change(
+            crate::content_transaction::ContentTarget::NoteBody {
+                entry_id: entry_id.clone(),
+                note_id: note_id.clone(),
+            },
+            body.into_bytes(),
+        )?;
         entry.contents.push(ContentItem::Note { note_id, title });
         entry.updated_at = Utc::now();
-        atomic_write_json(self.layout.entry_meta_file(entry_id), &entry)?;
+        let meta_change = self.content_change(
+            crate::content_transaction::ContentTarget::EntryMeta {
+                entry_id: entry_id.clone(),
+            },
+            serde_json::to_vec_pretty(&entry)?,
+        )?;
+        self.commit_content_transaction(vec![note_change, meta_change])?;
         Ok(entry)
     }
 
@@ -417,12 +434,16 @@ impl Workspace {
         entry_id: &EntryId,
         segments: &[SourceSegment],
     ) -> Result<(), WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         self.read_entry_meta(entry_id)?;
-        atomic_write_json(self.layout.entry_segments_file(entry_id), &segments)
+        atomic_write_json(self.layout.entry_segments_file(entry_id), &segments)?;
+        reading_snapshot::invalidate(self, entry_id)
     }
 
     pub fn clear_segments(&self, entry_id: &EntryId) -> Result<(), WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         self.read_entry_meta(entry_id)?;
+        reading_snapshot::invalidate(self, entry_id)?;
         let path = self.layout.entry_segments_file(entry_id);
         if path.exists() {
             fs::remove_file(path)?;
@@ -448,6 +469,7 @@ impl Workspace {
         entry_id: &EntryId,
         translation: &EntryTranslation,
     ) -> Result<(), WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         self.read_entry_meta(entry_id)?;
         atomic_write_json(self.layout.entry_translation_file(entry_id), translation)
     }
@@ -518,6 +540,9 @@ impl Workspace {
         entry_id: &EntryId,
     ) -> Result<Option<Value>, WorkspaceError> {
         self.read_entry_meta(entry_id)?;
+        if reading_snapshot::is_normalized(self, entry_id)? {
+            return Ok(None);
+        }
         let path = self
             .layout
             .entry_mineru_output_dir(entry_id)
@@ -548,8 +573,10 @@ impl Workspace {
         }
         let bytes = fs::read(path)?;
         let mut segments: Vec<SourceSegment> = serde_json::from_slice(&bytes)?;
-        self.enrich_segments_with_empty_mineru_regions(entry_id, &mut segments);
-        self.enrich_segments_with_mineru_assets(entry_id, &mut segments);
+        if !reading_snapshot::is_normalized(self, entry_id)? {
+            self.enrich_segments_with_empty_mineru_regions(entry_id, &mut segments);
+            self.enrich_segments_with_mineru_assets(entry_id, &mut segments);
+        }
         Ok(segments)
     }
 
@@ -670,6 +697,7 @@ impl Workspace {
         importance: AnnotationImportance,
         text_selection: Option<AnnotationTextSelection>,
     ) -> Result<Vec<Annotation>, WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         let mut annotations = self.read_annotations(entry_id)?;
         let annotation = match text_selection {
             Some(selection)
@@ -702,6 +730,7 @@ impl Workspace {
         content: String,
         importance: AnnotationImportance,
     ) -> Result<Vec<Annotation>, WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         let mut annotations = self.read_annotations(entry_id)?;
         let annotation_index = annotations
             .iter()
@@ -734,16 +763,15 @@ impl Workspace {
         entry_id: &EntryId,
         annotation_id: &AnnotationId,
     ) -> Result<Vec<Annotation>, WorkspaceError> {
-        let mut annotations = self.read_annotations(entry_id)?;
+        let _guard = self.begin_tag_safe_mutation()?;
+        let annotations = self.read_annotations(entry_id)?;
         let deleted = annotations
             .iter()
             .find(|annotation| annotation.annotation_id == *annotation_id)
             .cloned()
             .ok_or_else(|| WorkspaceError::AnnotationMissing(annotation_id.to_string()))?;
         self.store_deleted_annotation(entry_id, deleted)?;
-        annotations.retain(|annotation| annotation.annotation_id != *annotation_id);
-        atomic_write_json(self.layout.entry_annotations_file(entry_id), &annotations)?;
-        Ok(annotations)
+        self.read_annotations(entry_id)
     }
 
     pub fn upsert_segment_note(
@@ -822,16 +850,14 @@ impl Workspace {
     ) -> Result<Vec<SegmentBlockNote>, WorkspaceError> {
         let _guard = self.begin_tag_safe_mutation()?;
         let segment_uid = self.resolve_source_segment(entry_id, &segment_uid)?.uid;
-        let mut notes = self.read_segment_notes(entry_id)?;
+        let notes = self.read_segment_notes(entry_id)?;
         let deleted = notes
             .iter()
             .find(|note| note.segment_uid == segment_uid)
             .cloned()
             .ok_or_else(|| WorkspaceError::SegmentMissing(segment_uid.to_string()))?;
         self.store_deleted_segment_note(entry_id, deleted)?;
-        notes.retain(|note| note.segment_uid != segment_uid);
-        atomic_write_json(self.layout.entry_segment_notes_file(entry_id), &notes)?;
-        Ok(notes)
+        self.read_segment_notes(entry_id)
     }
 
     pub fn entry_pdf_path(&self, entry_id: &EntryId) -> Result<PathBuf, WorkspaceError> {
@@ -878,39 +904,7 @@ impl Workspace {
             .read_empty_mineru_paragraph_regions(entry_id)
             .unwrap_or_default();
 
-        for empty_region in empty_regions {
-            if segments.iter().any(|segment| {
-                segment.page_idx == empty_region.page_idx
-                    && segment.segment_type == SegmentType::Paragraph
-                    && (bboxes_match(segment.bbox, Some(empty_region.bbox))
-                        || non_empty_segment_overlaps_empty_region(segment, empty_region.bbox))
-            }) {
-                continue;
-            }
-
-            segments.push(SourceSegment {
-                uid: SegmentUid::from_string(format!(
-                    "mineru-empty-v2-p{}-{:.0}-{:.0}-{:.0}-{:.0}",
-                    empty_region.page_idx,
-                    empty_region.bbox[0],
-                    empty_region.bbox[1],
-                    empty_region.bbox[2],
-                    empty_region.bbox[3]
-                )),
-                segment_type: SegmentType::Paragraph,
-                page_idx: empty_region.page_idx,
-                bbox: Some(empty_region.bbox),
-                text: String::new(),
-                markdown: None,
-                asset_path: None,
-                raw_type: Some("paragraph".to_string()),
-                sub_type: None,
-                block_role: None,
-                mineru_metadata: Default::default(),
-                continuation_group_id: None,
-                visual_group_id: None,
-            });
-        }
+        reading_snapshot::add_empty_regions(segments, empty_regions);
     }
 
     fn read_empty_mineru_paragraph_regions(
@@ -950,49 +944,7 @@ impl Workspace {
     ) {
         let asset_refs = self.read_mineru_asset_refs(entry_id).unwrap_or_default();
 
-        for segment in segments.iter_mut() {
-            if segment.asset_path.is_none() {
-                segment.asset_path = mineru_asset_path_from_text(
-                    segment.markdown.as_deref().unwrap_or(segment.text.as_str()),
-                );
-            }
-            let existing_asset_path = segment.asset_path.clone();
-
-            let best = asset_refs
-                .iter()
-                .filter(|asset_ref| {
-                    asset_ref.page_idx == segment.page_idx
-                        && asset_ref.segment_type == segment.segment_type
-                        && existing_asset_path
-                            .as_deref()
-                            .is_none_or(|path| path == asset_ref.asset_path)
-                })
-                .filter_map(|asset_ref| {
-                    asset_ref
-                        .match_score(segment)
-                        .map(|score| (score, asset_ref))
-                })
-                .min_by_key(|(score, _)| *score);
-
-            if let Some((_, asset_ref)) = best {
-                if segment.asset_path.is_none() {
-                    segment.asset_path = Some(asset_ref.asset_path.clone());
-                }
-                if segment.raw_type.is_none() {
-                    segment.raw_type = Some(asset_ref.raw_type.clone());
-                }
-                if segment.sub_type.is_none() {
-                    segment.sub_type = asset_ref.sub_type.clone();
-                }
-                if segment.block_role.is_none() {
-                    segment.block_role = Some("body".to_string());
-                }
-                if segment.visual_group_id.is_none() {
-                    segment.visual_group_id = asset_ref.visual_group_id();
-                }
-                enrich_visual_segment_text(segment, asset_ref);
-            }
-        }
+        reading_snapshot::add_assets(segments, asset_refs);
     }
 
     fn read_mineru_asset_refs(

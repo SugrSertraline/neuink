@@ -1,3 +1,4 @@
+import { runLocalBackgroundJob } from '@/shared/lib/localBackgroundJobs';
 import { Plus } from 'lucide-react';
 import { PaperCardGroups } from './PaperCardGroups';
 import { SearchInput } from '@/components/ui/search-input';
@@ -94,12 +95,17 @@ function PaperCards({ entryId, parsed }: { entryId: string; parsed: boolean }) {
     const abort = new AbortController(); controller.current = abort; setBusy(true); setError(''); setProgress('准备正文…');
     let writing = false;
     try {
-      const result = await generatePaperCards(root, entryId, abort.signal, (done, total) => { if (!abort.signal.aborted) setProgress(`整理 ${done}/${total} 批`); });
-      if (abort.signal.aborted) return;
+      await runLocalBackgroundJob({ kind: 'llm', scope: { kind: 'entry', root, entry_id: entryId }, idPrefix: 'paper-cards',
+        message: '正在整理论文卡片', successMessage: '论文卡片草稿已保存，请核对', failureMessage: '论文卡片整理未完成，已有内容保留',
+      }, async report => {
+      const result = await generatePaperCards(root, entryId, abort.signal, (done, total) => { if (!abort.signal.aborted) { setProgress(`整理 ${done}/${total} 批`); report({ current: done, total, percent: total > 0 ? done / total * 100 : 0 }); } });
+      abort.signal.throwIfAborted();
+      report({ current: 0, total: 0, percent: 0 }, { message: '正在保存论文卡片草稿' });
       writing = true; setSaving(true); setProgress('保存草稿…');
       const saved = await saveIdeationDraft(root, snapshot.revision, { entry_id: entryId, status: 'ready', model: result.model, partial: result.partial,
         cards: result.cards.map(card => ({ id: card.id, entry_id: entryId, kind: card.kind, title: card.title, body: card.body, sources: card.sources, pattern_ids: card.pattern_ids, origin: 'ai_draft' })), relations: result.relations ?? [] });
       if (!abort.signal.aborted) { setSnapshot(saved); await context.background.refresh(); }
+      });
     } catch (cause) { if (!abort.signal.aborted) setError(writing ? '草稿保存失败，请刷新后重试；已有卡片保留。' : cardErrorMessages[classifyCardError(cause)]); }
     finally { if (!abort.signal.aborted) { setBusy(false); setSaving(false); setProgress(''); } if (controller.current === abort) controller.current = null; }
   };

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { SETTINGS_CATALOG, SETTINGS_CATEGORIES, readSettingsTab, searchSettings, settingsCategory } from './settingsCatalog';
+import { SETTINGS_CATALOG, SETTINGS_CATEGORIES, readSettingsTab, searchSettings, settingsCategory, ADMIN_PASSWORD_RESET_COMMAND, ADMIN_PASSWORD_RESET_TARGET } from './settingsCatalog';
 
 describe('settings discovery', () => {
   it('hides advanced assistant configuration from navigation and all settings searches', () => {
@@ -9,7 +9,7 @@ describe('settings discovery', () => {
     for (const query of ['主助手', '子助手', 'MCP', 'Skills']) expect(searchSettings(query)).toEqual([]);
     expect(searchSettings('sciverse').map(item => item.id)).toEqual(['tools-services']);
   });
-  it.each([['main-agent', 'models'], ['subagents', 'models'], ['getting-started', 'appearance'], ['removed-page', 'appearance']])('redirects the saved hidden page %s to %s', (saved, expected) => {
+  it.each([['data', 'account'], ['main-agent', 'models'], ['subagents', 'models'], ['getting-started', 'appearance'], ['removed-page', 'appearance']])('redirects the saved hidden page %s to %s', (saved, expected) => {
     window.localStorage.setItem('neuink.settings.lastTab', saved);
     expect(readSettingsTab()).toBe(expected);
     window.localStorage.clear();
@@ -26,10 +26,17 @@ describe('settings discovery', () => {
   });
   it('gives each target a unique identity within the settings categories', () => {
     expect(SETTINGS_CATEGORIES.map(category => category.id)).toEqual([
-      'appearance', 'reader', 'translation', 'parser', 'models', 'external-tools', 'data',
+      'account', 'appearance', 'reader', 'translation', 'parser', 'models', 'external-tools',
     ]);
     expect(searchSettings('新手引导')).toEqual([]);
     expect(new Set(SETTINGS_CATALOG.map(item => item.id)).size).toBe(SETTINGS_CATALOG.length);
     for (const item of SETTINGS_CATALOG) expect(settingsCategory(item.tab)).toBeTruthy();
   });
+});
+
+it('requires the complete dedicated reset command and routes storage to account', () => {
+  expect(searchSettings('重置密码')).toEqual([]);
+  expect(searchSettings('/neuink::admin/account/password-reset')).toEqual([]);
+  expect(searchSettings(ADMIN_PASSWORD_RESET_COMMAND)).toEqual([expect.objectContaining({ id: ADMIN_PASSWORD_RESET_TARGET, tab: 'account' })]);
+  expect(SETTINGS_CATALOG.find(item => item.id === 'data-workspace')?.tab).toBe('account');
 });

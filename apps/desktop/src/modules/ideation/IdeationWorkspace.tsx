@@ -1,4 +1,5 @@
 import { useIdeationTask } from './ideationTask';
+import { IdeationSourceDetails } from './IdeationSourceDetails';
 import { WorksheetCardSection } from './WorksheetCardSection';
 import { LocalIdeaEditor } from './LocalIdeaEditor';
 import { useEffect, useRef, useState } from 'react';
@@ -17,7 +18,7 @@ import { cardErrorMessages, classifyCardError } from './generateCards';
 import { ResearchPlanError } from './researchPlan';
 import { recommendMethods, type MethodAdvice } from './methodRecommendations';
 import { sectionForNode, reorderWorksheetCards, worksheetSections, type WorksheetSection, isWorksheetCard, setWorksheetValue, worksheetFields, worksheetNodes, worksheetReportState, worksheetValue, type WorksheetField } from './researchWorksheet';
-type Props = { root: string; entries: LibraryEntry[]; onOpenEntry: (id: string) => void; onOpenSource?: (target: SourceLinkOpenTarget) => void };
+type Props = { root: string; entries: LibraryEntry[]; trashedEntries?: LibraryEntry[]; onOpenTrash?: () => void; onOpenEntry: (id: string) => void; onOpenSource?: (target: SourceLinkOpenTarget) => void };
 export function IdeationWorkspace(props: Props) {
   const context = useIdeationContext();
   const [creating,setCreating] = useState(false);
@@ -26,7 +27,7 @@ export function IdeationWorkspace(props: Props) {
   if (!context.activeBoard) return <div className="flex h-full flex-col items-center justify-center gap-4 p-6"><h1 className="text-lg font-semibold">从一个问题开始</h1><p className="text-sm text-muted-foreground">描述问题，挑选积累的方法，让 AI 帮你整理组合思路。</p><Button onClick={() => setCreating(true)}>新建构思</Button>{creating && <IdeationBoardDialog board="new" onClose={() => setCreating(false)} />}</div>;
   return <ResearchWorksheet key={context.activeBoard.id} {...props} />;
 }
-function ResearchWorksheet({ root, entries, onOpenEntry }: Props) {
+function ResearchWorksheet({ root, entries, trashedEntries = [], onOpenTrash, onOpenEntry, onOpenSource }: Props) {
   const runTask = useIdeationTask();
   const context = useIdeationContext()!, state = context.state!, board = context.activeBoard!;
   const [editing,setEditing] = useState(false), [planning,setPlanning] = useState(false);
@@ -89,6 +90,7 @@ function ResearchWorksheet({ root, entries, onOpenEntry }: Props) {
         {context.error && <p role="alert" className="text-sm text-destructive">保存失败：{context.error}。内容仍保留，请点击保存重试。</p>}
         {undo && <div className="flex items-center gap-2 text-sm" role="status">已更新本构思，可撤销此次操作<Button size="sm" variant="outline" onClick={() => { undo(); setUndo(null); }}>撤销</Button></div>}
         {worksheetSections.map(field => <WorksheetCardSection key={field.key} boardId={board.id} section={field.key}
+          sourceStatus={id => ['ideation-user','ideation-preset'].includes(id) || entries.some(e => e.id === id) ? undefined : trashedEntries.some(e => e.id === id) ? '来源已移入回收站' : '来源当前不可用'}
           nodes={nodes.filter(n => n.card.body.trim() && sectionForNode(n) === field.key)} active={context.worksheetSection === field.key}
           onChoose={()=>context.requestWorksheetCards(field.key)} onDescribe={()=>setLocalCard({field:field.key})}
           onView={node=>setDetail(node.card)} onEdit={node=>setLocalCard({field:field.key,nodeId:node.id,title:node.card.title,body:node.card.body})}
@@ -110,7 +112,7 @@ function ResearchWorksheet({ root, entries, onOpenEntry }: Props) {
     }} />}
     {editing && <IdeationBoardDialog board={board} onClose={() => setEditing(false)} />}
     {planning && <ResearchPlanDialog root={root} onClose={() => setPlanning(false)} worksheet={{ goal, state: worksheetReportState(state), background: sectionText('background'), constraints: '' }} />}
-    {detail && <Dialog open onOpenChange={open => { if (!open) { setDetail(null); context.setSelectedCardId(null); } }}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>{detail.title}</DialogTitle><DialogDescription>卡片详情 · {entries.find(e => e.id === detail.entry_id)?.title ?? '本构思或个人内容'}</DialogDescription></DialogHeader><DialogBody><SourceSnapshotPreview markdown={detail.body} normalization="none" />{entries.some(e => e.id === detail.entry_id) && <Button variant="outline" onClick={() => onOpenEntry(detail.entry_id)}>查看来源论文</Button>}</DialogBody></DialogContent></Dialog>}
+    {detail && <Dialog open onOpenChange={open => { if (!open) { setDetail(null); context.setSelectedCardId(null); } }}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>{detail.title}</DialogTitle><DialogDescription>卡片详情 · {entries.find(e => e.id === detail.entry_id)?.title ?? trashedEntries.find(e => e.id === detail.entry_id)?.title ?? (['ideation-user','ideation-preset'].includes(detail.entry_id) ? '本构思或个人内容' : '来源当前不可用')}</DialogDescription></DialogHeader><DialogBody><SourceSnapshotPreview markdown={detail.body} normalization="none" /><IdeationSourceDetails root={root} entryId={detail.entry_id} sources={detail.sources} title={entries.find(e => e.id === detail.entry_id)?.title} trashedTitle={trashedEntries.find(e => e.id === detail.entry_id)?.title} onOpenEntry={onOpenEntry} onOpenSource={onOpenSource} onOpenTrash={onOpenTrash} /></DialogBody></DialogContent></Dialog>}
 
   </div>;
 }

@@ -7,7 +7,9 @@ import { ZoteroImportDialog } from './ZoteroImportDialog';
 
 const api = vi.hoisted(() => ({ getZoteroSettings: vi.fn(), saveZoteroSettings: vi.fn(), discoverZotero: vi.fn(), scanZotero: vi.fn(), importZoteroPaper: vi.fn(), setZoteroPaperHidden: vi.fn(), onZoteroSettingsChanged: vi.fn(() => () => undefined) }));
 const pick = vi.hoisted(() => vi.fn());
-vi.mock('@/shared/ipc/zoteroApi', () => api);
+const copies = vi.hoisted(() => ({ copySourceToLocal: vi.fn(), importZoteroLocalCopy: vi.fn() }));
+vi.mock('@/shared/ipc/zoteroApi', () => ({ ...api, importZoteroLocalCopy: copies.importZoteroLocalCopy }));
+vi.mock('@/shared/ipc/workspaceApi', () => ({ copySourceToLocal: copies.copySourceToLocal }));
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: pick }));
 const snapshot: ZoteroSnapshot = {
   snapshot_id: 'snapshot', existing: { old: 'local-entry' }, hidden: [],
@@ -19,6 +21,8 @@ const snapshot: ZoteroSnapshot = {
 };
 beforeEach(() => {
   vi.clearAllMocks();
+  copies.copySourceToLocal.mockImplementation(async (_root, id) => ({ entry_id: `copy-${id}`, created: true }));
+  copies.importZoteroLocalCopy.mockResolvedValue({ entry_id: 'independent-old', created: true });
   api.getZoteroSettings.mockResolvedValue({ data_directory: 'C:\\Zotero', linked_attachment_directory: null });
   api.scanZotero.mockResolvedValue(structuredClone(snapshot));
   api.setZoteroPaperHidden.mockResolvedValue({ hidden: true });
@@ -47,17 +51,42 @@ describe('Zotero selection import', () => {
     await screen.findByText('本批导入已结束。');
     expect(confirm).toHaveBeenCalledWith({ candidateTitle: 'Alpha paper', sourcePath: 'Alpha.pdf', duplicate });
     expect(api.importZoteroPaper.mock.calls[1]).toEqual(['workspace', 'snapshot', 'alpha', 'PDF1', 'same-hash']);
+    expect(copies.copySourceToLocal).toHaveBeenCalledWith('workspace', 'new-entry', true);
   });
-  it('loads automatically, excludes existing entries and imports only explicit selections', async () => {
+  it('loads only source caches and creates local copies only for explicit selections', async () => {
     render(<ZoteroImportDialog root="workspace" onClose={vi.fn()} />);
     await screen.findByText('Alpha paper');
     expect(api.scanZotero).toHaveBeenCalledTimes(1); expect(api.importZoteroPaper).not.toHaveBeenCalled();
-    expect((screen.getByRole('checkbox', { name: '选择 Already imported' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('checkbox', { name: '选择 Already imported' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(copies.copySourceToLocal).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('checkbox', { name: '选择 Alpha paper' }));
     fireEvent.click(screen.getByRole('button', { name: '导入所选' }));
     await screen.findByText('本批导入已结束。');
     expect(api.importZoteroPaper.mock.calls).toEqual([['workspace', 'snapshot', 'alpha', 'PDF1']]);
+    expect(copies.copySourceToLocal).toHaveBeenCalledWith('workspace', 'local-alpha', false);
     expect(screen.getByText(/新增 1/)).toBeTruthy();
+  });
+  it('allows an existing source cache to be explicitly imported', async () => {
+    await openList();
+    expect(screen.getByText('来源已缓存')).toBeTruthy();
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 Already imported' }));
+    fireEvent.click(screen.getByRole('button', { name: '导入所选' }));
+    await screen.findByText('本批导入已结束。');
+    expect(api.importZoteroPaper).not.toHaveBeenCalled();
+    expect(copies.importZoteroLocalCopy).toHaveBeenCalledWith('workspace', 'local-entry');
+    expect(screen.getByText('已导入到本地')).toBeTruthy();
+  });
+  it('keeps the source cache and reports a failed local copy for retry', async () => {
+    copies.importZoteroLocalCopy.mockRejectedValueOnce('来源正在解析，请稍后重试。');
+    await openList();
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 Already imported' }));
+    fireEvent.click(screen.getByRole('button', { name: '导入所选' }));
+    await screen.findByText('来源正在解析，请稍后重试。');
+    expect(screen.getByText('来源已缓存')).toBeTruthy();
+    expect(screen.queryByText('已导入到本地')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '重试／导入所选' }));
+    await screen.findByText('已导入到本地');
+    expect(api.importZoteroPaper).not.toHaveBeenCalled();
   });
 
   it('searches metadata, limits select-all to results and retains selections across filters', async () => {

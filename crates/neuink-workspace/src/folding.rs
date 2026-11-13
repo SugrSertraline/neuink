@@ -160,6 +160,7 @@ impl Workspace {
         entry_id: &EntryId,
         updates: Vec<FoldRecord>,
     ) -> Result<(), WorkspaceError> {
+        let _metadata_guard = self.begin_tag_safe_mutation()?;
         let _guard = WRITE_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         let mut file = self.read_fold_file(entry_id)?;
         let segments = self.read_segments(entry_id)?;
@@ -209,6 +210,7 @@ impl Workspace {
         level: &str,
         translation: FoldTranslation,
     ) -> Result<(), WorkspaceError> {
+        let _metadata_guard = self.begin_tag_safe_mutation()?;
         let _guard = WRITE_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         let current = self.read_entry_folds(entry_id)?;
         let record = current

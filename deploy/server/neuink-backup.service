@@ -1,0 +1,11 @@
+[Unit]
+Description=NeuInk consistent daily backup
+Requires=docker.service
+After=docker.service local-fs.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/neuink/backup.env
+WorkingDirectory=/opt/neuink/deploy
+ExecStart=/usr/bin/python3 /opt/neuink/scripts/backup_rotation.py ${BACKUP_ROOT} --project ${COMPOSE_PROJECT} --db-uuid ${DB_UUID} --files-uuid ${FILES_UUID} --status ${BACKUP_STATUS}
+UMask=0077

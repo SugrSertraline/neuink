@@ -3,7 +3,7 @@ import type { LibraryEntry, LibraryEntryStatus } from '../../library/components/
 import type { EntryLibraryColumnId } from './useEntryLibraryColumnWidths';
 import { getReadingProgress } from './libraryReading';
 
-export type LibraryEntrySortKey = Exclude<EntryLibraryColumnId, 'actions'> | 'created' | 'recent';
+export type LibraryEntrySortKey = Exclude<EntryLibraryColumnId, 'actions' | 'cloud'> | 'created' | 'recent';
 export type LibraryEntrySortDirection = 'asc' | 'desc';
 export type LibraryEntrySort = { by: LibraryEntrySortKey; direction: LibraryEntrySortDirection };
 export type LibraryEntrySourceKinds = Record<string, ('zotero' | 'mineru')[]>;

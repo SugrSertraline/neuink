@@ -357,6 +357,8 @@ export type EntryDeletionImpact = {
   note_count: number;
   annotation_count: number;
   incoming_source_link_count: number;
+  ideation_card_count?: number;
+  ideation_link_count?: number;
 };
 
 export async function getEntryDeletionImpact(
@@ -777,6 +779,8 @@ export type EntryTranslationResponse = {
 };
 
 export type JobKind =
+  | 'export' // Window-local export lifetime; not submitted to the native job queue.
+  | 'sync' // Desktop projection of the workspace synchronization task.
   | 'folding'
   | 'paragraph_translation'
   | 'pdf_import'

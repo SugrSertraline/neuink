@@ -59,3 +59,10 @@ describe('workspace task projection', () => {
     expect(workspaceTaskProjection('A', [existing], queue, true, vector)).toEqual([existing]);
   });
 });
+
+it('keeps account-level maintenance visible without exposing other workspace tasks', () => {
+  const global = { ...job('maintenance'), scope: null };
+  const queue = { waiting: [], active: [], failed: [] };
+  expect(workspaceTaskProjection(null, [global, job('private', 'B')], queue, false)).toEqual([global]);
+  expect(workspaceTaskProjection('A', [global, job('private', 'B')], queue, false)).toEqual([global]);
+});

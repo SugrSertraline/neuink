@@ -1,3 +1,11 @@
+#[path = "trash_sync.rs"]
+mod sync;
+#[path = "trash_transaction.rs"]
+mod transaction;
+pub(crate) use sync::SyncTrashSource;
+pub use transaction::ChildEvent;
+use transaction::Plan;
+
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -143,6 +151,9 @@ impl Workspace {
             .ok_or_else(|| WorkspaceError::TrashItemMissing(trash_id.to_string()))?;
         let record = records[index].clone();
 
+        let mut writes = Vec::new();
+        let mut moves = Vec::new();
+        let entity;
         match &record.payload {
             StoredTrashPayload::MarkdownNote {
                 note_id,
@@ -158,7 +169,25 @@ impl Workspace {
                 }) {
                     return Err(WorkspaceError::TrashRestoreConflict(note_id.to_string()));
                 }
-                self.restore_note_files(entry_id, note_id)?;
+                let source = self.layout().entry_trash_notes_dir(entry_id);
+                if !source.join(format!("{note_id}.md")).is_file() {
+                    return Err(WorkspaceError::TrashItemMissing(trash_id.into()));
+                }
+                moves = vec![
+                    (
+                        source.join(format!("{note_id}.md")),
+                        self.layout().entry_note_file(entry_id, note_id),
+                    ),
+                    (
+                        source.join(format!("{note_id}.links.json")),
+                        self.layout().entry_note_links_file(entry_id, note_id),
+                    ),
+                    (
+                        source.join(format!("{note_id}.assets")),
+                        self.layout().entry_note_assets_dir(entry_id, note_id),
+                    ),
+                ];
+                entity = format!("note:{note_id}");
                 let insert_at = (*original_index).min(entry.contents.len());
                 entry.contents.insert(
                     insert_at,
@@ -168,7 +197,10 @@ impl Workspace {
                     },
                 );
                 entry.updated_at = Utc::now();
-                atomic_write_json(self.layout().entry_meta_file(entry_id), &entry)?;
+                writes.push((
+                    self.layout().entry_meta_file(entry_id),
+                    serde_json::to_vec_pretty(&entry)?,
+                ));
             }
             StoredTrashPayload::SegmentNote { note } => {
                 let mut notes = self.read_segment_notes(entry_id)?;
@@ -180,8 +212,12 @@ impl Workspace {
                         note.segment_uid.to_string(),
                     ));
                 }
+                entity = format!("segment_note:{entry_id}:{}", note.segment_uid);
                 notes.push(note.clone());
-                atomic_write_json(self.layout().entry_segment_notes_file(entry_id), &notes)?;
+                writes.push((
+                    self.layout().entry_segment_notes_file(entry_id),
+                    serde_json::to_vec_pretty(&notes)?,
+                ));
             }
             StoredTrashPayload::Annotation { annotation } => {
                 let mut annotations = self.read_annotations(entry_id)?;
@@ -193,13 +229,27 @@ impl Workspace {
                         annotation.annotation_id.to_string(),
                     ));
                 }
+                entity = format!("annotation:{}", annotation.annotation_id);
                 annotations.push(annotation.clone());
-                atomic_write_json(self.layout().entry_annotations_file(entry_id), &annotations)?;
+                writes.push((
+                    self.layout().entry_annotations_file(entry_id),
+                    serde_json::to_vec_pretty(&annotations)?,
+                ));
             }
         }
 
         records.remove(index);
-        self.write_trash_records(entry_id, &records)
+        writes.push((
+            self.layout().entry_trash_index_file(entry_id),
+            transaction::records_bytes(&records)?,
+        ));
+        self.commit_child_trash(Plan {
+            entry: entry_id.clone(),
+            entity,
+            restored: true,
+            writes,
+            moves,
+        })
     }
 
     pub fn purge_trash_item(
@@ -207,6 +257,7 @@ impl Workspace {
         entry_id: &EntryId,
         trash_id: &str,
     ) -> Result<(), WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         let mut records = self.read_trash_records(&self.layout().entry_dir(entry_id))?;
         let index = records
             .iter()
@@ -220,6 +271,7 @@ impl Workspace {
     }
 
     pub fn empty_entry_trash(&self, entry_id: &EntryId) -> Result<(), WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         self.read_entry(entry_id)?;
         let trash_dir = self.layout().entry_trash_dir(entry_id);
         if trash_dir.exists() {
@@ -238,7 +290,7 @@ impl Workspace {
         let mut records = self.read_trash_records(&self.layout().entry_dir(entry_id))?;
         let trash_id = format!("markdown_note:{}", note_id.as_str());
         records.retain(|record| record.trash_id != trash_id);
-        self.move_note_files_to_trash(entry_id, note_id)?;
+
         records.push(StoredTrashRecord {
             trash_id,
             deleted_at: Utc::now(),
@@ -248,16 +300,41 @@ impl Workspace {
                 original_index,
             },
         });
-        self.write_trash_records(entry_id, &records)
-    }
-
-    pub(crate) fn mark_entry_trashed(&self, entry_id: &EntryId) -> Result<(), WorkspaceError> {
-        atomic_write_json(
-            self.layout().entry_dir(entry_id).join(".trashed.json"),
-            &TrashedEntryState {
-                deleted_at: Utc::now(),
-            },
-        )
+        let mut entry = self.read_entry(entry_id)?;
+        entry.contents.retain(
+            |content| !matches!(content,ContentItem::Note{note_id:current,..} if current==note_id),
+        );
+        entry.updated_at = Utc::now();
+        let target = self.layout().entry_trash_notes_dir(entry_id);
+        self.commit_child_trash(Plan {
+            entry: entry_id.clone(),
+            entity: format!("note:{note_id}"),
+            restored: false,
+            writes: vec![
+                (
+                    self.layout().entry_trash_index_file(entry_id),
+                    transaction::records_bytes(&records)?,
+                ),
+                (
+                    self.layout().entry_meta_file(entry_id),
+                    serde_json::to_vec_pretty(&entry)?,
+                ),
+            ],
+            moves: vec![
+                (
+                    self.layout().entry_note_file(entry_id, note_id),
+                    target.join(format!("{note_id}.md")),
+                ),
+                (
+                    self.layout().entry_note_links_file(entry_id, note_id),
+                    target.join(format!("{note_id}.links.json")),
+                ),
+                (
+                    self.layout().entry_note_assets_dir(entry_id, note_id),
+                    target.join(format!("{note_id}.assets")),
+                ),
+            ],
+        })
     }
 
     pub(crate) fn store_deleted_segment_note(
@@ -266,6 +343,7 @@ impl Workspace {
         note: SegmentBlockNote,
     ) -> Result<(), WorkspaceError> {
         let mut records = self.read_trash_records(&self.layout().entry_dir(entry_id))?;
+        let removed_id = note.segment_uid.clone();
         let trash_id = format!("segment_note:{}", note.segment_uid.as_str());
         records.retain(|record| record.trash_id != trash_id);
         records.push(StoredTrashRecord {
@@ -273,7 +351,24 @@ impl Workspace {
             deleted_at: Utc::now(),
             payload: StoredTrashPayload::SegmentNote { note },
         });
-        self.write_trash_records(entry_id, &records)
+        let mut notes = self.read_segment_notes(entry_id)?;
+        notes.retain(|note| note.segment_uid != removed_id);
+        self.commit_child_trash(Plan {
+            entry: entry_id.clone(),
+            entity: format!("segment_note:{entry_id}:{removed_id}"),
+            restored: false,
+            moves: vec![],
+            writes: vec![
+                (
+                    self.layout().entry_trash_index_file(entry_id),
+                    transaction::records_bytes(&records)?,
+                ),
+                (
+                    self.layout().entry_segment_notes_file(entry_id),
+                    serde_json::to_vec_pretty(&notes)?,
+                ),
+            ],
+        })
     }
 
     pub(crate) fn store_deleted_annotation(
@@ -282,6 +377,7 @@ impl Workspace {
         annotation: Annotation,
     ) -> Result<(), WorkspaceError> {
         let mut records = self.read_trash_records(&self.layout().entry_dir(entry_id))?;
+        let removed_id = annotation.annotation_id.clone();
         let trash_id = format!("annotation:{}", annotation.annotation_id.as_str());
         records.retain(|record| record.trash_id != trash_id);
         records.push(StoredTrashRecord {
@@ -289,7 +385,24 @@ impl Workspace {
             deleted_at: Utc::now(),
             payload: StoredTrashPayload::Annotation { annotation },
         });
-        self.write_trash_records(entry_id, &records)
+        let mut annotations = self.read_annotations(entry_id)?;
+        annotations.retain(|annotation| annotation.annotation_id != removed_id);
+        self.commit_child_trash(Plan {
+            entry: entry_id.clone(),
+            entity: format!("annotation:{removed_id}"),
+            restored: false,
+            moves: vec![],
+            writes: vec![
+                (
+                    self.layout().entry_trash_index_file(entry_id),
+                    transaction::records_bytes(&records)?,
+                ),
+                (
+                    self.layout().entry_annotations_file(entry_id),
+                    serde_json::to_vec_pretty(&annotations)?,
+                ),
+            ],
+        })
     }
 
     fn virtual_items_for_trashed_entry(
@@ -476,50 +589,6 @@ impl Workspace {
         )
     }
 
-    fn move_note_files_to_trash(
-        &self,
-        entry_id: &EntryId,
-        note_id: &NoteId,
-    ) -> Result<(), WorkspaceError> {
-        let target_dir = self.layout().entry_trash_notes_dir(entry_id);
-        fs::create_dir_all(&target_dir)?;
-        move_if_exists(
-            self.layout().entry_note_file(entry_id, note_id),
-            target_dir.join(format!("{}.md", note_id.as_str())),
-        )?;
-        move_if_exists(
-            self.layout().entry_note_links_file(entry_id, note_id),
-            target_dir.join(format!("{}.links.json", note_id.as_str())),
-        )?;
-        move_if_exists(
-            self.layout().entry_note_assets_dir(entry_id, note_id),
-            target_dir.join(format!("{}.assets", note_id.as_str())),
-        )?;
-        Ok(())
-    }
-
-    fn restore_note_files(
-        &self,
-        entry_id: &EntryId,
-        note_id: &NoteId,
-    ) -> Result<(), WorkspaceError> {
-        let source_dir = self.layout().entry_trash_notes_dir(entry_id);
-        fs::create_dir_all(self.layout().entry_notes_dir(entry_id))?;
-        move_if_exists(
-            source_dir.join(format!("{}.md", note_id.as_str())),
-            self.layout().entry_note_file(entry_id, note_id),
-        )?;
-        move_if_exists(
-            source_dir.join(format!("{}.links.json", note_id.as_str())),
-            self.layout().entry_note_links_file(entry_id, note_id),
-        )?;
-        move_if_exists(
-            source_dir.join(format!("{}.assets", note_id.as_str())),
-            self.layout().entry_note_assets_dir(entry_id, note_id),
-        )?;
-        Ok(())
-    }
-
     fn remove_trashed_note_files(
         &self,
         entry_id: &EntryId,
@@ -541,17 +610,6 @@ where
         return Ok(T::default());
     }
     Ok(serde_json::from_slice(&fs::read(path)?)?)
-}
-
-fn move_if_exists(source: PathBuf, target: PathBuf) -> Result<(), WorkspaceError> {
-    if !source.exists() {
-        return Ok(());
-    }
-    if target.exists() {
-        remove_if_exists(target.clone())?;
-    }
-    fs::rename(source, target)?;
-    Ok(())
 }
 
 fn remove_if_exists(path: PathBuf) -> Result<(), WorkspaceError> {

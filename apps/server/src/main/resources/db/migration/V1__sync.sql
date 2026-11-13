@@ -1,0 +1,12 @@
+CREATE TABLE server_identity (singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK(singleton), id TEXT NOT NULL, epoch TEXT NOT NULL);
+CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, admin BOOLEAN NOT NULL DEFAULT FALSE, disabled BOOLEAN NOT NULL DEFAULT FALSE, quota BIGINT NOT NULL DEFAULT 10737418240);
+CREATE TABLE invites (hash TEXT PRIMARY KEY, expires_at BIGINT NOT NULL, used BOOLEAN NOT NULL DEFAULT FALSE);
+CREATE TABLE sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), device_name TEXT NOT NULL, access_hash TEXT NOT NULL UNIQUE, access_expires BIGINT NOT NULL, refresh_hash TEXT NOT NULL UNIQUE, refresh_expires BIGINT NOT NULL, absolute_expires BIGINT NOT NULL, revoked BOOLEAN NOT NULL DEFAULT FALSE);
+CREATE TABLE libraries (id TEXT PRIMARY KEY, owner TEXT NOT NULL REFERENCES users(id), name TEXT NOT NULL, revision BIGINT NOT NULL DEFAULT 0);
+CREATE TABLE objects (library_id TEXT NOT NULL REFERENCES libraries(id), id TEXT NOT NULL, kind TEXT NOT NULL, content JSONB, revision BIGINT NOT NULL, deleted BOOLEAN NOT NULL, PRIMARY KEY(library_id,id));
+CREATE TABLE changes (library_id TEXT NOT NULL REFERENCES libraries(id), revision BIGINT NOT NULL, object_id TEXT NOT NULL, kind TEXT NOT NULL, content JSONB, deleted BOOLEAN NOT NULL, PRIMARY KEY(library_id,revision));
+CREATE TABLE operations (library_id TEXT NOT NULL REFERENCES libraries(id), id TEXT NOT NULL, request_hash TEXT NOT NULL, result JSONB NOT NULL, PRIMARY KEY(library_id,id));
+CREATE TABLE blobs (owner TEXT NOT NULL REFERENCES users(id), hash TEXT NOT NULL, size BIGINT NOT NULL, PRIMARY KEY(owner,hash));
+CREATE TABLE uploads (id TEXT PRIMARY KEY, owner TEXT NOT NULL REFERENCES users(id), hash TEXT NOT NULL, size BIGINT NOT NULL, offset_bytes BIGINT NOT NULL DEFAULT 0, expires_at BIGINT NOT NULL);
+CREATE TABLE reset_tokens (hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires_at BIGINT NOT NULL);
+CREATE TABLE auth_limits (name TEXT PRIMARY KEY, attempts INTEGER NOT NULL, window_start BIGINT NOT NULL);

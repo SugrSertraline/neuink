@@ -1,5 +1,6 @@
 import type { Editor } from '@tiptap/core';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
+import { onCloudLibraryChanged } from '@/shared/ipc/cloudAccountApi';
 import { useToast } from '@/shared/hooks/useToast';
 import type { NoteDocument, SourceLink } from '@/shared/types/domain';
 import { registerSegmentEditorCloseHandler, setSegmentEditorDirty } from '@/modules/reader/components/segmentEditorDirtyRegistry';
@@ -53,6 +54,12 @@ export function useMarkdownNoteSession({ editorScopeKey, editor, editorRef, entr
     return () => { detach(); if (editorRef.current === editor) editorRef.current = null; };
   }, [session, editor, editorRef, noteLinksRef, setNoteLinks]);
   useEffect(() => { void session.load(true); }, [session, refreshKey]);
+  useEffect(() => {
+    if (!workspaceRoot) return;
+    return onCloudLibraryChanged(workspaceRoot, () => { void session.load(true); }, () => {
+      notify({ tone: 'danger', title: '同步后的笔记刷新通知不可用，请重新打开笔记' });
+    });
+  }, [workspaceRoot, session, notify]);
   useEffect(() => { editor?.setEditable(!state.loading && !state.loadFailed && !recovery.loading && !recovery.pending, false); }, [editor, state.loading, state.loadFailed, recovery.loading, recovery.pending]);
 
   const save = async (options: NoteSaveOptions = {}) => {

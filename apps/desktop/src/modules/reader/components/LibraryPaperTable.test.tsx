@@ -32,6 +32,55 @@ function showTable(overrides: Partial<ComponentProps<typeof LibraryPaperTable>> 
 }
 
 describe('library table width fitting', () => {
+  it('cancels a left pinned resize when the viewport changes', () => {
+    const { resize, widths } = showTable(); resize(1100);
+    const handle = screen.getByRole('separator', { name: '调整“标题”列宽' });
+    expect(handle.className).toContain('right-0');
+    fireEvent.pointerDown(handle, { button: 0, clientX: 100, pointerId: 5 });
+    fireEvent.pointerMove(window, { clientX: 140, pointerId: 5 });
+    expect(widths()[0]).toBe(460);
+    resize(1000);
+    fireEvent.pointerUp(window, { clientX: 140, pointerId: 5 });
+    expect(widths()[0]).toBe(420);
+    expect(window.localStorage.getItem(ENTRY_LIBRARY_COLUMN_WIDTHS_STORAGE_KEY)).toBeNull();
+  });
+
+  it('resizes the inward edge of the right pinned column in pointer direction at UI zoom', () => {
+    const { resize, widths } = showTable(); resize(1100);
+    const header = screen.getByRole('columnheader', { name: '操作' });
+    const handle = screen.getByRole('separator', { name: '调整“操作”列宽' });
+    Object.defineProperty(header, 'clientWidth', { configurable: true, value: 288 });
+    vi.spyOn(header, 'getBoundingClientRect').mockReturnValue({ width: 432 } as DOMRect);
+    fireEvent.pointerDown(handle, { button: 0, clientX: 600, pointerId: 9 });
+    fireEvent.pointerMove(window, { clientX: 525, pointerId: 9 });
+    expect(widths()[widths().length - 1]).toBe(338);
+    expect(widths()[0]).toBe(420);
+    fireEvent.pointerUp(window, { clientX: 525, pointerId: 9 });
+    expect(handle.className).toContain('left-0');
+  });
+
+  it('keeps actions on one line and lets the column shrink without losing controls', () => {
+    const { resize, widths } = showTable({ onRead: vi.fn() });
+    resize(1100);
+    expect(widths()[widths().length - 1]).toBe(288);
+    const actions = screen.getByRole('group', { name: '条目操作：A long paper title' });
+    expect(actions.className).not.toContain('overflow-x-auto');
+    expect(actions.firstElementChild?.className).toContain('flex-nowrap');
+    const handle = screen.getByRole('separator', { name: '调整“操作”列宽' });
+    for (let step = 0; step < 40; step++) fireEvent.keyDown(handle, { key: 'ArrowRight' });
+    expect(widths()[widths().length - 1]).toBe(64);
+    expect(JSON.parse(window.localStorage.getItem(ENTRY_LIBRARY_COLUMN_WIDTHS_STORAGE_KEY)!).actions).toBe(64);
+    expect(screen.queryByRole('button', { name: '开始阅读' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '更多操作：A long paper title' }));
+    expect(screen.getByRole('button', { name: '开始阅读' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '查看详情' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '重新解析' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '移到回收站' })).toBeTruthy();
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    fireEvent.doubleClick(handle);
+    expect(widths()[widths().length - 1]).toBe(288);
+  });
+
   it('preserves saved action widths within the compact icon column limits', () => {
     window.localStorage.setItem(ENTRY_LIBRARY_COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify({ title: 300, actions: 136 }));
     const { resize, widths } = showTable();
@@ -113,7 +162,7 @@ describe('library table width fitting', () => {
     expect(window.localStorage.getItem(ENTRY_LIBRARY_COLUMN_WIDTHS_STORAGE_KEY)).toBeNull();
     drag(2);
     fireEvent.pointerUp(window, { clientX: 250, pointerId: 2 });
-    expect(JSON.parse(window.localStorage.getItem(ENTRY_LIBRARY_COLUMN_WIDTHS_STORAGE_KEY)!)).toEqual({ title: 489 });
+    expect(JSON.parse(window.localStorage.getItem(ENTRY_LIBRARY_COLUMN_WIDTHS_STORAGE_KEY)!)).toEqual({ title: 486 });
     const displayed = widths()[0];
     Object.defineProperty(header, 'clientWidth', { configurable: true, value: displayed });
     fireEvent.keyDown(handle, { key: 'ArrowRight' });
@@ -121,4 +170,37 @@ describe('library table width fitting', () => {
     fireEvent.doubleClick(handle);
     expect(widths()[0]).toBe(840);
   });
+});
+
+it('aligns resize feedback with each pinned column divider instead of the hit-area center', () => {
+  const { resize } = showTable(); resize(1100);
+  const left = screen.getByRole('separator', { name: '调整“标题”列宽' });
+  const right = screen.getByRole('separator', { name: '调整“操作”列宽' });
+  expect(left.className).toContain('after:right-0');
+  expect(right.className).toContain('after:left-0');
+  expect(left.className).not.toContain('after:left-1/2');
+  expect(right.className).not.toContain('after:-translate-x-1/2');
+});
+
+it('uses the complete header border box when starting a pinned drag', () => {
+  const { resize, widths } = showTable(); resize(1100);
+  const header = screen.getByRole('columnheader', { name: '标题' });
+  Object.defineProperty(header, 'clientWidth', { configurable: true, value: 419 });
+  Object.defineProperty(header, 'offsetWidth', { configurable: true, value: 420 });
+  vi.spyOn(header, 'getBoundingClientRect').mockReturnValue({ width: 630 } as DOMRect);
+  const handle = screen.getByRole('separator', { name: '调整“标题”列宽' });
+  fireEvent.pointerDown(handle, { button: 0, clientX: 600, pointerId: 77 });
+  fireEvent.pointerMove(window, { clientX: 690, pointerId: 77 });
+  fireEvent.pointerUp(window, { clientX: 690, pointerId: 77 });
+  expect(widths()[0]).toBe(480);
+});
+
+it('keeps the fixed action cell opaque while its more menu is open', () => {
+  window.localStorage.setItem(ENTRY_LIBRARY_COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify({ actions: 64 }));
+  const { table, resize } = showTable(); resize(1100);
+  fireEvent.click(screen.getByRole('button', { name: '更多操作：A long paper title' }));
+  const row = table.querySelector('tbody tr')!;
+  expect(row.className).toContain('has-aria-expanded:bg-muted');
+  expect(row.className).not.toContain('has-aria-expanded:bg-muted/50');
+  expect(row.querySelector('td[data-pinned="right"]')?.className).toContain('bg-inherit');
 });

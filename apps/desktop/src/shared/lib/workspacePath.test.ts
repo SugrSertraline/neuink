@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import { sameWorkspacePath } from './workspacePath';
 
 it.each([
+  [String.raw`\\?\D:\NeuInk\portable\data\library`, String.raw`D:\NeuInk\portable\data\library`, true],
   [String.raw`\\?\E:\NeuInk\data\library`, 'e:/neuink/data/library/', true],
   [String.raw`\\?\UNC\server\share\library`, '//SERVER/share/library/', true],
   [String.raw`\\?\E:\NeuInk\data\library`, String.raw`E:\Other\data\library`, false],

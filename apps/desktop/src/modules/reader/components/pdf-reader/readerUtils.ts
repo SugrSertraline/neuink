@@ -1,3 +1,4 @@
+import { preferredScrollBehavior } from '@/shared/lib/motionPolicy';
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 import type { SegmentType, SourceSegment } from "@/shared/types/domain";
@@ -264,7 +265,7 @@ export function scrollToSegment(
   const viewport = readerViewport(container);
 
   container.scrollTo({
-    behavior: "smooth",
+    behavior: preferredScrollBehavior(),
     left:
       container.scrollLeft +
       (targetRect.left - viewport.rect.left) / viewport.scaleX -
@@ -491,7 +492,7 @@ export function scrollToPdfRect(
   const centerY = surfaceRect.top + (((y0 + y1) / 2) / 1000) * surfaceRect.height;
 
   container.scrollTo({
-    behavior: "smooth",
+    behavior: preferredScrollBehavior(),
     left: Math.max(
       0,
       container.scrollLeft + (centerX - viewport.rect.left) / viewport.scaleX - container.clientWidth / 2,

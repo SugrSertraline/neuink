@@ -56,6 +56,8 @@ import type { AssistantEntryMetaProposal, AssistantTagProposal } from '../types/
 import { useWorkspaceResourceActions } from './useWorkspaceResourceActions';
 import { listTagArchives, TAG_ARCHIVES_CHANGED } from '../ipc/tagReadingApi';
 import { createWorkspaceReadScope } from './workspaceReadScope';
+import { notifyNotesChanged } from '../ipc/noteCatalogApi';
+import { onCloudLibraryChanged } from '../ipc/cloudAccountApi';
 import { onResearchLibraryChanged } from '../ipc/researchApi';
 import { onZoteroLibraryChanged, zoteroCatalogTags } from '../ipc/zoteroApi';
 import type { ConfirmPdfDuplicate } from '../lib/pdfDuplicate';
@@ -214,6 +216,22 @@ export function useWorkspace(confirmPdfDuplicate?: ConfirmPdfDuplicate) {
     },
     [readScope, root]
   );
+
+  useEffect(() => {
+    if (!root) return;
+    let closed = false;
+    const failed = () => { if (!closed) setError('同步后的资料列表刷新失败，请重新打开资料库。'); };
+    const stop = onCloudLibraryChanged(root, () => {
+      notifyNotesChanged(root);
+      const current = readScope.begin(root, 'tags');
+      void Promise.all([
+        refreshEntries(root),
+        refreshAnnotationCatalog(root),
+        zoteroCatalogTags(root).then(tags => { if (!closed && current()) setTags(tags); })
+      ]).catch(failed);
+    }, failed);
+    return () => { closed = true; stop(); };
+  }, [root, readScope, refreshEntries, refreshAnnotationCatalog]);
 
   const refreshTrashItems = useCallback(
     async (workspaceRoot = root) => {

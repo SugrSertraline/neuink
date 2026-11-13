@@ -4,6 +4,9 @@ use neuink_domain::{NeuinkDocument, SegmentType, SourceSegment};
 use serde::Serialize;
 use serde_json::Value;
 
+#[path = "mineru_middle_assets.rs"]
+mod assets;
+
 const LIST_ITEM_REGIONS_KEY: &str = "list_item_regions";
 
 #[derive(Serialize)]
@@ -80,6 +83,7 @@ pub fn enrich_document_with_middle(document: &mut NeuinkDocument, middle: &Value
 
     enrich_reference_list_segments(document, &candidates);
     enrich_caption_bboxes(document, middle);
+    assets::repair_directory_placeholders(document, middle);
 }
 
 fn list_region_candidates(middle: &Value) -> Vec<ListRegionCandidate> {

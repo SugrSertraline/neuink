@@ -11,6 +11,8 @@ members = [
   "crates/neuink-sciverse",
   "crates/neuink-workspace",
   "crates/neuink-zotero",
+  "crates/neuink-sync-protocol",
+  "crates/neuink-sync",
 ]
 
 [workspace.package]
@@ -32,7 +34,9 @@ tokio-stream = "0.1"
 futures-util = { version = "0.3", default-features = false, features = ["async-await", "std"] }
 rayon = "1.12"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# Exact floating-point round trips are required by sync's serialized-content
+# comparisons (PDF selection coordinates must not become fresh edits on decode).
+serde_json = { version = "1", features = ["float_roundtrip"] }
 sha1 = "0.10"
 tauri = { version = "2", features = ["protocol-asset", "unstable"] }
 tauri-build = "2"

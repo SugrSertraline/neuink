@@ -2,6 +2,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useLibrarySourceSync } from './useLibrarySourceSync';
+import { getLocalBackgroundJobs } from '@/shared/lib/localBackgroundJobs';
 
 const api = vi.hoisted(() => ({
   getZoteroSettings: vi.fn(), scanZotero: vi.fn(), importZoteroPaper: vi.fn(),
@@ -32,6 +33,23 @@ beforeEach(() => {
 });
 
 describe('library source synchronization', () => {
+  it('reports reading, completion and failure in the shared task registry', async () => {
+    let finish!: (value: unknown) => void;
+    api.getMineruSettings.mockResolvedValue({ results_directory: null });
+    api.scanZotero.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const refreshEntries = vi.fn(async () => undefined);
+    const view = renderHook(() => useLibrarySourceSync('task-registry-library', true, refreshEntries));
+    const latest = () => getLocalBackgroundJobs().find(job => job.scope?.root === 'task-registry-library');
+    await waitFor(() => expect(latest()?.message).toBe('正在检查 Zotero'));
+    expect(latest()?.status).toBe('processing');
+    await act(async () => finish({ existing: {}, changed: [], library: { papers: [] } }));
+    await waitFor(() => expect(latest()?.status).toBe('succeeded'));
+    api.scanZotero.mockRejectedValueOnce(new Error('read failed'));
+    act(() => view.result.current.refresh());
+    await waitFor(() => expect(latest()?.status).toBe('failed'));
+    expect(view.result.current.error).toContain('Zotero');
+    view.unmount();
+  });
   it('keeps local source management enabled without a configured scan directory', async () => {
     api.getZoteroSettings.mockResolvedValue({ enabled: true, data_directory: null });
     api.getMineruSettings.mockResolvedValue({ enabled: true, results_directory: null });
@@ -105,7 +123,7 @@ describe('library source synchronization', () => {
     const refreshEntries = vi.fn(async () => undefined);
     const view = renderHook(() => useLibrarySourceSync('workspace', true, refreshEntries));
     await waitFor(() => expect(view.result.current.scanVersion).toBe(1));
-    expect(view.result.current.issues).toEqual([{ source: 'mineru', title: 'old-result', entryId: 'local-entry', reason: '来源结果已不在当前 MinerU 目录；NeuInk 本地副本仍保留。' }]);
+    expect(view.result.current.issues).toEqual([{ source: 'mineru', title: 'old-result', entryId: 'local-entry', reason: '来源结果已不在当前 MinerU 目录；已保存的来源缓存仍保留。' }]);
     expect(api.importMineruItem).not.toHaveBeenCalled();
     expect(refreshEntries).not.toHaveBeenCalled();
   });

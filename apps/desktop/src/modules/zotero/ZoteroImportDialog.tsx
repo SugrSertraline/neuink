@@ -34,14 +34,14 @@ export function ZoteroImportDialog({ root, onClose, onOpenEntry, onSwitchSource,
   }, [papers, query, collection, showHidden, hiddenIds]);
   useEffect(() => { setPage(0); }, [query, collection, showHidden, model.snapshot?.snapshot_id]);
   useEffect(() => { setPage(current => Math.min(current, Math.max(0, Math.ceil(filtered.length / PAGE_SIZE) - 1))); }, [filtered.length]);
-  const eligible = filtered.filter(p => !hiddenIds.has(p.id) && !model.snapshot?.existing[p.id] && !model.outcomes[p.id]?.result);
+  const eligible = filtered.filter(p => !hiddenIds.has(p.id) && !model.outcomes[p.id]?.result);
   const selectedVisible = eligible.filter(p => model.selected.has(p.id)).length;
   const successes = Object.values(model.outcomes).filter(r => r.result?.status === 'imported').length;
   const skipped = Object.values(model.outcomes).filter(r => r.result?.status === 'skipped').length;
   const failures = Object.values(model.outcomes).filter(r => r.error).length;
   const cancelled = Object.values(model.outcomes).filter(r => r.cancelled).length;
   const close = () => { if (!model.busy) onClose(); };
-  return <ImportPanelFrame embedded={embedded} busy={model.busy} onClose={close} title="从 Zotero 导入" description="选择文献，复制本地 PDF、基本信息和附属笔记文字。保留笔记原始 HTML；笔记图片和 PDF 批注暂不迁移。">
+  return <ImportPanelFrame embedded={embedded} busy={model.busy} onClose={close} title="从 Zotero 导入" description="读取仅保存 Zotero 来源缓存；点击导入所选后，才创建独立本地论文。复制本地 PDF、基本信息和附属笔记文字。保留笔记原始 HTML；笔记图片和 PDF 批注暂不迁移。">
     {onSwitchSource && <ImportSourceSwitch source="zotero" onChange={onSwitchSource} disabled={model.busy} />}
       <ImportPanelBody>
         <div className="mb-4"><ZoteroSourceControls source={source} disabled={model.busy} showLinked={papers.some(p => p.attachments.some(a => a.reason === '需要设置链接附件基础目录' || a.reason === '链接附件未找到，请检查基础目录或文件是否已移动'))} /></div>

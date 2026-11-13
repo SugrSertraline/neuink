@@ -1,0 +1,11 @@
+services:
+  app:
+    environment:
+      NEUINK_BACKUP_STATUS: /ops/backup.json
+    volumes:
+      - type: bind
+        source: ${NEUINK_OPERATIONS_DIR:?set sanitized status directory}
+        target: /ops
+        read_only: true
+        bind:
+          create_host_path: false

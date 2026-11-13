@@ -6,7 +6,7 @@ import { useHeavyReaderRetention } from './useHeavyReaderRetention';
 import { setSegmentEditorDirty } from './segmentEditorDirtyRegistry';
 import { HEAVY_READER_IDLE_UNMOUNT_MS as IDLE, HEAVY_READER_SWEEP_INTERVAL_MS as SWEEP } from './readerRetention';
 
-afterEach(() => { cleanup(); vi.useRealTimers(); setSegmentEditorDirty('pdf:a', 'owner', false); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); setSegmentEditorDirty('pdf:a', 'owner', false); });
 const layout: WorkspaceSurfaceLayout = { focusedPane: 'left', left: { kind: 'library' }, leftTabs: [{ kind: 'library' }, { kind: 'pdf', entryId: 'a' }], right: null, rightTabs: [] };
 
 it('retains dirty hidden readers and restarts their idle period after saving', () => {
@@ -40,4 +40,14 @@ it('releases sweep timers during repeated mount, layout change and unmount', () 
     view.unmount();
     expect(vi.getTimerCount()).toBe(0);
   }
+});
+
+it('bounds hidden readers on a two-core device while protecting active and unsaved surfaces', () => {
+  vi.spyOn(navigator, 'hardwareConcurrency', 'get').mockReturnValue(2);
+  setSegmentEditorDirty('pdf:a', 'owner', true);
+  const tabs = ['a', 'b', 'c', 'd'].map(entryId => ({ kind: 'pdf' as const, entryId }));
+  const { result } = renderHook(() => useHeavyReaderRetention({ ...layout, left: tabs[3], leftTabs: tabs }));
+  expect(result.current.has('pdf:a')).toBe(false);
+  expect(result.current.has('pdf:d')).toBe(false);
+  expect(result.current.size).toBe(1);
 });

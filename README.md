@@ -4,88 +4,70 @@
 
 <h1 align="center">Neuink</h1>
 
-## 开发与发布分支
+**让每一次阅读，都留下可追溯的理解。**
 
-`alpha → beta → main`：最新功能先在 alpha 完成，确认需要保留的功能与数据兼容后交付 beta；beta 验证稳定性和实际使用效果，用户确认后再合入 main。
+Neuink 是本地优先的文献阅读与证据笔记工作台。接入 Zotero 或导入 PDF，在原文与重排视图中阅读、翻译和对照，把笔记连接到来源，再用自己配置的模型辅助检索与研究。
+
+[产品官网与手册](https://sugrsertraline.github.io/neuink/) · [开始使用](https://sugrsertraline.github.io/neuink/start.html) · [版本与下载](https://github.com/SugrSertraline/neuink/releases) · [English](README_EN.md)
+
+## 当前版本：alpha 内部测试
+
+**2026-11-13**：本页介绍当前 alpha 的实现。账户与云端同步已接入桌面，条目库、来源管理及任务反馈已有较大更新；这些变化尚不等于新的公开安装包。公开下载以 Releases 的版本说明为准，旧包可能没有以下内测功能。
+
+| 工作环节 | 当前能力 |
+| --- | --- |
+| 资料接入 | 浏览本机 Zotero / MinerU 来源，保留来源缓存；只有明确导入才成为独立本地论文。 |
+| 阅读与翻译 | PDF / 重排、左右对照、阅读详略、双语与逐句阅读，翻译按行为选择模型或服务。 |
+| 证据整理 | 文档笔记、片段笔记、批注、层级标签、来源链接与反向引用，支持成果导出。 |
+| 条目库 | 纯条目表格、纯标签文件夹或二者共存；文件夹内直接打开论文，动态标签页快速切换范围，列宽和操作按钮随空间调整。 |
+| 账户与存储 | 个人资料与头像、密码、服务器、设备管理及空间信息；本地资料位置合并进“账户”。 |
+| 云端同步（内测） | 明确确认后绑定默认云端资料库，自动或手动同步、附件续传、云端清单、冲突处理及维护预览。 |
+| 任务与反馈 | Zotero 来源读取与云端同步接入右下角任务区，失败可跳转处理，不把失败都当成版本冲突。 |
+| AI 与研究 | 自选模型、本地 Agent、上下文压缩、论文检索、可审阅修改提案，以及按需生成的论文卡片。 |
+
+### 按自己的方式浏览文献
+
+在条目库的“标签导航”菜单选择 **纯条目表格、纯标签文件夹、标签与表格**。需要比较字段时使用表格；按主题寻找资料时使用文件夹；也可以同时保留导航与表格，选择会保存在本机。
+
+文件夹模式支持返回上一级和路径跳转。单击选中，双击或按 Enter 打开标签文件夹或论文；当前文件夹显示直接归属的论文，根目录显示未分类论文。标签是分类方式，不会搬动 PDF 或因多标签而复制文件。
+
+顶部标签页随“最近阅读”“回收站”等当前范围变化，悬停可快速切换。长路径限宽，页眉和操作列放不下的按钮进入“更多”。完整操作见[条目与标签指南](website/content/library.md)。
+
+### 云端同步如何试用
+
+全新安装默认关闭同步，服务器地址留空。填写 URL 并连接验证成功后才能登录，登录后仍需确认范围才开启同步。升级时保留老用户已确认的设置。
+
+在**东北大学校园网环境**下，进入“设置 → 账户”，填写内测管理员提供的服务器地址，连接成功后登录。点击“开启同步”，核对内容范围与空间后确认；云端已有内容也会下载到本机。
+
+支持已适配的本地论文、阅读快照、笔记、批注、标签、译文、阅读详略和已确认构思。**Zotero 来源缓存不作为本地论文上传，明确导入的副本才参与。** 条目库的“云端状态”区分来源缓存、待同步、已同步、冲突和需要处理；账户页可查看服务器内容清单，右下角查看任务。
+
+状态列采用增量核对和短期缓存，实际上传仍完整校验。同步不等于整个 data 的备份，也不是团队多人实时协作。测试前独立备份资料。操作步骤见[云端同步内测指南](website/content/sync.md)。
+
+本轮**暂不推进证书配置**，新电脑的连接环境由内测管理员安排；证书错误不通过关闭 HTTPS 校验解决。缺少 Windows 应用签名不妨碍生成 EXE，但可能出现未知发布者提示或被设备策略阻止。当前不承诺所有 Windows 10 / 11 设备均已验收。
+
+### Zotero 来源与本地副本
+
+连接来源不会自动把整库变成 Neuink 本地论文。来源缓存始终保留来源身份；需要独立管理或云端同步时，再明确导入。隐藏来源不删除 Zotero 原件，恢复显示也不需要重新导入。
+
+来源笔记可选择导入；普通本地编辑不会自动写回 Zotero。写回前需比较版本并明确确认，目前要求 Zotero 10 及以上运行且允许本机访问，含图片笔记暂不支持直接写回。详见 [Zotero 指南](website/content/zotero.md)。
+
+### 实验入口与验证边界
+
+论文卡片可按需生成并逐张核对；研究构思通过搜索输入 `/inspiration` 主动打开。报告确认后保存，不自动执行实验，已有构思数据保留。新手引导入口当前暂时隐藏，以手册步骤上手。
+
+内测版已进行自动化回归与本机构建检查，但原生界面、真实模型效果、新电脑安装、跨设备网络和长时间使用仍需继续验收。不能把测试通过写成所有功能无缺陷。最新验证记录见[开发计划](docs/development/dev-plan.md)。
+
+## 开发与发布分支
 
 | 分支 | 职责 |
 | --- | --- |
-| [alpha](https://github.com/SugrSertraline/neuink/tree/alpha) | 最新功能开发与集成；包含研究卡片和构思探索，实验能力仍需验收。 |
-| [beta](https://github.com/SugrSertraline/neuink/tree/beta) | 已确认功能候选的稳定性测试与修复。 |
-| [main](https://github.com/SugrSertraline/neuink/tree/main) | 已批准的正式发布来源；安装包和官网从这里发布。 |
+| [alpha](https://github.com/SugrSertraline/neuink/tree/alpha) | 最新功能开发与内部测试。 |
+| [beta](https://github.com/SugrSertraline/neuink/tree/beta) | 已确认候选的稳定性与使用效果验收。 |
+| [main](https://github.com/SugrSertraline/neuink/tree/main) | 已批准的正式发布来源；公开程序包和官网从这里发布。 |
 
-alpha/beta 自动校验不发布安装包，也不自动晋级。交付时核对功能、入口变化、已有数据和已知限制；beta/main 修复及时回流 alpha。具体要求见[工程规范](docs/development/engineering-guidelines.md#分支与交付)，每次交付证据记录在[开发计划](docs/development/dev-plan.md)。
+按 `alpha → beta → main` 推进，自动校验不自动发布或晋级。功能范围、数据兼容和验收证据按[工程规范](docs/development/engineering-guidelines.md)记录；更新文档不等于已发布程序。
 
-## 从 Zotero 资料库，继续深入阅读
-
-Neuink 是本地优先的文献阅读与证据笔记工作台：接入已有论文，在 PDF／重排视图中阅读和翻译，整理带来源的笔记，再用自己的模型辅助检索与归纳。
-
-**2026-11-07 · beta 已集成以下更新。** 官网正式下载包仍以 [Releases](https://github.com/SugrSertraline/neuink/releases) 为准；本文不会把 beta 源码能力等同于已发布安装包。
-
-| 工作环节 | 当前 beta 能做什么 |
-| --- | --- |
-| 沿用 Zotero | 连接本机数据目录，浏览来源条目、检查变化，按需导入独立本地副本。 |
-| 整理来源笔记 | 选择导入 Zotero 笔记，比较原文与本地修改；只保存本地或明确确认写回。 |
-| 阅读与翻译 | PDF／重排、逐段详略、双语对照；翻译服务和大模型按行为配置。 |
-| 论文卡片 | 在论文阅读内容中手动生成、核对、编辑卡片，保留方法抽象、原文实例和来源。 |
-| 助手长对话 | 上下文占用、手动／自动 compact、跨轮工具结果及按顺序展示的执行过程。 |
-| 查找新论文 | arXiv 结构化检索、候选分页与来源核对，用户确认后才下载导入。 |
-| MinerU 阅读修复 | 导入解析结果时配对原始 PDF；已有条目可校验后替换阅读 PDF，保留解析及阅读成果。 |
-
-### Zotero：从接入到确认写回
-
-1. 在设置中选择 **Zotero 本机数据目录**并启用来源。已有资料可以继续保留在 Zotero 中。
-2. 在条目库浏览来源条目；需要独立管理时选择导入本地副本。普通本地编辑不会自动改写 Zotero。
-3. 选择导入需要的 Zotero 笔记，在 Neuink 中阅读与整理，保留来源关联。
-4. 保存菜单中核对来源原文、本地内容和差异，选择只保存本地，或明确确认替换来源笔记。
-5. 来源版本变化、权限不足或写回失败时，根据提示重新核对；本地保存与 Zotero 写回分别报告结果。
-
-本地保存不要求 Zotero 运行。写回目前要求 **Zotero 10 及以上运行并允许本机访问**；含图片的笔记暂不支持直接写回。关闭来源只隐藏来源内容，不删除原件或独立副本。这是本机接入与受控写回，**不是 Zotero 云同步或完整富文本双向同步**。
-
-[Zotero 完整操作指南](https://sugrsertraline.github.io/neuink/zotero.html) · [beta 更新与使用边界](https://sugrsertraline.github.io/neuink/updates.html)
-
-### 实验功能入口
-
-论文卡片正常显示；研究构思不占用常驻导航。需要试用时，在搜索框输入 `/inspiration` 并回车，按背景、问题和方法步骤组织卡片。推荐需要用户加入，报告确认后才保存到条目；不自动执行实验。旧构思数据保留。
-
-### 已知边界
-
-- MinerU 替换阅读 PDF 有普通失败回滚，但尚无断电／进程崩溃恢复事务；用户已接受该 beta 限制。
-- 生成内容需核对来源；外部模型与检索服务按配置联网。此次合并未完成真实模型和原生桌面视觉验收。
-- 合并版验证：4,182 项前端测试、670 项后端测试通过；部分显式验收测试默认跳过，类型检查与前端生产构建通过。
-
-<p align="center">
-  <strong><a href="https://sugrsertraline.github.io/neuink/">访问 Neuink 官网 · 完整功能介绍 →</a></strong><br>
-  通过实机截图、核心概念和分步教程，了解 Neuink 并开始第一次阅读。<br>
-  <a href="https://sugrsertraline.github.io/neuink/start.html">开始阅读</a> · <a href="https://sugrsertraline.github.io/neuink/screenshots.html">查看实机界面</a> · <a href="https://cdn.sugrsertraline.top/Neuink-windows-x64-portable.zip">下载 Windows 便携版</a>
-</p>
-
-<p align="center">
-  <strong>简体中文</strong> · <a href="README_EN.md">English</a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/SugrSertraline/neuink">GitHub Repository</a>
-</p>
-
-<p align="center">
-  <strong>让每一次阅读，都留下可追溯的理解。</strong><br>
-  本地优先的文献阅读、证据笔记与 AI 研究工作台。
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/desktop-Windows%20%7C%20macOS-1f2937?style=flat-square" alt="Desktop platforms: Windows and macOS">
-  <img src="https://img.shields.io/badge/Tauri-2-24c8db?style=flat-square" alt="Tauri 2">
-  <img src="https://img.shields.io/badge/React-18-61dafb?style=flat-square" alt="React 18">
-  <img src="https://img.shields.io/badge/license-Apache--2.0-2563eb?style=flat-square" alt="Apache-2.0 license">
-  <a href="https://linux.do"><img src="https://img.shields.io/badge/LINUX-DO-FFB003.svg?logo=data:image/svg%2bxml;base64,DQo8c3ZnIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgd2lkdGg9IjEwMCIgaGVpZ2h0PSIxMDAiPjxwYXRoIGQ9Ik00Ni44Mi0uMDU1aDYuMjVxMjMuOTY5IDIuMDYyIDM4IDIxLjQyNmM1LjI1OCA3LjY3NiA4LjIxNSAxNi4xNTYgOC44NzUgMjUuNDV2Ni4yNXEtMi4wNjQgMjMuOTY4LTIxLjQzIDM4LTExLjUxMiA3Ljg4NS0yNS40NDUgOC44NzRoLTYuMjVxLTIzLjk3LTIuMDY0LTM4LjAwNC0yMS40M1EuOTcxIDY3LjA1Ni0uMDU0IDUzLjE4di02LjQ3M0MxLjM2MiAzMC43ODEgOC41MDMgMTguMTQ4IDIxLjM3IDguODE3IDI5LjA0NyAzLjU2MiAzNy41MjcuNjA0IDQ2LjgyMS0uMDU2IiBzdHlsZT0ic3Ryb2tlOm5vbmU7ZmlsbC1ydWxlOmV2ZW5vZGQ7ZmlsbDojZWNlY2VjO2ZpbGwtb3BhY2l0eToxIi8+PHBhdGggZD0iTTQ3LjI2NiAyLjk1N3EyMi41My0uNjUgMzcuNzc3IDE1LjczOGE0OS43IDQ5LjcgMCAwIDEgNi44NjcgMTAuMTU3cS00MS45NjQuMjIyLTgzLjkzIDAgOS43NS0xOC42MTYgMzAuMDI0LTI0LjM4N2E2MSA2MSAwIDAgMSA5LjI2Mi0xLjUwOCIgc3R5bGU9InN0cm9rZTpub25lO2ZpbGwtcnVsZTpldmVub2RkO2ZpbGw6IzE5MTkxOTtmaWxsLW9wYWNpdHk6MSIvPjxwYXRoIGQ9Ik03Ljk4IDcwLjkyNmMyNy45NzctLjAzNSA1NS45NTQgMCA4My45My4xMTNRODMuNDI2IDg3LjQ3MyA2Ni4xMyA5NC4wODZxLTE4LjgxIDYuNTQ0LTM2LjgzMi0xLjg5OC0xNC4yMDMtNy4wOS0yMS4zMTctMjEuMjYyIiBzdHlsZT0ic3Ryb2tlOm5vbmU7ZmlsbC1ydWxlOmV2ZW5vZGQ7ZmlsbDojZjlhZjAwO2ZpbGwtb3BhY2l0eToxIi8+PC9zdmc+" alt="LINUX DO"></a>
-</p>
-
-> **Neuink** 面向论文、报告、标准和书籍章节，把资料整理、PDF 与网页阅读、跨篇对照、来源笔记、检索和 AI 研究放进同一个本地工作区。阅读成果可以回到原文证据，也可以导出为独立文件。
-
-**整理资料 → 阅读与对照 → 记录并连接证据 → 检索与研究 → 导出分享**
-
-[产品官网](https://sugrsertraline.github.io/neuink/) · [作者主页](https://sugrsertraline.github.io/homepage/) · [核心功能](#核心功能) · [阅读详略](#阅读详略操作指南) · [来源与副本](#来源资料与本地副本) · [开始使用](#开始使用) · [常见问题](#开发版常见问题) · [开发与构建](#开发与构建) · [项目文档](#项目文档)
+以下版本记录属于既有公开预览版本，不能代表上方 alpha 内测功能均已发布。
 
 ## 0.1.3 预览版更新
 
@@ -335,7 +317,7 @@ Neuink 区分直接管理的本地条目，以及从 Zotero／MinerU 目录识�
 
 ## 条目库与标签管理
 
-条目库支持点击支持排序的表头切换排序，表头居中，标题按可用宽度截断并通过气泡展示全文。行内操作使用平铺图标，悬停显示用途；单选、多选和批量操作共用明确的选择状态。
+条目库支持点击支持排序的表头切换排序，表头居中，标题按可用宽度截断并通过气泡展示全文。列宽可调整，左右固定列保留拖动边界；行内操作按剩余宽度逐项折叠进“更多”，悬停显示用途。选择模式保留相关搜索与批量操作；“云端状态”列显示服务器确认情况。
 
 标签管理提供层级树、展开／收起、画布平移、放大／缩小、复位与右键菜单，便于整理较大的主题结构。标签归属、来源属性和本地编辑权限分别处理；来源条目的受限操作不会伪装成已经成功写入。
 
@@ -367,13 +349,13 @@ Neuink 区分直接管理的本地条目，以及从 Zotero／MinerU 目录识�
 
 ### 已有 Windows 便携包
 
-完整解压后双击 `Neuink.exe`，保留随包资源目录。无需安装 Node.js 或 Rust，系统需有 Microsoft Edge WebView2 Runtime。Windows 便携版默认将数据保存在程序旁的 `data`；迁移时先关闭程序，再连同该目录一起复制。更新程序时保留原有数据，具体位置可在资料库与数据设置中核对。
+完整解压后双击 `Neuink.exe`，保留随包资源目录。无需安装 Node.js 或 Rust，系统需有 Microsoft Edge WebView2 Runtime。Windows 便携版默认将数据保存在程序旁的 `data`；迁移时先关闭程序，再连同该目录一起复制。更新程序时保留原有数据，当前内测版可在“设置 → 账户”的数据位置核对。
 
 当前项目版本为 **0.1.3**。Windows 提供便携包构建流程；签名、应用内自动更新及原生发行验收仍有待完成。自动构建、下载方式和各平台验收状态见[打包与发行](docs/deployment/packaging-and-distribution.md)。
 
 ### 第一次整理一篇论文
 
-1. **创建或打开资料库**：在设置的“资料库与数据”中选择本地 Workspace；新手引导可带你熟悉主要入口，离线演示取决于安装包是否包含演示素材。
+1. **确认资料位置**：Windows 默认使用程序旁的 `data/library`，在“设置 → 账户”查看；当前内测版暂时隐藏新手引导，可按下列步骤开始。
 2. **导入材料**：直接导入 PDF 即可阅读。需要结构化内容时，在“导入与解析”中查看 MinerU 客户端图文教程：先解析，再导出完整结果并压缩为 ZIP，最后导入 Neuink。
 3. **整理与阅读**：添加主题标签，打开 PDF 或 Reflow；需要对照时，从同标签论文列表打开另一篇。
 4. **记录证据**：新建文档笔记或标签综合笔记，插入来源链接并保存。
@@ -392,9 +374,10 @@ Neuink 区分直接管理的本地条目，以及从 Zotero／MinerU 目录识�
 | AI 对话与翻译 | 对话使用自行配置的模型；翻译可使用专用服务或模型，仅向所选来源发送待处理内容。 |
 | 阅读详略生成与详略译文 | 分别使用助手模型与段落翻译路由；所选正文及有长度限制的背景发送至对应服务，已有结果切换使用本地缓存。 |
 | 在线论文／网页研究 | 需要网络；可选服务还受凭据、权限和配额限制。 |
+| 云端同步（内测） | 连接已配置的校园网服务器，确认开启后传输支持的本地内容；来源缓存不上传，独立备份仍需保留。 |
 | 内嵌网页／视频字幕读取 | 原生网页目前在 Windows 启用；视频运行时当前随 Windows x64 包提供。 |
 
-Workspace 是普通本地文件夹，保存 PDF、笔记、批注、标签、译文和会话；搜索等缓存可重建。API Key 不属于 Workspace 或分享包。迁移资料库会复制、验证并保留原目录。
+Workspace 是普通本地文件夹，保存 PDF、笔记、批注、标签、译文和会话；搜索等缓存可重建。API Key 不属于 Workspace 或分享包，但整个 data 的设置文件可能包含凭据，不能作为公开分享包。当前 Windows 版随程序携带 data，移动前先保存退出并独立备份。
 
 **当前边界**：本地关系图展示已有关系；自动研究方向图、证据对比表、跨原生窗口拖出和团队云协作不在本文已实现能力之列。具体完成度与后续工作统一见[开发计划](docs/development/dev-plan.md)。
 
