@@ -2635,3 +2635,6 @@ pub async fn prepare_visual_search_index<R: tauri::Runtime>(
         .map_err(|error| error.to_string())?
 }
 
+
+#[cfg(test)]
+mod visual_service_tests;

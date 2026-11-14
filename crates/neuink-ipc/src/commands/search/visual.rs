@@ -201,13 +201,10 @@ pub(super) fn prepare_visual_index(
                 .embed_pdf_pages(&request.pdf_path, &request.pages, true)
                 .map_err(|error| error.to_string())?;
             for item in vectors {
-                let key = page_document(
-                    &request.entry_id,
-                    &page_hash(&documents, &request.entry_id, item.page_idx, item.region),
-                    item.page_idx,
-                    item.region,
-                )
-                .key();
+                let key = page_key(&documents, &request.entry_id, item.page_idx, item.region)
+                    .ok_or_else(|| {
+                        "视觉分页编码返回了未收集的页面或区域".to_string()
+                    })?;
                 precomputed.insert(key, item.vector);
             }
         }
@@ -222,7 +219,19 @@ pub(super) fn prepare_visual_index(
         provider.as_ref(),
         &|_, _| {},
     )
-    .map_err(|error| error.to_string())?;
+    .map_err(|error| {
+        if cfg!(test) {
+            eprintln!(
+                "visual prepare: docs={} assets={} precomputed={} sample_doc={:?} sample_pre={:?}",
+                documents.len(),
+                assets.len(),
+                precomputed.len(),
+                documents.first().map(|document| document.key()),
+                precomputed.keys().next()
+            );
+        }
+        error.to_string()
+    })?;
     let embedded_count = rebuilt
         .documents()
         .iter()
@@ -293,14 +302,14 @@ struct PageRequest {
     pages: Vec<u32>,
 }
 
-/// Hash the collected documents use for one page source, so a service vector can be
-/// matched to the document the build will persist.
-fn page_hash(
+/// Key of the collected document for one page source, so a service vector can be matched
+/// to the document the build will persist.
+fn page_key(
     documents: &[VisualIndexDocument],
     entry_id: &str,
     page: u32,
     region: Option<u32>,
-) -> String {
+) -> Option<String> {
     documents
         .iter()
         .find(|document| {
@@ -308,8 +317,7 @@ fn page_hash(
                 && document.page_idx == Some(page)
                 && document.region == region
         })
-        .map(|document| document.content_hash.clone())
-        .unwrap_or_default()
+        .map(VisualIndexDocument::key)
 }
 
 /// Page and region sources for every parsed entry that still has its PDF.
