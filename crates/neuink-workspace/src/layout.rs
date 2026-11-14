@@ -102,6 +102,18 @@ impl WorkspaceLayout {
             .join(format!("{}.assets", note_id.as_str()))
     }
 
+    /// Figure/table images copied out of a MinerU client ZIP, keyed by the
+    /// ZIP-relative `images/...` path that `SourceSegment::asset_path` already holds.
+    pub fn entry_assets_dir(&self, entry_id: &EntryId) -> PathBuf {
+        self.entry_dir(entry_id).join("assets")
+    }
+
+    /// Content hashes of the stored assets, kept beside the asset directory so an
+    /// identical re-import can be detected without re-reading every image.
+    pub fn entry_assets_manifest_file(&self, entry_id: &EntryId) -> PathBuf {
+        self.entry_dir(entry_id).join("assets.manifest.json")
+    }
+
     pub fn entry_note_links_file(&self, entry_id: &EntryId, note_id: &NoteId) -> PathBuf {
         self.entry_notes_dir(entry_id)
             .join(format!("{}.links.json", note_id.as_str()))

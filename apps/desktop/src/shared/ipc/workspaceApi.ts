@@ -1231,6 +1231,151 @@ export function searchSegmentsBatch(
   });
 }
 
+/** Composed retrieval: document routing, carrier binding, the visual vote, evidence. */
+export type UnifiedSearchRequest = {
+  question: string;
+  sub_questions?: string[];
+  scope_entry_ids?: EntryId[];
+  mandated_entry_ids?: EntryId[];
+  section_filter?: string | null;
+  segment_types?: string[];
+  mode?: SearchMode;
+  top_k?: number;
+  head_units?: number;
+  max_documents?: number;
+  bind_carriers?: boolean;
+};
+
+export type UnifiedCarrierWire = { kind: 'section' | 'table' | 'figure'; label: string };
+
+export type UnifiedSearchTaskWire = {
+  question: string;
+  carrier_applied: boolean;
+  mode: string;
+  total_hit_count: number;
+  results: SearchResults;
+};
+
+/** Fixed, path-free degradation codes. Copy is host-owned. */
+export type UnifiedSearchResponse = {
+  question: string;
+  routed_documents: string[];
+  routing_skip: string | null;
+  truncated: boolean;
+  text_entries: number;
+  visual_entries: number;
+  /** `ready` | `disabled` | `model_unavailable` | `index_missing`. */
+  visual_status: string;
+  /** Present only under gated append: whether the gate admitted visual entries. */
+  visual_gate_open?: boolean | null;
+  carriers: UnifiedCarrierWire[];
+  tasks: UnifiedSearchTaskWire[];
+  degradations: string[];
+};
+
+export function searchUnified(
+  root: string,
+  request: UnifiedSearchRequest
+): Promise<UnifiedSearchResponse> {
+  return invoke<UnifiedSearchResponse>('search_unified', {
+    request: { root, ...request }
+  });
+}
+
+/** How visual votes enter the document order. */
+export type VisualFusionMode = 'weighted' | 'append_gated';
+
+/** Gold-free gate for `append_gated`: thin text head, or weak question/hit overlap. */
+export type VisualAppendGate = {
+  min_head_entries: number;
+  max_snippet_overlap: number;
+};
+
+export type VisualFusionSettings = {
+  mode: VisualFusionMode;
+  text_weight: number;
+  visual_weight: number;
+  rrf_k: number;
+  gate: VisualAppendGate;
+};
+
+/** The visual channel runs Qwen3-VL-Embedding-2B, locally or behind an API. */
+export type VisualEmbeddingProviderKind = 'qwen_local' | 'qwen_api';
+
+export type VisualEmbeddingSettings = {
+  provider: VisualEmbeddingProviderKind;
+  endpoint: string | null;
+  timeout_ms: number;
+  fusion: VisualFusionSettings;
+};
+
+/** Status view. `has_api_key` reports whether a token is stored; the token is not returned. */
+export type VisualEmbeddingSettingsState = {
+  provider: 'qwen_local' | 'qwen_api' | 'retired';
+  has_api_key: boolean;
+  endpoint: string | null;
+  timeout_ms: number;
+  fusion: VisualFusionSettings;
+};
+
+export type VisualEmbeddingSettingsInput = VisualEmbeddingSettings & {
+  /** Omit to keep the stored key; pass an empty string to clear it. */
+  api_key?: string | null;
+};
+
+export function getVisualEmbeddingSettings(): Promise<VisualEmbeddingSettingsState> {
+  return invoke('get_visual_embedding_settings');
+}
+
+/** Validated backend-side; a configuration that cannot run is rejected at save time. */
+export function saveVisualEmbeddingSettings(
+  settings: VisualEmbeddingSettingsInput
+): Promise<VisualEmbeddingSettingsState> {
+  return invoke('save_visual_embedding_settings', { settings });
+}
+
+/**
+ * Re-imports MinerU image assets for entries that already store a MinerU ZIP, so a
+ * library imported before assets were persisted gains them without a re-upload.
+ * Idempotent: an entry whose stored bytes match reports `reused`.
+ */
+export type BackfillEntryAssetsResponse = {
+  entries_considered: number;
+  entries_with_zip: number;
+  entries_imported: number;
+  entries_reused: number;
+  assets_imported: number;
+  failures: { entry_id: string; code: string }[];
+};
+
+export function backfillEntryAssets(
+  root: string,
+  entryIds: string[] = []
+): Promise<BackfillEntryAssetsResponse> {
+  return invoke('backfill_entry_assets', {
+    request: { root, entry_ids: entryIds }
+  });
+}
+
+/** Encodes every page, region and MinerU asset once and writes the visual snapshot. */
+export function prepareVisualSearchIndex(
+  root: string
+): Promise<{
+  provider: string;
+  model_name: string | null;
+  dimensions: number | null;
+  identity: string;
+  namespace: string;
+  entry_count: number;
+  asset_count: number;
+  document_count: number;
+  embedded_count: number;
+}> {
+  return invoke('prepare_visual_search_index', {
+    request: { root }
+  });
+}
+
 export async function searchSegments(
   root: string,
   query: string,

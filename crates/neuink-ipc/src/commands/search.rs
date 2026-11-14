@@ -23,6 +23,13 @@ use serde::{de::IgnoredAny, Deserialize, Serialize};
 
 use super::embedding_resources::embedding_model_dir;
 
+mod unified;
+mod visual;
+mod visual_qwen;
+
+pub use unified::{UnifiedSearchRequest, UnifiedSearchResponse};
+pub use visual::{PrepareVisualSearchIndexRequest, PrepareVisualSearchIndexResponse};
+
 const SEARCH_INDEX_CACHE_LIMIT: usize = 8;
 const SEMANTIC_INDEX_CACHE_LIMIT: usize = 3;
 const EMBEDDING_PROVIDER_CACHE_LIMIT: usize = 1;
@@ -284,6 +291,9 @@ struct PreparedSearch {
     keyword: Arc<MemorySearchIndex>,
     provider: Arc<FastEmbedProvider>,
     semantic: Option<Arc<PersistentSemanticSearchIndex>>,
+    /// Distinct entries in the prepared corpus. The document head needs the scope
+    /// size to tell "no parsed documents" from "nothing ranked".
+    document_count: usize,
 }
 
 fn prepare_search(
@@ -338,6 +348,11 @@ fn prepare_search(
         keyword,
         provider,
         semantic,
+        document_count: documents
+            .iter()
+            .map(|document| document.entry_id.as_str())
+            .collect::<HashSet<_>>()
+            .len(),
     })
 }
 
@@ -2292,6 +2307,8 @@ mod tests {
             keyword: index,
             provider: Arc::new(FastEmbedProvider::from_model_dir(model_dir)),
             semantic: None,
+            // Fixtures below use two entries, so the head's scope size is 2.
+            document_count: 2,
         }
     }
 
@@ -2525,3 +2542,96 @@ fn read_semantic_disk_cache_status(path: &PathBuf) -> Option<SemanticDiskCacheSt
         record_count: snapshot.records.len(),
     })
 }
+
+/// Which visual encoder is configured. The Qwen service is the only encoder this build
+/// runs; a stored retired value is reported so the settings screen can explain it.
+#[derive(Debug, serde::Serialize)]
+pub struct VisualEmbeddingSettingsState {
+    pub provider: &'static str,
+    /// Whether a key is stored; the key itself is never returned.
+    pub has_api_key: bool,
+    pub endpoint: Option<String>,
+    pub timeout_ms: u64,
+    /// Dual-channel parameters, so a settings screen can read what the pipeline uses.
+    pub fusion: neuink_config::VisualFusionSettings,
+}
+
+impl VisualEmbeddingSettingsState {
+    fn from_settings(settings: &neuink_config::VisualEmbeddingSettings) -> Self {
+        Self {
+            provider: settings.provider.as_str(),
+            has_api_key: settings
+                .api_key
+                .as_deref()
+                .is_some_and(|key| !key.trim().is_empty()),
+            endpoint: settings.endpoint.clone(),
+            timeout_ms: settings.timeout_ms,
+            fusion: settings.fusion,
+        }
+    }
+}
+
+#[tauri::command]
+pub fn get_visual_embedding_settings<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<VisualEmbeddingSettingsState, String> {
+    let settings = crate::storage::read_settings(&app)?.visual;
+    Ok(VisualEmbeddingSettingsState::from_settings(&settings))
+}
+
+/// Validates before writing, so a configuration that cannot run is rejected at save time
+/// instead of silently disabling the channel later. The key is write-only: omitting it
+/// keeps the stored one, an empty string clears it.
+#[tauri::command]
+pub fn save_visual_embedding_settings<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    settings: neuink_config::VisualEmbeddingSettings,
+) -> Result<VisualEmbeddingSettingsState, String> {
+    let mut saved = crate::storage::read_settings(&app)?;
+    let mut merged = settings;
+    match merged.api_key.as_deref() {
+        None => merged.api_key = saved.visual.api_key.clone(),
+        Some("") => merged.api_key = None,
+        Some(_) => {}
+    }
+    merged.validate()?;
+    saved.visual = merged;
+    crate::storage::write_settings(&app, &saved)?;
+    Ok(VisualEmbeddingSettingsState::from_settings(&saved.visual))
+}
+
+/// Composed retrieval in one call: document routing, named-carrier binding, the visual
+/// sidecar vote (ready only when its snapshot matches the current model), and evidence
+/// inside the routed documents. Separate from the batch path so a batch keeps its
+/// existing request and result shape.
+#[tauri::command]
+pub async fn search_unified<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    request: UnifiedSearchRequest,
+) -> Result<UnifiedSearchResponse, String> {
+    let model_dir = embedding_model_dir(&app)?;
+    let settings = crate::storage::read_settings(&app)?.visual;
+    let visual_provider = visual::provider_for(&settings);
+    let fusion = settings.fusion;
+    tokio::task::spawn_blocking(move || {
+        unified::run_unified_search(model_dir, visual_provider, fusion, request)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// Encodes every stored MinerU asset once and writes the visual snapshot. This is the
+/// only path that spends image-encoder work; queries only reread the snapshot.
+#[tauri::command]
+pub async fn prepare_visual_search_index<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    request: PrepareVisualSearchIndexRequest,
+) -> Result<PrepareVisualSearchIndexResponse, String> {
+    let settings = crate::storage::read_settings(&app)?.visual;
+    settings.validate()?;
+    let provider = visual::provider_for(&settings);
+    tokio::task::spawn_blocking(move || visual::prepare_visual_index(provider, request))
+        .await
+        .map_err(|error| error.to_string())?
+}
+

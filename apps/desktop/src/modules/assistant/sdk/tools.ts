@@ -86,7 +86,7 @@ import type { ApplicationActions } from '../runtime/applicationActions';
 import { resolveModelProfile, runJsonModelTask } from './modelTasks';
 import { PLANNER_TASK_DESCRIPTION, PLANNER_TASK_NAME, fallbackDirectPlan, planRetrieval, type PlanResolution } from './retrievalPlanning';
 import { runSearchLibrary, type PlanInput, type SearchOptions } from './searchLibrary';
-import { createSearchLibraryBatch } from './searchLibraryBatch';
+import { createSearchLibraryBatch, type UnifiedRetrievalConfig } from './searchLibraryBatch';
 import { frozenScopeFromSnapshot, scopeRequestFromToolInput } from './searchScope';
 import { PLANNING_READ_TOOLS } from '../runtime/executionPolicy';
 import { buildEntryMetaProposal } from './entryMetaProposal';
@@ -200,6 +200,8 @@ type CreateAssistantToolsOptions = {
   initialSourceByMarker?: Map<number, ConversationSourceLink>;
   markerStart?: number;
   loopGuard?: AgentLoopGuard;
+  /** Host-only opt-in for composed retrieval. Absent keeps the batch path. */
+  unifiedRetrieval?: UnifiedRetrievalConfig | null;
   onCreateEntry?: CreateEntryHandler;
   onNoteProposal?: NoteProposalHandler;
   onEntryMetaProposal?: EntryMetaProposalHandler;
@@ -269,6 +271,7 @@ export async function createAssistantTools({
   executionDepth = 0,
   initialSourceByMarker,
   loopGuard,
+  unifiedRetrieval,
   onCreateEntry,
   onNoteProposal,
   onEntryMetaProposal,
@@ -754,7 +757,7 @@ export async function createAssistantTools({
             frozenScope: frozenScopeFromSnapshot(retrievalScope ?? UNRESOLVED_RETRIEVAL_SCOPE),
             libraryEntries: availableEntries.map((entry) => ({ id: entry.id, title: entry.title })),
             plan: planSearch,
-            searchBatch: createSearchLibraryBatch({ root, addSource, abortSignal: searchSignal }),
+            searchBatch: createSearchLibraryBatch({ root, addSource, abortSignal: searchSignal, unifiedRetrieval }),
             abortSignal: searchSignal
           });
           searchSignal?.throwIfAborted();

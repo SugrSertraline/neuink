@@ -1616,3 +1616,13 @@ Hover 即时反馈（2026-09-17）：按用户要求删除 PDF 600ms 冷却、�
 - `search_segments` 工具结果先按全局分数重排，再用 MMR（λ=0.7，词集 Jaccard，CJK 双字）选取 12 条；同一片段的正文、片段笔记、批注合并为一个来源，相似度 ≥0.9 的近重复不再占用名额。纯函数位于 `sdk/evidenceDiversity.ts`。
 - 对话记忆检查点改为 Mem0 式增量操作：已有条目以 d/o/e/p 编号提供给模型，模型返回 ADD/UPDATE/DELETE/NONE，由宿主确定性应用；未提及条目保留，近重复 ADD 改写原条目，超限时先淘汰最旧项。兼容仍返回整份列表的模型；`AssistantConversationMemory` 存储形状不变，旧会话可直接读取。
 - 验证：neuink-search 18 项、neuink-ipc 289 项（28 项既有忽略）、neuink-workspace 145 项（4 项既有忽略）通过；TypeScript 检查与前端全量 2981 项通过。新增 BM25 排序/饱和、片段范围一致性、MMR 与记忆操作测试。未调用真实模型，未用真实资料对比检索质量，原生 Tauri 验收未完成；改动未提交。
+
+## 2026-11-14：双通道视觉旁路（页面/区域 + MinerU 资产同步）
+
+- 文档级路由：新增 `document_head`（head 20 / cap 20，点名论文单独传入不被 cap 丢弃）、`carrier_binding`（唯一编号才收窄，未编号/多编号只报告）、`unified_retrieval`（路由 → 视觉投票 → 文档头 → 载体 → 证据，子问题只进证据层，路由为空不扩散）。
+- 视觉通道固定 Qwen3-VL-Embedding-2B，两种传输：`qwen_local`（默认 `http://127.0.0.1:8765`，`.no_proxy()`）与 `qwen_api`（https + 只写密钥）。随包 fastembed 视觉编码停用，旧设置值经 `Retired` 承接并拒绝运行。
+- **页面与区域来自原生 PDF，图表资产来自 MinerU，同进一个快照**：`VisualSourceKind::{Page,Region,Figure,Table}`，页面与四个 region 共享 `page:{idx}` 父级（一页一票、region 取最大），资产按 `asset:` 独立投票。栅格化在本地服务内完成（`/embed_pages`），产品不存页面位图，Rust 不引入 PDF 库；`qwen_api` 无页面源。
+- 融合参数恢复为设置项：`append_gated`（默认，文本顺序不变、门控打开才追加）与 `weighted`，含权重、RRF k、门控阈值；`RoutingStage.visual_gate_open` 暴露门控结果。
+- 资产持久化：MinerU ZIP 的 `images/**` 落盘 `<entry>/assets/`（zip-slip/符号链接/超限校验、原子发布、blake3 清单幂等），并新增 `backfill_entry_assets` 从已存 `full.zip` 回填旧库。
+- 验证：`neuink-search` 109、`neuink-workspace` 161、`neuink-ipc commands::search` 24、回填 4、`tsc --noEmit` 通过、前端 3110 项通过（3 跳过）。
+- 未完成：本地 Qwen 服务脚本（`/health`、`/embed`、`/embed_pages` + PyMuPDF）、设置页 UI 与下载引导、原生端到端验收。视觉通道在无服务时报 `model_unavailable`，不影响文本检索。
