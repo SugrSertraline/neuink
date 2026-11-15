@@ -5,12 +5,14 @@ import {
   installRecommendedTextModel,
   listRecommendedRerankModels,
   listRecommendedTextModels,
+  listRecommendedVisualModels,
   listTextModels,
   rebuildSearchIndex,
   runRetrievalSelfCheck,
   saveTextModelSettings,
   type RecommendedRerankModelState,
   type RecommendedTextModelState,
+  type RecommendedVisualModel,
   type RetrievalCheck,
   type TextModelChoice,
   type TextModelSettingsState
@@ -40,6 +42,7 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
   const [state, setState] = useState<TextModelSettingsState | null>(null);
   const [recommended, setRecommended] = useState<RecommendedTextModelState[]>([]);
   const [rerankModels, setRerankModels] = useState<RecommendedRerankModelState[]>([]);
+  const [visualModels, setVisualModels] = useState<RecommendedVisualModel[]>([]);
   const [selected, setSelected] = useState<string>('');
   const [custom, setCustom] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -50,16 +53,18 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
   const [checking, setChecking] = useState(false);
 
   const reload = async () => {
-    const [models, current, textRecommended, rerankRecommended] = await Promise.all([
+    const [models, current, textRecommended, rerankRecommended, visualRecommended] = await Promise.all([
       listTextModels(),
       getTextModelSettings(),
       listRecommendedTextModels(),
-      listRecommendedRerankModels()
+      listRecommendedRerankModels(),
+      listRecommendedVisualModels()
     ]);
     setChoices(models);
     setState(current);
     setRecommended(textRecommended);
     setRerankModels(rerankRecommended);
+    setVisualModels(visualRecommended);
     setSelected(current.model_dir ?? models.find((model) => model.bundled)?.path ?? '');
     setCustom(current.model_dir ?? '');
   };
@@ -252,13 +257,34 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
       <div className="mt-3 border-t border-border pt-2">
         <p className="text-xs font-medium text-muted-foreground">视觉编码模型</p>
         <p className="mt-1 text-xs leading-5 text-muted-foreground">
-          视觉通道是一个本机 Python 服务（Qwen3-VL-Embedding-2B，4.26 GB），需要 torch 与 PyMuPDF，因此不随安装包下载；
-          在
-          <a className="mx-1 underline" href={VISUAL_MODEL.href} target="_blank" rel="noreferrer">
-            {VISUAL_MODEL.label} 模型页
-          </a>
-          取得权重后按 apps/desktop/scripts/qwen-visual-service/README.md 启动服务，再回到本页填地址与密钥。
+          视觉通道是一个本机 Python 服务，需要 torch 与 PyMuPDF，因此不随安装包下载：按下面每条给出的路径与命令准备权重并启动服务，再回到本页填地址与密钥。
         </p>
+        <ul className="mt-1 space-y-1">
+          {visualModels.map((model) => (
+            <li
+              key={model.id}
+              className="flex flex-wrap items-baseline gap-x-2 text-xs leading-5 text-muted-foreground"
+              data-testid={`recommended-visual-${model.id}`}
+            >
+              <span className="font-medium text-foreground">{model.display_name}</span>
+              <span>
+                {model.dimensions} 维 · {model.weights_megabytes} MB
+              </span>
+              <a className="underline" href={model.homepage} target="_blank" rel="noreferrer">
+                模型页
+              </a>
+              <span className="basis-full">{model.note}</span>
+              <span className="basis-full">
+                安装路径：<code className="select-all font-mono text-[11px]">{model.install_path}</code>
+              </span>
+              {model.install_commands.length > 0 && (
+                <code className="basis-full select-all whitespace-pre-wrap font-mono text-[11px] leading-4">
+                  {model.install_commands.join("\n")}
+                </code>
+              )}
+            </li>
+          ))}
+        </ul>
       </div>
 
       {rerankModels.length > 0 && (
@@ -329,3 +355,5 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
     </SettingsGroup>
   );
 }
+
+

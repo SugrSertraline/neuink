@@ -28,6 +28,7 @@ pub mod unified;
 pub mod rerank_stage;
 pub mod visual;
 pub mod recommended_rerank_models;
+pub mod recommended_visual_models;
 pub mod recommended_text_models;
 pub mod visual_qwen;
 #[cfg(test)]
@@ -3198,4 +3199,10 @@ pub fn run_retrieval_self_check<R: tauri::Runtime>(
     });
 
     Ok(checks)
+}
+
+
+#[tauri::command]
+pub fn list_recommended_visual_models() -> Vec<crate::commands::search::recommended_visual_models::RecommendedVisualModel> {
+    crate::commands::search::recommended_visual_models::RECOMMENDED_VISUAL.to_vec()
 }

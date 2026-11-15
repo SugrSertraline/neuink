@@ -6,6 +6,7 @@ import {
   getTextModelSettings,
   listRecommendedRerankModels,
   listRecommendedTextModels,
+  listRecommendedVisualModels,
   listTextModels,
   rebuildSearchIndex,
   saveTextModelSettings
@@ -16,6 +17,7 @@ vi.mock('@/shared/ipc/workspaceApi', () => ({
   listTextModels: vi.fn(),
   listRecommendedTextModels: vi.fn(),
   listRecommendedRerankModels: vi.fn(),
+  listRecommendedVisualModels: vi.fn(),
   installRecommendedRerankModel: vi.fn(),
   runRetrievalSelfCheck: vi.fn(),
   installRecommendedTextModel: vi.fn(),
@@ -61,6 +63,21 @@ beforeEach(() => {
   vi.mocked(listRecommendedTextModels).mockResolvedValue([]);
   vi.mocked(listRecommendedRerankModels).mockReset();
   vi.mocked(listRecommendedRerankModels).mockResolvedValue([]);
+  vi.mocked(listRecommendedVisualModels).mockReset();
+  vi.mocked(listRecommendedVisualModels).mockResolvedValue([
+    {
+      id: 'siglip2-base-patch16-224',
+      display_name: 'SigLIP2 base（更小）',
+      repository: 'google/siglip2-base-patch16-224',
+      homepage: 'https://huggingface.co/google/siglip2-base-patch16-224',
+      weights_megabytes: 1501,
+      dimensions: 768,
+      note: '测试用视觉模型',
+      install_path: '%USERPROFILE%\\neuink-visual-models\\siglip2-base-patch16-224',
+      install_commands: ['huggingface-cli download google/siglip2-base-patch16-224'],
+      current_default: false
+    }
+  ]);
   vi.mocked(saveTextModelSettings).mockReset();
   vi.mocked(rebuildSearchIndex).mockReset();
 });
@@ -110,7 +127,8 @@ describe('ModelAccessSettings', () => {
       .getAllByRole('link')
       .map((element) => element.getAttribute('href') ?? '');
     expect(links).toContain('https://huggingface.co/Xenova/bge-m3');
-    expect(links).toContain('https://huggingface.co/Qwen/Qwen3-VL-Embedding-2B');
+    expect(links).toContain('https://huggingface.co/google/siglip2-base-patch16-224');
+    expect(links).toContain('https://huggingface.co/google/siglip2-base-patch16-224');
   });
 
   it('saves a custom directory and warns that the index must be rebuilt', async () => {
@@ -161,6 +179,9 @@ describe('ModelAccessSettings', () => {
     );
   });
 });
+
+
+
 
 
 

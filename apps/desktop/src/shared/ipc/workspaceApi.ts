@@ -1593,3 +1593,21 @@ export type RetrievalCheck = {
 export function runRetrievalSelfCheck(root: string): Promise<RetrievalCheck[]> {
   return invoke('run_retrieval_self_check', { root });
 }
+
+/** One visual encoder the local service can host. */
+export type RecommendedVisualModel = {
+  id: string;
+  display_name: string;
+  repository: string;
+  homepage: string;
+  weights_megabytes: number;
+  dimensions: number;
+  note: string;
+  install_path: string;
+  install_commands: string[];
+  current_default: boolean;
+};
+
+export function listRecommendedVisualModels(): Promise<RecommendedVisualModel[]> {
+  return invoke('list_recommended_visual_models');
+}
