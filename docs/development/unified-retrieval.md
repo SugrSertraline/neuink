@@ -108,3 +108,17 @@ apps/desktop/src-tauri/resources/embedding-models/reranker/
 
 结论：**R@10 由头部宽度与池覆盖决定，重排改变不了**（池覆盖 0.700，头部 20 后上限 0.475）；重排只影响 R@1/nDCG@5，CPU 代价 1.2–4.2 s。所以默认 `off`，字段覆盖留在融合臂里，不重复施加同一信号。
 
+
+## 8. 启用入口（端到端接线）
+
+默认**不启用**：组合检索会改变论文路由与证据顺序，属于用户决定而不是默认行为。
+
+| 层 | 位置 | 作用 |
+|---|---|---|
+| 配置 | `AppSettings.retrieval.unified`（默认 false） | 唯一权威来源 |
+| IPC | `get_retrieval_settings` / `save_retrieval_settings` | 设置页读写 |
+| TS 缓存 | `shared/lib/retrievalMode.ts` | 每轮不重复 IPC；失败**fail-closed** 保持批次路径 |
+| 调用方 | `sdk/qna.ts` → `unifiedRetrieval: unified ? {} : null` | 主助手；子助手与本地 Agent 仍走批次路径 |
+| 设置页 | 检索与工具 → 检索路径 → 使用组合检索 | 单个开关；保存被拒会回滚开关 |
+
+关闭时全链路退回批次检索；开启后视觉投票、文档路由、载体绑定与重排阶梯才进入真实提问。

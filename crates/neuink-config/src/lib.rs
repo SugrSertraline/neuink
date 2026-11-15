@@ -27,6 +27,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub rerank: RerankSettings,
     #[serde(default)]
+    pub retrieval: RetrievalSettings,
+    #[serde(default)]
     pub recent_workspaces: Vec<RecentWorkspace>,
     pub autosave_interval_ms: Option<u64>,
     pub theme: Option<String>,
@@ -649,4 +651,49 @@ mod rerank_settings_tests {
         assert!(settings.validate().is_ok());
     }
 }
+
+/// Which retrieval path the assistant's library tool uses.
+///
+/// The default stays on the batch path: the composed path changes document routing, runs
+/// the visual vote and applies the rerank ladder, so it is opt-in rather than a silent
+/// behaviour change for every existing user.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(default)]
+pub struct RetrievalSettings {
+    /// Use `search_unified` (document routing, carrier binding, visual vote, rerank).
+    pub unified: bool,
+}
+
+impl RetrievalSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod retrieval_settings_tests {
+    use super::RetrievalSettings;
+    use serde_json;
+
+    #[test]
+    fn the_composed_path_is_opt_in() {
+        let settings = RetrievalSettings::default();
+        assert!(!settings.unified);
+        assert!(settings.validate().is_ok());
+    }
+
+    #[test]
+    fn the_flag_round_trips_through_json() {
+        let settings = RetrievalSettings { unified: true };
+        let encoded = serde_json::to_string(&settings).expect("encode");
+        assert_eq!(encoded, r#"{"unified":true}"#);
+        let decoded: RetrievalSettings = serde_json::from_str(&encoded).expect("decode");
+        assert!(decoded.unified);
+        // An older settings file without the field still loads.
+        let legacy: RetrievalSettings = serde_json::from_str("{}").expect("legacy");
+        assert!(!legacy.unified);
+    }
+}
+
+
 

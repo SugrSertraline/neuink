@@ -5,6 +5,7 @@ import { AssistantDebugSetting } from './AssistantDebugSetting';
 import { LocalAgentSettingsSection } from './LocalAgentSettingsSection';
 import { RerankSettingsSection } from './RerankSettingsSection';
 import { VisualSettingsSection } from './VisualSettingsSection';
+import { RetrievalPathSetting } from './RetrievalPathSetting';
 
 import { AgentToolRuntimeSection } from './AgentSettingsSection';
 import { ADVANCED_ASSISTANT_SETTINGS_VISIBLE } from '../settingsCatalog';
@@ -22,6 +23,7 @@ export function ExternalToolsSettingsSection({
         <LocalAgentSettingsSection active={active} workspaceRoot={props.workspaceRoot} />
         <ResearchSettingsSection active={active}><SciverseSettingsSection active={active} /></ResearchSettingsSection>
         <VisualSettingsSection active={active} root={props.workspaceRoot ?? ''} />
+        <RetrievalPathSetting active={active} />
         <RerankSettingsSection active={active} />
         <AssistantDebugSetting />
         {ADVANCED_ASSISTANT_SETTINGS_VISIBLE && <fieldset data-setting-id="tools-mcp" tabIndex={-1} disabled={props.runtimeUnavailable} className="min-w-0"><AgentToolRuntimeSection
@@ -31,6 +33,7 @@ export function ExternalToolsSettingsSection({
     </SettingsPage>
   );
 }
+
 
 
 

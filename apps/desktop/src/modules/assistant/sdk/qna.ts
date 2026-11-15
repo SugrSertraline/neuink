@@ -44,6 +44,7 @@ import { answerVerification } from './answerVerification';
 import { createAgentDriver, agentExecutors } from './agentDriver';
 import { SourceLedger } from '../runtime/sourceLedger';
 import { assistantContextCharBudget } from './contextBudget';
+import { readUnifiedRetrieval } from '@/shared/lib/retrievalMode';
 import { createAssistantTools, modelToolName, type ToolRuntimeState } from './tools';
 import { Agent, RunBudget, AgentLoopGuard, AgentLoopGuardError, createAgentLoopState } from '../agent-core';
 import { executionModeInstructions } from '../runtime/executionPolicy';
@@ -185,6 +186,9 @@ export async function answerWithGroundedAgent({
     currentEntry,
     currentNote,
     executionDepth: 0,
+    // Opt-in: the composed path changes document routing, runs the visual vote and the
+    // rerank ladder, so it stays a user decision rather than a silent default.
+    unifiedRetrieval: (await readUnifiedRetrieval()) ? {} : null,
     initialSourceByMarker: new Map([
       ...pinned.sourceByMarker,
       ...selectedNotes.sourceByMarker
@@ -660,3 +664,4 @@ function compactQuote(text: string) {
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
+

@@ -2783,3 +2783,34 @@ pub fn save_rerank_settings<R: tauri::Runtime>(
     Ok(RerankSettingsState::from_settings(&saved.rerank, model_present))
 }
 
+
+/// Whether the assistant uses the composed retrieval path. Read by the app shell, not by
+/// the search commands: the commands always support both paths.
+#[derive(Debug, serde::Serialize)]
+pub struct RetrievalSettingsState {
+    pub unified: bool,
+}
+
+#[tauri::command]
+pub fn get_retrieval_settings<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<RetrievalSettingsState, String> {
+    let settings = crate::storage::read_settings(&app)?.retrieval;
+    Ok(RetrievalSettingsState {
+        unified: settings.unified,
+    })
+}
+
+#[tauri::command]
+pub fn save_retrieval_settings<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    settings: neuink_config::RetrievalSettings,
+) -> Result<RetrievalSettingsState, String> {
+    settings.validate()?;
+    let mut saved = crate::storage::read_settings(&app)?;
+    saved.retrieval = settings;
+    crate::storage::write_settings(&app, &saved)?;
+    Ok(RetrievalSettingsState {
+        unified: saved.retrieval.unified,
+    })
+}

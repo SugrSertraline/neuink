@@ -641,8 +641,6 @@ mod tests {
         assert_eq!(channel.status_code(), "index_missing");
         assert!(!channel.status().is_ready());
     }
-}
-
 
 
 
@@ -688,3 +686,4 @@ mod tests {
         assert_eq!(after.assets.len(), 2);
         std::fs::remove_dir_all(&root).ok();
     }
+}

@@ -1369,6 +1369,20 @@ export function saveRerankSettings(settings: RerankSettings): Promise<RerankSett
   return invoke('save_rerank_settings', { settings });
 }
 
+/** Which retrieval path the assistant's library tool uses. */
+export type RetrievalSettingsState = {
+  /** Composed path: document routing, carrier binding, visual vote and rerank. */
+  unified: boolean;
+};
+
+export function getRetrievalSettings(): Promise<RetrievalSettingsState> {
+  return invoke('get_retrieval_settings');
+}
+
+export function saveRetrievalSettings(settings: RetrievalSettingsState): Promise<RetrievalSettingsState> {
+  return invoke('save_retrieval_settings', { settings });
+}
+
 /** Encodes every page, region and MinerU asset once and writes the visual snapshot. */
 export function prepareVisualSearchIndex(
   root: string
