@@ -3147,10 +3147,22 @@ pub fn run_retrieval_self_check<R: tauri::Runtime>(
     let started = std::time::Instant::now();
     let visual = (|| -> Result<String, String> {
         let settings = crate::storage::read_settings(&app)?.visual;
+        let endpoint = settings
+            .endpoint
+            .clone()
+            .unwrap_or_else(|| "http://127.0.0.1:8765".to_string());
         let provider = visual::provider_for(&settings);
         let check = neuink_search::check_provider(provider.as_ref());
-        if let Some(reason) = check.unavailable_reason {
-            return Err(format!("视觉编码不可用：{reason}"));
+        if check.unavailable_reason.is_some() {
+            // Distinguish "no service listening" from "service answered but not usable":
+            // both used to read as model_unavailable, which sent people looking for files.
+            let message = provider.status().message.unwrap_or_default();
+            let code = if message.contains("不可达") {
+                "service_unreachable"
+            } else {
+                "model_not_ready"
+            };
+            return Err(format!("{code}：{endpoint} — {message}"));
         }
         Ok(format!(
             "视觉编码服务就绪：{} · {} 维",
@@ -3272,3 +3284,5 @@ fn visual_service_script<R: tauri::Runtime>(
         .find(|candidate| candidate.is_file())
         .ok_or_else(|| "找不到视觉服务脚本（scripts/qwen-visual-service/service.py）".to_string())
 }
+
+
