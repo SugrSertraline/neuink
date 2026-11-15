@@ -182,10 +182,22 @@ pub(super) fn prepare_visual_index(
         .ok_or_else(|| "视觉编码模型未声明输出维度。".to_string())?;
     let include_pages = provider.page_source().is_some();
     let (documents, assets, page_requests) = collect_assets(&request.root, include_pages)?;
-    if documents.is_empty() {
-        return Err("资料库中没有可编码的图片资源。".to_string());
-    }
     let namespace = visual_namespace(&identity, dimensions);
+    // Nothing to encode is a state, not a failure: a fresh library legitimately has no
+    // assets yet, and the settings screen must be able to say so without an error banner.
+    if documents.is_empty() {
+        return Ok(PrepareVisualSearchIndexResponse {
+            provider: provider.status().provider,
+            model_name: provider.status().model_name,
+            dimensions: Some(dimensions),
+            identity,
+            namespace,
+            entry_count: 0,
+            asset_count: 0,
+            document_count: 0,
+            embedded_count: 0,
+        });
+    }
     let path = visual_index_path(&workspace.layout().cache_dir(), &namespace);
     let entry_count = documents
         .iter()
