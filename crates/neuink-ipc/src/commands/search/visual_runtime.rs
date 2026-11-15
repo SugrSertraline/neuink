@@ -161,9 +161,8 @@ pub fn install(
     Ok(state)
 }
 
-/// Starts the service with the prepared environment, returning the child process id.
-pub fn start(resource_dir: &Path, service_script: &Path, model_id: &str) -> Result<u32, String> {
-    let state = load_state(resource_dir, model_id).ok_or_else(|| REASON_MODEL_MISSING.to_string())?;
+/// Starts the service with an already-loaded state, returning the child process id.
+pub fn start_with_state(state: &VisualRuntimeState, service_script: &Path) -> Result<u32, String> {
     if !state.dependencies_installed || !state.model_present {
         return Err(REASON_MODEL_MISSING.to_string());
     }
@@ -200,4 +199,5 @@ mod tests {
         std::fs::remove_dir_all(&root).ok();
     }
 }
+
 

@@ -3262,7 +3262,9 @@ pub fn start_visual_service<R: tauri::Runtime>(
 ) -> Result<u32, String> {
     let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
     let script = visual_service_script(&app)?;
-    crate::commands::search::visual_runtime::start(&resource_dir, &script, &id)
+    let state = visual_runtime::load_state(&resource_dir, &id)
+        .ok_or_else(|| "视觉服务尚未安装".to_string())?;
+    visual_runtime::start_with_state(&state, &script)
 }
 
 /// Locates the service script in the packaged resources, then in the checkout layout.
@@ -3316,30 +3318,22 @@ fn ensure_visual_service<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result
         return Err("service_unreachable：启动策略为手动，请先启动视觉服务".to_string());
     }
 
-    let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
-    let runtime_root = resource_dir.join("visual-service");
-    let mut ready: Option<std::path::PathBuf> = None;
-    if let Ok(entries) = std::fs::read_dir(&runtime_root) {
-        for entry in entries.flatten() {
-            let id = entry.file_name().to_string_lossy().to_string();
-            if let Some(state) = visual_runtime::load_state(&resource_dir, &id) {
-                if state.dependencies_installed && state.model_present {
-                    ready = Some(std::path::PathBuf::from(id));
-                    break;
-                }
-            }
-        }
-    }
-    let Some(id) = ready else {
+    let Some((id, state)) = ready_visual_runtime(app) else {
         return Err(
             "service_unreachable：尚未安装视觉服务依赖与模型，请先在“视觉编码模型”里一键安装"
                 .to_string(),
         );
     };
+    let _id = id.to_string();
+    // The runtime state carries absolute paths, so the directory passed to `start` only has
+    // to satisfy its path resolution, not hold the weights.
+    let resource_dir = std::path::PathBuf::from(&state.env_dir);
+    let _resource_dir = resource_dir.parent().unwrap_or(&resource_dir).to_path_buf();
     let script = visual_service_script(app)?;
-    let pid = visual_runtime::start(&resource_dir, &script, &id.to_string_lossy())?;
+    let pid = visual_runtime::start_with_state(&state, &script)?;
     // Give the interpreter a moment to bind the port before the caller probes it.
-    for _ in 0..20 {
+    // A 4 GB checkpoint needs tens of seconds to load, so wait long enough to be useful.
+    for _ in 0..90 {
         std::thread::sleep(std::time::Duration::from_millis(500));
         let provider = visual::provider_for(&settings);
         if neuink_search::check_provider(provider.as_ref())
@@ -3356,4 +3350,55 @@ fn ensure_visual_service<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result
 
 
 
+
+
+/// Directories that may hold the prepared visual runtime.
+///
+/// `app.path().resource_dir()` is not the same directory in every layout: a dev build can
+/// report the target directory itself while the copied resources live under `resources/`.
+/// Every lookup therefore probes the same candidate list instead of trusting one path.
+fn visual_runtime_roots<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Vec<std::path::PathBuf> {
+    const DIR: &str = "visual-service";
+    let mut roots = Vec::new();
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        roots.push(resource_dir.join(DIR));
+        roots.push(resource_dir.join("resources").join(DIR));
+    }
+    if let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|parent| parent.to_path_buf()))
+    {
+        roots.push(exe_dir.join(DIR));
+        roots.push(exe_dir.join("resources").join(DIR));
+    }
+    roots.push(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../apps/desktop/src-tauri/resources")
+            .join(DIR),
+    );
+    roots
+}
+
+/// First root that actually contains a prepared model.
+fn ready_visual_runtime<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<(String, visual_runtime::VisualRuntimeState)> {
+    for root in visual_runtime_roots(app) {
+        let Ok(entries) = std::fs::read_dir(&root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let id = entry.file_name().to_string_lossy().to_string();
+            let state_path = entry.path().join("state.json");
+            let Ok(bytes) = std::fs::read(&state_path) else {
+                continue;
+            };
+            let Ok(state) = serde_json::from_slice::<visual_runtime::VisualRuntimeState>(&bytes) else {
+                continue;
+            };
+            if state.dependencies_installed && state.model_present {
+                return Some((id, state));
+            }
+        }
+    }
+    None
+}
 

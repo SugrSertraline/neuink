@@ -53,9 +53,7 @@
       "resources/onboarding-availability.json",
       "resources/pdfium.dll",
       "resources/pdfium-licenses/**/*",
-      "resources/scripts/**/*",
-      "resources/visual-service/**/*",
-      "resources/embedding-models/**/*"
+      "resources/scripts/**/*"
     ],
     "icon": [
       "icons/32x32.png",
