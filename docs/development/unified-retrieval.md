@@ -157,3 +157,17 @@ cargo run -p neuink-ipc --bin retrieval-probe -- `
 
 真实实测（`Qwen3-VL-Embedding-2B`，2048 维，身份 `3b3f75…`，真实论文 128 源）：
 `visual_prepare` 186,710 ms（≈1.46 s/源，CPU）、`document_count=128`、`embedded_count=128`、`visual_status=ready`、`visual_entries=1`、检索 3.3 s。
+
+### 硬件与耗时（实测）
+
+本机：i5-13400F（10C/16T）、32 GB、纯 CPU。
+
+| 场景 | 128 源首次全量 |
+|---|---|
+| 默认线程（torch 自取） | 186,710 ms |
+| `NEUINK_TORCH_THREADS=8` | **98,237 ms**（≈0.77 s/源） |
+| 增量（源未变） | 只编码页面（资产向量复用），约 78 s |
+
+新增 `NEUINK_TORCH_THREADS`：轻薄本按物理核数设置，避免 torch 占用全部逻辑核造成超额订阅。
+
+按 4000 元档轻薄本（R7-8845H 8C/16T / Ultra 5 125H）推算：单篇首次全量约 2–2.5 分钟；把每页 4 个裁切降到 2 个约 1–1.2 分钟。核显无法加速：Windows 上 PyTorch 对 AMD 核显无 ROCm 支持，Intel 核显需 IPEX（未接入）。

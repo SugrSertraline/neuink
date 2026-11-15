@@ -36,6 +36,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 DEFAULT_DIM = int(os.environ.get("NEUINK_EMBED_DIM", "2048"))
+# Thread budget for CPU inference. A thin laptop with 8 physical cores should set this to
+# its core count; leaving it at the default lets torch take every logical CPU.
+TORCH_THREADS = int(os.environ.get("NEUINK_TORCH_THREADS", "0"))
 PDF_DPI = int(os.environ.get("NEUINK_PDF_DPI", "110"))
 REGION_COUNT = 4
 
@@ -97,6 +100,10 @@ class QwenEncoder:
         sys.path.insert(0, str(model_dir / "scripts"))
         from qwen3_vl_embedding import Qwen3VLEmbedder  # type: ignore
 
+        import torch
+
+        if TORCH_THREADS > 0:
+            torch.set_num_threads(TORCH_THREADS)
         self._fitz = fitz
         self._embedder = Qwen3VLEmbedder(str(model_dir), min_pixels=256, max_pixels=65536)
         self.dimensions = DEFAULT_DIM
@@ -261,3 +268,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
