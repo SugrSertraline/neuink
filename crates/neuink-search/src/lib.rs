@@ -9,6 +9,8 @@ mod fastembed_provider;
 mod memory_index;
 mod persistent_semantic_index;
 mod query;
+#[cfg(feature = "local-embedding")]
+mod path_embedding;
 mod query_plan;
 mod rerank_hits;
 mod reranking;
@@ -103,3 +105,4 @@ pub use visual_sidecar::{
     aggregate_parents, fuse_entry_orders, parent_entry_order, ParentScore, VisualChannelStatus,
     VisualRecall, VisualScore,
 };
+

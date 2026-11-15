@@ -2946,7 +2946,7 @@ pub fn install_recommended_text_model<R: tauri::Runtime>(
     let downloads: Vec<(String, String)> = model
         .files
         .iter()
-        .map(|path| ((*path).to_string(), (*path).to_string()))
+        .map(|(remote, local)| ((*remote).to_string(), (*local).to_string()))
         .collect();
     for (remote, relative) in downloads {
         let target = dir.join(&relative);
@@ -2967,6 +2967,7 @@ pub fn install_recommended_text_model<R: tauri::Runtime>(
     }
     recommended::write_model_metadata(&dir, &model)?;
 
+    // Prove the model actually runs: files on disk are not the same as a usable encoder.
     let provider = neuink_search::FastEmbedProvider::from_model_dir(dir.clone());
     let status = provider.status();
     if !status.available {
@@ -2975,11 +2976,23 @@ pub fn install_recommended_text_model<R: tauri::Runtime>(
             status.message.unwrap_or_else(|| "未知原因".to_string())
         ));
     }
+    let probe = neuink_search::EmbeddingProvider::embed(
+        &provider,
+        &[neuink_search::EmbeddingInput {
+            id: "probe".to_string(),
+            text: "probe".to_string(),
+        }],
+    )
+    .map_err(|error| format!("模型已下载但推理失败：{error}"))?;
+    if probe.len() != 1 {
+        return Err("模型已下载但推理结果数量不符".to_string());
+    }
     Ok(crate::commands::search::recommended_text_models::RecommendedState {
         model,
         installed_dir: Some(dir.to_string_lossy().to_string()),
         installed: true,
     })
 }
+
 
 

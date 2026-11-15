@@ -8,6 +8,8 @@ license.workspace = true
 [dependencies]
 blake3.workspace = true
 fastembed = { workspace = true, optional = true }
+ort = { version = "=2.0.0-rc.12", default-features = false, features = ["std", "api-24"], optional = true }
+tokenizers = { version = "0.22.2", default-features = false, features = ["onig"], optional = true }
 neuink-domain = { path = "../neuink-domain" }
 rayon.workspace = true
 serde.workspace = true
@@ -16,4 +18,6 @@ thiserror.workspace = true
 
 [features]
 default = []
-local-embedding = ["dep:fastembed"]
+local-embedding = ["dep:fastembed", "dep:ort", "dep:tokenizers"]
+
+

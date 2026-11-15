@@ -29,7 +29,7 @@ pub struct FastEmbedProvider {
     intra_threads: Option<usize>,
     cache_identity: OnceLock<Option<String>>,
     #[cfg(feature = "local-embedding")]
-    model: OnceLock<SearchResult<Mutex<TextEmbedding>>>,
+    backend: OnceLock<SearchResult<Backend>>,
 }
 
 impl FastEmbedProvider {
@@ -54,7 +54,7 @@ impl FastEmbedProvider {
             intra_threads,
             cache_identity: OnceLock::new(),
             #[cfg(feature = "local-embedding")]
-            model: OnceLock::new(),
+            backend: OnceLock::new(),
         }
     }
 
@@ -98,23 +98,28 @@ impl EmbeddingProvider for FastEmbedProvider {
             ));
         }
 
-        let model = match self
-            .model
-            .get_or_init(|| load_text_embedding(&self.model_dir, self.intra_threads))
+        let backend = match self
+            .backend
+            .get_or_init(|| load_backend(&self.model_dir, self.intra_threads))
         {
-            Ok(model) => model,
+            Ok(backend) => backend,
             Err(error) => return Err(clone_search_error(error)),
         };
-        let mut model = model.lock().map_err(|_| SearchError::LockPoisoned)?;
         let mut vectors = Vec::with_capacity(inputs.len());
         for batch in inputs.chunks(LOCAL_EMBEDDING_BATCH_SIZE) {
-            let texts = batch
-                .iter()
-                .map(|input| input.text.as_str())
-                .collect::<Vec<_>>();
-            let batch_vectors = model
-                .embed(texts, Some(LOCAL_EMBEDDING_BATCH_SIZE))
-                .map_err(|error| SearchError::EmbeddingUnavailable(error.to_string()))?;
+            let texts = batch.iter().map(|input| input.text.clone()).collect::<Vec<_>>();
+            let batch_vectors = match backend {
+                Backend::SingleFile(model) => {
+                    let mut model = model.lock().map_err(|_| SearchError::LockPoisoned)?;
+                    let borrowed = texts.iter().map(String::as_str).collect::<Vec<_>>();
+                    model
+                        .embed(borrowed, Some(LOCAL_EMBEDDING_BATCH_SIZE))
+                        .map_err(|error| SearchError::EmbeddingUnavailable(error.to_string()))?
+                }
+                Backend::ExternalData(engine) => engine
+                    .embed(&texts)
+                    .map_err(SearchError::EmbeddingUnavailable)?,
+            };
             vectors.extend(batch_vectors.into_iter().map(EmbeddingVector::new));
             on_progress(vectors.len(), inputs.len());
         }
@@ -187,6 +192,62 @@ fn model_content_identity(model_dir: &Path) -> std::io::Result<String> {
         }
     }
     Ok(hasher.finalize().to_hex().to_string())
+}
+
+/// Which ONNX backend a model directory needs.
+///
+/// `SingleFile` covers exports where graph and weights live in one `.onnx` (fastembed path).
+/// `ExternalData` covers the official bge-m3 shape: a small graph plus a `*_data` sidecar that
+/// only ONNX Runtime's path-based loader resolves.
+#[cfg(feature = "local-embedding")]
+pub enum Backend {
+    SingleFile(Mutex<TextEmbedding>),
+    ExternalData(crate::path_embedding::PathEmbeddingEngine),
+}
+
+/// True when the chosen graph references weights kept beside it.
+#[cfg(feature = "local-embedding")]
+fn has_external_data(model_file: &Path) -> bool {
+    let Some(name) = model_file.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    model_file
+        .with_file_name(format!("{name}_data"))
+        .is_file()
+}
+
+#[cfg(feature = "local-embedding")]
+fn load_backend(model_dir: &Path, intra_threads: Option<usize>) -> SearchResult<Backend> {
+    let model_file = first_existing_file(model_dir, MODEL_FILE_NAMES).ok_or_else(|| {
+        SearchError::EmbeddingUnavailable(
+            "Embedding ONNX model is missing; expected onnx/model.onnx, onnx/model_int8.onnx or model.onnx.".to_string(),
+        )
+    })?;
+    if has_external_data(&model_file) {
+        let manifest = read_manifest(&model_dir.join(MANIFEST_FILE_NAME));
+        let pooling = crate::path_embedding::PoolKind::from_manifest(
+            manifest.as_ref().and_then(|manifest| manifest.pooling.as_deref()),
+        );
+        let dimensions = manifest
+            .as_ref()
+            .and_then(|manifest| manifest.dimensions)
+            .ok_or_else(|| {
+                SearchError::EmbeddingUnavailable(
+                    "Embedding manifest must declare dimensions for an external-data model."
+                        .to_string(),
+                )
+            })?;
+        let engine = crate::path_embedding::PathEmbeddingEngine::load(
+            model_dir,
+            &model_file,
+            pooling,
+            dimensions,
+            intra_threads,
+        )
+        .map_err(SearchError::EmbeddingUnavailable)?;
+        return Ok(Backend::ExternalData(engine));
+    }
+    load_text_embedding(model_dir, intra_threads).map(Backend::SingleFile)
 }
 
 #[cfg(feature = "local-embedding")]
@@ -519,5 +580,6 @@ mod tests {
         format!("{prefix}-{nanos}")
     }
 }
+
 
 

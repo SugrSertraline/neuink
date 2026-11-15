@@ -208,3 +208,16 @@ cargo run -p neuink-ipc --bin retrieval-probe -- `
 禁用项说明：Xenova 的 `sentence_transformers_*` 变体把池化**烘焙进图**，再用我们的池化会得到无意义向量，因此明确排除。
 
 实现：`recommended_text_models.rs`（清单 + 安装 + 元数据合成）、IPC `list_recommended_text_models` / `install_recommended_text_model`、设置页新增「推荐模型」列表（已安装 / 下载安装 / 需自行导出）。
+
+### 外部权重（external data）模型：一次下载两个文件也能直接用
+
+官方 `BAAI/bge-m3` 导出的 ONNX 是「图 725 KB + `model.onnx_data` 2.27 GB」两件套。ONNX Runtime 只有在**按路径**创建 session 时才会解析该 sidecar，而 fastembed 只接受单块字节流。
+
+新增 `path_embedding.rs`（受 `local-embedding` 特性约束）：用 `ort::Session::builder().commit_from_file(path)` 打开图，自行完成分词、Mean/CLS 池化与 L2 归一化；`fastembed_provider` 在检测到 `*_data` 旁车文件时自动改用该后端，否则仍走 fastembed 单文件路径。
+
+配套：
+- 推荐条目 `bge-m3-fp32-original` 由「需内联」改为**可直接安装**；
+- 安装清单改为 `(远端路径, 本地路径)` 成对声明：官方导出的 tokenizer 在 `onnx/` 下，而加载器要求它们位于模型根目录，安装时自动平铺；
+- 安装完成后不仅校验文件存在，还会**跑一次真实推理**（`probe`），失败即报错，不留“看起来装好了”的目录。
+
+代价：该模型约 2.3 GB，安装与首次加载都比 int8 慢；`neuink-search --features local-embedding` 143 项、`commands::search` 45 项通过。

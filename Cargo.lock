@@ -3316,10 +3316,12 @@ dependencies = [
  "blake3",
  "fastembed",
  "neuink-domain",
+ "ort",
  "rayon",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tokenizers",
 ]
 
 [[package]]

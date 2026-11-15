@@ -50,8 +50,11 @@ pub struct RecommendedTextModel {
     pub onnx_megabytes: u32,
     pub languages: &'static str,
     pub license: &'static str,
-    /// Every file the installer downloads, verified reachable on Hugging Face.
-    pub files: &'static [&'static str],
+    /// Every file the installer downloads, as `(remote path, local path)`.
+    ///
+    /// The two differ for the official export, whose tokenizer files live under `onnx/` while
+    /// the loader expects them at the model root.
+    pub files: &'static [(&'static str, &'static str)],
     /// Why this entry is or is not directly installable.
     pub note: &'static str,
     /// `true` when the files can be fetched and used as-is.
@@ -72,12 +75,12 @@ pub const RECOMMENDED: [RecommendedTextModel; 4] = [
         note: "与默认同源的官方社区 int8 导出；ONNX 单文件（无外部 weight 文件），权重与全部 tokenizer 文件均可直接从 HF 下载。",
         directly_installable: true,
         files: &[
-            "onnx/model_int8.onnx",
-            "tokenizer.json",
-            "config.json",
-            "tokenizer_config.json",
-            "special_tokens_map.json",
-            "sentencepiece.bpe.model",
+            ("onnx/model_int8.onnx", "onnx/model_int8.onnx"),
+            ("tokenizer.json", "tokenizer.json"),
+            ("config.json", "config.json"),
+            ("tokenizer_config.json", "tokenizer_config.json"),
+            ("special_tokens_map.json", "special_tokens_map.json"),
+            ("sentencepiece.bpe.model", "sentencepiece.bpe.model"),
         ],
     },
     RecommendedTextModel {
@@ -93,12 +96,12 @@ pub const RECOMMENDED: [RecommendedTextModel; 4] = [
         note: "轻量档：118 MB、384 维，Mean 池化，需 query:/passage: 前缀；ONNX 单文件与 tokenizer 文件均可直接下载。",
         directly_installable: true,
         files: &[
-            "onnx/model_quantized.onnx",
-            "tokenizer.json",
-            "config.json",
-            "tokenizer_config.json",
-            "special_tokens_map.json",
-            "sentencepiece.bpe.model",
+            ("onnx/model_quantized.onnx", "onnx/model_quantized.onnx"),
+            ("tokenizer.json", "tokenizer.json"),
+            ("config.json", "config.json"),
+            ("tokenizer_config.json", "tokenizer_config.json"),
+            ("special_tokens_map.json", "special_tokens_map.json"),
+            ("sentencepiece.bpe.model", "sentencepiece.bpe.model"),
         ],
     },
     RecommendedTextModel {
@@ -111,9 +114,17 @@ pub const RECOMMENDED: [RecommendedTextModel; 4] = [
         onnx_megabytes: 2162,
         languages: "中英 + 100 语种",
         license: "MIT",
-        note: "可下载（图 725 KB + model.onnx_data 2.27 GB），但外部权重文件无法经内存加载器解析；需先内联成单文件。",
-        directly_installable: false,
-        files: &["onnx/model.onnx", "onnx/model.onnx_data"],
+        note: "BAAI 官方 ONNX：图 725 KB + model.onnx_data 2.27 GB，两个文件一次下载，由路径加载器解析外部权重。",
+        directly_installable: true,
+        files: &[
+            ("onnx/model.onnx", "onnx/model.onnx"),
+            ("onnx/model.onnx_data", "onnx/model.onnx_data"),
+            ("onnx/tokenizer.json", "tokenizer.json"),
+            ("onnx/config.json", "config.json"),
+            ("onnx/tokenizer_config.json", "tokenizer_config.json"),
+            ("onnx/special_tokens_map.json", "special_tokens_map.json"),
+            ("onnx/sentencepiece.bpe.model", "sentencepiece.bpe.model"),
+        ],
     },
     RecommendedTextModel {
         id: "bge-large-zh-v1.5",
@@ -145,12 +156,11 @@ pub fn list_states(root: &Path) -> Vec<RecommendedState> {
         .iter()
         .map(|model| {
             let dir = root.join(model.id);
+            // "Installed" means every declared file is present: for external-data models the
+            // weights sidecar is as required as the graph.
             let installed = model.directly_installable
-                && !model.onnx_path.is_empty()
-                && dir.join(model.onnx_path).is_file()
-                && REQUIRED_TOKENIZER_FILES
-                    .iter()
-                    .all(|name| dir.join(name).is_file());
+                && !model.files.is_empty()
+                && model.files.iter().all(|(_, local)| dir.join(local).is_file());
             RecommendedState {
                 model: *model,
                 installed_dir: installed.then(|| dir.to_string_lossy().to_string()),
@@ -210,13 +220,11 @@ mod tests {
     #[test]
     fn every_installable_entry_declares_its_onnx_and_tokenizer_files() {
         for model in RECOMMENDED.iter().filter(|model| model.directly_installable) {
-            assert!(model.files.contains(&model.onnx_path), "{} must download its onnx", model.id);
+            let remotes = model.files.iter().map(|(remote, _)| *remote).collect::<Vec<_>>();
+            let locals = model.files.iter().map(|(_, local)| *local).collect::<Vec<_>>();
+            assert!(remotes.contains(&model.onnx_path), "{} must download its onnx", model.id);
             for required in REQUIRED_TOKENIZER_FILES {
-                assert!(
-                    model.files.contains(&required) || required == "special_tokens_map.json",
-                    "{} must declare {required}",
-                    model.id
-                );
+                assert!(locals.contains(&required), "{} must place {required} at the root", model.id);
             }
         }
     }
@@ -243,10 +251,12 @@ mod tests {
         write_model_metadata(&dir, &model).expect("metadata");
         assert!(!list_states(&root).iter().any(|state| state.installed));
 
-        std::fs::create_dir_all(dir.join("onnx")).expect("onnx dir");
-        std::fs::write(dir.join(model.onnx_path), b"stub").expect("onnx");
-        for name in ["tokenizer.json", "config.json", "tokenizer_config.json"] {
-            std::fs::write(dir.join(name), b"{}").expect("tokenizer file");
+        for (_, local) in model.files {
+            let target = dir.join(local);
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent).expect("parent");
+            }
+            std::fs::write(target, b"stub").expect("declared file");
         }
         let installed = list_states(&root)
             .into_iter()
@@ -256,6 +266,11 @@ mod tests {
         std::fs::remove_dir_all(&root).ok();
     }
 }
+
+
+
+
+
 
 
 
