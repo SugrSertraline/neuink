@@ -2760,7 +2760,7 @@ pub fn get_rerank_settings<R: tauri::Runtime>(
         .as_deref()
         .map(PathBuf::from)
         .unwrap_or(rerank_model_dir(&app)?);
-    let model_present = rerank_stage::reranker_for(&resolved).is_some();
+    let model_present = rerank_stage::reranker_model_present(&resolved);
     Ok(RerankSettingsState::from_settings(&settings, model_present))
 }
 
@@ -2779,6 +2779,7 @@ pub fn save_rerank_settings<R: tauri::Runtime>(
         .as_deref()
         .map(PathBuf::from)
         .unwrap_or(rerank_model_dir(&app)?);
-    let model_present = rerank_stage::reranker_for(&resolved).is_some();
+    let model_present = rerank_stage::reranker_model_present(&resolved);
     Ok(RerankSettingsState::from_settings(&saved.rerank, model_present))
 }
+

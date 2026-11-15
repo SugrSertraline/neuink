@@ -96,6 +96,18 @@ fn fall_back(
 /// Single-slot cache: one reranker model at a time, keyed by directory and modification
 /// time so a replaced model is reloaded. A failed load is cached too, because retrying a
 /// missing or broken 279 MB model on every query would be worse than the failure.
+/// Whether a model file exists at the directory, without loading it.
+///
+/// A settings screen asks "is the model installed", not "does inference work". Loading a
+/// 279 MB ONNX graph takes seconds and is a live read that changes nothing about the
+/// answer, so presence is answered by the file layout that `LocalReranker` looks for.
+pub(super) fn reranker_model_present(model_dir: &Path) -> bool {
+    const CANDIDATES: [&str; 3] = ["onnx/model_int8.onnx", "onnx/model.onnx", "model.onnx"];
+    CANDIDATES
+        .iter()
+        .any(|relative| model_dir.join(relative).is_file())
+}
+
 pub(super) fn reranker_for(model_dir: &Path) -> Option<Arc<neuink_search::LocalReranker>> {
     #[cfg(not(feature = "local-embedding"))]
     {
@@ -260,6 +272,18 @@ mod tests {
         let single = vec![hit("a", "only")];
         let (_, outcome) = apply_rerank(single, "q", &settings(RerankMode::Heuristic, true), None);
         assert_eq!(outcome.used, RERANK_OFF);
+    }
+
+    #[test]
+    fn model_presence_is_answered_by_the_file_layout_not_by_loading() {
+        let missing = PathBuf::from("definitely-not-a-model-directory");
+        assert!(!reranker_model_present(&missing));
+
+        let dir = std::env::temp_dir().join(format!("neuink-rerank-presence-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("onnx")).expect("create dir");
+        std::fs::write(dir.join("onnx/model_int8.onnx"), b"stub").expect("write stub");
+        assert!(reranker_model_present(&dir));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
