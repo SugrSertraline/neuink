@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { ModelAccessSettings } from './ModelAccessSettings';
 import {
   getTextModelSettings,
+  listRecommendedRerankModels,
   listRecommendedTextModels,
   listTextModels,
   rebuildSearchIndex,
@@ -14,6 +15,9 @@ vi.mock('@/shared/ipc/workspaceApi', () => ({
   getTextModelSettings: vi.fn(),
   listTextModels: vi.fn(),
   listRecommendedTextModels: vi.fn(),
+  listRecommendedRerankModels: vi.fn(),
+  installRecommendedRerankModel: vi.fn(),
+  runRetrievalSelfCheck: vi.fn(),
   installRecommendedTextModel: vi.fn(),
   saveTextModelSettings: vi.fn(),
   rebuildSearchIndex: vi.fn()
@@ -55,6 +59,8 @@ beforeEach(() => {
   vi.mocked(listTextModels).mockReset();
   vi.mocked(listRecommendedTextModels).mockReset();
   vi.mocked(listRecommendedTextModels).mockResolvedValue([]);
+  vi.mocked(listRecommendedRerankModels).mockReset();
+  vi.mocked(listRecommendedRerankModels).mockResolvedValue([]);
   vi.mocked(saveTextModelSettings).mockReset();
   vi.mocked(rebuildSearchIndex).mockReset();
 });
@@ -76,13 +82,34 @@ describe('ModelAccessSettings', () => {
 
   it('offers the model pages so a missing model can be obtained', async () => {
     vi.mocked(listTextModels).mockResolvedValue(choices);
+    vi.mocked(listRecommendedTextModels).mockResolvedValue([
+      {
+        model: {
+          id: 'bge-m3-int8-xenova',
+          display_name: 'bge-m3 int8（Xenova 单文件）',
+          repository: 'Xenova/bge-m3',
+          dimensions: 1024,
+          pooling: 'cls',
+          onnx_path: 'onnx/model_int8.onnx',
+          onnx_megabytes: 569,
+          languages: '中英 + 100 语种',
+          license: 'MIT',
+          note: '测试用条目',
+          directly_installable: true,
+          homepage: 'https://huggingface.co/Xenova/bge-m3',
+          export_hint: ''
+        },
+        installed_dir: null,
+        installed: false
+      }
+    ]);
     vi.mocked(getTextModelSettings).mockResolvedValue(current);
     render(<ModelAccessSettings active root="/lib" />);
-    await waitFor(() => expect(screen.getByText('BAAI/bge-m3')).toBeDefined());
+    await waitFor(() => expect(screen.getByTestId('text-model-status')).toBeDefined());
     const links = screen
       .getAllByRole('link')
       .map((element) => element.getAttribute('href') ?? '');
-    expect(links).toContain('https://huggingface.co/BAAI/bge-m3');
+    expect(links).toContain('https://huggingface.co/Xenova/bge-m3');
     expect(links).toContain('https://huggingface.co/Qwen/Qwen3-VL-Embedding-2B');
   });
 
@@ -134,5 +161,10 @@ describe('ModelAccessSettings', () => {
     );
   });
 });
+
+
+
+
+
 
 

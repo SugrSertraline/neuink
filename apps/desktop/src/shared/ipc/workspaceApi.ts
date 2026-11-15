@@ -1557,3 +1557,39 @@ export function installRecommendedTextModel(id: string): Promise<RecommendedText
   return invoke('install_recommended_text_model', { id });
 }
 
+
+/** One curated reranker the app can install in one click. */
+export type RecommendedRerankModel = {
+  id: string;
+  display_name: string;
+  repository: string;
+  onnx_megabytes: number;
+  note: string;
+  homepage: string;
+};
+
+export type RecommendedRerankModelState = {
+  model: RecommendedRerankModel;
+  installed_dir: string | null;
+  installed: boolean;
+};
+
+export function listRecommendedRerankModels(): Promise<RecommendedRerankModelState[]> {
+  return invoke('list_recommended_rerank_models');
+}
+
+export function installRecommendedRerankModel(id: string): Promise<RecommendedRerankModelState> {
+  return invoke('install_recommended_rerank_model', { id });
+}
+
+/** One line of the on-device retrieval self check. */
+export type RetrievalCheck = {
+  name: 'text_model' | 'library' | 'visual_model' | 'rerank';
+  ok: boolean;
+  detail: string;
+  ms: number;
+};
+
+export function runRetrievalSelfCheck(root: string): Promise<RetrievalCheck[]> {
+  return invoke('run_retrieval_self_check', { root });
+}

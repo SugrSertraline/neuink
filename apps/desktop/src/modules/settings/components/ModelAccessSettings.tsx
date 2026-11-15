@@ -1,12 +1,17 @@
 import { useEffect, useState } from 'react';
 import {
   getTextModelSettings,
+  installRecommendedRerankModel,
   installRecommendedTextModel,
+  listRecommendedRerankModels,
   listRecommendedTextModels,
   listTextModels,
   rebuildSearchIndex,
+  runRetrievalSelfCheck,
   saveTextModelSettings,
+  type RecommendedRerankModelState,
   type RecommendedTextModelState,
+  type RetrievalCheck,
   type TextModelChoice,
   type TextModelSettingsState
 } from '@/shared/ipc/workspaceApi';
@@ -14,51 +19,47 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { SettingsGroup, SettingRow, SettingSelect } from './SettingsPrimitives';
 
-/** Model pages and the local service guide; the only place these links appear. */
-const LINKS: ReadonlyArray<{ label: string; note: string; href: string }> = [
-  { label: 'BAAI/bge-m3', note: '1024 维，CLS 池化，568 MB int8', href: 'https://huggingface.co/BAAI/bge-m3' },
-  {
-    label: 'Qwen3-VL-Embedding-2B',
-    note: '视觉通道，2048 维，本地服务',
-    href: 'https://huggingface.co/Qwen/Qwen3-VL-Embedding-2B'
-  },
-  {
-    label: 'BAAI/bge-reranker-base',
-    note: '重排，279 MB int8',
-    href: 'https://huggingface.co/BAAI/bge-reranker-base'
-  },
-  {
-    label: 'BAAI/bge-reranker-v2-m3',
-    note: '重排，570 MB int8，质量档',
-    href: 'https://huggingface.co/BAAI/bge-reranker-v2-m3'
-  }
-];
+const VISUAL_MODEL = {
+  label: 'Qwen3-VL-Embedding-2B',
+  href: 'https://huggingface.co/Qwen/Qwen3-VL-Embedding-2B'
+};
+
+const CHECK_LABEL: Record<RetrievalCheck['name'], string> = {
+  text_model: '文本嵌入模型',
+  library: '资料库',
+  visual_model: '视觉编码服务',
+  rerank: '重排'
+};
 
 /**
- * Model choice and access points: which text encoder runs, which directories exist, and
- * where the optional models come from. Switching the encoder invalidates the text index,
- * so the screen offers the rebuild instead of pretending nothing changed.
+ * Model access in three blocks — text, visual, rerank — plus one button that answers the
+ * only question that matters on a fresh machine: does retrieval actually work here.
  */
 export function ModelAccessSettings({ active, root }: { active: boolean; root: string }) {
   const [choices, setChoices] = useState<TextModelChoice[]>([]);
   const [state, setState] = useState<TextModelSettingsState | null>(null);
   const [recommended, setRecommended] = useState<RecommendedTextModelState[]>([]);
+  const [rerankModels, setRerankModels] = useState<RecommendedRerankModelState[]>([]);
   const [selected, setSelected] = useState<string>('');
   const [custom, setCustom] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [installing, setInstalling] = useState<string | null>(null);
   const [rebuildNote, setRebuildNote] = useState<string | null>(null);
+  const [checks, setChecks] = useState<RetrievalCheck[] | null>(null);
+  const [checking, setChecking] = useState(false);
 
   const reload = async () => {
-    const [models, current, recommendedStates] = await Promise.all([
+    const [models, current, textRecommended, rerankRecommended] = await Promise.all([
       listTextModels(),
       getTextModelSettings(),
-      listRecommendedTextModels()
+      listRecommendedTextModels(),
+      listRecommendedRerankModels()
     ]);
     setChoices(models);
     setState(current);
-    setRecommended(recommendedStates);
+    setRecommended(textRecommended);
+    setRerankModels(rerankRecommended);
     setSelected(current.model_dir ?? models.find((model) => model.bundled)?.path ?? '');
     setCustom(current.model_dir ?? '');
   };
@@ -67,14 +68,14 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
     if (!active) return;
     let cancelled = false;
     void reload().catch(() => {
-      if (!cancelled) setError('未能读取文本嵌入模型设置。');
+      if (!cancelled) setError('未能读取模型设置。');
     });
     return () => {
       cancelled = true;
     };
   }, [active]);
 
-  const install = async (id: string) => {
+  const installText = async (id: string) => {
     setInstalling(id);
     setError(null);
     setRebuildNote(null);
@@ -84,10 +85,24 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
       if (installed.installed_dir) {
         setSelected(installed.installed_dir);
         setCustom(installed.installed_dir);
-        setRebuildNote('模型已下载到本地目录，点“应用模型”后重建索引即可使用。');
+        setRebuildNote('模型已下载并验证；点“应用模型”后重建索引即可使用。');
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '未能安装推荐模型。');
+    } finally {
+      setInstalling(null);
+    }
+  };
+
+  const installRerank = async (id: string) => {
+    setInstalling(id);
+    setError(null);
+    try {
+      await installRecommendedRerankModel(id);
+      await reload();
+      setRebuildNote('重排模型已下载并验证打分；在“重排”设置里选择它即可。');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '未能安装重排模型。');
     } finally {
       setInstalling(null);
     }
@@ -121,6 +136,18 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
     }
   };
 
+  const check = async () => {
+    setChecking(true);
+    setError(null);
+    try {
+      setChecks(await runRetrievalSelfCheck(root));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '自检失败。');
+    } finally {
+      setChecking(false);
+    }
+  };
+
   const options = choices.map((choice) => ({
     value: choice.path,
     label: `${choice.bundled ? '内置：' : ''}${choice.model_name ?? choice.id}${
@@ -132,12 +159,14 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
     <SettingsGroup
       id="tools-model-access"
       title="模型与接入"
-      description="搜索用哪个文本嵌入模型、从哪里加载，以及可选模型与本地视觉服务的入口。"
+      description="文本、视觉、重排三条通道各自的模型来源与一键安装，以及一次点击完成的本机自检。"
     >
       {error && <p role="alert" className="mt-2 text-xs leading-5 text-destructive">{error}</p>}
+
+      <p className="mt-1 text-xs font-medium text-muted-foreground">文本嵌入模型</p>
       <SettingSelect
         id="tools-text-model"
-        label="文本嵌入模型"
+        label="当前模型"
         description="切换后需重建索引；维度与池化由模型目录内的 neuink-embedding.json 声明。"
         disabled={!state || busy || options.length === 0}
         value={selected}
@@ -180,74 +209,123 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
         </Button>
       </div>
       {recommended.length > 0 && (
+        <ul className="mt-2 space-y-1">
+          {recommended.map((entry) => (
+            <li
+              key={entry.model.id}
+              className="flex flex-wrap items-baseline gap-x-2 text-xs leading-5 text-muted-foreground"
+              data-testid={`recommended-${entry.model.id}`}
+            >
+              <span className="font-medium text-foreground">{entry.model.display_name}</span>
+              <span>
+                {entry.model.dimensions} 维 · {entry.model.onnx_megabytes} MB ·{' '}
+                {entry.model.pooling.toUpperCase()} 池化 · {entry.model.languages} · {entry.model.license}
+              </span>
+              {entry.installed ? (
+                <span className="text-foreground">已安装</span>
+              ) : entry.model.directly_installable ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={installing !== null}
+                  onClick={() => void installText(entry.model.id)}
+                >
+                  {installing === entry.model.id ? '下载中…' : '一键安装'}
+                </Button>
+              ) : (
+                <span>需自行导出</span>
+              )}
+              <a className="underline" href={entry.model.homepage} target="_blank" rel="noreferrer">
+                模型页
+              </a>
+              <span className="basis-full">{entry.model.note}</span>
+              {entry.model.export_hint && (
+                <code className="basis-full select-all font-mono text-[11px] leading-4 text-muted-foreground">
+                  {entry.model.export_hint}
+                </code>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="mt-3 border-t border-border pt-2">
+        <p className="text-xs font-medium text-muted-foreground">视觉编码模型</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          视觉通道是一个本机 Python 服务（Qwen3-VL-Embedding-2B，4.26 GB），需要 torch 与 PyMuPDF，因此不随安装包下载；
+          在
+          <a className="mx-1 underline" href={VISUAL_MODEL.href} target="_blank" rel="noreferrer">
+            {VISUAL_MODEL.label} 模型页
+          </a>
+          取得权重后按 apps/desktop/scripts/qwen-visual-service/README.md 启动服务，再回到本页填地址与密钥。
+        </p>
+      </div>
+
+      {rerankModels.length > 0 && (
         <div className="mt-3 border-t border-border pt-2">
-          <p className="text-xs font-medium text-muted-foreground">推荐模型（按当前加载器的兼容性筛选）</p>
+          <p className="text-xs font-medium text-muted-foreground">重排模型</p>
           <ul className="mt-1 space-y-1">
-            {recommended.map((entry) => (
+            {rerankModels.map((entry) => (
               <li
                 key={entry.model.id}
                 className="flex flex-wrap items-baseline gap-x-2 text-xs leading-5 text-muted-foreground"
-                data-testid={`recommended-${entry.model.id}`}
+                data-testid={`recommended-rerank-${entry.model.id}`}
               >
                 <span className="font-medium text-foreground">{entry.model.display_name}</span>
-                <span>
-                  {entry.model.dimensions} 维 · {entry.model.onnx_megabytes} MB · {entry.model.pooling.toUpperCase()}{' '}
-                  池化 · {entry.model.languages} · {entry.model.license}
-                </span>
+                <span>{entry.model.onnx_megabytes} MB</span>
                 {entry.installed ? (
                   <span className="text-foreground">已安装</span>
-                ) : entry.model.directly_installable ? (
+                ) : (
                   <Button
                     size="sm"
                     variant="ghost"
                     disabled={installing !== null}
-                    onClick={() => void install(entry.model.id)}
+                    onClick={() => void installRerank(entry.model.id)}
                   >
-                    {installing === entry.model.id ? '下载中…' : '下载安装'}
+                    {installing === entry.model.id ? '下载中…' : '一键安装'}
                   </Button>
-                ) : (
-                  <span>需自行导出</span>
                 )}
                 <a className="underline" href={entry.model.homepage} target="_blank" rel="noreferrer">
                   模型页
                 </a>
                 <span className="basis-full">{entry.model.note}</span>
-                {entry.model.export_hint && (
-                  <code className="basis-full select-all font-mono text-[11px] leading-4 text-muted-foreground">
-                    {entry.model.export_hint}
-                  </code>
-                )}
               </li>
             ))}
           </ul>
         </div>
       )}
+
+      <div className="mt-3 border-t border-border pt-2">
+        <p className="text-xs font-medium text-muted-foreground">本机检索配置</p>
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <Button size="sm" disabled={checking || !root} onClick={() => void check()}>
+            {checking ? '检测中…' : '一键测试能否使用'}
+          </Button>
+          <span className="text-xs leading-5 text-muted-foreground">
+            依次验证文本模型、资料库、视觉服务与重排，逐条给出结论与耗时。
+          </span>
+        </div>
+        {checks && (
+          <ul className="mt-1 space-y-1" data-testid="self-check-results">
+            {checks.map((result) => (
+              <li key={result.name} className="text-xs leading-5 text-muted-foreground">
+                <span className={result.ok ? 'text-foreground' : 'text-destructive'}>
+                  {result.ok ? '通过' : '未通过'}
+                </span>
+                <span className="mx-2 font-medium">{CHECK_LABEL[result.name]}</span>
+                <span>{result.detail}</span>
+                <span className="ml-2">{result.ms} ms</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
       {rebuildNote && (
-        <p className="mt-1 text-xs leading-5 text-muted-foreground" data-testid="text-model-note">
+        <p className="mt-2 text-xs leading-5 text-muted-foreground" data-testid="text-model-note">
           {rebuildNote}
         </p>
       )}
-      <div className="mt-3 border-t border-border pt-2">
-        <p className="text-xs font-medium text-muted-foreground">模型来源与本地服务</p>
-        <ul className="mt-1 space-y-1">
-          {LINKS.map((link) => (
-            <li key={link.href} className="text-xs leading-5 text-muted-foreground">
-              <a className="underline" href={link.href} target="_blank" rel="noreferrer">
-                {link.label}
-              </a>
-              <span className="ml-2">{link.note}</span>
-            </li>
-          ))}
-          <li className="text-xs leading-5 text-muted-foreground">
-            <span className="font-medium">本地视觉服务</span>
-            <span className="ml-2">apps/desktop/scripts/qwen-visual-service/README.md（启动、协议与依赖）</span>
-          </li>
-        </ul>
-      </div>
     </SettingsGroup>
   );
 }
-
-
-
-

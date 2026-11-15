@@ -221,3 +221,17 @@ cargo run -p neuink-ipc --bin retrieval-probe -- `
 - 安装完成后不仅校验文件存在，还会**跑一次真实推理**（`probe`），失败即报错，不留“看起来装好了”的目录。
 
 代价：该模型约 2.3 GB，安装与首次加载都比 int8 慢；`neuink-search --features local-embedding` 143 项、`commands::search` 45 项通过。
+
+### 三条通道的模型入口 + 本机自检
+
+设置页「模型与接入」现按通道组织：
+
+| 区块 | 内容 |
+|---|---|
+| 文本嵌入模型 | 当前模型下拉 + 自定义目录 + 推荐列表（一键安装 / 模型页 / 导出命令） |
+| 视觉编码模型 | Qwen3-VL-Embedding-2B 模型页 + 服务说明（需 torch/PyMuPDF，不随包下载） |
+| 重排模型 | 推荐列表：`bge-reranker-base int8`（Xenova，279 MB）、官方 fp32（1112 MB）；一键安装后**跑一次打分**验证 |
+| 本机检索配置 | **一键测试**：文本模型（加载+embed）、资料库（条目与已解析数）、视觉服务（健康检查）、重排（模型打分或模式说明），逐条给出通过/未通过与耗时 |
+
+新增 IPC：`list_recommended_rerank_models`、`install_recommended_rerank_model`、`run_retrieval_self_check`。
+重排安装会补齐缺失的 `special_tokens_map.json`（Xenova 导出没有该文件），并用 `LocalReranker::load` + 一次打分证明可用。

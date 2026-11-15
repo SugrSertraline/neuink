@@ -27,6 +27,7 @@ use super::embedding_resources::{embedding_model_dir, rerank_model_dir};
 pub mod unified;
 pub mod rerank_stage;
 pub mod visual;
+pub mod recommended_rerank_models;
 pub mod recommended_text_models;
 pub mod visual_qwen;
 #[cfg(test)]
@@ -2996,3 +2997,205 @@ pub fn install_recommended_text_model<R: tauri::Runtime>(
 
 
 
+
+
+#[tauri::command]
+pub fn list_recommended_rerank_models<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<crate::commands::search::recommended_rerank_models::RecommendedRerankState>, String> {
+    let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
+    Ok(crate::commands::search::recommended_rerank_models::list_states(
+        &resource_dir.join("embedding-models"),
+    ))
+}
+
+/// Downloads one reranker and proves it scores before reporting success.
+#[tauri::command]
+pub fn install_recommended_rerank_model<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    id: String,
+) -> Result<crate::commands::search::recommended_rerank_models::RecommendedRerankState, String> {
+    use crate::commands::search::recommended_rerank_models as recommended;
+
+    let model = recommended::RECOMMENDED_RERANK
+        .iter()
+        .find(|model| model.id == id)
+        .copied()
+        .ok_or_else(|| format!("未知的推荐重排模型：{id}"))?;
+    let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
+    let dir = recommended::install_dir(&resource_dir.join("embedding-models"), model.id)
+        .ok_or_else(|| "安装目录不可用".to_string())?;
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(3600))
+        .build()
+        .map_err(|error| error.to_string())?;
+    for (remote, local) in model.files {
+        let target = dir.join(local);
+        if target.is_file() && std::fs::metadata(&target).map(|meta| meta.len() > 0).unwrap_or(false) {
+            continue;
+        }
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let url = format!("https://huggingface.co/{}/resolve/main/{remote}", model.repository);
+        let bytes = client
+            .get(&url)
+            .send()
+            .and_then(|response| response.error_for_status())
+            .and_then(|response| response.bytes())
+            .map_err(|error| format!("下载 {url} 失败：{error}"))?;
+        std::fs::write(&target, &bytes).map_err(|error| error.to_string())?;
+    }
+    recommended::complete_tokenizer_files(&dir)?;
+
+    let reranker = neuink_search::LocalReranker::load(&dir)
+        .map_err(|error| format!("重排模型已下载但无法加载：{error}"))?;
+    let scores = neuink_search::RerankProvider::score(
+        &reranker,
+        "probe query",
+        &["probe passage"],
+    )
+    .map_err(|error| format!("重排模型已下载但推理失败：{error}"))?;
+    if scores.len() != 1 {
+        return Err("重排模型已下载但打分结果数量不符".to_string());
+    }
+    Ok(recommended::RecommendedRerankState {
+        model,
+        installed_dir: Some(dir.to_string_lossy().to_string()),
+        installed: true,
+    })
+}
+
+/// One line of the on-device self check.
+#[derive(Debug, serde::Serialize)]
+pub struct RetrievalCheck {
+    pub name: &'static str,
+    pub ok: bool,
+    pub detail: String,
+    pub ms: u64,
+}
+
+/// Verifies the three channels plus the library, so "does retrieval work here" is a single
+/// button instead of four separate guesses.
+#[tauri::command]
+pub fn run_retrieval_self_check<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    root: std::path::PathBuf,
+) -> Result<Vec<RetrievalCheck>, String> {
+    let mut checks = Vec::new();
+
+    // Text encoder: load and embed one probe string.
+    let started = std::time::Instant::now();
+    let text = (|| -> Result<String, String> {
+        let dir = embedding_model_dir(&app)?;
+        let provider = neuink_search::FastEmbedProvider::from_model_dir(dir.clone());
+        let status = neuink_search::EmbeddingProvider::status(&provider);
+        if !status.available {
+            return Err(status.message.unwrap_or_else(|| "模型不可用".to_string()));
+        }
+        let vectors = neuink_search::EmbeddingProvider::embed(
+            &provider,
+            &[neuink_search::EmbeddingInput {
+                id: "probe".to_string(),
+                text: "probe".to_string(),
+            }],
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(format!(
+            "{} · {} 维 · {}",
+            status.model_name.unwrap_or_else(|| "未知模型".to_string()),
+            vectors.first().map(|vector| vector.dimensions()).unwrap_or(0),
+            dir.display()
+        ))
+    })();
+    checks.push(RetrievalCheck {
+        name: "text_model",
+        ok: text.is_ok(),
+        detail: text.unwrap_or_else(|error| error),
+        ms: started.elapsed().as_millis() as u64,
+    });
+
+    // Library: can it be opened, and how many papers are parsed.
+    let started = std::time::Instant::now();
+    let library = (|| -> Result<String, String> {
+        let workspace = Workspace::open(&root).map_err(|error| error.to_string())?;
+        let entries = workspace.list_entries().map_err(|error| error.to_string())?;
+        let parsed = entries
+            .iter()
+            .filter(|entry| {
+                entry
+                    .pdf
+                    .as_ref()
+                    .map(|pdf| pdf.parse.status == neuink_domain::PdfParseStatus::Succeeded)
+                    .unwrap_or(false)
+            })
+            .count();
+        Ok(format!("{} 篇条目，其中 {} 篇已解析", entries.len(), parsed))
+    })();
+    checks.push(RetrievalCheck {
+        name: "library",
+        ok: library.is_ok(),
+        detail: library.unwrap_or_else(|error| error),
+        ms: started.elapsed().as_millis() as u64,
+    });
+
+    // Visual channel: provider reachability (a missing snapshot is reported, not failed).
+    let started = std::time::Instant::now();
+    let visual = (|| -> Result<String, String> {
+        let settings = crate::storage::read_settings(&app)?.visual;
+        let provider = visual::provider_for(&settings);
+        let check = neuink_search::check_provider(provider.as_ref());
+        if let Some(reason) = check.unavailable_reason {
+            return Err(format!("视觉编码不可用：{reason}"));
+        }
+        Ok(format!(
+            "视觉编码服务就绪：{} · {} 维",
+            provider.status().model_name.unwrap_or_else(|| "未知模型".to_string()),
+            provider.dimensions().unwrap_or(0)
+        ))
+    })();
+    checks.push(RetrievalCheck {
+        name: "visual_model",
+        ok: visual.is_ok(),
+        detail: visual.unwrap_or_else(|error| error),
+        ms: started.elapsed().as_millis() as u64,
+    });
+
+    // Rerank ladder: only the model-backed rung needs a load; the others are model-free.
+    let started = std::time::Instant::now();
+    let rerank = (|| -> Result<String, String> {
+        let settings = crate::storage::read_settings(&app)?.rerank;
+        match settings.mode {
+            neuink_config::RerankMode::Off => Ok("重排关闭（融合序直接输出）".to_string()),
+            neuink_config::RerankMode::Heuristic => Ok("字段覆盖重排可用（无需模型）".to_string()),
+            neuink_config::RerankMode::CrossEncoder => {
+                let dir = settings
+                    .model_dir
+                    .as_deref()
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or(rerank_model_dir(&app)?);
+                let reranker = rerank_stage::reranker_for(&dir)
+                    .ok_or_else(|| format!("本地重排模型不可用：{}", dir.display()))?;
+                let scores = neuink_search::RerankProvider::score(
+                    reranker.as_ref(),
+                    "probe query",
+                    &["probe passage"],
+                )
+                .map_err(|error| error.to_string())?;
+                if scores.is_empty() {
+                    return Err("重排模型打分结果为空".to_string());
+                }
+                Ok(format!("交叉编码器可用：{}", dir.display()))
+            }
+        }
+    })();
+    checks.push(RetrievalCheck {
+        name: "rerank",
+        ok: rerank.is_ok(),
+        detail: rerank.unwrap_or_else(|error| error),
+        ms: started.elapsed().as_millis() as u64,
+    });
+
+    Ok(checks)
+}
