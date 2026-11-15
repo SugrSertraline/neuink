@@ -146,3 +146,14 @@ cargo run -p neuink-ipc --bin retrieval-probe -- `
 - 空 `scope_entry_ids` 现在表示**整库**（`PreparedSearch.entries`），而不是空边界。之前它会让视觉通道报 `visual_no_allowed_entries` 并静默不出票——守卫是对的，推导是错的。
 
 两篇演示库实测：路由 2 篇（无 `single_document` 跳过）、`text_entries=2`、`visual_entries=2`、`visual_gate_open=true`、`rerank_used=cross_encoder`、检索 2.48 s；`carrier_empty_fallback` 属于预期（合成段落没有载体标记，绑定如实报告并回退）。
+
+### 真实 Qwen 服务的实测与两处适配
+
+首次真跑暴露三个问题，前两个是环境/夹具，第三个是代码缺陷：
+
+1. 服务真实模式需要 `PyMuPDF`（页面栅格化），原 venv 未安装 → 已装 `pymupdf 2.1`。
+2. `--seed-demo` 写的是 4 字节 PDF 桩，MuPDF 无法打开 → 500。合成库只适合 stub 服务。
+3. 一次请求把整篇论文的页都交给服务，21 页 × 5 源需要 >60 s，触发客户端超时 → 改为**每 4 页一个请求**（`PAGE_REQUEST_CHUNK`），请求时长有界。
+
+真实实测（`Qwen3-VL-Embedding-2B`，2048 维，身份 `3b3f75…`，真实论文 128 源）：
+`visual_prepare` 186,710 ms（≈1.46 s/源，CPU）、`document_count=128`、`embedded_count=128`、`visual_status=ready`、`visual_entries=1`、检索 3.3 s。

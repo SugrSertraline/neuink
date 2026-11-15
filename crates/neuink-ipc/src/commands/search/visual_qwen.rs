@@ -253,10 +253,11 @@ impl VisualEmbeddingProvider for QwenVisualServiceProvider {
     }
 }
 
+/// Pages per request. Four pages is twenty sources with crops: enough to amortise the
+/// request, small enough to stay well inside the client timeout on CPU-only inference.
+const PAGE_REQUEST_CHUNK: usize = 4;
+
 impl VisualPageEmbedding for QwenVisualServiceProvider {
-    /// Sends the local PDF path and asks the service for page and crop vectors. The
-    /// service owns rasterization, so the product never stores page bitmaps and the
-    /// Rust side needs no native PDF library.
     fn embed_pdf_pages(
         &self,
         pdf_path: &std::path::Path,
@@ -274,6 +275,25 @@ impl VisualPageEmbedding for QwenVisualServiceProvider {
                 "视觉编码未收到任何页码".to_string(),
             ));
         }
+        // The service renders and encodes every requested page, so one request covering a
+        // whole paper can outlive the client timeout. Chunking keeps each request bounded.
+        let mut vectors = Vec::with_capacity(pages.len() * if regions { 5 } else { 1 });
+        for chunk in pages.chunks(PAGE_REQUEST_CHUNK) {
+            vectors.extend(self.embed_pages_once(pdf_path, chunk, regions)?);
+        }
+        Ok(vectors)
+    }
+}
+
+impl QwenVisualServiceProvider {
+    /// One bounded request: asks the service for exactly these pages and validates that
+    /// what came back matches the request, rather than trusting the response shape.
+    fn embed_pages_once(
+        &self,
+        pdf_path: &std::path::Path,
+        pages: &[u32],
+        regions: bool,
+    ) -> SearchResult<Vec<VisualPageVector>> {
         let body = serde_json::json!({
             "pdf_path": pdf_path.to_string_lossy(),
             "pages": pages,
