@@ -169,6 +169,9 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
             commands::search::list_recommended_text_models,
             commands::search::install_recommended_text_model,
             commands::search::list_recommended_visual_models,
+            commands::search::get_visual_runtime_state,
+            commands::search::install_visual_runtime,
+            commands::search::start_visual_service,
             commands::search::list_recommended_rerank_models,
             commands::search::install_recommended_rerank_model,
             commands::search::run_retrieval_self_check,
@@ -206,6 +209,7 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
         handler(invoke)
     })
 }
+
 
 
 

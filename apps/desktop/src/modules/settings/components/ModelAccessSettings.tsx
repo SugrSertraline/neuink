@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import {
   getTextModelSettings,
+  getVisualRuntimeState,
   installRecommendedRerankModel,
   installRecommendedTextModel,
+  installVisualRuntime,
   listRecommendedRerankModels,
   listRecommendedTextModels,
   listRecommendedVisualModels,
@@ -10,9 +12,11 @@ import {
   rebuildSearchIndex,
   runRetrievalSelfCheck,
   saveTextModelSettings,
+  startVisualService,
   type RecommendedRerankModelState,
   type RecommendedTextModelState,
   type RecommendedVisualModel,
+  type VisualRuntimeState,
   type RetrievalCheck,
   type TextModelChoice,
   type TextModelSettingsState
@@ -43,6 +47,8 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
   const [recommended, setRecommended] = useState<RecommendedTextModelState[]>([]);
   const [rerankModels, setRerankModels] = useState<RecommendedRerankModelState[]>([]);
   const [visualModels, setVisualModels] = useState<RecommendedVisualModel[]>([]);
+  const [runtimes, setRuntimes] = useState<Record<string, VisualRuntimeState | null>>({});
+  const [reuseDirs, setReuseDirs] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<string>('');
   const [custom, setCustom] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -60,11 +66,15 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
       listRecommendedRerankModels(),
       listRecommendedVisualModels()
     ]);
+    const runtimeStates = await Promise.all(
+      visualRecommended.map(async (model) => [model.id, await getVisualRuntimeState(model.id)] as const)
+    );
     setChoices(models);
     setState(current);
     setRecommended(textRecommended);
     setRerankModels(rerankRecommended);
     setVisualModels(visualRecommended);
+    setRuntimes(Object.fromEntries(runtimeStates));
     setSelected(current.model_dir ?? models.find((model) => model.bundled)?.path ?? '');
     setCustom(current.model_dir ?? '');
   };
@@ -138,6 +148,41 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
       setError(cause instanceof Error ? cause.message : '未能重建检索索引。');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const installRuntime = async (id: string) => {
+    setInstalling(id);
+    setError(null);
+    setRebuildNote(null);
+    try {
+      const reuse = reuseDirs[id]?.trim();
+      const state = await installVisualRuntime(id, reuse ? reuse : null);
+      setRuntimes({ ...runtimes, [id]: state });
+      setRebuildNote(
+        state.dependencies_installed && state.model_present
+          ? `视觉服务已就绪：${state.model_dir}。点“启动服务”即可。`
+          : `依赖已安装，但权重缺失（${state.model_dir}）。`
+      );
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setError(
+        message.includes("uv_missing")
+          ? "未找到 uv（Python 环境管理器），请先安装 uv 后重试。"
+          : `安装失败：${message}`
+      );
+    } finally {
+      setInstalling(null);
+    }
+  };
+
+  const startService = async (id: string) => {
+    setError(null);
+    try {
+      const pid = await startVisualService(id);
+      setRebuildNote(`视觉服务已启动（进程 ${pid}），地址 http://127.0.0.1:8765。`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "未能启动视觉服务。");
     }
   };
 
@@ -275,12 +320,49 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
               </a>
               <span className="basis-full">{model.note}</span>
               <span className="basis-full">
-                安装路径：<code className="select-all font-mono text-[11px]">{model.install_path}</code>
+                建议安装路径：<code className="select-all font-mono text-[11px]">{model.install_path}</code>
+              </span>
+              <span className="basis-full flex flex-wrap items-center gap-x-2 gap-y-1">
+                <Input
+                  aria-label={`${model.display_name} 本地模型目录（可选）`}
+                  className="h-7 w-72 min-w-0 font-mono text-[11px]"
+                  placeholder="已有权重目录（留空则下载）"
+                  value={reuseDirs[model.id] ?? ""}
+                  onChange={(event) =>
+                    setReuseDirs({ ...reuseDirs, [model.id]: event.target.value })
+                  }
+                />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={installing !== null}
+                  onClick={() => void installRuntime(model.id)}
+                >
+                  {installing === model.id ? "安装中…" : "一键安装依赖与模型"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!runtimes[model.id]?.dependencies_installed || checking}
+                  onClick={() => void startService(model.id)}
+                >
+                  启动服务
+                </Button>
+                <span data-testid={`visual-runtime-${model.id}`}>
+                  {runtimes[model.id]?.dependencies_installed
+                    ? runtimes[model.id]?.model_present
+                      ? `已就绪：${runtimes[model.id]?.model_dir}`
+                      : "依赖已装，权重缺失"
+                    : "未安装"}
+                </span>
               </span>
               {model.install_commands.length > 0 && (
-                <code className="basis-full select-all whitespace-pre-wrap font-mono text-[11px] leading-4">
-                  {model.install_commands.join("\n")}
-                </code>
+                <details className="basis-full">
+                  <summary className="cursor-pointer select-none">手动步骤（备用）</summary>
+                  <code className="mt-1 block select-all whitespace-pre-wrap font-mono text-[11px] leading-4">
+                    {model.install_commands.join("\n")}
+                  </code>
+                </details>
               )}
             </li>
           ))}
@@ -355,5 +437,9 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
     </SettingsGroup>
   );
 }
+
+
+
+
 
 

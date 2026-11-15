@@ -32,6 +32,7 @@ pub mod recommended_rerank_models;
 pub mod recommended_visual_models;
 pub mod recommended_text_models;
 pub mod visual_qwen;
+pub mod visual_runtime;
 #[cfg(test)]
 mod rerank_batch_tests;
 
@@ -3210,3 +3211,64 @@ pub fn list_recommended_visual_models() -> Vec<crate::commands::search::recommen
 
 
 
+
+
+#[tauri::command]
+pub fn get_visual_runtime_state<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    id: String,
+) -> Result<Option<crate::commands::search::visual_runtime::VisualRuntimeState>, String> {
+    let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
+    Ok(crate::commands::search::visual_runtime::load_state(&resource_dir, &id))
+}
+
+/// One action: isolated Python environment, CPU inference dependencies and model weights.
+/// A supplied `reuse_model_dir` skips the multi-gigabyte download.
+#[tauri::command]
+pub fn install_visual_runtime<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    id: String,
+    reuse_model_dir: Option<String>,
+) -> Result<crate::commands::search::visual_runtime::VisualRuntimeState, String> {
+    let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
+    let reuse = reuse_model_dir.map(std::path::PathBuf::from);
+    crate::commands::search::visual_runtime::install(&resource_dir, &id, reuse.as_deref())
+}
+
+/// Starts the prepared service and returns its process id.
+#[tauri::command]
+pub fn start_visual_service<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    id: String,
+) -> Result<u32, String> {
+    let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
+    let script = visual_service_script(&app)?;
+    crate::commands::search::visual_runtime::start(&resource_dir, &script, &id)
+}
+
+/// Locates the service script in the packaged resources, then in the checkout layout.
+fn visual_service_script<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<std::path::PathBuf, String> {
+    const RELATIVE: &str = "scripts/qwen-visual-service/service.py";
+    let mut candidates = Vec::new();
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        candidates.push(resource_dir.join(RELATIVE));
+        candidates.push(resource_dir.join("resources").join(RELATIVE));
+    }
+    if let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|parent| parent.to_path_buf()))
+    {
+        candidates.push(exe_dir.join(RELATIVE));
+    }
+    candidates.push(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../apps/desktop")
+            .join(RELATIVE),
+    );
+    candidates
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+        .ok_or_else(|| "找不到视觉服务脚本（scripts/qwen-visual-service/service.py）".to_string())
+}

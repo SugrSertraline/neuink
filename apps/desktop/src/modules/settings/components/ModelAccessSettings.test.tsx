@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { ModelAccessSettings } from './ModelAccessSettings';
 import {
   getTextModelSettings,
+  getVisualRuntimeState,
   listRecommendedRerankModels,
   listRecommendedTextModels,
   listRecommendedVisualModels,
@@ -18,6 +19,9 @@ vi.mock('@/shared/ipc/workspaceApi', () => ({
   listRecommendedTextModels: vi.fn(),
   listRecommendedRerankModels: vi.fn(),
   listRecommendedVisualModels: vi.fn(),
+  getVisualRuntimeState: vi.fn(),
+  installVisualRuntime: vi.fn(),
+  startVisualService: vi.fn(),
   installRecommendedRerankModel: vi.fn(),
   runRetrievalSelfCheck: vi.fn(),
   installRecommendedTextModel: vi.fn(),
@@ -64,6 +68,8 @@ beforeEach(() => {
   vi.mocked(listRecommendedRerankModels).mockReset();
   vi.mocked(listRecommendedRerankModels).mockResolvedValue([]);
   vi.mocked(listRecommendedVisualModels).mockReset();
+  vi.mocked(getVisualRuntimeState).mockReset();
+  vi.mocked(getVisualRuntimeState).mockResolvedValue(null);
   vi.mocked(listRecommendedVisualModels).mockResolvedValue([
     {
       id: 'siglip2-base-patch16-224',
@@ -179,6 +185,8 @@ describe('ModelAccessSettings', () => {
     );
   });
 });
+
+
 
 
 

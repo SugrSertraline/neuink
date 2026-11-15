@@ -1611,3 +1611,36 @@ export type RecommendedVisualModel = {
 export function listRecommendedVisualModels(): Promise<RecommendedVisualModel[]> {
   return invoke('list_recommended_visual_models');
 }
+
+/** Prepared state of the optional local visual service for one model. */
+export type VisualRuntimeState = {
+  model_id: string;
+  env_dir: string;
+  model_dir: string;
+  python: string;
+  dependencies_installed: boolean;
+  model_present: boolean;
+};
+
+export function getVisualRuntimeState(id: string): Promise<VisualRuntimeState | null> {
+  return invoke('get_visual_runtime_state', { id });
+}
+
+/**
+ * One action: isolated Python env, CPU inference dependencies, and weights.
+ * Passing `reuse_model_dir` skips the multi-gigabyte download.
+ */
+export function installVisualRuntime(
+  id: string,
+  reuseModelDir?: string | null
+): Promise<VisualRuntimeState> {
+  return invoke('install_visual_runtime', {
+    id,
+    reuse_model_dir: reuseModelDir ?? null
+  });
+}
+
+/** Starts the prepared service; resolves to its process id. */
+export function startVisualService(id: string): Promise<number> {
+  return invoke('start_visual_service', { id });
+}
