@@ -31,6 +31,3 @@ pub mod tag_reading;
 mod tag_tests;
 pub mod translation;
 pub mod workspace;
-
-#[cfg(test)]
-mod entry_assets_backfill_tests;

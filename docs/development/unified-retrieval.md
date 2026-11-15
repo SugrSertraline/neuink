@@ -65,7 +65,7 @@
 ## 6. 未启用项
 
 - 引用追加池：`neuink-search` 尚未包含引用抽取与扩池，`document_head` 只完成了头部选择。接入需要引用抽取器与独立的可重建引用索引。
-- 图片／图表资产已持久化：MinerU ZIP 的 `images/**` 存入 `<entry>/assets/`，`asset_path` 与 ZIP 相对路径一致（`entry_assets.rs`）。
+- 图表资产不再复制：`images/**` 直接从已存 `<entry>/mineru-output/full.zip` 读取（`entry_assets.rs` 只读），`asset_path` 与 ZIP 相对路径一致。此前的 `<entry>/assets/` 副本、`assets.manifest.json` 与 `backfill_entry_assets` 回填命令一并移除——老库与新建库行为一致，无需迁移。
 - **页面与区域源来自原生 PDF，图表资产来自 MinerU，二者同进一个快照**（`VisualSourceKind::{Page,Region,Figure,Table}`）。页面与四个 region 共享同一 `parent`（`page:{idx}`），所以一页只投一票，region 只用来取最大分；资产按 `asset:images/...` 独立投票。栅格化由本地编码服务完成（`POST /embed_pages {pdf_path,pages,regions}`），产品不保存页面位图，Rust 侧不引入原生 PDF 库；`qwen_api` 无法读本地路径，因此没有页面源，其快照只含资产。
 - 视觉通道固定使用 Qwen3-VL-Embedding-2B，两种运行方式：`qwen_local`（默认 `http://127.0.0.1:8765`）与 `qwen_api`（https + 密钥）。随包 fastembed 视觉编码已停用，旧设置值仍可反序列化但会被拒绝并提示改选。索引 namespace 由服务上报的模型身份派生。`prepare_visual_search_index` 编码一次、查询只读快照；服务不可达或快照不匹配时固定报 `model_unavailable`/`index_missing` 并退回文本通道。
 - 字段覆盖重排、真实版面 crop（替代几何四等分）均未接入产品。
@@ -107,3 +107,4 @@ apps/desktop/src-tauri/resources/embedding-models/reranker/
 | +m3 int8 @256 | 0.325 | 0.475 | 0.475 | 0.399 | 4.2 s |
 
 结论：**R@10 由头部宽度与池覆盖决定，重排改变不了**（池覆盖 0.700，头部 20 后上限 0.475）；重排只影响 R@1/nDCG@5，CPU 代价 1.2–4.2 s。所以默认 `off`，字段覆盖留在融合臂里，不重复施加同一信号。
+

@@ -60,10 +60,6 @@ pub enum WorkspaceError {
     AssetPathTraversal(String),
     #[error("MinerU asset is larger than the per-file budget: {0}")]
     AssetFileTooLarge(String),
-    #[error("MinerU assets exceed the per-entry budget: {0}")]
-    AssetBudgetExceeded(String),
-    #[error("MinerU asset is a symbolic link: {0}")]
-    AssetSymlink(String),
     #[error("entry asset does not exist: {0}")]
     AssetMissing(String),
     #[error("visual asset scope names an entry that is not in the live library: {0}")]

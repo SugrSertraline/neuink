@@ -57,7 +57,6 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
             commands::entry::import_note_segment_asset,
             commands::entry::import_and_parse_pdf,
             commands::entry::import_mineru_client_result,
-            commands::entry::backfill_entry_assets,
             commands::entry::list_entries,
             commands::entry::list_trashed_entries,
             commands::entry::list_trash_items,
@@ -196,3 +195,4 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
         handler(invoke)
     })
 }
+

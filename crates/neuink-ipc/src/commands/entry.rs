@@ -997,11 +997,6 @@ pub fn import_mineru_client_result(
     workspace
         .write_mineru_output_zip(&request.entry_id, &zip_bytes)
         .map_err(|error| error.to_string())?;
-    // Segments already reference `images/...` paths, so the bytes must be stored before
-    // the parsed state is recorded.
-    workspace
-        .import_entry_assets_from_zip(&request.entry_id, &zip_bytes)
-        .map_err(|error| format!("MinerU 图片资源导入失败：{error}"))?;
     workspace
         .write_segments(&request.entry_id, &document.segments)
         .map_err(|error| error.to_string())?;
@@ -1057,11 +1052,6 @@ pub fn create_from_mineru_client_result(
     workspace
         .write_mineru_output_zip(&entry.id, &zip_bytes)
         .map_err(|error| error.to_string())?;
-    // Stored before segments: a segment's `asset_path` must resolve once the entry is
-    // marked parsed.
-    workspace
-        .import_entry_assets_from_zip(&entry.id, &zip_bytes)
-        .map_err(|error| format!("MinerU 图片资源导入失败：{error}"))?;
     let extracted_pdf = workspace
         .layout()
         .entry_mineru_output_dir(&entry.id)
@@ -1447,105 +1437,3 @@ async fn failure_status_message(
         ),
     }
 }
-
-/// Re-imports MinerU image assets for entries that already store a MinerU client ZIP.
-///
-/// Assets are only persisted from the version that added `entry_assets.rs`, so a library
-/// imported earlier has segments pointing at `images/...` paths whose bytes were never
-/// written. The stored `<entry>/mineru-output/full.zip` still has them, so this command
-/// backfills without asking the user to re-upload anything. It is idempotent: an entry
-/// whose stored bytes already match the ZIP reports `reused` and nothing is rewritten.
-#[derive(Debug, Deserialize)]
-pub struct BackfillEntryAssetsRequest {
-    pub root: PathBuf,
-    /// Empty means every live entry that stores a MinerU ZIP.
-    #[serde(default)]
-    pub entry_ids: Vec<EntryId>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct BackfillEntryAssetFailure {
-    pub entry_id: String,
-    /// Fixed, path-free code.
-    pub code: &'static str,
-}
-
-#[derive(Debug, Serialize)]
-pub struct BackfillEntryAssetsResponse {
-    pub entries_considered: usize,
-    pub entries_with_zip: usize,
-    pub entries_imported: usize,
-    pub entries_reused: usize,
-    pub assets_imported: usize,
-    pub failures: Vec<BackfillEntryAssetFailure>,
-}
-
-fn backfill_failure_code(error: &neuink_workspace::WorkspaceError) -> &'static str {
-    use neuink_workspace::WorkspaceError;
-    match error {
-        WorkspaceError::AssetPathTraversal(_) => "asset_path_traversal",
-        WorkspaceError::AssetSymlink(_) => "asset_symlink",
-        WorkspaceError::AssetFileTooLarge(_) => "asset_too_large",
-        WorkspaceError::AssetBudgetExceeded(_) => "asset_budget_exceeded",
-        WorkspaceError::Io(_) => "asset_io_failed",
-        WorkspaceError::Zip(_) => "zip_unreadable",
-        _ => "import_failed",
-    }
-}
-
-#[tauri::command]
-pub fn backfill_entry_assets(
-    request: BackfillEntryAssetsRequest,
-) -> Result<BackfillEntryAssetsResponse, String> {
-    let workspace =
-        neuink_workspace::Workspace::open(&request.root).map_err(|error| error.to_string())?;
-    let entries = workspace.list_entries().map_err(|error| error.to_string())?;
-    let selected = entries
-        .into_iter()
-        .filter(|entry| {
-            request.entry_ids.is_empty() || request.entry_ids.iter().any(|id| id == &entry.id)
-        })
-        .collect::<Vec<_>>();
-
-    let mut response = BackfillEntryAssetsResponse {
-        entries_considered: selected.len(),
-        entries_with_zip: 0,
-        entries_imported: 0,
-        entries_reused: 0,
-        assets_imported: 0,
-        failures: Vec::new(),
-    };
-    for entry in selected {
-        let zip_path = workspace.layout().entry_mineru_output_zip(&entry.id);
-        if !zip_path.is_file() {
-            continue;
-        }
-        response.entries_with_zip += 1;
-        let bytes = match fs::read(&zip_path) {
-            Ok(bytes) => bytes,
-            Err(_) => {
-                response.failures.push(BackfillEntryAssetFailure {
-                    entry_id: entry.id.to_string(),
-                    code: "zip_unreadable",
-                });
-                continue;
-            }
-        };
-        match workspace.import_entry_assets_from_zip(&entry.id, &bytes) {
-            Ok(import) => {
-                response.assets_imported += import.asset_count;
-                if import.reused {
-                    response.entries_reused += 1;
-                } else {
-                    response.entries_imported += 1;
-                }
-            }
-            Err(error) => response.failures.push(BackfillEntryAssetFailure {
-                entry_id: entry.id.to_string(),
-                code: backfill_failure_code(&error),
-            }),
-        }
-    }
-    Ok(response)
-}
-

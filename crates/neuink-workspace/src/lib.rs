@@ -34,7 +34,7 @@ pub use annotation_index::{
     AnnotationIndexRecord, AnnotationSegmentContext, AnnotationSegmentStatus,
 };
 pub use atomic_write::{atomic_write, atomic_write_json};
-pub use entry_assets::{EntryAsset, EntryAssetImport, EntryVisualAsset};
+pub use entry_assets::EntryVisualAsset;
 pub use error::WorkspaceError;
 pub use layout::WorkspaceLayout;
 pub use search::{WorkspaceSearchOptions, WorkspaceSearchRecord, WorkspaceSearchRecordKind};
@@ -43,3 +43,4 @@ pub use workspace::{
     EntryTranslation, TranslatedSegment, TranslatedSegmentStatus, TranslationPaperContext,
     TranslationProgress, TranslationStatus, TranslationTaskSnapshot, TranslationTerm, Workspace,
 };
+

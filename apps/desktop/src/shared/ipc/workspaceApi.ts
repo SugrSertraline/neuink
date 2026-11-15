@@ -1369,29 +1369,6 @@ export function saveRerankSettings(settings: RerankSettings): Promise<RerankSett
   return invoke('save_rerank_settings', { settings });
 }
 
-/**
- * Re-imports MinerU image assets for entries that already store a MinerU ZIP, so a
- * library imported before assets were persisted gains them without a re-upload.
- * Idempotent: an entry whose stored bytes match reports `reused`.
- */
-export type BackfillEntryAssetsResponse = {
-  entries_considered: number;
-  entries_with_zip: number;
-  entries_imported: number;
-  entries_reused: number;
-  assets_imported: number;
-  failures: { entry_id: string; code: string }[];
-};
-
-export function backfillEntryAssets(
-  root: string,
-  entryIds: string[] = []
-): Promise<BackfillEntryAssetsResponse> {
-  return invoke('backfill_entry_assets', {
-    request: { root, entry_ids: entryIds }
-  });
-}
-
 /** Encodes every page, region and MinerU asset once and writes the visual snapshot. */
 export function prepareVisualSearchIndex(
   root: string

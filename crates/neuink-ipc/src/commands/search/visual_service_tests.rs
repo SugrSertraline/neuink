@@ -90,15 +90,16 @@ fn pages_regions_and_assets_are_encoded_then_ranked_from_one_snapshot() {
         )
         .expect("segments");
 
-    // MinerU assets: the figure/table channel of the same snapshot.
+    // MinerU assets: the figure/table channel of the same snapshot. The bytes are read
+    // straight from the stored ZIP, so nothing has to be copied out first.
     let zip = mineru_zip();
     workspace
         .write_mineru_output_zip(&entry.id, &zip)
         .expect("store zip");
-    let imported = workspace
-        .import_entry_assets_from_zip(&entry.id, &zip)
-        .expect("import assets");
-    assert_eq!(imported.asset_count, 2);
+    let collected = workspace
+        .collect_entry_visual_assets(None)
+        .expect("collect assets");
+    assert_eq!(collected.len(), 2);
 
     let settings = neuink_config::VisualEmbeddingSettings {
         provider: neuink_config::VisualEmbeddingProviderKind::QwenLocal,
