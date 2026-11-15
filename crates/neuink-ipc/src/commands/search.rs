@@ -21,11 +21,13 @@ use neuink_workspace::{
 };
 use serde::{de::IgnoredAny, Deserialize, Serialize};
 
+use tauri::Manager;
 use super::embedding_resources::{embedding_model_dir, rerank_model_dir};
 
 pub mod unified;
 pub mod rerank_stage;
 pub mod visual;
+pub mod recommended_text_models;
 pub mod visual_qwen;
 #[cfg(test)]
 mod rerank_batch_tests;
@@ -2899,3 +2901,86 @@ pub fn save_text_model_settings<R: tauri::Runtime>(
         message: status.message,
     })
 }
+
+
+#[tauri::command]
+pub fn list_recommended_text_models<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<crate::commands::search::recommended_text_models::RecommendedState>, String> {
+    let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
+    let root = resource_dir.join("embedding-models");
+    Ok(crate::commands::search::recommended_text_models::list_states(&root))
+}
+
+/// Downloads one self-contained ONNX export and installs it as a selectable model directory.
+///
+/// Only entries flagged `directly_installable` are accepted: everything else would need an
+/// export or an external-data merge, which this command must not pretend to do.
+#[tauri::command]
+pub fn install_recommended_text_model<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    id: String,
+) -> Result<crate::commands::search::recommended_text_models::RecommendedState, String> {
+    use crate::commands::search::recommended_text_models as recommended;
+    use neuink_search::EmbeddingProvider;
+
+    let model = recommended::RECOMMENDED
+        .iter()
+        .find(|model| model.id == id)
+        .copied()
+        .ok_or_else(|| format!("未知的推荐模型：{id}"))?;
+    if !model.directly_installable {
+        return Err(format!("{} 无法直接安装：{}", model.display_name, model.note));
+    }
+    let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
+    let dir = recommended::install_dir(&resource_dir.join("embedding-models"), model.id)
+        .ok_or_else(|| "安装目录不可用".to_string())?;
+    recommended::write_model_metadata(&dir, &model)?;
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(1800))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let mut downloads: Vec<(String, String)> = vec![
+        (model.onnx_path.to_string(), model.onnx_path.to_string()),
+        ("tokenizer.json".to_string(), "tokenizer.json".to_string()),
+        ("config.json".to_string(), "config.json".to_string()),
+        ("tokenizer_config.json".to_string(), "tokenizer_config.json".to_string()),
+    ];
+    if model.repository.contains("e5") {
+        downloads.push(("sentencepiece.bpe.model".to_string(), "sentencepiece.bpe.model".to_string()));
+    }
+    for (remote, relative) in downloads {
+        let target = dir.join(&relative);
+        if target.is_file() && std::fs::metadata(&target).map(|meta| meta.len() > 0).unwrap_or(false) {
+            continue;
+        }
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let url = format!("https://huggingface.co/{}/resolve/main/{remote}", model.repository);
+        let bytes = client
+            .get(&url)
+            .send()
+            .and_then(|response| response.error_for_status())
+            .and_then(|response| response.bytes())
+            .map_err(|error| format!("下载 {url} 失败：{error}"))?;
+        std::fs::write(&target, &bytes).map_err(|error| error.to_string())?;
+    }
+    recommended::write_model_metadata(&dir, &model)?;
+
+    let provider = neuink_search::FastEmbedProvider::from_model_dir(dir.clone());
+    let status = provider.status();
+    if !status.available {
+        return Err(format!(
+            "模型文件已下载但无法加载：{}",
+            status.message.unwrap_or_else(|| "未知原因".to_string())
+        ));
+    }
+    Ok(crate::commands::search::recommended_text_models::RecommendedState {
+        model,
+        installed_dir: Some(dir.to_string_lossy().to_string()),
+        installed: true,
+    })
+}
+

@@ -193,3 +193,18 @@ cargo run -p neuink-ipc --bin retrieval-probe -- `
 - 打包/开发前的资源校验不再写死 `onnx/model.onnx`，接受 `model.onnx` / `model_int8.onnx`（`onboarding-resources.cjs`）。
 - 模型选择器不再出现 e5：e5 目录已移出 `embedding-models/`，`list_text_models` 也跳过 `router`。
 - 助手路由仍使用 e5（`embedding-models/router`，指向 `embedding-models-internal/e5-small-router`）：其阈值与 `query:` 前缀是在 e5 上校准的，换模型会静默改变路由行为，所以它是内部编码器而不是用户选项。
+
+### 可替换的文本嵌入模型（推荐清单）
+
+筛选标准不是流行度，而是**当前加载器能否直接吃下**：ONNX 必须是**单文件自包含**、输出 `last_hidden_state`（池化由我们按 manifest 做）。
+
+| 模型 | 维度 | 池化 | 体积 | 可直接安装 | 说明 |
+|---|---|---:|---:|---|---|
+| bge-m3 int8（Xenova/bge-m3） | 1024 | CLS | 569 MB | ✅ | 与默认同源的官方社区 int8 导出；仓库缺 `special_tokens_map.json`，安装时补齐 |
+| multilingual-e5-large quantized（Xenova） | 1024 | Mean | 562 MB | ✅ | e5 家族 1024 维版，需 `query:`/`passage:` 前缀 |
+| bge-m3 fp32（BAAI 官方 ONNX） | 1024 | CLS | 2162 MB | ❌ | 图 0.7 MB + `model.onnx_data` 外部权重，内存加载器无法解析，需先内联 |
+| bge-large-zh-v1.5 | 1024 | CLS | ~1.3 GB | ❌ | 仓库无 ONNX，需自行 `optimum` 导出 |
+
+禁用项说明：Xenova 的 `sentence_transformers_*` 变体把池化**烘焙进图**，再用我们的池化会得到无意义向量，因此明确排除。
+
+实现：`recommended_text_models.rs`（清单 + 安装 + 元数据合成）、IPC `list_recommended_text_models` / `install_recommended_text_model`、设置页新增「推荐模型」列表（已安装 / 下载安装 / 需自行导出）。

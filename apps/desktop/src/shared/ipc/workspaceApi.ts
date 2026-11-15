@@ -1522,3 +1522,33 @@ export function saveTextModelSettings(settings: {
 }): Promise<TextModelSettingsState> {
   return invoke('save_text_model_settings', { settings });
 }
+
+/** One curated text model the app can install and run as-is. */
+export type RecommendedTextModel = {
+  id: string;
+  display_name: string;
+  repository: string;
+  dimensions: number;
+  pooling: string;
+  onnx_path: string;
+  onnx_megabytes: number;
+  languages: string;
+  license: string;
+  note: string;
+  directly_installable: boolean;
+};
+
+export type RecommendedTextModelState = {
+  model: RecommendedTextModel;
+  installed_dir: string | null;
+  installed: boolean;
+};
+
+export function listRecommendedTextModels(): Promise<RecommendedTextModelState[]> {
+  return invoke('list_recommended_text_models');
+}
+
+/** Downloads a self-contained export; rejects entries that would need an export step. */
+export function installRecommendedTextModel(id: string): Promise<RecommendedTextModelState> {
+  return invoke('install_recommended_text_model', { id });
+}

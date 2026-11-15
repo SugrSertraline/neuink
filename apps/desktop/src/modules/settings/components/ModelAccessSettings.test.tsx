@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { ModelAccessSettings } from './ModelAccessSettings';
 import {
   getTextModelSettings,
+  listRecommendedTextModels,
   listTextModels,
   rebuildSearchIndex,
   saveTextModelSettings
@@ -12,6 +13,8 @@ import {
 vi.mock('@/shared/ipc/workspaceApi', () => ({
   getTextModelSettings: vi.fn(),
   listTextModels: vi.fn(),
+  listRecommendedTextModels: vi.fn(),
+  installRecommendedTextModel: vi.fn(),
   saveTextModelSettings: vi.fn(),
   rebuildSearchIndex: vi.fn()
 }));
@@ -50,6 +53,8 @@ afterEach(cleanup);
 beforeEach(() => {
   vi.mocked(getTextModelSettings).mockReset();
   vi.mocked(listTextModels).mockReset();
+  vi.mocked(listRecommendedTextModels).mockReset();
+  vi.mocked(listRecommendedTextModels).mockResolvedValue([]);
   vi.mocked(saveTextModelSettings).mockReset();
   vi.mocked(rebuildSearchIndex).mockReset();
 });
@@ -129,4 +134,5 @@ describe('ModelAccessSettings', () => {
     );
   });
 });
+
 

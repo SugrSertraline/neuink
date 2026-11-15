@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
 import {
   getTextModelSettings,
+  installRecommendedTextModel,
+  listRecommendedTextModels,
   listTextModels,
   rebuildSearchIndex,
   saveTextModelSettings,
+  type RecommendedTextModelState,
   type TextModelChoice,
   type TextModelSettingsState
 } from '@/shared/ipc/workspaceApi';
@@ -39,30 +42,56 @@ const LINKS: ReadonlyArray<{ label: string; note: string; href: string }> = [
 export function ModelAccessSettings({ active, root }: { active: boolean; root: string }) {
   const [choices, setChoices] = useState<TextModelChoice[]>([]);
   const [state, setState] = useState<TextModelSettingsState | null>(null);
+  const [recommended, setRecommended] = useState<RecommendedTextModelState[]>([]);
   const [selected, setSelected] = useState<string>('');
   const [custom, setCustom] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [installing, setInstalling] = useState<string | null>(null);
   const [rebuildNote, setRebuildNote] = useState<string | null>(null);
+
+  const reload = async () => {
+    const [models, current, recommendedStates] = await Promise.all([
+      listTextModels(),
+      getTextModelSettings(),
+      listRecommendedTextModels()
+    ]);
+    setChoices(models);
+    setState(current);
+    setRecommended(recommendedStates);
+    setSelected(current.model_dir ?? models.find((model) => model.bundled)?.path ?? '');
+    setCustom(current.model_dir ?? '');
+  };
 
   useEffect(() => {
     if (!active) return;
     let cancelled = false;
-    void Promise.all([listTextModels(), getTextModelSettings()])
-      .then(([models, current]) => {
-        if (cancelled) return;
-        setChoices(models);
-        setState(current);
-        setSelected(current.model_dir ?? models.find((model) => model.bundled)?.path ?? '');
-        setCustom(current.model_dir ?? '');
-      })
-      .catch(() => {
-        if (!cancelled) setError('未能读取文本嵌入模型设置。');
-      });
+    void reload().catch(() => {
+      if (!cancelled) setError('未能读取文本嵌入模型设置。');
+    });
     return () => {
       cancelled = true;
     };
   }, [active]);
+
+  const install = async (id: string) => {
+    setInstalling(id);
+    setError(null);
+    setRebuildNote(null);
+    try {
+      const installed = await installRecommendedTextModel(id);
+      await reload();
+      if (installed.installed_dir) {
+        setSelected(installed.installed_dir);
+        setCustom(installed.installed_dir);
+        setRebuildNote('模型已下载到本地目录，点“应用模型”后重建索引即可使用。');
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '未能安装推荐模型。');
+    } finally {
+      setInstalling(null);
+    }
+  };
 
   const apply = async () => {
     setBusy(true);
@@ -150,6 +179,41 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
           重建检索索引
         </Button>
       </div>
+      {recommended.length > 0 && (
+        <div className="mt-3 border-t border-border pt-2">
+          <p className="text-xs font-medium text-muted-foreground">推荐模型（按当前加载器的兼容性筛选）</p>
+          <ul className="mt-1 space-y-1">
+            {recommended.map((entry) => (
+              <li
+                key={entry.model.id}
+                className="flex flex-wrap items-baseline gap-x-2 text-xs leading-5 text-muted-foreground"
+                data-testid={`recommended-${entry.model.id}`}
+              >
+                <span className="font-medium text-foreground">{entry.model.display_name}</span>
+                <span>
+                  {entry.model.dimensions} 维 · {entry.model.onnx_megabytes} MB · {entry.model.pooling.toUpperCase()}{' '}
+                  池化 · {entry.model.languages} · {entry.model.license}
+                </span>
+                {entry.installed ? (
+                  <span className="text-foreground">已安装</span>
+                ) : entry.model.directly_installable ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={installing !== null}
+                    onClick={() => void install(entry.model.id)}
+                  >
+                    {installing === entry.model.id ? '下载中…' : '下载安装'}
+                  </Button>
+                ) : (
+                  <span>需自行导出</span>
+                )}
+                <span className="basis-full">{entry.model.note}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {rebuildNote && (
         <p className="mt-1 text-xs leading-5 text-muted-foreground" data-testid="text-model-note">
           {rebuildNote}
@@ -175,5 +239,6 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
     </SettingsGroup>
   );
 }
+
 
 
