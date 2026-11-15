@@ -2828,3 +2828,74 @@ pub fn save_retrieval_settings<R: tauri::Runtime>(
 }
 
 
+
+/// What the text model settings screen shows: the configured choice, the directory that
+/// would actually be loaded, and the manifest facts of that directory.
+#[derive(Debug, serde::Serialize)]
+pub struct TextModelSettingsState {
+    pub model_dir: Option<String>,
+    pub resolved_dir: String,
+    pub model_name: Option<String>,
+    pub dimensions: Option<usize>,
+    pub pooling: Option<String>,
+    pub available: bool,
+    pub message: Option<String>,
+}
+
+#[tauri::command]
+pub fn list_text_models<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<crate::commands::embedding_resources::TextModelChoice>, String> {
+    crate::commands::embedding_resources::list_text_models(&app)
+}
+
+#[tauri::command]
+pub fn get_text_model_settings<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<TextModelSettingsState, String> {
+    let settings = crate::storage::read_settings(&app)?.text_model;
+    let resolved = crate::commands::embedding_resources::embedding_model_dir(&app)?;
+    let provider = neuink_search::FastEmbedProvider::from_model_dir(resolved.clone());
+    let status = neuink_search::EmbeddingProvider::status(&provider);
+    Ok(TextModelSettingsState {
+        model_dir: settings.model_dir,
+        resolved_dir: resolved.to_string_lossy().to_string(),
+        model_name: status.model_name,
+        dimensions: status.dimensions,
+        pooling: status.message,
+        available: status.available,
+        message: None,
+    })
+}
+
+#[tauri::command]
+pub fn save_text_model_settings<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    settings: neuink_config::TextModelSettings,
+) -> Result<TextModelSettingsState, String> {
+    settings.validate()?;
+    // Refuse a directory that cannot serve the search path: shipping a setting that silently
+    // disables semantic retrieval would look like a search regression later.
+    if let Some(dir) = settings.model_dir.as_deref() {
+        let path = std::path::PathBuf::from(dir);
+        let provider = neuink_search::FastEmbedProvider::from_model_dir(path);
+        if !neuink_search::EmbeddingProvider::status(&provider).available {
+            return Err("该目录不是可用的文本嵌入模型（需 neuink-embedding.json 与 ONNX 权重）".to_string());
+        }
+    }
+    let mut saved = crate::storage::read_settings(&app)?;
+    saved.text_model = settings;
+    crate::storage::write_settings(&app, &saved)?;
+    let resolved = crate::commands::embedding_resources::embedding_model_dir(&app)?;
+    let provider = neuink_search::FastEmbedProvider::from_model_dir(resolved.clone());
+    let status = neuink_search::EmbeddingProvider::status(&provider);
+    Ok(TextModelSettingsState {
+        model_dir: saved.text_model.model_dir,
+        resolved_dir: resolved.to_string_lossy().to_string(),
+        model_name: status.model_name,
+        dimensions: status.dimensions,
+        pooling: None,
+        available: status.available,
+        message: status.message,
+    })
+}

@@ -163,6 +163,9 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
             commands::search::save_rerank_settings,
             commands::search::get_retrieval_settings,
             commands::search::save_retrieval_settings,
+            commands::search::list_text_models,
+            commands::search::get_text_model_settings,
+            commands::search::save_text_model_settings,
             commands::tag::create_tag,
             commands::tag::delete_tag,
             commands::tag::rename_tag,
@@ -197,5 +200,6 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
         handler(invoke)
     })
 }
+
 
 

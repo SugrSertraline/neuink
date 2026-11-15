@@ -29,6 +29,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub retrieval: RetrievalSettings,
     #[serde(default)]
+    pub text_model: TextModelSettings,
+    #[serde(default)]
     pub recent_workspaces: Vec<RecentWorkspace>,
     pub autosave_interval_ms: Option<u64>,
     pub theme: Option<String>,
@@ -696,4 +698,63 @@ mod retrieval_settings_tests {
 }
 
 
+
+
+/// Which text embedding model the search path uses.
+///
+/// `model_dir` is an absolute directory holding `neuink-embedding.json` plus an ONNX file;
+/// `None` means the bundled resource directory. The dimension and pooling come from that
+/// manifest, so switching models never needs a code change.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(default)]
+pub struct TextModelSettings {
+    /// Absolute model directory, or `None` for the bundled one.
+    pub model_dir: Option<String>,
+}
+
+impl TextModelSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        if let Some(dir) = self.model_dir.as_deref() {
+            if dir.trim().is_empty() {
+                return Err("文本嵌入模型目录不能是空串；留空表示使用内置模型".to_string());
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod text_model_settings_tests {
+    use super::TextModelSettings;
+
+    #[test]
+    fn the_bundled_model_is_the_default() {
+        let settings = TextModelSettings::default();
+        assert_eq!(settings.model_dir, None);
+        assert!(settings.validate().is_ok());
+    }
+
+    #[test]
+    fn an_empty_directory_is_rejected_but_an_absolute_one_is_accepted() {
+        let blank = TextModelSettings {
+            model_dir: Some("   ".to_string()),
+        };
+        assert!(blank.validate().is_err());
+        let absolute = TextModelSettings {
+            model_dir: Some(r"D:\models\bge-m3-int8".to_string()),
+        };
+        assert!(absolute.validate().is_ok());
+    }
+
+    #[test]
+    fn the_field_round_trips_and_older_settings_still_load() {
+        let encoded = serde_json::to_string(&TextModelSettings {
+            model_dir: Some("D:/m".to_string()),
+        })
+        .expect("encode");
+        assert!(encoded.contains("model_dir"));
+        let legacy: TextModelSettings = serde_json::from_str("{}").expect("legacy");
+        assert_eq!(legacy.model_dir, None);
+    }
+}
 

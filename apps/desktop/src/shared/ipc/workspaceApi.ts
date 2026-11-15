@@ -1487,3 +1487,38 @@ export async function rebuildSearchIndex(
   });
 }
 
+
+/** One selectable text embedding model directory that carries a manifest and ONNX file. */
+export type TextModelChoice = {
+  id: string;
+  model_name: string | null;
+  dimensions: number | null;
+  pooling: string | null;
+  path: string;
+  bundled: boolean;
+};
+
+/** Configured choice plus what would actually be loaded. */
+export type TextModelSettingsState = {
+  model_dir: string | null;
+  resolved_dir: string;
+  model_name: string | null;
+  dimensions: number | null;
+  pooling: string | null;
+  available: boolean;
+  message: string | null;
+};
+
+export function listTextModels(): Promise<TextModelChoice[]> {
+  return invoke('list_text_models');
+}
+
+export function getTextModelSettings(): Promise<TextModelSettingsState> {
+  return invoke('get_text_model_settings');
+}
+
+export function saveTextModelSettings(settings: {
+  model_dir: string | null;
+}): Promise<TextModelSettingsState> {
+  return invoke('save_text_model_settings', { settings });
+}

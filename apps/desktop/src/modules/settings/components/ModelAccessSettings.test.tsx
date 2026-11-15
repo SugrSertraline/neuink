@@ -1,0 +1,131 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { ModelAccessSettings } from './ModelAccessSettings';
+import {
+  getTextModelSettings,
+  listTextModels,
+  rebuildSearchIndex,
+  saveTextModelSettings
+} from '@/shared/ipc/workspaceApi';
+
+vi.mock('@/shared/ipc/workspaceApi', () => ({
+  getTextModelSettings: vi.fn(),
+  listTextModels: vi.fn(),
+  saveTextModelSettings: vi.fn(),
+  rebuildSearchIndex: vi.fn()
+}));
+
+const choices = [
+  {
+    id: 'default',
+    model_name: 'BAAI/bge-m3',
+    dimensions: 1024,
+    pooling: 'cls',
+    path: 'D:/models/default',
+    bundled: true
+  },
+  {
+    id: 'default-e5-small',
+    model_name: 'intfloat/multilingual-e5-small',
+    dimensions: 384,
+    pooling: 'mean',
+    path: 'D:/models/e5',
+    bundled: false
+  }
+];
+
+const current = {
+  model_dir: null,
+  resolved_dir: 'D:/models/default',
+  model_name: 'BAAI/bge-m3',
+  dimensions: 1024,
+  pooling: null,
+  available: true,
+  message: null
+};
+
+afterEach(cleanup);
+
+beforeEach(() => {
+  vi.mocked(getTextModelSettings).mockReset();
+  vi.mocked(listTextModels).mockReset();
+  vi.mocked(saveTextModelSettings).mockReset();
+  vi.mocked(rebuildSearchIndex).mockReset();
+});
+
+describe('ModelAccessSettings', () => {
+  it('stays idle until its tab is active', () => {
+    render(<ModelAccessSettings active={false} root="/lib" />);
+    expect(listTextModels).not.toHaveBeenCalled();
+  });
+
+  it('shows the loaded model with its dimension and directory', async () => {
+    vi.mocked(listTextModels).mockResolvedValue(choices);
+    vi.mocked(getTextModelSettings).mockResolvedValue(current);
+    render(<ModelAccessSettings active root="/lib" />);
+    await waitFor(() =>
+      expect(screen.getByTestId('text-model-status').textContent).toContain('BAAI/bge-m3，1024 维')
+    );
+  });
+
+  it('offers the model pages so a missing model can be obtained', async () => {
+    vi.mocked(listTextModels).mockResolvedValue(choices);
+    vi.mocked(getTextModelSettings).mockResolvedValue(current);
+    render(<ModelAccessSettings active root="/lib" />);
+    await waitFor(() => expect(screen.getByText('BAAI/bge-m3')).toBeDefined());
+    const links = screen
+      .getAllByRole('link')
+      .map((element) => element.getAttribute('href') ?? '');
+    expect(links).toContain('https://huggingface.co/intfloat/multilingual-e5-small');
+    expect(links).toContain('https://huggingface.co/Qwen/Qwen3-VL-Embedding-2B');
+  });
+
+  it('saves a custom directory and warns that the index must be rebuilt', async () => {
+    vi.mocked(listTextModels).mockResolvedValue(choices);
+    vi.mocked(getTextModelSettings).mockResolvedValue(current);
+    vi.mocked(saveTextModelSettings).mockResolvedValue({ ...current, model_dir: 'D:/models/e5' });
+    render(<ModelAccessSettings active root="/lib" />);
+    await waitFor(() => expect(getTextModelSettings).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByLabelText('文本嵌入模型目录'), { target: { value: 'D:/models/e5' } });
+    fireEvent.click(screen.getByRole('button', { name: '应用模型' }));
+    await waitFor(() =>
+      expect(saveTextModelSettings).toHaveBeenCalledWith({ model_dir: 'D:/models/e5' })
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('text-model-note').textContent).toContain('请重建')
+    );
+  });
+
+  it('rebuilds the index and reports the vector count', async () => {
+    vi.mocked(listTextModels).mockResolvedValue(choices);
+    vi.mocked(getTextModelSettings).mockResolvedValue(current);
+    vi.mocked(rebuildSearchIndex).mockResolvedValue({
+      status: { scope: 'segments', semantic_status: 'ready_memory' } as never,
+      rebuilt_vector_count: 331
+    });
+    render(<ModelAccessSettings active root="/lib" />);
+    await waitFor(() => expect(getTextModelSettings).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole('button', { name: '重建检索索引' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('text-model-note').textContent).toContain('331 个向量')
+    );
+  });
+
+  it('keeps the backend rejection message', async () => {
+    vi.mocked(listTextModels).mockResolvedValue(choices);
+    vi.mocked(getTextModelSettings).mockResolvedValue(current);
+    vi.mocked(saveTextModelSettings).mockRejectedValue(
+      new Error('该目录不是可用的文本嵌入模型（需 neuink-embedding.json 与 ONNX 权重）')
+    );
+    render(<ModelAccessSettings active root="/lib" />);
+    await waitFor(() => expect(getTextModelSettings).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole('button', { name: '应用模型' }));
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toContain('不是可用的文本嵌入模型')
+    );
+  });
+});
