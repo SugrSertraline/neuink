@@ -25,6 +25,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub visual: VisualEmbeddingSettings,
     #[serde(default)]
+    pub rerank: RerankSettings,
+    #[serde(default)]
     pub recent_workspaces: Vec<RecentWorkspace>,
     pub autosave_interval_ms: Option<u64>,
     pub theme: Option<String>,
@@ -523,6 +525,128 @@ mod visual_settings_tests {
         fusion.text_weight = 0.0;
         fusion.visual_weight = 0.0;
         assert!(fusion.validate().is_err());
+    }
+}
+
+
+/// Which rerank stage runs after fusion.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RerankMode {
+    /// No rerank stage. The measured default: field-coverage fusion already orders the
+    /// head, and a cross-encoder costs 1.2–4.7 s per query on CPU for a thin gain.
+    #[default]
+    Off,
+    /// Model-free field coverage. Cheap, and the fallback stage of the ladder.
+    Heuristic,
+    /// Local cross-encoder over the head of the fused list.
+    CrossEncoder,
+}
+
+impl RerankMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Heuristic => "heuristic",
+            Self::CrossEncoder => "cross_encoder",
+        }
+    }
+}
+
+fn default_rerank_max_candidates() -> usize {
+    20
+}
+
+/// Rerank ladder: `CrossEncoder → Heuristic → fused order`.
+///
+/// A model that is missing, fails to load, or errors mid-scoring must never break a
+/// search: the stage falls back to the model-free heuristic when allowed, and otherwise
+/// leaves the fused order untouched. Which rung ran is reported per task.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(default)]
+pub struct RerankSettings {
+    pub mode: RerankMode,
+    /// Cross-encoder directory; empty means the bundled resource path.
+    #[serde(default)]
+    pub model_dir: Option<String>,
+    /// Head of the fused list that a cross-encoder is allowed to score.
+    #[serde(default = "default_rerank_max_candidates")]
+    pub max_candidates: usize,
+    /// When the cross-encoder cannot run, fall back to field coverage instead of the
+    /// fused order alone.
+    #[serde(default = "default_true")]
+    pub fallback_heuristic: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for RerankSettings {
+    fn default() -> Self {
+        Self {
+            mode: RerankMode::Off,
+            model_dir: None,
+            max_candidates: default_rerank_max_candidates(),
+            fallback_heuristic: true,
+        }
+    }
+}
+
+impl RerankSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.max_candidates == 0 || self.max_candidates > 200 {
+            return Err("重排候选上限必须在 1 到 200 之间".to_string());
+        }
+        if self.mode == RerankMode::CrossEncoder {
+            if let Some(model_dir) = self.model_dir.as_deref() {
+                if model_dir.trim().is_empty() {
+                    return Err("选择本地重排模型时目录不能为空串，留空表示使用内置路径".to_string());
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod rerank_settings_tests {
+    use super::{RerankMode, RerankSettings};
+
+    #[test]
+    fn the_default_is_off_with_a_bounded_head() {
+        let settings = RerankSettings::default();
+        assert_eq!(settings.mode, RerankMode::Off);
+        assert_eq!(settings.mode.as_str(), "off");
+        assert_eq!(settings.max_candidates, 20);
+        assert!(settings.fallback_heuristic);
+        assert!(settings.validate().is_ok());
+    }
+
+    #[test]
+    fn the_candidate_bound_is_enforced() {
+        let mut settings = RerankSettings::default();
+        settings.max_candidates = 0;
+        assert!(settings.validate().is_err());
+        settings.max_candidates = 201;
+        assert!(settings.validate().is_err());
+        settings.max_candidates = 200;
+        assert!(settings.validate().is_ok());
+    }
+
+    #[test]
+    fn an_empty_directory_string_is_rejected_for_the_model_mode() {
+        let mut settings = RerankSettings {
+            mode: RerankMode::CrossEncoder,
+            ..RerankSettings::default()
+        };
+        settings.model_dir = Some("   ".to_string());
+        assert!(settings.validate().is_err());
+        settings.model_dir = Some(r"D:\models\reranker".to_string());
+        assert!(settings.validate().is_ok());
+        // Omitted directory is valid: it means the bundled resource path.
+        settings.model_dir = None;
+        assert!(settings.validate().is_ok());
     }
 }
 

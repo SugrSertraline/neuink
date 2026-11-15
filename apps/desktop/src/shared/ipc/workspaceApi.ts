@@ -1253,6 +1253,10 @@ export type UnifiedSearchTaskWire = {
   carrier_applied: boolean;
   mode: string;
   total_hit_count: number;
+  /** Which rerank rung ran: `off`, `heuristic`, `cross_encoder`, `fused`. */
+  rerank_used: string;
+  /** Why a rung was skipped: `model_unavailable`, `provider_error`. */
+  rerank_reason?: string | null;
   results: SearchResults;
 };
 
@@ -1332,6 +1336,33 @@ export function saveVisualEmbeddingSettings(
   settings: VisualEmbeddingSettingsInput
 ): Promise<VisualEmbeddingSettingsState> {
   return invoke('save_visual_embedding_settings', { settings });
+}
+
+/** Which rerank stage runs after fusion. */
+export type RerankMode = 'off' | 'heuristic' | 'cross_encoder';
+
+/** Rerank ladder: cross-encoder -> field coverage -> fused order. */
+export type RerankSettings = {
+  mode: RerankMode;
+  /** Cross-encoder directory; `null` means the bundled resource path. */
+  model_dir: string | null;
+  /** Head of the fused list a cross-encoder may score. */
+  max_candidates: number;
+  /** Fall back to field coverage when the encoder cannot run. */
+  fallback_heuristic: boolean;
+};
+
+export type RerankSettingsState = RerankSettings & {
+  /** Whether a model file is actually present at the resolved directory. */
+  model_present: boolean;
+};
+
+export function getRerankSettings(): Promise<RerankSettingsState> {
+  return invoke('get_rerank_settings');
+}
+
+export function saveRerankSettings(settings: RerankSettings): Promise<RerankSettingsState> {
+  return invoke('save_rerank_settings', { settings });
 }
 
 /**
@@ -1460,3 +1491,4 @@ export async function rebuildSearchIndex(
     }
   });
 }
+

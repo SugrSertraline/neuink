@@ -1,6 +1,7 @@
 mod document_builder;
 mod carrier_binding;
 mod document_head;
+mod heuristic_rerank;
 mod embedding_provider_trait;
 mod embedding_representation;
 mod error;
@@ -9,6 +10,12 @@ mod memory_index;
 mod persistent_semantic_index;
 mod query;
 mod query_plan;
+mod rerank_hits;
+mod reranking;
+#[cfg(test)]
+mod reranking_tests;
+#[cfg(all(test, feature = "local-embedding"))]
+mod reranking_local_tests;
 mod result;
 mod retrieval_pipeline;
 #[cfg(test)]
@@ -43,6 +50,14 @@ pub use persistent_semantic_index::{
 };
 pub use query::{SearchInclude, SearchMode, SearchQuery, SearchScope};
 pub use query_plan::{infer_query_plan, QueryModality, QueryPlan};
+#[cfg(feature = "local-embedding")]
+pub use reranking::LocalReranker;
+pub use rerank_hits::rerank_hits_with_provider;
+pub use reranking::{
+    rerank_candidates, LocalRerankerOptions, RerankCandidate, RerankError, RerankProvider,
+    RerankResult, RerankScore, RerankedCandidate, DEFAULT_RERANK_MAX_CANDIDATES,
+    RERANK_MAX_CANDIDATES_LIMIT, RERANK_MAX_LENGTH,
+};
 pub use result::{
     SearchDocument, SearchDocumentSource, SearchDocumentSourceKind, SearchEntryGroup, SearchHit,
     SearchResults, SearchTarget, SearchTextSection,
@@ -62,6 +77,10 @@ pub use vector_store_trait::{VectorRecord, VectorSearchHit, VectorStore};
 pub use carrier_binding::{
     apply_to_query, parse_binding, Carrier, CarrierBinding, CarrierConstraint, CarrierKind,
     UnboundReason,
+};
+pub use heuristic_rerank::{
+    extract_query_fields, field_coverage, rerank_hits_by_coverage, FieldCoverageWeights,
+    QueryFields,
 };
 pub use document_head::{
     document_head, document_pairs, documents_for_pairs, DocumentHead, DocumentHeadConfig, HeadSkip,

@@ -160,6 +160,8 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
             commands::search::prepare_visual_search_index,
             commands::search::get_visual_embedding_settings,
             commands::search::save_visual_embedding_settings,
+            commands::search::get_rerank_settings,
+            commands::search::save_rerank_settings,
             commands::tag::create_tag,
             commands::tag::delete_tag,
             commands::tag::rename_tag,

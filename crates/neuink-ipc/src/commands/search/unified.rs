@@ -79,13 +79,20 @@ pub struct UnifiedTaskOutput {
     pub carrier_applied: bool,
     pub mode: String,
     pub total_hit_count: usize,
+    /// Which rerank rung ran: `off`, `heuristic`, `cross_encoder`, `fused`.
+    pub rerank_used: &'static str,
+    /// Why a rung was skipped: `model_unavailable`, `provider_error`.
+    pub rerank_reason: Option<&'static str>,
     pub results: SearchResults,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn run_unified_search(
     model_dir: PathBuf,
     visual_provider: Arc<dyn neuink_search::VisualEmbeddingProvider>,
     fusion: neuink_config::VisualFusionSettings,
+    rerank: neuink_config::RerankSettings,
+    rerank_provider: Option<Arc<dyn neuink_search::RerankProvider>>,
     request: UnifiedSearchRequest,
 ) -> Result<UnifiedSearchResponse, String> {
     let question = request.question.trim().to_string();
@@ -192,12 +199,17 @@ pub(super) fn run_unified_search(
         tasks: output
             .tasks
             .into_iter()
-            .map(|task| UnifiedTaskOutput {
-                question: task.question,
-                carrier_applied: task.carrier_applied,
-                mode: task.results.mode.clone(),
-                total_hit_count: task.results.total_hit_count,
-                results: task.results,
+            .map(|task| {
+                let reranked = rerank_task_results(task.results, &task.question, &rerank, rerank_provider.as_deref());
+                UnifiedTaskOutput {
+                    question: task.question,
+                    carrier_applied: task.carrier_applied,
+                    mode: reranked.0.mode.clone(),
+                    total_hit_count: reranked.0.total_hit_count,
+                    rerank_used: reranked.1.used,
+                    rerank_reason: reranked.1.reason,
+                    results: reranked.0,
+                }
             })
             .collect(),
         degradations: output
@@ -206,6 +218,37 @@ pub(super) fn run_unified_search(
             .map(Degradation::code)
             .collect(),
     })
+}
+
+/// Applies the rerank ladder to one task's hits and rebuilds the grouped results.
+///
+/// The ladder never fails a search: a missing or broken encoder falls back to field
+/// coverage (or to the fused order), and the rung that ran is reported on the task.
+fn rerank_task_results(
+    results: SearchResults,
+    question: &str,
+    settings: &neuink_config::RerankSettings,
+    provider: Option<&dyn neuink_search::RerankProvider>,
+) -> (SearchResults, super::rerank_stage::RerankOutcome) {
+    if settings.mode == neuink_config::RerankMode::Off {
+        return (
+            results,
+            super::rerank_stage::RerankOutcome {
+                used: super::rerank_stage::RERANK_OFF,
+                reason: None,
+            },
+        );
+    }
+    let query = results.query.clone();
+    let mode = results.mode.clone();
+    let generation = results.index_generation;
+    let warnings = results.warnings.clone();
+    let hits = neuink_search::ordered_hits(&results);
+    let (ordered, outcome) = super::rerank_stage::apply_rerank(hits, question, settings, provider);
+    (
+        neuink_search::results_from_hits(query, mode, generation, ordered, warnings),
+        outcome,
+    )
 }
 
 /// The evidence channel over the prepared indexes: one query, both channels,

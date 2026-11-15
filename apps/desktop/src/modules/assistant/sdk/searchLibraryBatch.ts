@@ -38,6 +38,12 @@ const UNIFIED_VISUAL_STATUS_COPY: Record<string, string> = {
   index_missing: '视觉索引尚未构建，本次仅使用文本通道。'
 };
 
+/** Rerank ladder reason copy. The rung that ran is reported on the task itself. */
+const UNIFIED_RERANK_COPY: Record<string, string> = {
+  model_unavailable: '本地重排模型未安装，已退回字段覆盖排序。',
+  provider_error: '重排模型调用失败，已退回字段覆盖排序。'
+};
+
 function hitIdentity(hit: SearchResults['entries'][number]['hits'][number]): string {
   const target = hit.target;
   if (target.kind === 'segment') return `s:${target.entry_id}:${target.segment_uid}`;
@@ -100,6 +106,12 @@ function outcomeFromUnified(
   const statusCopy = UNIFIED_VISUAL_STATUS_COPY[response.visual_status];
   if (statusCopy && !warnings.includes(statusCopy)) {
     warnings.push(statusCopy);
+  }
+  for (const task of response.tasks) {
+    const rerankCopy = task.rerank_reason ? UNIFIED_RERANK_COPY[task.rerank_reason] : undefined;
+    if (rerankCopy && !warnings.includes(rerankCopy)) {
+      warnings.push(rerankCopy);
+    }
   }
   const merged = mergeUnifiedResults(response, request.query);
   if (!merged) {

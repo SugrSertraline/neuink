@@ -63,7 +63,7 @@ function unified(overrides: Partial<UnifiedSearchResponse> = {}): UnifiedSearchR
     visual_status: 'disabled',
     carriers: [],
     tasks: [
-      { question: '方法？', carrier_applied: false, mode: 'hybrid', total_hit_count: 1, results: results() }
+      { question: '方法？', carrier_applied: false, mode: 'hybrid', total_hit_count: 1, rerank_used: 'off', results: results() }
     ],
     degradations: [],
     ...overrides
@@ -115,8 +115,8 @@ describe('unified retrieval batch', () => {
     vi.mocked(searchUnified).mockReset().mockResolvedValue(
       unified({
         tasks: [
-          { question: '方法？', carrier_applied: false, mode: 'hybrid', total_hit_count: 1, results: results() },
-          { question: 'baseline？', carrier_applied: true, mode: 'hybrid', total_hit_count: 1, results: results() }
+          { question: '方法？', carrier_applied: false, mode: 'hybrid', total_hit_count: 1, rerank_used: 'off', results: results() },
+          { question: 'baseline？', carrier_applied: true, mode: 'hybrid', total_hit_count: 1, rerank_used: 'off', results: results() }
         ]
       })
     );
@@ -152,7 +152,7 @@ describe('unified retrieval batch', () => {
     vi.mocked(searchUnified).mockReset().mockResolvedValue(
       unified({
         tasks: [
-          { question: '方法？', carrier_applied: false, mode: 'hybrid', total_hit_count: 1, results: results('z') }
+          { question: '方法？', carrier_applied: false, mode: 'hybrid', total_hit_count: 1, rerank_used: 'off', results: results('z') }
         ]
       })
     );
@@ -182,3 +182,4 @@ describe('unified retrieval batch', () => {
     expect(searchUnified).not.toHaveBeenCalled();
   });
 });
+

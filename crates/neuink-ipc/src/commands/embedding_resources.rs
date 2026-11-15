@@ -48,3 +48,39 @@ pub fn embedding_model_dir<R: tauri::Runtime>(
         .next()
         .unwrap_or_else(|| PathBuf::from(DEFAULT_EMBEDDING_MODEL_RESOURCE_DIR)))
 }
+
+/// Bundled cross-encoder directory (`embedding-models/reranker`).
+///
+/// Feature-free resolution, like `visual_model_dir`: it checks for the ONNX file instead
+/// of asking the reranker type, so a build without `local-embedding` reports the same path
+/// and the rerank stage simply falls back.
+pub fn rerank_model_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, String> {
+    const RERANK_DIR: &str = "embedding-models/reranker";
+
+    let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|parent| parent.to_path_buf()));
+    let mut candidates = vec![
+        resource_dir.join(RERANK_DIR),
+        resource_dir.join("resources").join(RERANK_DIR),
+    ];
+    if let Some(exe_dir) = exe_dir {
+        candidates.push(exe_dir.join(RERANK_DIR));
+        candidates.push(exe_dir.join("resources").join(RERANK_DIR));
+    }
+    candidates.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../apps/desktop/src-tauri/resources")
+            .join(RERANK_DIR),
+    );
+    for candidate in &candidates {
+        if ["onnx/model_int8.onnx", "onnx/model.onnx", "model.onnx"]
+            .iter()
+            .any(|relative| candidate.join(relative).is_file())
+        {
+            return Ok(candidate.clone());
+        }
+    }
+    Ok(candidates.into_iter().next().unwrap_or_else(|| PathBuf::from(RERANK_DIR)))
+}

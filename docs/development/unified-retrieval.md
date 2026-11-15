@@ -71,3 +71,39 @@
 - 字段覆盖重排、真实版面 crop（替代几何四等分）均未接入产品。
 - 字段覆盖重排、真实布局 crop（替代几何四等分）均未接入产品。
 - 宿主开关：`createAssistantTools({ unifiedRetrieval })` 已透传到批次适配器，但 `qna.ts` 等调用方未设置，生产默认关闭。
+
+## 7. 重排阶梯（cross-encoder / 无模型 / 降级）
+
+重排是可选的第三段，阶梯固定为 **cross-encoder → 字段覆盖（无模型）→ 融合序**，每次任务都会报告实际用哪一档。
+
+| 设置 `rerank.mode` | 行为 | 体积 |
+|---|---|---|
+| `off`（默认） | 不重排 | 0 |
+| `heuristic` | 字段覆盖重排：数字/指标词/实体加权，命中查询词才生效 | 0 |
+| `cross_encoder` | 本地 ONNX 交叉编码器，只判头部 `max_candidates`（默认 20） | 279 MB（base int8）/ 570 MB（m3 int8） |
+
+降级规则：模型缺失 → `used=heuristic, reason=model_unavailable`；推理失败 → `used=heuristic, reason=provider_error`；`fallback_heuristic=false` 时两档都退回 `used=fused`。单条命中不触发重排。模型目录按目录+mtime 缓存，加载失败也缓存，避免每查询重试 279 MB 模型。
+
+### 接入 cross-encoder
+
+```text
+apps/desktop/src-tauri/resources/embedding-models/reranker/
+  onnx/model_int8.onnx          # 优先；也接受 onnx/model.onnx、model.onnx
+  tokenizer.json
+  config.json
+  special_tokens_map.json
+  tokenizer_config.json
+```
+
+导出与量化（本机已验证）：m3 用 `torch.onnx.export` + `quantize_dynamic` → 569.6 MB，fp32 数值差 1e-05；base 上游自带 fp32 ONNX（1112 MB），量化后 **278.9 MB**，top1/top3 排序与 torch 一致。模型字节不进仓库，由设置 `rerank.model_dir` 指向任意目录。
+
+### 实测选择依据（40 题、真实候选池、头部 20）
+
+| 路线 | R@1 | R@5 | R@10 | nDCG@5 | 每查询 |
+|---|---:|---:|---:|---:|---:|
+| 融合（已含字段覆盖） | 0.300 | 0.450 | 0.475 | 0.391 | — |
+| +启发式 | 0.300 | 0.450 | 0.475 | 0.385 | ≈0 |
+| +base int8 @256 | 0.350 | 0.425 | 0.475 | 0.385 | 1.2 s |
+| +m3 int8 @256 | 0.325 | 0.475 | 0.475 | 0.399 | 4.2 s |
+
+结论：**R@10 由头部宽度与池覆盖决定，重排改变不了**（池覆盖 0.700，头部 20 后上限 0.475）；重排只影响 R@1/nDCG@5，CPU 代价 1.2–4.2 s。所以默认 `off`，字段覆盖留在融合臂里，不重复施加同一信号。

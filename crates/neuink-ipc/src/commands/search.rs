@@ -21,9 +21,10 @@ use neuink_workspace::{
 };
 use serde::{de::IgnoredAny, Deserialize, Serialize};
 
-use super::embedding_resources::embedding_model_dir;
+use super::embedding_resources::{embedding_model_dir, rerank_model_dir};
 
 mod unified;
+mod rerank_stage;
 mod visual;
 mod visual_qwen;
 
@@ -2610,11 +2611,28 @@ pub async fn search_unified<R: tauri::Runtime>(
     request: UnifiedSearchRequest,
 ) -> Result<UnifiedSearchResponse, String> {
     let model_dir = embedding_model_dir(&app)?;
-    let settings = crate::storage::read_settings(&app)?.visual;
+    let saved = crate::storage::read_settings(&app)?;
+    let settings = saved.visual;
     let visual_provider = visual::provider_for(&settings);
     let fusion = settings.fusion;
+    let rerank_settings = saved.rerank;
+    // Only a cross-encoder run needs the model; the heuristic rung is model-free.
+    let rerank_provider: Option<Arc<dyn neuink_search::RerankProvider>> =
+        if rerank_settings.mode == neuink_config::RerankMode::CrossEncoder {
+            let dir = rerank_model_dir(&app)?;
+            rerank_stage::reranker_for(&dir).map(|reranker| reranker as Arc<dyn neuink_search::RerankProvider>)
+        } else {
+            None
+        };
     tokio::task::spawn_blocking(move || {
-        unified::run_unified_search(model_dir, visual_provider, fusion, request)
+        unified::run_unified_search(
+            model_dir,
+            visual_provider,
+            fusion,
+            rerank_settings,
+            rerank_provider,
+            request,
+        )
     })
     .await
     .map_err(|error| error.to_string())?
@@ -2638,3 +2656,60 @@ pub async fn prepare_visual_search_index<R: tauri::Runtime>(
 
 #[cfg(test)]
 mod visual_service_tests;
+
+/// Which rerank rung is configured, with the model directory it would load.
+#[derive(Debug, serde::Serialize)]
+pub struct RerankSettingsState {
+    pub mode: &'static str,
+    pub model_dir: Option<String>,
+    pub max_candidates: usize,
+    pub fallback_heuristic: bool,
+    /// Whether a model is actually present at the resolved directory. A settings screen
+    /// needs this to tell "configured but not installed" from "working".
+    pub model_present: bool,
+}
+
+impl RerankSettingsState {
+    fn from_settings(settings: &neuink_config::RerankSettings, model_present: bool) -> Self {
+        Self {
+            mode: settings.mode.as_str(),
+            model_dir: settings.model_dir.clone(),
+            max_candidates: settings.max_candidates,
+            fallback_heuristic: settings.fallback_heuristic,
+            model_present,
+        }
+    }
+}
+
+#[tauri::command]
+pub fn get_rerank_settings<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<RerankSettingsState, String> {
+    let settings = crate::storage::read_settings(&app)?.rerank;
+    let resolved = settings
+        .model_dir
+        .as_deref()
+        .map(PathBuf::from)
+        .unwrap_or(rerank_model_dir(&app)?);
+    let model_present = rerank_stage::reranker_for(&resolved).is_some();
+    Ok(RerankSettingsState::from_settings(&settings, model_present))
+}
+
+#[tauri::command]
+pub fn save_rerank_settings<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    settings: neuink_config::RerankSettings,
+) -> Result<RerankSettingsState, String> {
+    settings.validate()?;
+    let mut saved = crate::storage::read_settings(&app)?;
+    saved.rerank = settings;
+    crate::storage::write_settings(&app, &saved)?;
+    let resolved = saved
+        .rerank
+        .model_dir
+        .as_deref()
+        .map(PathBuf::from)
+        .unwrap_or(rerank_model_dir(&app)?);
+    let model_present = rerank_stage::reranker_for(&resolved).is_some();
+    Ok(RerankSettingsState::from_settings(&saved.rerank, model_present))
+}
