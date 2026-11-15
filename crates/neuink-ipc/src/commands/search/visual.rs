@@ -96,7 +96,7 @@ impl VisualRecall for VisualChannel {
 /// Builds the provider named by the settings. Both transports return the same trait
 /// object, so every caller below is provider-agnostic: local or remote is a settings
 /// change, never a code path.
-pub(super) fn provider_for(settings: &VisualEmbeddingSettings) -> Arc<dyn VisualEmbeddingProvider> {
+pub fn provider_for(settings: &VisualEmbeddingSettings) -> Arc<dyn VisualEmbeddingProvider> {
     let endpoint = settings.endpoint.clone().unwrap_or_default();
     let timeout = std::time::Duration::from_millis(settings.timeout_ms.max(1));
     match settings.provider {
@@ -163,7 +163,7 @@ pub(super) fn visual_channel(
 
 /// Encodes and stores every asset of the requested scope. Reads the workspace, writes
 /// only the cache snapshot.
-pub(super) fn prepare_visual_index(
+pub fn prepare_visual_index(
     provider: Arc<dyn VisualEmbeddingProvider>,
     request: PrepareVisualSearchIndexRequest,
 ) -> Result<PrepareVisualSearchIndexResponse, String> {
@@ -245,14 +245,44 @@ pub(super) fn prepare_visual_index(
         &|_, _| {},
     )
     .map_err(|error| {
-        if cfg!(test) {
+        if cfg!(test) || std::env::var_os("NEUINK_VISUAL_DEBUG").is_some() {
+            // A failing prepare must say which sources it could not account for: the
+            // settings screen only shows the fixed message.
+            let unaccounted = documents
+                .iter()
+                .filter(|document| {
+                    !asset_bytes.contains_key(&document.key())
+                        && !precomputed.contains_key(&document.key())
+                })
+                .take(5)
+                .map(|document| {
+                    format!(
+                        "{} kind={:?} page={:?} region={:?}",
+                        document.key(),
+                        document.kind,
+                        document.page_idx,
+                        document.region
+                    )
+                })
+                .collect::<Vec<_>>();
+            let page_doc_keys = documents
+                .iter()
+                .filter(|document| {
+                    document.region.is_none()
+                        && document.kind == neuink_search::VisualSourceKind::Page
+                })
+                .take(3)
+                .map(VisualIndexDocument::key)
+                .collect::<Vec<_>>();
+            let pre_keys = precomputed.keys().take(3).cloned().collect::<Vec<_>>();
+            eprintln!("visual prepare: page_doc_keys={page_doc_keys:?} precomputed_keys={pre_keys:?}");
             eprintln!(
-                "visual prepare: docs={} assets={} precomputed={} sample_doc={:?} sample_pre={:?}",
+                "visual prepare: docs={} assets={} precomputed={} page_entries={} unaccounted={:?}",
                 documents.len(),
                 asset_bytes.len(),
                 precomputed.len(),
-                documents.first().map(|document| document.key()),
-                precomputed.keys().next()
+                page_requests.len(),
+                unaccounted
             );
         }
         error.to_string()
@@ -488,6 +518,12 @@ fn page_key(
         .iter()
         .find(|document| {
             document.entry_id == entry_id
+                // Page sources only: MinerU assets also carry a page index and no region,
+                // so page/region alone would collide with a figure.
+                && matches!(
+                    document.kind,
+                    neuink_search::VisualSourceKind::Page | neuink_search::VisualSourceKind::Region
+                )
                 && document.page_idx == Some(page)
                 && document.region == region
         })
@@ -686,4 +722,17 @@ mod tests {
         assert_eq!(after.assets.len(), 2);
         std::fs::remove_dir_all(&root).ok();
     }
+    #[test]
+    fn a_page_source_never_resolves_to_a_mineru_asset_on_the_same_page() {
+        // Regression: MinerU assets carry a page index and no region, so matching only on
+        // page/region used to return the asset key and left the page document vectorless.
+        let figure = document_from_asset(&asset(Some(3)));
+        let page = page_document("entry-1", "pdf-hash", 3, None);
+        let documents = vec![figure, page.clone()];
+        assert_eq!(page_key(&documents, "entry-1", 3, None), Some(page.key()));
+        let crop = page_document("entry-1", "pdf-hash", 3, Some(2));
+        let documents = vec![document_from_asset(&asset(Some(3))), crop.clone()];
+        assert_eq!(page_key(&documents, "entry-1", 3, Some(2)), Some(crop.key()));
+    }
 }
+

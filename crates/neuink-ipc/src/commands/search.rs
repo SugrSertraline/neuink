@@ -23,10 +23,10 @@ use serde::{de::IgnoredAny, Deserialize, Serialize};
 
 use super::embedding_resources::{embedding_model_dir, rerank_model_dir};
 
-mod unified;
-mod rerank_stage;
-mod visual;
-mod visual_qwen;
+pub mod unified;
+pub mod rerank_stage;
+pub mod visual;
+pub mod visual_qwen;
 #[cfg(test)]
 mod rerank_batch_tests;
 
@@ -802,7 +802,7 @@ fn get_search_index_status_impl(
     })
 }
 
-fn rebuild_search_index_impl(
+pub fn rebuild_search_index_impl(
     embedding_model_dir: PathBuf,
     request: RebuildSearchIndexRequest,
 ) -> Result<RebuildSearchIndexResponse, String> {
@@ -2814,3 +2814,4 @@ pub fn save_retrieval_settings<R: tauri::Runtime>(
         unified: saved.retrieval.unified,
     })
 }
+

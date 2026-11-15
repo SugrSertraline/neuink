@@ -101,14 +101,14 @@ fn fall_back(
 /// A settings screen asks "is the model installed", not "does inference work". Loading a
 /// 279 MB ONNX graph takes seconds and is a live read that changes nothing about the
 /// answer, so presence is answered by the file layout that `LocalReranker` looks for.
-pub(super) fn reranker_model_present(model_dir: &Path) -> bool {
+pub fn reranker_model_present(model_dir: &Path) -> bool {
     const CANDIDATES: [&str; 3] = ["onnx/model_int8.onnx", "onnx/model.onnx", "model.onnx"];
     CANDIDATES
         .iter()
         .any(|relative| model_dir.join(relative).is_file())
 }
 
-pub(super) fn reranker_for(model_dir: &Path) -> Option<Arc<neuink_search::LocalReranker>> {
+pub fn reranker_for(model_dir: &Path) -> Option<Arc<neuink_search::LocalReranker>> {
     #[cfg(not(feature = "local-embedding"))]
     {
         let _ = model_dir;
@@ -322,3 +322,4 @@ mod tests {
         assert_eq!(ordered[0].snippet, "accuracy 91.2 percent on the test split");
     }
 }
+

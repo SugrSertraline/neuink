@@ -122,3 +122,20 @@ apps/desktop/src-tauri/resources/embedding-models/reranker/
 | 设置页 | 检索与工具 → 检索路径 → 使用组合检索 | 单个开关；保存被拒会回滚开关 |
 
 关闭时全链路退回批次检索；开启后视觉投票、文档路由、载体绑定与重排阶梯才进入真实提问。
+
+## 9. 一次调用跑完整条检索（retrieval-probe）
+
+```powershell
+cargo run -p neuink-ipc --bin retrieval-probe -- `
+  --root <库路径> `
+  --model-dir apps/desktop/src-tauri/resources/embedding-models/default `
+  --question "what accuracy does table 11 report?" `
+  [--build-text-index] [--prepare-visual] [--visual-endpoint http://127.0.0.1:8765] `
+  [--rerank-mode off|heuristic|cross_encoder] [--rerank-dir <模型目录>] [--skip-visual]
+```
+
+输出一份 JSON：`text_model`（是否可用/维度/名称）、`text_index`（构建耗时与向量数）、`visual_prepare`（1 篇 / 23 资产 / 128 向量源 / 405 ms）、`routing`（论文、跳过原因、文本与视觉条目数、`visual_status`、门控）、`carriers`、`tasks`（命中数、`rerank_used`/`rerank_reason`、前三条），以及 `timing_ms`。
+
+实测（dev 库，stub 视觉服务 + base int8 重排）：`visual_status=ready`、`rerank_used=cross_encoder`、检索 2.87 s、准备索引 405 ms。
+
+`NEUINK_VISUAL_DEBUG=1` 时，准备失败会打印未能归因的文档（entry/kind/page/region），便于定位源不一致。

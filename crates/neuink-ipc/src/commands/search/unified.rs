@@ -87,7 +87,7 @@ pub struct UnifiedTaskOutput {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn run_unified_search(
+pub fn run_unified_search(
     model_dir: PathBuf,
     visual_provider: Arc<dyn neuink_search::VisualEmbeddingProvider>,
     fusion: neuink_config::VisualFusionSettings,
@@ -326,3 +326,4 @@ mod tests {
         assert_eq!(carrier_kind_code(CarrierKind::Section), "section");
     }
 }
+
