@@ -136,7 +136,9 @@ pub(super) fn visual_channel(
     };
     // The document set must match what the snapshot was built with, so page sources are
     // included exactly when this transport could have produced them.
-    let include_pages = provider.page_source().is_some();
+    // Page sources need a rasterizer, not a particular transport: both the local service
+    // and a remote API receive images from this process.
+    let include_pages = super::page_render::available();
     let documents = match collect_assets(root, include_pages) {
         Ok(collected) => collected.documents,
         Err(_) => return unavailable(VISUAL_REASON_INDEX_MISSING),
@@ -180,7 +182,9 @@ pub fn prepare_visual_index(
     let dimensions = provider
         .dimensions()
         .ok_or_else(|| "视觉编码模型未声明输出维度。".to_string())?;
-    let include_pages = provider.page_source().is_some();
+    // Page sources need a rasterizer, not a particular transport: both the local service
+    // and a remote API receive images from this process.
+    let include_pages = super::page_render::available();
     let collected = collect_assets(&request.root, include_pages)?;
     let CollectedSources {
         documents,
@@ -735,4 +739,5 @@ mod tests {
         assert_eq!(page_key(&documents, "entry-1", 3, Some(2)), Some(crop.key()));
     }
 }
+
 

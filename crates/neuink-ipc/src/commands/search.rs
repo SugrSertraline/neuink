@@ -27,6 +27,7 @@ use super::embedding_resources::{embedding_model_dir, rerank_model_dir};
 pub mod unified;
 pub mod rerank_stage;
 pub mod visual;
+pub mod page_render;
 pub mod recommended_rerank_models;
 pub mod recommended_visual_models;
 pub mod recommended_text_models;
@@ -3206,3 +3207,6 @@ pub fn run_retrieval_self_check<R: tauri::Runtime>(
 pub fn list_recommended_visual_models() -> Vec<crate::commands::search::recommended_visual_models::RecommendedVisualModel> {
     crate::commands::search::recommended_visual_models::RECOMMENDED_VISUAL.to_vec()
 }
+
+
+

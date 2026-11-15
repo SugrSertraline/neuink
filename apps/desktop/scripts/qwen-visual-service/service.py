@@ -6,9 +6,9 @@ Contract (one JSON object per request, all responses JSON):
     GET  /health                 -> {"ready","model","dimensions","identity"}
     POST /embed                  <- {"texts":["..."],"images":["<base64>"]}
                                  -> {"vectors":[[float,...],...]}   texts first
-    POST /embed_pages            <- {"pdf_path":"...","pages":[0,1],"regions":true}
-                                 -> {"vectors":[{"page":0,"region":null,"vector":[...]},
-                                                {"page":0,"region":0,"vector":[...]}, ...]}
+    POST /embed_pages            deprecated: the desktop app now rasterizes pages itself
+                                 with PDFium and sends images to /embed
+
 
 The model is Qwen3-VL-Embedding-2B run with transformers; PDF rasterization uses
 PyMuPDF. Both live here on purpose: the desktop app then needs no PDF renderer and no
@@ -20,7 +20,7 @@ product chain (backfill -> prepare -> dual-channel query) can be tested offline.
 Environment:
     NEUINK_QWEN_VL_MODEL   model directory containing scripts/qwen3_vl_embedding.py
     NEUINK_EMBED_DIM       output dimensions, default 2048
-    NEUINK_PDF_DPI         rasterization DPI, default 110
+
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ DEFAULT_DIM = int(os.environ.get("NEUINK_EMBED_DIM", "2048"))
 # Thread budget for CPU inference. A thin laptop with 8 physical cores should set this to
 # its core count; leaving it at the default lets torch take every logical CPU.
 TORCH_THREADS = int(os.environ.get("NEUINK_TORCH_THREADS", "0"))
-PDF_DPI = int(os.environ.get("NEUINK_PDF_DPI", "110"))
+
 REGION_COUNT = 4
 
 
@@ -93,10 +93,12 @@ class StubEncoder:
 
 
 class QwenEncoder:
-    """Real embedding path: transformers model + PyMuPDF rasterization."""
+    """Real embedding path: the transformers model only.
+
+    Page pixels come from the desktop app (PDFium), so this service carries no PDF library.
+    """
 
     def __init__(self, model_dir: Path) -> None:
-        import fitz  # noqa: F401 - imported here so --stub needs no PyMuPDF
         sys.path.insert(0, str(model_dir / "scripts"))
         from qwen3_vl_embedding import Qwen3VLEmbedder  # type: ignore
 
@@ -104,7 +106,6 @@ class QwenEncoder:
 
         if TORCH_THREADS > 0:
             torch.set_num_threads(TORCH_THREADS)
-        self._fitz = fitz
         self._embedder = Qwen3VLEmbedder(str(model_dir), min_pixels=256, max_pixels=65536)
         self.dimensions = DEFAULT_DIM
         self.model_name = model_dir.name
@@ -136,40 +137,11 @@ class QwenEncoder:
         return self._process([{"text": None, "image": image} for image in decoded])
 
     def embed_pages(self, pdf_path: str, pages: list[int], regions: bool) -> list[dict]:
-        document = self._fitz.open(pdf_path)
-        out = []
-        for page in pages:
-            pixmap = document.load_page(page).get_pixmap(dpi=PDF_DPI)
-            from PIL import Image
-
-            page_image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
-            out.append({"page": page, "region": None, "vector": self.embed_images([self._png(page_image)])[0]})
-            if regions:
-                for crop, box in enumerate(self._crops(page_image.size)):
-                    out.append(
-                        {
-                            "page": page,
-                            "region": crop,
-                            "vector": self.embed_images([self._png(page_image.crop(box))])[0],
-                        }
-                    )
-        return out
-
-    @staticmethod
-    def _crops(size: tuple[int, int]) -> list[tuple[int, int, int, int]]:
-        width, height = size
-        return [
-            (0, 0, width, height // 2),
-            (0, height // 2, width, height),
-            (0, 0, width // 2, height),
-            (width // 2, 0, width, height),
-        ]
-
-    @staticmethod
-    def _png(image) -> bytes:
-        buffer = io.BytesIO()
-        image.save(buffer, format="PNG")
-        return buffer.getvalue()
+        # Deprecated: the desktop app renders pages with PDFium and posts PNG bytes to /embed,
+        # so this service no longer carries a PDF library (and no AGPL obligation).
+        raise NotImplementedError(
+            "pages are rendered by the desktop app; send images to /embed instead"
+        )
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -268,4 +240,6 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
 

@@ -235,3 +235,13 @@ cargo run -p neuink-ipc --bin retrieval-probe -- `
 
 新增 IPC：`list_recommended_rerank_models`、`install_recommended_rerank_model`、`run_retrieval_self_check`。
 重排安装会补齐缺失的 `special_tokens_map.json`（Xenova 导出没有该文件），并用 `LocalReranker::load` + 一次打分证明可用。
+
+### 页面渲染搬到 Rust（PDFium），去掉 PyMuPDF 与 AGPL
+
+- 新增 `crates/neuink-ipc/src/commands/search/page_render.rs`：用 `pdfium-render` 0.9.5（动态链接）在进程内渲染页面与几何裁切，输出 PNG；DPI 110，与旧服务一致。
+- PDFium 非线程安全：单实例绑定于互斥锁后，所有渲染串行；**DLL 缺失时页面源不可用**，通道退化为仅 MinerU 资产并报 `pdfium_unavailable`，不崩溃。
+- 视觉编码协议简化：页面/区域像素由本进程渲染后，作为图片交给 `embed_assets`。**本地服务与远程 API 两条路径都保留**——两者都只收图片，服务端不再需要任何 PDF 库。
+- `qwen-visual-service/service.py` 移除 PyMuPDF：`/embed_pages` 标记废弃（保留端点返回明确错误），真实模式依赖降为 torch / transformers / qwen_vl_utils / pillow。
+- 分发要求：安装包必须带 `pdfium.dll`（BSD-3，需附版权声明）；本机因 GitHub 不可达尚未放入，页面向量暂不可用。
+
+验证：`commands::search` 50 项、`neuink-search` 135 项通过；服务 `--stub` 健康检查与 `/embed` 冒烟通过。

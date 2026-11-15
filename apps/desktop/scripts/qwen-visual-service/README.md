@@ -13,7 +13,7 @@
 # 假向量（不加载模型，用于整链测试）
 python service.py --stub --port 8765
 
-# 真实模型（需要 transformers / torch / qwen_vl_utils / PyMuPDF）
+# 真实模型（需要 transformers / torch / qwen_vl_utils / pillow）
 $env:NEUINK_QWEN_VL_MODEL = 'D:\models\Qwen3-VL-Embedding-2B-...'
 python service.py --port 8765
 ```
@@ -45,4 +45,5 @@ POST /embed_pages   <- {"pdf_path":"…","pages":[0,1],"regions":true}
 
 ## 依赖
 
-真实模式需要：`torch`、`transformers`、`qwen_vl_utils`、`pillow`、`pymupdf`（`pip install pymupdf`）。`--stub` 模式只依赖标准库，可在没有任何模型的环境里验证整条产品链。
+真实模式需要：`torch`、`transformers`、`qwen_vl_utils`、`pillow`。**不再需要 PyMuPDF**：页面与区域由桌面应用用 PDFium 渲染后以图片发送（`POST /embed`），服务只负责编码。`--stub` 模式只依赖标准库。
+
