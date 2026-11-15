@@ -202,7 +202,12 @@ fn check_option_range(field: &'static str, requested: usize, max: usize) -> Rera
 /// `onnx/model_int8.onnx`, so it is listed first. `model.onnx` stays as a fallback
 /// for directories exported with the plain name.
 #[cfg(feature = "local-embedding")]
-const RERANK_MODEL_FILE_NAMES: &[&str] = &["onnx/model_int8.onnx", "onnx/model.onnx", "model.onnx"];
+const RERANK_MODEL_FILE_NAMES: &[&str] = &[
+    "onnx/model_int8.onnx",
+    "onnx/model.onnx",
+    "onnx/model_quantized.onnx",
+    "model.onnx",
+];
 
 /// Cross-encoder reranker loaded only from a local directory. It never downloads:
 /// fastembed's hub loader is not called.
@@ -301,3 +306,4 @@ impl RerankProvider for LocalReranker {
             .collect())
     }
 }
+

@@ -245,3 +245,11 @@ cargo run -p neuink-ipc --bin retrieval-probe -- `
 - 分发要求：安装包必须带 `pdfium.dll`（BSD-3，需附版权声明）；本机因 GitHub 不可达尚未放入，页面向量暂不可用。
 
 验证：`commands::search` 50 项、`neuink-search` 135 项通过；服务 `--stub` 健康检查与 `/embed` 冒烟通过。
+
+### 重排模型：下载后可直接接入
+
+- `LocalReranker` 的文件名白名单新增 `onnx/model_quantized.onnx`（Xenova 导出用这个名字；此前会被判为"模型缺失"，属于真实缺陷）。
+- 安装器补齐 Xenova 缺的 `special_tokens_map.json`，并在报告成功前 **真实加载 + 打一次分**。
+- 重排设置新增「已安装的重排模型」下拉：选中即写入 `model_dir`，不必手抄路径。
+
+已验证：`neuink-search` 重排 18 项、前端 `RerankSettingsSection` 5 项通过。

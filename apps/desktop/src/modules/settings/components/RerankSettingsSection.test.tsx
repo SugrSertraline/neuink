@@ -2,10 +2,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { RerankSettingsSection } from './RerankSettingsSection';
-import { getRerankSettings, saveRerankSettings } from '@/shared/ipc/workspaceApi';
+import {
+  getRerankSettings,
+  listRecommendedRerankModels,
+  saveRerankSettings
+} from '@/shared/ipc/workspaceApi';
 
 vi.mock('@/shared/ipc/workspaceApi', () => ({
   getRerankSettings: vi.fn(),
+  listRecommendedRerankModels: vi.fn(),
   saveRerankSettings: vi.fn()
 }));
 
@@ -21,6 +26,8 @@ afterEach(cleanup);
 
 beforeEach(() => {
   vi.mocked(getRerankSettings).mockReset();
+  vi.mocked(listRecommendedRerankModels).mockReset();
+  vi.mocked(listRecommendedRerankModels).mockResolvedValue([]);
   vi.mocked(saveRerankSettings).mockReset();
 });
 
@@ -86,5 +93,6 @@ describe('RerankSettingsSection', () => {
     );
   });
 });
+
 
 

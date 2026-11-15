@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import {
   getRerankSettings,
+  listRecommendedRerankModels,
   saveRerankSettings,
+  type RecommendedRerankModelState,
   type RerankMode,
   type RerankSettings,
   type RerankSettingsState
@@ -25,15 +27,17 @@ export function RerankSettingsSection({ active }: { active: boolean }) {
   const [draft, setDraft] = useState<RerankSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [installed, setInstalled] = useState<RecommendedRerankModelState[]>([]);
 
   useEffect(() => {
     if (!active || saved) return;
     let cancelled = false;
-    void getRerankSettings()
-      .then((value) => {
+    void Promise.all([getRerankSettings(), listRecommendedRerankModels()])
+      .then(([value, models]) => {
         if (cancelled) return;
         setSaved(value);
         setDraft(value);
+        setInstalled(models.filter((model) => model.installed));
       })
       .catch(() => {
         if (!cancelled) setError('未能读取重排设置。');
@@ -82,6 +86,24 @@ export function RerankSettingsSection({ active }: { active: boolean }) {
           void persist({ ...current, mode: value as RerankMode });
         }}
       />
+      {needsModel && installed.length > 0 && (
+        <SettingSelect
+          id="tools-rerank-installed"
+          label="已安装的重排模型"
+          description="安装完成的模型目录，选择即写入下方目录。"
+          disabled={busy}
+          value={current?.model_dir ?? ""}
+          options={installed.map((entry) => ({
+            value: entry.installed_dir ?? "",
+            label: entry.model.display_name
+          }))}
+          placeholder="选择已安装模型"
+          onValueChange={(value) => {
+            if (!current) return;
+            void persist({ ...current, model_dir: value });
+          }}
+        />
+      )}
       {needsModel && (
         <SettingRow
           id="tools-rerank-model"
@@ -148,3 +170,5 @@ export function RerankSettingsSection({ active }: { active: boolean }) {
     </SettingsGroup>
   );
 }
+
+
