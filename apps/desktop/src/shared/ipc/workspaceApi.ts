@@ -1536,6 +1536,10 @@ export type RecommendedTextModel = {
   license: string;
   note: string;
   directly_installable: boolean;
+  /** Model page, so an entry is never a dead end. */
+  homepage: string;
+  /** Copyable export command when the repository publishes no ONNX. */
+  export_hint: string;
 };
 
 export type RecommendedTextModelState = {
@@ -1552,3 +1556,4 @@ export function listRecommendedTextModels(): Promise<RecommendedTextModelState[]
 export function installRecommendedTextModel(id: string): Promise<RecommendedTextModelState> {
   return invoke('install_recommended_text_model', { id });
 }
+

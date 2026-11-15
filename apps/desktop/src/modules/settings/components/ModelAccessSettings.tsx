@@ -208,7 +208,15 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
                 ) : (
                   <span>需自行导出</span>
                 )}
+                <a className="underline" href={entry.model.homepage} target="_blank" rel="noreferrer">
+                  模型页
+                </a>
                 <span className="basis-full">{entry.model.note}</span>
+                {entry.model.export_hint && (
+                  <code className="basis-full select-all font-mono text-[11px] leading-4 text-muted-foreground">
+                    {entry.model.export_hint}
+                  </code>
+                )}
               </li>
             ))}
           </ul>
@@ -239,6 +247,7 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
     </SettingsGroup>
   );
 }
+
 
 
 

@@ -59,11 +59,17 @@ pub struct RecommendedTextModel {
     pub note: &'static str,
     /// `true` when the files can be fetched and used as-is.
     pub directly_installable: bool,
+    /// Model page, so an entry is never a dead end.
+    pub homepage: &'static str,
+    /// Copyable export command for entries that need a conversion step.
+    pub export_hint: &'static str,
 }
 
 pub const RECOMMENDED: [RecommendedTextModel; 4] = [
     RecommendedTextModel {
         id: "bge-m3-int8-xenova",
+        homepage: "https://huggingface.co/Xenova/bge-m3",
+        export_hint: "",
         display_name: "bge-m3 int8（Xenova 单文件）",
         repository: "Xenova/bge-m3",
         dimensions: 1024,
@@ -85,6 +91,8 @@ pub const RECOMMENDED: [RecommendedTextModel; 4] = [
     },
     RecommendedTextModel {
         id: "multilingual-e5-small-qs",
+        homepage: "https://huggingface.co/Xenova/multilingual-e5-small",
+        export_hint: "",
         display_name: "multilingual-e5-small quantized（Xenova）",
         repository: "Xenova/multilingual-e5-small",
         dimensions: 384,
@@ -106,6 +114,8 @@ pub const RECOMMENDED: [RecommendedTextModel; 4] = [
     },
     RecommendedTextModel {
         id: "bge-m3-fp32-original",
+        homepage: "https://huggingface.co/BAAI/bge-m3",
+        export_hint: "",
         display_name: "bge-m3 fp32（BAAI 官方 ONNX）",
         repository: "BAAI/bge-m3",
         dimensions: 1024,
@@ -128,6 +138,8 @@ pub const RECOMMENDED: [RecommendedTextModel; 4] = [
     },
     RecommendedTextModel {
         id: "bge-large-zh-v1.5",
+        homepage: "https://huggingface.co/BAAI/bge-large-zh-v1.5",
+        export_hint: "optimum-cli export onnx --model BAAI/bge-large-zh-v1.5 --task feature-extraction out/  # 然后把 out/ 里的 model.onnx + tokenizer 文件放入模型目录，并写 neuink-embedding.json（dimensions 1024, pooling cls）",
         display_name: "bge-large-zh-v1.5",
         repository: "BAAI/bge-large-zh-v1.5",
         dimensions: 1024,
@@ -230,6 +242,24 @@ mod tests {
     }
 
     #[test]
+    fn every_entry_links_to_its_model_page_and_explains_a_missing_export() {
+        for model in RECOMMENDED.iter() {
+            assert!(
+                model.homepage.starts_with("https://huggingface.co/"),
+                "{} needs a model page",
+                model.id
+            );
+            if !model.directly_installable {
+                assert!(
+                    !model.export_hint.is_empty(),
+                    "{} must explain how to produce an ONNX",
+                    model.id
+                );
+            }
+        }
+    }
+
+    #[test]
     fn metadata_writes_a_manifest_the_loader_accepts() {
         let dir = std::env::temp_dir().join(format!("neuink-rec-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -266,6 +296,9 @@ mod tests {
         std::fs::remove_dir_all(&root).ok();
     }
 }
+
+
+
 
 
 
