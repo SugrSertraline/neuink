@@ -3,6 +3,7 @@ import { SciverseSettingsSection } from '@/modules/sciverse/components/SciverseS
 import { ResearchSettingsSection } from './ResearchSettingsSection';
 import { AssistantDebugSetting } from './AssistantDebugSetting';
 import { LocalAgentSettingsSection } from './LocalAgentSettingsSection';
+import { RerankSettingsSection } from './RerankSettingsSection';
 
 import { AgentToolRuntimeSection } from './AgentSettingsSection';
 import { ADVANCED_ASSISTANT_SETTINGS_VISIBLE } from '../settingsCatalog';
@@ -19,6 +20,7 @@ export function ExternalToolsSettingsSection({
     <SettingsPage tab="external-tools" title="检索与工具" description="管理论文和网页检索、本地 Agent 及诊断选项。">
         <LocalAgentSettingsSection active={active} workspaceRoot={props.workspaceRoot} />
         <ResearchSettingsSection active={active}><SciverseSettingsSection active={active} /></ResearchSettingsSection>
+        <RerankSettingsSection active={active} />
         <AssistantDebugSetting />
         {ADVANCED_ASSISTANT_SETTINGS_VISIBLE && <fieldset data-setting-id="tools-mcp" tabIndex={-1} disabled={props.runtimeUnavailable} className="min-w-0"><AgentToolRuntimeSection
           runtimeSettings={props.runtimeSettings}
@@ -27,3 +29,4 @@ export function ExternalToolsSettingsSection({
     </SettingsPage>
   );
 }
+

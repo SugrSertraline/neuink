@@ -224,7 +224,7 @@ pub(super) fn run_unified_search(
 ///
 /// The ladder never fails a search: a missing or broken encoder falls back to field
 /// coverage (or to the fused order), and the rung that ran is reported on the task.
-fn rerank_task_results(
+pub(super) fn rerank_task_results(
     results: SearchResults,
     question: &str,
     settings: &neuink_config::RerankSettings,

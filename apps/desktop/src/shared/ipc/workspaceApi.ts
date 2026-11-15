@@ -1219,6 +1219,10 @@ export type SearchSegmentsBatchItem = {
   task_id: string;
   results?: SearchResults | null;
   error?: { code: string; message: string } | null;
+  /** Which rerank rung ran for this task: `off`, `heuristic`, `cross_encoder`, `fused`. */
+  rerank_used?: string | null;
+  /** Why a rung was skipped: `model_unavailable`, `provider_error`. */
+  rerank_reason?: string | null;
 };
 
 /** One IPC call that prepares the workspace index once for every task in the batch. */

@@ -27,6 +27,8 @@ mod unified;
 mod rerank_stage;
 mod visual;
 mod visual_qwen;
+#[cfg(test)]
+mod rerank_batch_tests;
 
 pub use unified::{UnifiedSearchRequest, UnifiedSearchResponse};
 pub use visual::{PrepareVisualSearchIndexRequest, PrepareVisualSearchIndexResponse};
@@ -118,6 +120,12 @@ pub struct SearchSegmentsBatchItem {
     pub results: Option<SearchResults>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<SearchSegmentsTaskError>,
+    /// Which rerank rung ran: `off`, `heuristic`, `cross_encoder`, `fused`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rerank_used: Option<&'static str>,
+    /// Why a rung was skipped: `model_unavailable`, `provider_error`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rerank_reason: Option<&'static str>,
 }
 
 /// Fixed, path-free codes. Raw backend errors can contain workspace paths, so they are dropped.
@@ -502,19 +510,74 @@ pub async fn search_segments_batch<R: tauri::Runtime>(
     request: SearchSegmentsBatchRequest,
 ) -> Result<Vec<SearchSegmentsBatchItem>, String> {
     let model_dir = embedding_model_dir(&app)?;
-    tokio::task::spawn_blocking(move || run_segments_batch(model_dir, request))
-        .await
-        .map_err(|error| error.to_string())?
+    let (rerank, rerank_provider) = resolve_rerank(&app)?;
+    tokio::task::spawn_blocking(move || {
+        run_segments_batch(model_dir, rerank, rerank_provider, request)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// Resolves the rerank ladder settings and, for the model-backed rung only, the loaded
+/// encoder. Shared by both search entry points so one settings screen governs them both.
+fn resolve_rerank<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<
+    (
+        neuink_config::RerankSettings,
+        Option<Arc<dyn neuink_search::RerankProvider>>,
+    ),
+    String,
+> {
+    let settings = crate::storage::read_settings(app)?.rerank;
+    let provider: Option<Arc<dyn neuink_search::RerankProvider>> =
+        if settings.mode == neuink_config::RerankMode::CrossEncoder {
+            let dir = rerank_model_dir(app)?;
+            rerank_stage::reranker_for(&dir)
+                .map(|reranker| reranker as Arc<dyn neuink_search::RerankProvider>)
+        } else {
+            None
+        };
+    Ok((settings, provider))
+}
+
+/// Applies the ladder to every successful batch item. The batch wire is unchanged except
+/// for two additive fields, so a caller that ignores reranking keeps working.
+fn apply_batch_rerank(
+    items: Vec<SearchSegmentsBatchItem>,
+    settings: &neuink_config::RerankSettings,
+    provider: Option<&dyn neuink_search::RerankProvider>,
+) -> Vec<SearchSegmentsBatchItem> {
+    items
+        .into_iter()
+        .map(|item| match item.results {
+            Some(results) => {
+                let question = results.query.clone();
+                let (reranked, outcome) =
+                    unified::rerank_task_results(results, &question, settings, provider);
+                SearchSegmentsBatchItem {
+                    task_id: item.task_id,
+                    results: Some(reranked),
+                    error: item.error,
+                    rerank_used: Some(outcome.used),
+                    rerank_reason: outcome.reason,
+                }
+            }
+            None => item,
+        })
+        .collect()
 }
 
 /// Prepares the workspace index and embedding provider once per batch, then runs
 /// each task in order. Only a preparation failure fails the whole batch.
 fn run_segments_batch(
     model_dir: PathBuf,
+    rerank: neuink_config::RerankSettings,
+    rerank_provider: Option<Arc<dyn neuink_search::RerankProvider>>,
     request: SearchSegmentsBatchRequest,
 ) -> Result<Vec<SearchSegmentsBatchItem>, String> {
     let SearchSegmentsBatchRequest { root, tasks } = request;
-    collect_segments_batch(
+    let items = collect_segments_batch(
         tasks,
         |needs_semantic| prepare_search(model_dir, &root, true, needs_semantic),
         |prepared, task| {
@@ -531,7 +594,8 @@ fn run_segments_batch(
                 parse_segment_types(&task.segment_types),
             )
         },
-    )
+    )?;
+    Ok(apply_batch_rerank(items, &rerank, rerank_provider.as_deref()))
 }
 
 const BATCH_INVALID_QUERY: SearchSegmentsTaskError = SearchSegmentsTaskError {
@@ -574,6 +638,9 @@ fn collect_segments_batch<P>(
                     task_id,
                     results: Some(results),
                     error: None,
+                    // The ladder runs after the batch; until then no rung has been applied.
+                    rerank_used: None,
+                    rerank_reason: None,
                 },
                 Err(_) => batch_error_item(task_id, BATCH_SEARCH_FAILED),
             }
@@ -586,6 +653,8 @@ fn batch_error_item(task_id: String, error: SearchSegmentsTaskError) -> SearchSe
         task_id,
         results: None,
         error: Some(error),
+        rerank_used: None,
+        rerank_reason: None,
     }
 }
 
