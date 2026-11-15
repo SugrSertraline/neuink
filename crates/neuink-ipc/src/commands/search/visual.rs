@@ -121,6 +121,7 @@ pub(super) fn visual_channel(
     root: &PathBuf,
     provider: Arc<dyn VisualEmbeddingProvider>,
 ) -> VisualChannel {
+    super::page_render::bind_from_env();
     let unavailable = |reason: &'static str| VisualChannel {
         status: VisualChannelStatus::Unavailable(reason),
         provider: provider.clone(),
@@ -169,6 +170,9 @@ pub fn prepare_visual_index(
     provider: Arc<dyn VisualEmbeddingProvider>,
     request: PrepareVisualSearchIndexRequest,
 ) -> Result<PrepareVisualSearchIndexResponse, String> {
+    // Headless callers (probe, tests) bind PDFium from the environment; the app binds in the
+    // command layer, where the resource directory is known.
+    super::page_render::bind_from_env();
     let workspace = Workspace::open(&request.root).map_err(|error| error.to_string())?;
     if !provider.status().available {
         return Err(provider
@@ -739,5 +743,6 @@ mod tests {
         assert_eq!(page_key(&documents, "entry-1", 3, Some(2)), Some(crop.key()));
     }
 }
+
 
 

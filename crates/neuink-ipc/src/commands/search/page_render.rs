@@ -37,13 +37,31 @@ pub fn bind(dll_path: &Path) -> Result<(), String> {
     if guard.is_some() {
         return Ok(());
     }
-    let library = pdfium_render::prelude::Pdfium::pdfium_platform_library_name_at_path(dll_path);
+    // The helper expects a *directory*; accept a full DLL path as well so callers can pass
+    // either the resource directory or the file itself.
+    let directory = if dll_path.is_dir() {
+        dll_path.to_path_buf()
+    } else {
+        dll_path.parent().map(|parent| parent.to_path_buf()).ok_or_else(|| {
+            format!("PDFium 路径无效：{}", dll_path.display())
+        })?
+    };
+    let library = pdfium_render::prelude::Pdfium::pdfium_platform_library_name_at_path(&directory);
     let pdfium = pdfium_render::prelude::Pdfium::new(
         pdfium_render::prelude::Pdfium::bind_to_library(library)
             .map_err(|error| format!("无法绑定 PDFium（{}）：{error}", dll_path.display()))?,
     );
     *guard = Some(BoundPdfium { pdfium });
     Ok(())
+}
+
+/// Binds from `NEUINK_PDFIUM_DLL` when set, so headless tools (the retrieval probe) can
+/// rasterize without an app handle.
+pub fn bind_from_env() -> bool {
+    match std::env::var_os("NEUINK_PDFIUM_DLL") {
+        Some(path) => bind(&PathBuf::from(path)).is_ok(),
+        None => available(),
+    }
 }
 
 /// Whether page rendering is available right now.
@@ -119,4 +137,6 @@ fn encode_png(image: &image::RgbaImage) -> Result<Vec<u8>, String> {
 pub fn default_dll_path(resource_dir: &Path) -> PathBuf {
     resource_dir.join(pdfium_render::prelude::Pdfium::pdfium_platform_library_name())
 }
+
+
 
