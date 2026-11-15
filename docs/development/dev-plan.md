@@ -1626,3 +1626,12 @@ Hover 即时反馈（2026-09-17）：按用户要求删除 PDF 600ms 冷却、�
 - 资产持久化：MinerU ZIP 的 `images/**` 落盘 `<entry>/assets/`（zip-slip/符号链接/超限校验、原子发布、blake3 清单幂等），并新增 `backfill_entry_assets` 从已存 `full.zip` 回填旧库。
 - 验证：`neuink-search` 109、`neuink-workspace` 161、`neuink-ipc commands::search` 24、回填 4、`tsc --noEmit` 通过、前端 3110 项通过（3 跳过）。
 - 未完成：本地 Qwen 服务脚本（`/health`、`/embed`、`/embed_pages` + PyMuPDF）、设置页 UI 与下载引导、原生端到端验收。视觉通道在无服务时报 `model_unavailable`，不影响文本检索。
+
+## 2026-11-14：图表资产改为从已存 MinerU ZIP 直读（取代落盘副本与回填）
+
+- 判定：图片字节是纯派生数据，`full.zip` 已有唯一一份，不应再复制到 `<entry>/assets/`。
+- 移除：`assets/` 目录、`assets.manifest.json`、`import_entry_assets_from_zip`、`backfill_entry_assets` 命令、`AssetBudgetExceeded`/`AssetSymlink` 错误、`entry_assets_dir`/`entry_assets_manifest_file` 布局函数，以及 MinerU 导入路径中的复制步骤。
+- 改为：`collect_entry_visual_assets` / `entry_asset_bytes` 只读 zip；逐文件限 32 MiB，非白名单扩展名与危险路径跳过，未知 scope 条目仍报错。
+- 效果：老库与新库行为一致，无需迁移；磁盘不再翻倍；写盘与迁移代码整体消失。
+- 视觉快照陈旧检测不变：重开时比对完整文档集合（含 PDF 与图片内容哈希），任何源变化自动报 `index_missing`。
+- 验证：`neuink-workspace` 156（资产 7 项）、`neuink-ipc commands::search` 38、`tsc --noEmit` 通过。
