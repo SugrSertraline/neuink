@@ -2642,6 +2642,8 @@ pub struct VisualEmbeddingSettingsState {
     pub timeout_ms: u64,
     /// Dual-channel parameters, so a settings screen can read what the pipeline uses.
     pub fusion: neuink_config::VisualFusionSettings,
+    /// `on_demand` or `manual`; the local service starts itself when the policy allows.
+    pub startup: &'static str,
 }
 
 impl VisualEmbeddingSettingsState {
@@ -2655,6 +2657,7 @@ impl VisualEmbeddingSettingsState {
             endpoint: settings.endpoint.clone(),
             timeout_ms: settings.timeout_ms,
             fusion: settings.fusion,
+            startup: settings.startup.as_str(),
         }
     }
 }
@@ -2735,6 +2738,9 @@ pub async fn prepare_visual_search_index<R: tauri::Runtime>(
     let settings = crate::storage::read_settings(&app)?.visual;
     settings.validate()?;
     let provider = visual::provider_for(&settings);
+    // Bring the local service up if the policy allows it, then proceed regardless: a failed
+    // start degrades the channel instead of failing the command.
+    let _ = ensure_visual_service(&app);
     tokio::task::spawn_blocking(move || visual::prepare_visual_index(provider, request))
         .await
         .map_err(|error| error.to_string())?
@@ -3146,6 +3152,7 @@ pub fn run_retrieval_self_check<R: tauri::Runtime>(
     // Visual channel: provider reachability (a missing snapshot is reported, not failed).
     let started = std::time::Instant::now();
     let visual = (|| -> Result<String, String> {
+        let startup = ensure_visual_service(&app)?;
         let settings = crate::storage::read_settings(&app)?.visual;
         let endpoint = settings
             .endpoint
@@ -3165,7 +3172,7 @@ pub fn run_retrieval_self_check<R: tauri::Runtime>(
             return Err(format!("{code}：{endpoint} — {message}"));
         }
         Ok(format!(
-            "视觉编码服务就绪：{} · {} 维",
+            "{startup}；{} · {} 维",
             provider.status().model_name.unwrap_or_else(|| "未知模型".to_string()),
             provider.dimensions().unwrap_or(0)
         ))
@@ -3284,5 +3291,68 @@ fn visual_service_script<R: tauri::Runtime>(
         .find(|candidate| candidate.is_file())
         .ok_or_else(|| "找不到视觉服务脚本（scripts/qwen-visual-service/service.py）".to_string())
 }
+
+
+
+/// Starts the local visual service when the configured transport needs it.
+///
+/// Called before any visual work: a user should never have to keep a terminal open, and a
+/// remote transport must never spawn anything. The outcome string is for the self check.
+fn ensure_visual_service<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<String, String> {
+    use neuink_config::{VisualEmbeddingProviderKind, VisualServiceStartup};
+
+    let settings = crate::storage::read_settings(app)?.visual;
+    if settings.provider != VisualEmbeddingProviderKind::QwenLocal {
+        return Ok("远程视觉编码，无需本机服务".to_string());
+    }
+    let provider = visual::provider_for(&settings);
+    if neuink_search::check_provider(provider.as_ref())
+        .unavailable_reason
+        .is_none()
+    {
+        return Ok("视觉编码服务已在运行".to_string());
+    }
+    if settings.startup == VisualServiceStartup::Manual {
+        return Err("service_unreachable：启动策略为手动，请先启动视觉服务".to_string());
+    }
+
+    let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
+    let runtime_root = resource_dir.join("visual-service");
+    let mut ready: Option<std::path::PathBuf> = None;
+    if let Ok(entries) = std::fs::read_dir(&runtime_root) {
+        for entry in entries.flatten() {
+            let id = entry.file_name().to_string_lossy().to_string();
+            if let Some(state) = visual_runtime::load_state(&resource_dir, &id) {
+                if state.dependencies_installed && state.model_present {
+                    ready = Some(std::path::PathBuf::from(id));
+                    break;
+                }
+            }
+        }
+    }
+    let Some(id) = ready else {
+        return Err(
+            "service_unreachable：尚未安装视觉服务依赖与模型，请先在“视觉编码模型”里一键安装"
+                .to_string(),
+        );
+    };
+    let script = visual_service_script(app)?;
+    let pid = visual_runtime::start(&resource_dir, &script, &id.to_string_lossy())?;
+    // Give the interpreter a moment to bind the port before the caller probes it.
+    for _ in 0..20 {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let provider = visual::provider_for(&settings);
+        if neuink_search::check_provider(provider.as_ref())
+            .unavailable_reason
+            .is_none()
+        {
+            return Ok(format!("视觉编码服务已自动启动（进程 {pid}）"));
+        }
+    }
+    Err(format!(
+        "service_unreachable：已尝试启动视觉服务（进程 {pid}）但未就绪，请查看服务日志"
+    ))
+}
+
 
 

@@ -1315,8 +1315,8 @@ export type VisualEmbeddingSettings = {
   endpoint: string | null;
   timeout_ms: number;
   fusion: VisualFusionSettings;
+  startup: 'on_demand' | 'manual';
 };
-
 /** Status view. `has_api_key` reports whether a token is stored; the token is not returned. */
 export type VisualEmbeddingSettingsState = {
   provider: 'qwen_local' | 'qwen_api' | 'retired';
@@ -1324,6 +1324,7 @@ export type VisualEmbeddingSettingsState = {
   endpoint: string | null;
   timeout_ms: number;
   fusion: VisualFusionSettings;
+  startup: 'on_demand' | 'manual';
 };
 
 export type VisualEmbeddingSettingsInput = VisualEmbeddingSettings & {
@@ -1644,3 +1645,4 @@ export function installVisualRuntime(
 export function startVisualService(id: string): Promise<number> {
   return invoke('start_visual_service', { id });
 }
+

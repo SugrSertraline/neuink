@@ -120,7 +120,21 @@ impl EmbeddingProvider for FastEmbedProvider {
                     .embed(&texts)
                     .map_err(SearchError::EmbeddingUnavailable)?,
             };
-            vectors.extend(batch_vectors.into_iter().map(EmbeddingVector::new));
+            for vector in batch_vectors {
+                // The manifest is the contract. A directory holding both an old and a new
+                // weight file used to load the wrong one and silently change every vector,
+                // so a mismatch is an error rather than a quietly different result.
+                if let Some(declared) = self.status.dimensions {
+                    if vector.len() != declared {
+                        return Err(SearchError::EmbeddingUnavailable(format!(
+                            "Embedding manifest declares {declared} dimensions but the loaded ONNX produced {}; remove stale weight files from {}",
+                            vector.len(),
+                            self.model_dir.display()
+                        )));
+                    }
+                }
+                vectors.push(EmbeddingVector::new(vector));
+            }
             on_progress(vectors.len(), inputs.len());
         }
         if inputs.is_empty() {

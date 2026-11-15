@@ -25,7 +25,8 @@ const base = {
     visual_weight: 0.5,
     rrf_k: 60,
     gate: { min_head_entries: 3, max_snippet_overlap: 2 }
-  }
+  },
+  startup: 'on_demand' as const
 };
 
 afterEach(cleanup);
@@ -146,3 +147,4 @@ describe('VisualSettingsSection', () => {
     );
   });
 });
+

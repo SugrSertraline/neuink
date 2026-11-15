@@ -15,6 +15,7 @@ type Draft = {
   provider: VisualEmbeddingProviderKind;
   endpoint: string;
   timeout_ms: number;
+  startup: 'on_demand' | 'manual';
   fusion: {
     mode: VisualFusionMode;
     text_weight: number;
@@ -39,6 +40,7 @@ function draftFrom(state: VisualEmbeddingSettingsState): Draft {
     provider: state.provider === 'qwen_api' ? 'qwen_api' : 'qwen_local',
     endpoint: state.endpoint ?? '',
     timeout_ms: state.timeout_ms,
+    startup: state.startup ?? 'on_demand',
     fusion: {
       mode: state.fusion.mode,
       text_weight: state.fusion.text_weight,
@@ -95,6 +97,7 @@ export function VisualSettingsSection({ active, root }: { active: boolean; root:
         provider: draft.provider,
         endpoint: draft.endpoint.trim() ? draft.endpoint.trim() : null,
         timeout_ms: draft.timeout_ms,
+        startup: draft.startup,
         fusion: draft.fusion,
         // Write-only: omitting keeps the stored key, so only send when typed.
         ...(apiKey ? { api_key: apiKey } : {})
@@ -195,6 +198,20 @@ export function VisualSettingsSection({ active, root }: { active: boolean; root:
           }}
         />
       </SettingRow>
+      <SettingSelect
+        id="tools-visual-startup"
+        label="服务启动方式"
+        description="按需启动：需要视觉通道时自动拉起本机服务；手动：必须自己先启动，未运行则通道不可用。"
+        disabled={!draft || busy}
+        value={draft?.startup ?? "on_demand"}
+        options={[
+          { value: "on_demand", label: "按需自动启动（默认）" },
+          { value: "manual", label: "手动启动" }
+        ]}
+        onValueChange={(value) => {
+          if (draft) setDraft({ ...draft, startup: value as "on_demand" | "manual" });
+        }}
+      />
       <SettingSelect
         id="tools-visual-fusion"
         label="融合方式"
@@ -315,3 +332,5 @@ export function VisualSettingsSection({ active, root }: { active: boolean; root:
     </SettingsGroup>
   );
 }
+
+

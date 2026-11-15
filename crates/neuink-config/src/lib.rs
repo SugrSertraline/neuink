@@ -383,6 +383,9 @@ pub struct VisualEmbeddingSettings {
     /// text 1.0 / visual 0.5, RRF k=60.
     #[serde(default)]
     pub fusion: VisualFusionSettings,
+    /// Startup policy for the local service (ignored by remote transports).
+    #[serde(default)]
+    pub startup: VisualServiceStartup,
 }
 
 impl Default for VisualEmbeddingSettings {
@@ -393,6 +396,7 @@ impl Default for VisualEmbeddingSettings {
             api_key: None,
             timeout_ms: default_visual_timeout_ms(),
             fusion: VisualFusionSettings::default(),
+            startup: VisualServiceStartup::default(),
         }
     }
 }
@@ -757,4 +761,34 @@ mod text_model_settings_tests {
         assert_eq!(legacy.model_dir, None);
     }
 }
+
+/// Whether the app starts the local visual service on demand.
+///
+/// A user should not have to keep a terminal open for the second retrieval channel, so the
+/// local transport auto-starts when a visual channel is needed and the service is not
+/// answering. Remote transports never auto-start anything.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VisualServiceStartup {
+    /// Start it when needed (default).
+    OnDemand,
+    /// Never start it; require an already running service.
+    Manual,
+}
+
+impl Default for VisualServiceStartup {
+    fn default() -> Self {
+        Self::OnDemand
+    }
+}
+
+impl VisualServiceStartup {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OnDemand => "on_demand",
+            Self::Manual => "manual",
+        }
+    }
+}
+
 
