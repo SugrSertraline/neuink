@@ -139,3 +139,10 @@ cargo run -p neuink-ipc --bin retrieval-probe -- `
 实测（dev 库，stub 视觉服务 + base int8 重排）：`visual_status=ready`、`rerank_used=cross_encoder`、检索 2.87 s、准备索引 405 ms。
 
 `NEUINK_VISUAL_DEBUG=1` 时，准备失败会打印未能归因的文档（entry/kind/page/region），便于定位源不一致。
+
+### 多篇演示库与空 scope 语义
+
+- `--seed-demo DIR`：写入两篇合成论文（各 3 页、2 张图）到空目录，用于在无真实语料时验证多篇路由；目录非空时拒绝执行，避免覆盖真实库。
+- 空 `scope_entry_ids` 现在表示**整库**（`PreparedSearch.entries`），而不是空边界。之前它会让视觉通道报 `visual_no_allowed_entries` 并静默不出票——守卫是对的，推导是错的。
+
+两篇演示库实测：路由 2 篇（无 `single_document` 跳过）、`text_entries=2`、`visual_entries=2`、`visual_gate_open=true`、`rerank_used=cross_encoder`、检索 2.48 s；`carrier_empty_fallback` 属于预期（合成段落没有载体标记，绑定如实报告并回退）。

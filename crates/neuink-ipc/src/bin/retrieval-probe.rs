@@ -38,6 +38,7 @@ struct Args {
     skip_visual: bool,
     prepare_visual: bool,
     build_text_index: bool,
+    seed_demo: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -53,6 +54,7 @@ fn parse_args() -> Result<Args, String> {
     let mut skip_visual = false;
     let mut prepare = false;
     let mut build_text_index = false;
+    let mut seed_demo: Option<PathBuf> = None;
 
     while let Some(flag) = args.next() {
         let mut value = || {
@@ -80,6 +82,7 @@ fn parse_args() -> Result<Args, String> {
             "--skip-visual" => skip_visual = true,
             "--prepare-visual" => prepare = true,
             "--build-text-index" => build_text_index = true,
+            "--seed-demo" => seed_demo = Some(PathBuf::from(value()?)),
             "--help" | "-h" => {
                 println!(
                     "retrieval-probe --root DIR --model-dir DIR --question TEXT \
@@ -105,9 +108,106 @@ fn parse_args() -> Result<Args, String> {
         skip_visual,
         prepare_visual: prepare,
         build_text_index,
+        seed_demo,
     })
 }
 
+
+/// Materializes a two-paper fixture library so the multi-document path (routing, visual
+/// votes, carrier binding) can be exercised without importing real papers.
+///
+/// It refuses to touch an existing non-empty directory: a probe must never be able to
+/// overwrite a real library.
+fn seed_demo(dir: &std::path::Path) -> Result<(), String> {
+    use neuink_domain::{SegmentType, SourceSegment};
+    use neuink_workspace::Workspace;
+
+    if dir.is_dir() && std::fs::read_dir(dir).map_err(|e| e.to_string())?.next().is_some() {
+        return Err(format!(
+            "{} is not empty; refusing to seed a demo library there",
+            dir.display()
+        ));
+    }
+    std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
+    let workspace = Workspace::create(dir).map_err(|error| error.to_string())?;
+
+    let papers: [(&str, &[(&str, SegmentType, u32, &str)]); 2] = [
+        (
+            "Dense Retrieval Notes",
+            &[
+                ("Section 3 describes the dual-channel retriever and its fusion rule.", SegmentType::Paragraph, 0, ""),
+                ("Table 3 reports recall@10 of 0.475 for the fused channel and 0.380 for text only.", SegmentType::Table, 1, "images/table3.jpg"),
+                ("Figure 2 plots recall against candidate depth for both channels.", SegmentType::Figure, 2, "images/figure2.jpg"),
+            ],
+        ),
+        (
+            "Table Parsing Study",
+            &[
+                ("We annotate 1,193 two-hop questions and 311 three-hop questions.", SegmentType::Paragraph, 0, ""),
+                ("Table 1 lists parser accuracy of 44.9% on the held-out split.", SegmentType::Table, 1, "images/table1.jpg"),
+                ("Figure 1 shows the annotation interface used by three annotators.", SegmentType::Figure, 2, "images/figure1.jpg"),
+            ],
+        ),
+    ];
+
+    for (title, rows) in papers {
+        let entry = workspace.create_entry(title).map_err(|e| e.to_string())?;
+        let pdf_path = dir.join(format!("{title}.pdf"));
+        std::fs::write(&pdf_path, b"%PDF-1.4\n%%EOF\n").map_err(|e| e.to_string())?;
+        workspace
+            .import_pdf(&entry.id, &pdf_path)
+            .map_err(|e| e.to_string())?;
+        for status in [
+            neuink_domain::PdfParseStatus::Queued,
+            neuink_domain::PdfParseStatus::Uploading,
+            neuink_domain::PdfParseStatus::Uploaded,
+            neuink_domain::PdfParseStatus::Parsing,
+            neuink_domain::PdfParseStatus::Succeeded,
+        ] {
+            workspace
+                .set_pdf_parse_state(&entry.id, status, None)
+                .map_err(|e| e.to_string())?;
+        }
+        let segments = rows
+            .iter()
+            .map(|(text, kind, page, asset)| {
+                SourceSegment::new(*kind, *page, None, (*text).to_string())
+                    .with_asset_path((!asset.is_empty()).then(|| (*asset).to_string()))
+            })
+            .collect::<Vec<_>>();
+        workspace
+            .write_segments(&entry.id, &segments)
+            .map_err(|e| e.to_string())?;
+
+        // One MinerU archive per paper: the images the figure/table channel reads.
+        let zip_bytes = {
+            use std::io::{Cursor, Write};
+            use zip::{write::SimpleFileOptions, ZipWriter};
+            let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+            writer
+                .start_file("content_list.json", SimpleFileOptions::default())
+                .map_err(|e| e.to_string())?;
+            writer.write_all(b"[]").map_err(|e| e.to_string())?;
+            for (_, _, _, asset) in rows {
+                if asset.is_empty() {
+                    continue;
+                }
+                writer
+                    .start_file(*asset, SimpleFileOptions::default())
+                    .map_err(|e| e.to_string())?;
+                writer
+                    .write_all(format!("{title}-{asset}").as_bytes())
+                    .map_err(|e| e.to_string())?;
+            }
+            writer.finish().map_err(|e| e.to_string())?.into_inner()
+        };
+        workspace
+            .write_mineru_output_zip(&entry.id, &zip_bytes)
+            .map_err(|e| e.to_string())?;
+        std::fs::remove_file(&pdf_path).ok();
+    }
+    Ok(())
+}
 fn main() {
     if let Err(error) = run() {
         eprintln!("retrieval-probe: {error}");
@@ -117,6 +217,9 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let args = parse_args()?;
+    if let Some(dir) = args.seed_demo.as_ref() {
+        seed_demo(dir)?;
+    }
     let mut report = serde_json::Map::new();
     let started = Instant::now();
 
@@ -309,6 +412,9 @@ fn run() -> Result<(), String> {
     );
     Ok(())
 }
+
+
+
 
 
 

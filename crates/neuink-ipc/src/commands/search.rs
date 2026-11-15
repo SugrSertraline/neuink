@@ -303,6 +303,9 @@ struct PreparedSearch {
     /// Distinct entries in the prepared corpus. The document head needs the scope
     /// size to tell "no parsed documents" from "nothing ranked".
     document_count: usize,
+    /// The same entries in first-seen order, so an empty request scope can mean this set
+    /// rather than an empty boundary.
+    entries: Vec<String>,
 }
 
 fn prepare_search(
@@ -362,6 +365,14 @@ fn prepare_search(
             .map(|document| document.entry_id.as_str())
             .collect::<HashSet<_>>()
             .len(),
+        entries: {
+            let mut seen = HashSet::new();
+            documents
+                .iter()
+                .map(|document| document.entry_id.to_string())
+                .filter(|entry| seen.insert(entry.clone()))
+                .collect()
+        },
     })
 }
 
@@ -2379,6 +2390,7 @@ mod tests {
             semantic: None,
             // Fixtures below use two entries, so the head's scope size is 2.
             document_count: 2,
+            entries: vec!["entry-a".to_string(), "entry-b".to_string()],
         }
     }
 
@@ -2814,4 +2826,5 @@ pub fn save_retrieval_settings<R: tauri::Runtime>(
         unified: saved.retrieval.unified,
     })
 }
+
 

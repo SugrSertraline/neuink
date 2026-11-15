@@ -118,11 +118,18 @@ pub fn run_unified_search(
         filter_stopwords: false,
         limit: request.top_k.unwrap_or(20).clamp(1, 20),
     };
-    let allowed_entries = request
-        .scope_entry_ids
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>();
+    // An empty request scope means the whole prepared corpus, not an empty boundary:
+    // otherwise the visual channel would refuse to vote for every "search my library"
+    // call, and the guard against unfrozen votes would look like a broken channel.
+    let allowed_entries = if request.scope_entry_ids.is_empty() {
+        prepared.entries.clone()
+    } else {
+        request
+            .scope_entry_ids
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+    };
     let mandated_entries = request
         .mandated_entry_ids
         .iter()
@@ -326,4 +333,5 @@ mod tests {
         assert_eq!(carrier_kind_code(CarrierKind::Section), "section");
     }
 }
+
 
