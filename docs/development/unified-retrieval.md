@@ -185,3 +185,11 @@ cargo run -p neuink-ipc --bin retrieval-probe -- `
 助手路由原先与搜索共用同一目录，且只接受 e5-small，换模型后会**静默关闭**。新增 `embedding-models/router` 专用目录（本机指向 e5 备份），两者互不影响；缺失时回退到搜索目录，但仅当其中仍是校准模型时才启用。
 
 注意：目录联接是本地做法，打包分发必须真实拷贝模型文件。
+
+### 默认模型改为 bge-m3（取消 e5 选项）
+
+- `embedding-lock.json` 指向 `BAAI/bge-m3`：`onnx/model_int8.onnx` 与 1024 维、CLS 池化；随包资源目录 `embedding-models/default` 现在是 bge-m3。
+- 该 int8 权重是本地量化产物（上游只发布 fp32），因此 lock 标 `downloadable: false`：`--prepare` 会明确拒绝下载，构建机必须本地放置权重。
+- 打包/开发前的资源校验不再写死 `onnx/model.onnx`，接受 `model.onnx` / `model_int8.onnx`（`onboarding-resources.cjs`）。
+- 模型选择器不再出现 e5：e5 目录已移出 `embedding-models/`，`list_text_models` 也跳过 `router`。
+- 助手路由仍使用 e5（`embedding-models/router`，指向 `embedding-models-internal/e5-small-router`）：其阈值与 `query:` 前缀是在 e5 上校准的，换模型会静默改变路由行为，所以它是内部编码器而不是用户选项。

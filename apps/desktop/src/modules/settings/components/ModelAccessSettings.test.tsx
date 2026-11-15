@@ -77,7 +77,7 @@ describe('ModelAccessSettings', () => {
     const links = screen
       .getAllByRole('link')
       .map((element) => element.getAttribute('href') ?? '');
-    expect(links).toContain('https://huggingface.co/intfloat/multilingual-e5-small');
+    expect(links).toContain('https://huggingface.co/BAAI/bge-m3');
     expect(links).toContain('https://huggingface.co/Qwen/Qwen3-VL-Embedding-2B');
   });
 
@@ -129,3 +129,4 @@ describe('ModelAccessSettings', () => {
     );
   });
 });
+

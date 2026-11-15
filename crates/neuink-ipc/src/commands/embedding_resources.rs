@@ -179,6 +179,11 @@ pub fn list_text_models<R: tauri::Runtime>(
             let Some(manifest) = read_model_manifest(&path) else {
                 continue;
             };
+            // `router` is an internal encoder the assistant router owns; it is not a user
+            // choice, so it must not appear in the model picker.
+            if path.file_name().and_then(|name| name.to_str()) == Some("router") {
+                continue;
+            }
             let id = path
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -215,3 +220,4 @@ fn read_model_manifest(dir: &std::path::Path) -> Option<(Option<String>, Option<
         value.get("pooling").and_then(|item| item.as_str()).map(str::to_string),
     ))
 }
+

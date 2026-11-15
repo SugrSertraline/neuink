@@ -15,11 +15,6 @@ import { SettingsGroup, SettingRow, SettingSelect } from './SettingsPrimitives';
 const LINKS: ReadonlyArray<{ label: string; note: string; href: string }> = [
   { label: 'BAAI/bge-m3', note: '1024 维，CLS 池化，568 MB int8', href: 'https://huggingface.co/BAAI/bge-m3' },
   {
-    label: 'intfloat/multilingual-e5-small',
-    note: '384 维，Mean 池化，448 MB fp32 ONNX',
-    href: 'https://huggingface.co/intfloat/multilingual-e5-small'
-  },
-  {
     label: 'Qwen3-VL-Embedding-2B',
     note: '视觉通道，2048 维，本地服务',
     href: 'https://huggingface.co/Qwen/Qwen3-VL-Embedding-2B'
@@ -180,3 +175,5 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
     </SettingsGroup>
   );
 }
+
+

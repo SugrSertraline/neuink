@@ -97,7 +97,15 @@ function copyOptionalResources(source, destination, log = console.log) {
 }
 
 function assertEmbeddingResources(directory = DEFAULT_MODEL_SOURCE) {
-  for (const name of ['onnx/model.onnx', 'tokenizer.json', 'config.json', 'special_tokens_map.json', 'tokenizer_config.json']) {
+  // The bundled encoder is interchangeable, so the weight file name is not fixed:
+  // e5 ships `onnx/model.onnx` while the bge-m3 int8 export ships `onnx/model_int8.onnx`.
+  const modelFiles = ['onnx/model.onnx', 'onnx/model_int8.onnx', 'model.onnx'];
+  if (!modelFiles.some(name => existsSync(path.join(directory, name)))) {
+    throw new Error(
+      `缺少必需 embedding 资源：${path.join(directory, modelFiles[0])}；不能仅凭 README 或缓存目录生成安装包。`,
+    );
+  }
+  for (const name of ['tokenizer.json', 'config.json', 'special_tokens_map.json', 'tokenizer_config.json']) {
     const file = path.join(directory, name);
     if (!existsSync(file) || !statSync(file).isFile() || statSync(file).size === 0) {
       throw new Error(`缺少必需 embedding 资源：${file}；不能仅凭 README 或缓存目录生成安装包。`);
