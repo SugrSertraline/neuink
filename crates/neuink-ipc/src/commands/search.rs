@@ -2941,15 +2941,13 @@ pub fn install_recommended_text_model<R: tauri::Runtime>(
         .timeout(std::time::Duration::from_secs(1800))
         .build()
         .map_err(|error| error.to_string())?;
-    let mut downloads: Vec<(String, String)> = vec![
-        (model.onnx_path.to_string(), model.onnx_path.to_string()),
-        ("tokenizer.json".to_string(), "tokenizer.json".to_string()),
-        ("config.json".to_string(), "config.json".to_string()),
-        ("tokenizer_config.json".to_string(), "tokenizer_config.json".to_string()),
-    ];
-    if model.repository.contains("e5") {
-        downloads.push(("sentencepiece.bpe.model".to_string(), "sentencepiece.bpe.model".to_string()));
-    }
+    // Download exactly what the entry declares; every path was checked to return HTTP 206
+    // from `https://huggingface.co/<repo>/resolve/main/<path>`.
+    let downloads: Vec<(String, String)> = model
+        .files
+        .iter()
+        .map(|path| ((*path).to_string(), (*path).to_string()))
+        .collect();
     for (remote, relative) in downloads {
         let target = dir.join(&relative);
         if target.is_file() && std::fs::metadata(&target).map(|meta| meta.len() > 0).unwrap_or(false) {
@@ -2983,4 +2981,5 @@ pub fn install_recommended_text_model<R: tauri::Runtime>(
         installed: true,
     })
 }
+
 

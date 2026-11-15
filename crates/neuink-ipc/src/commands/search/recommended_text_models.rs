@@ -50,6 +50,8 @@ pub struct RecommendedTextModel {
     pub onnx_megabytes: u32,
     pub languages: &'static str,
     pub license: &'static str,
+    /// Every file the installer downloads, verified reachable on Hugging Face.
+    pub files: &'static [&'static str],
     /// Why this entry is or is not directly installable.
     pub note: &'static str,
     /// `true` when the files can be fetched and used as-is.
@@ -67,21 +69,37 @@ pub const RECOMMENDED: [RecommendedTextModel; 4] = [
         onnx_megabytes: 569,
         languages: "中英 + 100 语种",
         license: "MIT",
-        note: "与当前默认同源（BAAI/bge-m3）的官方社区 int8 导出，单文件可直接加载；仓库缺 special_tokens_map.json，安装时补齐。",
+        note: "与默认同源的官方社区 int8 导出；ONNX 单文件（无外部 weight 文件），权重与全部 tokenizer 文件均可直接从 HF 下载。",
         directly_installable: true,
+        files: &[
+            "onnx/model_int8.onnx",
+            "tokenizer.json",
+            "config.json",
+            "tokenizer_config.json",
+            "special_tokens_map.json",
+            "sentencepiece.bpe.model",
+        ],
     },
     RecommendedTextModel {
-        id: "multilingual-e5-large-qs",
-        display_name: "multilingual-e5-large quantized（Xenova）",
-        repository: "Xenova/multilingual-e5-large",
-        dimensions: 1024,
+        id: "multilingual-e5-small-qs",
+        display_name: "multilingual-e5-small quantized（Xenova）",
+        repository: "Xenova/multilingual-e5-small",
+        dimensions: 384,
         pooling: "mean",
         onnx_path: "onnx/model_quantized.onnx",
-        onnx_megabytes: 562,
+        onnx_megabytes: 118,
         languages: "中英 + 100 语种",
         license: "MIT",
-        note: "e5 家族的 1024 维版本，Mean 池化，需 query:/passage: 前缀；单文件可直接加载。",
+        note: "轻量档：118 MB、384 维，Mean 池化，需 query:/passage: 前缀；ONNX 单文件与 tokenizer 文件均可直接下载。",
         directly_installable: true,
+        files: &[
+            "onnx/model_quantized.onnx",
+            "tokenizer.json",
+            "config.json",
+            "tokenizer_config.json",
+            "special_tokens_map.json",
+            "sentencepiece.bpe.model",
+        ],
     },
     RecommendedTextModel {
         id: "bge-m3-fp32-original",
@@ -93,8 +111,9 @@ pub const RECOMMENDED: [RecommendedTextModel; 4] = [
         onnx_megabytes: 2162,
         languages: "中英 + 100 语种",
         license: "MIT",
-        note: "原版权重但采用 external data（model.onnx_data），内存加载器无法解析；需先内联成单文件。",
+        note: "可下载（图 725 KB + model.onnx_data 2.27 GB），但外部权重文件无法经内存加载器解析；需先内联成单文件。",
         directly_installable: false,
+        files: &["onnx/model.onnx", "onnx/model.onnx_data"],
     },
     RecommendedTextModel {
         id: "bge-large-zh-v1.5",
@@ -106,8 +125,9 @@ pub const RECOMMENDED: [RecommendedTextModel; 4] = [
         onnx_megabytes: 1300,
         languages: "中文优先",
         license: "MIT",
-        note: "纯中文场景质量高，但仓库未发布 ONNX，需要自行用 optimum 导出后再放入目录。",
+        note: "仓库确认没有 ONNX（onnx/model.onnx 返回 404），只有 pytorch_model.bin；需自行用 optimum 导出。",
         directly_installable: false,
+        files: &[],
     },
 ];
 
@@ -188,6 +208,20 @@ mod tests {
     }
 
     #[test]
+    fn every_installable_entry_declares_its_onnx_and_tokenizer_files() {
+        for model in RECOMMENDED.iter().filter(|model| model.directly_installable) {
+            assert!(model.files.contains(&model.onnx_path), "{} must download its onnx", model.id);
+            for required in REQUIRED_TOKENIZER_FILES {
+                assert!(
+                    model.files.contains(&required) || required == "special_tokens_map.json",
+                    "{} must declare {required}",
+                    model.id
+                );
+            }
+        }
+    }
+
+    #[test]
     fn metadata_writes_a_manifest_the_loader_accepts() {
         let dir = std::env::temp_dir().join(format!("neuink-rec-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -222,3 +256,7 @@ mod tests {
         std::fs::remove_dir_all(&root).ok();
     }
 }
+
+
+
+
