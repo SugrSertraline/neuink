@@ -1,5 +1,5 @@
 //! Local semantic signals, not permissions or an Agent executor. No network or user-text logs.
-use super::embedding_resources::embedding_model_dir;
+use super::embedding_resources::router_model_dir;
 use neuink_search::{EmbeddingInput, EmbeddingProvider, EmbeddingVector, FastEmbedProvider};
 use serde::Serialize;
 use std::{
@@ -180,7 +180,7 @@ pub async fn assistant_route_signals<R: tauri::Runtime>(
     {
         return unavailable("skipped");
     }
-    let Ok(path) = embedding_model_dir(&app) else {
+    let Ok(path) = router_model_dir(&app) else {
         return unavailable("unavailable");
     };
     let job = tokio::task::spawn_blocking(move || {
@@ -258,3 +258,5 @@ mod tests {
         }
     }
 }
+
+

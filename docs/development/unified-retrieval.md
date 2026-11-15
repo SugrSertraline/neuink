@@ -171,3 +171,17 @@ cargo run -p neuink-ipc --bin retrieval-probe -- `
 新增 `NEUINK_TORCH_THREADS`：轻薄本按物理核数设置，避免 torch 占用全部逻辑核造成超额订阅。
 
 按 4000 元档轻薄本（R7-8845H 8C/16T / Ultra 5 125H）推算：单篇首次全量约 2–2.5 分钟；把每页 4 个裁切降到 2 个约 1–1.2 分钟。核显无法加速：Windows 上 PyTorch 对 AMD 核显无 ROCm 支持，Intel 核显需 IPEX（未接入）。
+
+### 文本嵌入模型可替换（bge-m3-int8 实测）
+
+`fastembed_provider` 原来只认 `onnx/model.onnx` 且**硬编码 Mean 池化**，因此 bge-m3-int8 无法正确接入（bge-m3 需要 CLS 池化，用 Mean 会得到近乎无用的向量）。已改为：
+
+- 接受 `onnx/model.onnx`、`onnx/model_int8.onnx`、`model.onnx`；
+- `neuink-embedding.json` 新增 `pooling`（`mean` 默认 / `cls`），未知值直接报错而不是猜；
+- 池化计入模型身份哈希，换池化即换索引命名空间。
+
+切换实测（本机 resources）：`default` 由 e5-small 改为 `bge-m3-int8`（备份在 `default-e5-small`，以目录联接指向模型目录）。探针输出：`model_name=BAAI/bge-m3`、`dimensions=1024`、331 段重建 113 s、检索 `mode=hybrid` 268 ms。
+
+助手路由原先与搜索共用同一目录，且只接受 e5-small，换模型后会**静默关闭**。新增 `embedding-models/router` 专用目录（本机指向 e5 备份），两者互不影响；缺失时回退到搜索目录，但仅当其中仍是校准模型时才启用。
+
+注意：目录联接是本地做法，打包分发必须真实拷贝模型文件。

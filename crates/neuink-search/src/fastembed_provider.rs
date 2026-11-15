@@ -16,7 +16,7 @@ use crate::{
 
 pub const DEFAULT_EMBEDDING_MODEL_RESOURCE_DIR: &str = "embedding-models/default";
 const DEFAULT_PROVIDER_NAME: &str = "fastembed-local";
-const MODEL_FILE_NAMES: &[&str] = &["onnx/model.onnx", "model.onnx"];
+const MODEL_FILE_NAMES: &[&str] = &["onnx/model.onnx", "onnx/model_int8.onnx", "model.onnx"];
 const TOKENIZER_FILE_NAME: &str = "tokenizer.json";
 const MANIFEST_FILE_NAME: &str = "neuink-embedding.json";
 pub const LOCAL_EMBEDDING_BATCH_SIZE: usize = 8;
@@ -162,7 +162,12 @@ fn model_content_identity(model_dir: &Path) -> std::io::Result<String> {
         ));
     }
     let mut hasher = blake3::Hasher::new();
-    hasher.update(b"neuink-fastembed-mean-pooling-v1");
+    // Pooling belongs to the identity: the same weights pooled differently produce
+    // incompatible vectors, so a manifest change must invalidate cached embeddings.
+    let pooling = read_manifest(&model_dir.join(MANIFEST_FILE_NAME))
+        .and_then(|manifest| manifest.pooling_tag())
+        .unwrap_or("mean");
+    hasher.update(format!("neuink-fastembed-pooling-v2:{pooling}").as_bytes());
     let mut buffer = [0_u8; 64 * 1024];
     for path in files {
         let relative = path
@@ -191,9 +196,20 @@ fn load_text_embedding(
 ) -> SearchResult<Mutex<TextEmbedding>> {
     let model_file = first_existing_file(model_dir, MODEL_FILE_NAMES).ok_or_else(|| {
         SearchError::EmbeddingUnavailable(
-            "Embedding ONNX model is missing; expected onnx/model.onnx or model.onnx.".to_string(),
+            "Embedding ONNX model is missing; expected onnx/model.onnx, onnx/model_int8.onnx or model.onnx.".to_string(),
         )
     })?;
+    let pooling = match read_manifest(&model_dir.join(MANIFEST_FILE_NAME))
+        .and_then(|manifest| manifest.pooling_tag())
+    {
+        Some("cls") => Pooling::Cls,
+        Some(_) => Pooling::Mean,
+        None => {
+            return Err(SearchError::EmbeddingUnavailable(
+                "Embedding manifest names an unsupported pooling; use mean or cls.".to_string(),
+            ))
+        }
+    };
     let tokenizer_files = TokenizerFiles {
         tokenizer_file: read_required_file(&model_dir.join(TOKENIZER_FILE_NAME))?,
         config_file: read_required_file(&model_dir.join("config.json"))?,
@@ -202,7 +218,7 @@ fn load_text_embedding(
     };
     let user_model =
         UserDefinedEmbeddingModel::new(read_required_file(&model_file)?, tokenizer_files)
-            .with_pooling(Pooling::Mean);
+            .with_pooling(pooling);
     let mut options = InitOptionsUserDefined::default();
     if let Some(threads) = intra_threads {
         options = options.with_intra_threads(threads);
@@ -284,7 +300,7 @@ fn inspect_model_dir(model_dir: &Path) -> EmbeddingProviderStatus {
             model_name,
             Some(model_dir.display().to_string()),
             dimensions,
-            "Embedding ONNX model is missing; expected onnx/model.onnx or model.onnx.",
+            "Embedding ONNX model is missing; expected onnx/model.onnx, onnx/model_int8.onnx or model.onnx.",
         );
     };
 
@@ -349,6 +365,23 @@ struct EmbeddingManifest {
     model_name: Option<String>,
     #[serde(default)]
     dimensions: Option<usize>,
+    /// `mean` (default, e5 family) or `cls` (bge-m3 family). Pooling belongs to the model
+    /// identity: mean-pooling a CLS model silently produces near-useless vectors, so the
+    /// manifest declares it instead of the code assuming one kind.
+    #[serde(default)]
+    pooling: Option<String>,
+}
+
+impl EmbeddingManifest {
+    /// Normalised pooling tag, or `None` when the manifest names an unsupported one.
+    fn pooling_tag(&self) -> Option<&'static str> {
+        match self.pooling.as_deref().map(str::to_ascii_lowercase) {
+            None => Some("mean"),
+            Some(value) if value == "mean" => Some("mean"),
+            Some(value) if value == "cls" => Some("cls"),
+            Some(_) => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -404,9 +437,14 @@ mod tests {
     fn embeds_with_bundled_model_when_present() {
         let model_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../apps/desktop/src-tauri/resources/embedding-models/default");
-        if !model_dir.join("onnx").join("model.onnx").is_file() {
+        // The bundled model is replaceable (e5-small 384, bge-m3 1024), so this test looks
+        // for any accepted file name and follows the manifest instead of pinning one model.
+        if first_existing_file(&model_dir, MODEL_FILE_NAMES).is_none() {
             return;
         }
+        let declared = read_manifest(&model_dir.join(MANIFEST_FILE_NAME))
+            .and_then(|manifest| manifest.dimensions)
+            .expect("the bundled manifest must declare dimensions");
 
         let provider = FastEmbedProvider::from_model_dir(model_dir);
         let vectors = provider
@@ -417,7 +455,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(vectors.len(), 1);
-        assert_eq!(vectors[0].dimensions(), 384);
+        assert_eq!(vectors[0].dimensions(), declared);
     }
 
     #[test]
@@ -481,3 +519,5 @@ mod tests {
         format!("{prefix}-{nanos}")
     }
 }
+
+
