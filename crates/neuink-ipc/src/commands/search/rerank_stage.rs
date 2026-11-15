@@ -268,4 +268,33 @@ mod tests {
         assert!(reranker_for(&dir).is_none());
         assert!(reranker_for(&dir).is_none());
     }
+
+    /// Real ONNX proof for the `cross_encoder` rung.
+    ///
+    /// The rest of this module uses a fake provider, so those tests prove the ladder but
+    /// not that a local `.onnx` model loads and reorders. Set `NEUINK_RERANK_ONNX_DIR` to
+    /// a directory laid out as `onnx/model_int8.onnx` plus the four tokenizer files.
+    #[test]
+    fn a_real_onnx_model_loads_and_takes_the_cross_encoder_rung() {
+        let Ok(dir) = std::env::var("NEUINK_RERANK_ONNX_DIR") else {
+            return;
+        };
+        let loaded = reranker_for(&PathBuf::from(dir));
+        assert!(loaded.is_some(), "the ONNX reranker must load");
+        let provider = loaded.expect("loaded");
+        let hits = vec![
+            hit("a", "prose about several qualitative cases"),
+            hit("b", "accuracy 91.2 percent on the test split"),
+        ];
+        let (ordered, outcome) = apply_rerank(
+            hits,
+            "what accuracy percent is reported",
+            &settings(RerankMode::CrossEncoder, false),
+            Some(provider.as_ref() as &dyn RerankProvider),
+        );
+        assert_eq!(outcome.used, RERANK_CROSS_ENCODER);
+        assert_eq!(outcome.reason, None);
+        // The cross-encoder must prefer the page that states the number.
+        assert_eq!(ordered[0].snippet, "accuracy 91.2 percent on the test split");
+    }
 }
