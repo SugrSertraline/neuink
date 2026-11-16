@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import {
+  getRerankSettings,
   getTextModelSettings,
+  getVisualEmbeddingSettings,
   getVisualRuntimeState,
   getVisualServiceStatus,
   installRecommendedRerankModel,
@@ -19,7 +21,9 @@ import {
   type RecommendedRerankModelState,
   type RecommendedTextModelState,
   type RecommendedVisualModel,
+  type RerankSettingsState,
   type VisualRuntimeState,
+  type VisualEmbeddingSettingsState,
   type VisualServiceStatus,
   type RetrievalCheck,
   type TextEmbeddingProbeState,
@@ -56,6 +60,8 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
   const [visualModels, setVisualModels] = useState<RecommendedVisualModel[]>([]);
   const [runtimes, setRuntimes] = useState<Record<string, VisualRuntimeState | null>>({});
   const [serviceStatus, setServiceStatus] = useState<VisualServiceStatus | null>(null);
+  const [rerankState, setRerankState] = useState<RerankSettingsState | null>(null);
+  const [visualState, setVisualState] = useState<VisualEmbeddingSettingsState | null>(null);
   const [startingService, setStartingService] = useState(false);
   const [reuseDirs, setReuseDirs] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<string>('');
@@ -76,14 +82,17 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
   const [checking, setChecking] = useState(false);
 
   const reload = async () => {
-    const [models, current, textRecommended, rerankRecommended, visualRecommended, service] = await Promise.all([
-      listTextModels(),
-      getTextModelSettings(),
-      listRecommendedTextModels(),
-      listRecommendedRerankModels(),
-      listRecommendedVisualModels(),
-      getVisualServiceStatus().catch(() => null)
-    ]);
+    const [models, current, textRecommended, rerankRecommended, visualRecommended, service, rerank, visual] =
+      await Promise.all([
+        listTextModels(),
+        getTextModelSettings(),
+        listRecommendedTextModels(),
+        listRecommendedRerankModels(),
+        listRecommendedVisualModels(),
+        getVisualServiceStatus().catch(() => null),
+        getRerankSettings().catch(() => null),
+        getVisualEmbeddingSettings().catch(() => null)
+      ]);
     const runtimeStates = await Promise.all(
       visualRecommended.map(async (model) => [model.id, await getVisualRuntimeState(model.id)] as const)
     );
@@ -94,6 +103,8 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
     setVisualModels(visualRecommended);
     setRuntimes(Object.fromEntries(runtimeStates));
     setServiceStatus(service);
+    setRerankState(rerank);
+    setVisualState(visual);
     setSelected(current.model_dir ?? models.find((model) => model.bundled)?.path ?? '');
     setCustom(current.model_dir ?? '');
     setProvider(current.provider);
@@ -300,7 +311,116 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
     >
       {error && <p role="alert" className="mt-2 text-xs leading-5 text-destructive">{error}</p>}
 
-      <p className="mt-1 text-xs font-medium text-muted-foreground">文本嵌入模型</p>
+      <div className="mt-2 flex items-baseline justify-between gap-2">
+        <p className="text-xs font-medium text-foreground">通道总览</p>
+        <Button size="sm" disabled={checking || !root} onClick={() => void check()}>
+          {checking ? '自检中…' : '一键自检'}
+        </Button>
+      </div>
+      <table className="mt-1 w-full border-collapse text-xs leading-5" data-testid="channel-overview">
+        <thead>
+          <tr className="text-left text-muted-foreground">
+            <th className="w-16 py-1 font-normal">通道</th>
+            <th className="w-24 py-1 font-normal">后端</th>
+            <th className="py-1 font-normal">当前状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr className="border-t border-border align-top">
+            <td className="py-1 text-foreground">
+              <a className="underline-offset-2 hover:underline" href="#channel-text">
+                文本嵌入
+              </a>
+            </td>
+            <td className="py-1 text-muted-foreground">{provider === 'api' ? '远程 API' : '本地 ONNX'}</td>
+            <td className={`py-1 ${state?.available ? 'text-muted-foreground' : 'text-warning'}`}>
+              {state?.available
+                ? `${state.loaded_model_name ?? '未知模型'}${state.loaded_dimensions ? ` · ${state.loaded_dimensions} 维` : ''}`
+                : (state?.message ?? '未检测到可用模型')}
+            </td>
+          </tr>
+          <tr className="border-t border-border align-top">
+            <td className="py-1 text-foreground">
+              <a className="underline-offset-2 hover:underline" href="#channel-visual">
+                视觉编码
+              </a>
+            </td>
+            <td className="py-1 text-muted-foreground">
+              {visualState?.provider === 'qwen_api' ? '远程 API' : '本机服务'}
+            </td>
+            <td className={`py-1 ${serviceStatus?.running || visualState?.provider === 'qwen_api' ? 'text-muted-foreground' : 'text-warning'}`}>
+              {visualState?.provider === 'qwen_api'
+                ? visualState.endpoint
+                  ? `已配置 ${visualState.endpoint}`
+                  : '未填写地址与密钥'
+                : serviceStatus?.running
+                  ? `服务运行中${serviceStatus.dimensions ? ` · ${serviceStatus.dimensions} 维` : ''}`
+                  : runtimes['qwen3-vl-embedding-2b']?.dependencies_installed
+                    ? '服务未运行（按需启动）'
+                    : '运行时未安装'}
+            </td>
+          </tr>
+          <tr className="border-t border-border align-top">
+            <td className="py-1 text-foreground">
+              <a className="underline-offset-2 hover:underline" href="#channel-rerank">
+                重排
+              </a>
+            </td>
+            <td className="py-1 text-muted-foreground">
+              {rerankState?.mode === 'cross_encoder'
+                ? rerankState.transport === 'api'
+                  ? '远程 API'
+                  : '本地 ONNX'
+                : rerankState?.mode === 'heuristic'
+                  ? '字段覆盖'
+                  : '关闭'}
+            </td>
+            <td className="py-1 text-muted-foreground">
+              {rerankState?.mode === 'cross_encoder'
+                ? rerankState.transport === 'api'
+                  ? rerankState.api_endpoint
+                    ? `已配置 · ${rerankState.api_model ?? '缺模型名'}`
+                    : '未填写地址'
+                  : rerankState.model_present
+                    ? '本地模型已就绪'
+                    : '未选择可用的模型目录'
+                : '融合序直接输出'}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      {checks && (
+        <table className="mt-2 w-full border-collapse text-xs leading-5" data-testid="self-check-results">
+          <thead>
+            <tr className="text-left text-muted-foreground">
+              <th className="w-12 py-1 font-normal">结果</th>
+              <th className="w-24 py-1 font-normal">项目</th>
+              <th className="py-1 font-normal">说明</th>
+              <th className="w-14 py-1 text-right font-normal">耗时</th>
+            </tr>
+          </thead>
+          <tbody>
+            {checks.map((result) => (
+              <tr key={result.name} className="border-t border-border align-top">
+                <td className={`py-1 ${result.ok ? 'text-foreground' : 'text-destructive'}`}>
+                  {result.ok ? '通过' : '未通过'}
+                </td>
+                <td className="py-1 text-foreground">{CHECK_LABEL[result.name]}</td>
+                <td className="py-1 text-muted-foreground">{result.detail}</td>
+                <td className="py-1 text-right text-muted-foreground">{result.ms} ms</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <section id="channel-text" className="mt-3 scroll-mt-2 border-t border-border pt-2">
+        <p className="text-xs font-medium text-foreground">文本嵌入模型</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          本地 ONNX 权重，或 OpenAI 兼容的 <code className="font-mono">/embeddings</code> 接口；两种方式共用同一套向量索引与检索管线。
+        </p>
+      </section>
       <SettingSelect
         id="tools-text-provider"
         label="编码方式"
@@ -488,10 +608,11 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
         </ul>
       )}
 
-      <div className="mt-3 border-t border-border pt-2">
-        <p className="text-xs font-medium text-muted-foreground">视觉编码模型</p>
+      <div className="mt-3 border-t border-border pt-2" id="channel-visual">
+        <p className="text-xs font-medium text-foreground">视觉编码模型</p>
         <p className="mt-1 text-xs leading-5 text-muted-foreground">
-          视觉通道是一个本机 Python 服务，需要 torch 与 PyMuPDF，因此不随安装包下载：按下面每条给出的路径与命令准备权重并启动服务，再回到本页填地址与密钥。
+          视觉通道是一个本机 Python 服务：页面与区域由应用内 PDFium 渲染，服务只负责编码，依赖只剩 torch / transformers / qwen-vl-utils / pillow。
+          一键安装会把隔离环境与权重准备到下面给出的路径；也可以用「已有权重目录」复用本机权重。
         </p>
         <ul className="mt-1 space-y-1">
           {visualModels.map((model) => (
@@ -586,8 +707,8 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
       </div>
 
       {rerankModels.length > 0 && (
-        <div className="mt-3 border-t border-border pt-2">
-          <p className="text-xs font-medium text-muted-foreground">重排模型</p>
+        <div className="mt-3 border-t border-border pt-2" id="channel-rerank">
+          <p className="text-xs font-medium text-foreground">重排模型</p>
           <ul className="mt-1 space-y-1">
             {rerankModels.map((entry) => (
               <li
@@ -618,32 +739,6 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
           </ul>
         </div>
       )}
-
-      <div className="mt-3 border-t border-border pt-2">
-        <p className="text-xs font-medium text-muted-foreground">本机检索配置</p>
-        <div className="mt-1 flex flex-wrap items-center gap-2">
-          <Button size="sm" disabled={checking || !root} onClick={() => void check()}>
-            {checking ? '检测中…' : '一键测试能否使用'}
-          </Button>
-          <span className="text-xs leading-5 text-muted-foreground">
-            依次验证文本模型、资料库、视觉服务与重排，逐条给出结论与耗时。
-          </span>
-        </div>
-        {checks && (
-          <ul className="mt-1 space-y-1" data-testid="self-check-results">
-            {checks.map((result) => (
-              <li key={result.name} className="text-xs leading-5 text-muted-foreground">
-                <span className={result.ok ? 'text-foreground' : 'text-destructive'}>
-                  {result.ok ? '通过' : '未通过'}
-                </span>
-                <span className="mx-2 font-medium">{CHECK_LABEL[result.name]}</span>
-                <span>{result.detail}</span>
-                <span className="ml-2">{result.ms} ms</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
 
       {rebuildNote && (
         <p className="mt-2 text-xs leading-5 text-muted-foreground" data-testid="text-model-note">

@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ModelAccessSettings } from './ModelAccessSettings';
 import {
+  getRerankSettings,
   getTextModelSettings,
+  getVisualEmbeddingSettings,
   getVisualRuntimeState,
   getVisualServiceStatus,
   listRecommendedRerankModels,
@@ -23,6 +25,8 @@ vi.mock('@/shared/ipc/workspaceApi', () => ({
   listRecommendedRerankModels: vi.fn(),
   listRecommendedVisualModels: vi.fn(),
   getVisualRuntimeState: vi.fn(),
+  getRerankSettings: vi.fn(),
+  getVisualEmbeddingSettings: vi.fn(),
   getVisualServiceStatus: vi.fn(),
   installVisualRuntime: vi.fn(),
   downloadVisualWeights: vi.fn(),
@@ -104,6 +108,33 @@ beforeEach(() => {
     message: null
   });
   vi.mocked(getVisualRuntimeState).mockResolvedValue(null);
+  vi.mocked(getRerankSettings).mockReset();
+  vi.mocked(getRerankSettings).mockResolvedValue({
+    mode: 'off',
+    model_dir: null,
+    max_candidates: 20,
+    fallback_heuristic: true,
+    transport: 'local',
+    api_endpoint: null,
+    api_model: null,
+    has_api_key: false,
+    model_present: false
+  } as never);
+  vi.mocked(getVisualEmbeddingSettings).mockReset();
+  vi.mocked(getVisualEmbeddingSettings).mockResolvedValue({
+    provider: 'qwen_local',
+    has_api_key: false,
+    endpoint: 'http://127.0.0.1:8765',
+    timeout_ms: 60000,
+    fusion: {
+      mode: 'append_gated',
+      text_weight: 1,
+      visual_weight: 0.5,
+      rrf_k: 60,
+      gate: { min_head_entries: 3, max_snippet_overlap: 2 }
+    },
+    startup: 'on_demand'
+  } as never);
   vi.mocked(listRecommendedVisualModels).mockResolvedValue([
     {
       id: 'siglip2-base-patch16-224',
@@ -269,3 +300,5 @@ describe('ModelAccessSettings', () => {
     );
   });
 });
+
+
