@@ -5,8 +5,13 @@
 //! auditable instead of guessed: "text-only because the reranker was not installed" and
 //! "text-only because the reranker failed" must not look the same.
 
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::path::Path;
+use std::sync::Arc;
+#[cfg(any(feature = "local-embedding", test))]
+use std::path::PathBuf;
+#[cfg(feature = "local-embedding")]
+use std::sync::{Mutex, OnceLock};
+#[cfg(feature = "local-embedding")]
 use std::time::SystemTime;
 
 use neuink_config::{RerankMode, RerankSettings};
@@ -116,7 +121,7 @@ pub fn reranker_model_present(model_dir: &Path) -> bool {
         .any(|relative| model_dir.join(relative).is_file())
 }
 
-pub fn reranker_for(model_dir: &Path) -> Option<Arc<neuink_search::LocalReranker>> {
+pub fn reranker_for(model_dir: &Path) -> Option<Arc<dyn RerankProvider>> {
     #[cfg(not(feature = "local-embedding"))]
     {
         let _ = model_dir;
@@ -135,12 +140,12 @@ pub fn reranker_for(model_dir: &Path) -> Option<Arc<neuink_search::LocalReranker
         };
         if let Some((cached_dir, cached_modified, loaded)) = cache.as_ref() {
             if cached_dir == model_dir && *cached_modified == modified {
-                return loaded.clone();
+                return loaded.clone().map(|value| value as Arc<dyn RerankProvider>);
             }
         }
         let loaded = neuink_search::LocalReranker::load(model_dir).ok().map(Arc::new);
         *cache = Some((model_dir.to_path_buf(), modified, loaded.clone()));
-        loaded
+        loaded.map(|value| value as Arc<dyn RerankProvider>)
     }
 }
 
@@ -306,11 +311,23 @@ mod tests {
         assert!(reranker_for(&dir).is_none());
     }
 
+    #[cfg(not(feature = "local-embedding"))]
+    #[test]
+    fn local_reranker_disabled_build_uses_the_configured_fallback() {
+        let settings = settings(RerankMode::CrossEncoder, true);
+        let provider = provider_for(&settings, Path::new("unused"));
+        assert!(provider.is_none());
+        let (_, outcome) = apply_rerank(hits(), "accuracy", &settings, provider.as_deref());
+        assert_eq!(outcome.used, RERANK_HEURISTIC);
+        assert_eq!(outcome.reason, Some(REASON_MODEL_UNAVAILABLE));
+    }
+
     /// Real ONNX proof for the `cross_encoder` rung.
     ///
     /// The rest of this module uses a fake provider, so those tests prove the ladder but
     /// not that a local `.onnx` model loads and reorders. Set `NEUINK_RERANK_ONNX_DIR` to
     /// a directory laid out as `onnx/model_int8.onnx` plus the four tokenizer files.
+    #[cfg(feature = "local-embedding")]
     #[test]
     fn a_real_onnx_model_loads_and_takes_the_cross_encoder_rung() {
         let Ok(dir) = std::env::var("NEUINK_RERANK_ONNX_DIR") else {
@@ -348,7 +365,7 @@ pub(super) fn provider_for(
 ) -> Option<Arc<dyn neuink_search::RerankProvider>> {
     match settings.transport {
         neuink_config::RerankTransport::Local => {
-            reranker_for(local_dir).map(|reranker| reranker as Arc<dyn neuink_search::RerankProvider>)
+            reranker_for(local_dir)
         }
         neuink_config::RerankTransport::Api => {
             let endpoint = settings.api_endpoint.clone()?;

@@ -1,10 +1,10 @@
 {
-  "repository": "BAAI/bge-m3",
-  "revision": "5617a9f61b028005a4858fdac845db406aefb181",
+  "repository": "Xenova/bge-m3",
+  "revision": "4de13258303883538bd53b696b452bf8099f0858",
   "license": "MIT",
-  "origin": "local-int8-export",
-  "packaging_note": "The int8 ONNX is a local dynamic-quantisation of BAAI/bge-m3 (the upstream repository does not publish an int8 ONNX). It must be placed into the resource directory by the build machine; it cannot be fetched from Hugging Face, so `--prepare` refuses to download it.",
-  "downloadable": false,
+  "origin": "Xenova/bge-m3 pinned int8 ONNX export",
+  "model_name": "BAAI/bge-m3",
+  "downloadable": true,
   "dimensions": 1024,
   "pooling": "cls",
   "files": {
@@ -13,8 +13,7 @@
     "sentencepiece.bpe.model": "cfc8146abe2a0488e9e2a0c56de7952f7c11ab059eca145a0a727afce0db2865",
     "special_tokens_map.json": "8c785abebea9ae3257b61681b4e6fd8365ceafde980c21970d001e834cf10835",
     "tokenizer.json": "6710678b12670bc442b99edc952c4d996ae309a7020c1fa0096dd245c2faf790",
-    "tokenizer_config.json": "7e4c1cc848840aeccdd763458c18dd525eb0f795c992e00ebe9c28554e7db2d4",
-    "neuink-embedding.json": "4ed946f287ac10666432d6e322e28b59cd336b9431a4f3ce0634021cd4153914"
+    "tokenizer_config.json": "7e4c1cc848840aeccdd763458c18dd525eb0f795c992e00ebe9c28554e7db2d4"
   }
 }
 

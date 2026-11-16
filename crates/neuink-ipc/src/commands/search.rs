@@ -550,7 +550,6 @@ fn resolve_rerank<R: tauri::Runtime>(
         if settings.mode == neuink_config::RerankMode::CrossEncoder {
             let dir = rerank_model_dir(app)?;
             rerank_stage::reranker_for(&dir)
-                .map(|reranker| reranker as Arc<dyn neuink_search::RerankProvider>)
         } else {
             None
         };
@@ -3325,6 +3324,7 @@ pub async fn install_recommended_rerank_model<R: tauri::Runtime>(
         .map_err(|error| error.to_string())?
 }
 
+#[cfg(feature = "local-embedding")]
 fn install_recommended_rerank_model_impl<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     id: String,
@@ -3379,6 +3379,14 @@ fn install_recommended_rerank_model_impl<R: tauri::Runtime>(
         installed_dir: Some(dir.to_string_lossy().to_string()),
         installed: true,
     })
+}
+
+#[cfg(not(feature = "local-embedding"))]
+fn install_recommended_rerank_model_impl<R: tauri::Runtime>(
+    _app: &tauri::AppHandle<R>,
+    _id: String,
+) -> Result<crate::commands::search::recommended_rerank_models::RecommendedRerankState, String> {
+    Err("当前构建未启用本地重排模型支持".to_string())
 }
 
 /// One line of the on-device self check.

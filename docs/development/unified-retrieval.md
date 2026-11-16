@@ -1,6 +1,6 @@
 # 统一检索：文档级路由 + 载体绑定 + 双通道旁路
 
-状态：已接入 `neuink-search` 与 `search_unified` IPC，宿主默认未开启。前端 `unifiedRetrieval` 为宿主级开关，当前生产代码尚未设置，因此助手默认仍走 `search_segments_batch`。
+状态：已接入 `neuink-search` 与 `search_unified` IPC。主助手读取检索路径设置；组合检索默认关闭，关闭时走 `search_segments_batch`。子助手和本地 Agent 仍走批次路径。
 
 ## 1. 组合依据
 
@@ -38,7 +38,7 @@
 - `search_unified` 独立于 `search_segments_batch`，批次请求与结果形状不变；旧调用不受影响。
 - 固定降级码：`visual_disabled`、`visual_unavailable`、`visual_no_allowed_entries`、`carrier_unnumbered`、`carrier_multiple`、`carrier_empty_fallback`、`no_documents`。前端持有文案，后端不返回路径或正文。
 - 路由为空直接返回空证据，绝不把空集合透传成“全库”。`out_of_scope_entries_from_a_channel_are_dropped` 覆盖通道越界。
-- 视觉通道当前恒为 `Disabled`：产品没有视觉索引与编码器，模型侧只留 `VisualRecall` trait。`VisualChannelStatus::Ready` 之前不得宣称已启用多模态召回。
+- 视觉通道需要配置可用的编码服务并准备匹配的视觉索引；未就绪时降级到文本检索，状态以实际运行结果为准。
 - 证据仍只来自文本通道的片段，来源走既有 `formatSearchSegmentsOutput` 与来源账本；视觉候选只作为文档层投票，不生成正文摘录。
 
 ## 4. 验证
@@ -62,15 +62,14 @@
 
 旧的 v1 产物已移入 `out/vidore-v1/archive-v1/`，相关脚本加了 oracle 运行时警告。
 
-## 6. 未启用项
+## 6. 当前边界与未启用项
 
 - 引用追加池：`neuink-search` 尚未包含引用抽取与扩池，`document_head` 只完成了头部选择。接入需要引用抽取器与独立的可重建引用索引。
 - 图表资产不再复制：`images/**` 直接从已存 `<entry>/mineru-output/full.zip` 读取（`entry_assets.rs` 只读），`asset_path` 与 ZIP 相对路径一致。此前的 `<entry>/assets/` 副本、`assets.manifest.json` 与 `backfill_entry_assets` 回填命令一并移除——老库与新建库行为一致，无需迁移。
-- **页面与区域源来自原生 PDF，图表资产来自 MinerU，二者同进一个快照**（`VisualSourceKind::{Page,Region,Figure,Table}`）。页面与四个 region 共享同一 `parent`（`page:{idx}`），所以一页只投一票，region 只用来取最大分；资产按 `asset:images/...` 独立投票。栅格化由本地编码服务完成（`POST /embed_pages {pdf_path,pages,regions}`），产品不保存页面位图，Rust 侧不引入原生 PDF 库；`qwen_api` 无法读本地路径，因此没有页面源，其快照只含资产。
+- **页面与区域源来自原生 PDF，图表资产来自 MinerU，二者同进一个快照**（`VisualSourceKind::{Page,Region,Figure,Table}`）。页面与四个 region 共享同一 `parent`（`page:{idx}`），所以一页只投一票，region 只用来取最大分；资产按 `asset:images/...` 独立投票。页面由桌面进程通过 PDFium 渲染，图片发送到本地或远程编码服务；产品不保存页面位图。
 - 视觉通道固定使用 Qwen3-VL-Embedding-2B，两种运行方式：`qwen_local`（默认 `http://127.0.0.1:8765`）与 `qwen_api`（https + 密钥）。随包 fastembed 视觉编码已停用，旧设置值仍可反序列化但会被拒绝并提示改选。索引 namespace 由服务上报的模型身份派生。`prepare_visual_search_index` 编码一次、查询只读快照；服务不可达或快照不匹配时固定报 `model_unavailable`/`index_missing` 并退回文本通道。
-- 字段覆盖重排、真实版面 crop（替代几何四等分）均未接入产品。
-- 字段覆盖重排、真实布局 crop（替代几何四等分）均未接入产品。
-- 宿主开关：`createAssistantTools({ unifiedRetrieval })` 已透传到批次适配器，但 `qna.ts` 等调用方未设置，生产默认关闭。
+- 真实布局 crop（替代几何四等分）尚未接入；重排阶梯中的启发式字段覆盖可选，默认关闭。
+- 宿主开关由 `qna.ts` 读取；主助手默认关闭组合检索。
 
 ## 7. 重排阶梯（cross-encoder / 无模型 / 降级）
 
@@ -149,7 +148,7 @@ cargo run -p neuink-ipc --bin retrieval-probe -- `
 
 ### 真实 Qwen 服务的实测与两处适配
 
-首次真跑暴露三个问题，前两个是环境/夹具，第三个是代码缺陷：
+以下是迁移到 PDFium 之前的历史实验，不代表当前服务依赖。首次真跑暴露三个问题，前两个是环境/夹具，第三个是代码缺陷：
 
 1. 服务真实模式需要 `PyMuPDF`（页面栅格化），原 venv 未安装 → 已装 `pymupdf 2.1`。
 2. `--seed-demo` 写的是 4 字节 PDF 桩，MuPDF 无法打开 → 500。合成库只适合 stub 服务。
@@ -189,7 +188,7 @@ cargo run -p neuink-ipc --bin retrieval-probe -- `
 ### 默认模型改为 bge-m3（取消 e5 选项）
 
 - `embedding-lock.json` 指向 `BAAI/bge-m3`：`onnx/model_int8.onnx` 与 1024 维、CLS 池化；随包资源目录 `embedding-models/default` 现在是 bge-m3。
-- 该 int8 权重是本地量化产物（上游只发布 fp32），因此 lock 标 `downloadable: false`：`--prepare` 会明确拒绝下载，构建机必须本地放置权重。
+- 构建资源锁定 Xenova/bge-m3 的具体 revision；脚本下载 ONNX 与 tokenizer 文件并逐项校验 SHA-256，本地生成 `neuink-embedding.json`。已存在但不匹配的文件会保留并导致准备失败。
 - 打包/开发前的资源校验不再写死 `onnx/model.onnx`，接受 `model.onnx` / `model_int8.onnx`（`onboarding-resources.cjs`）。
 - 模型选择器不再出现 e5：e5 目录已移出 `embedding-models/`，`list_text_models` 也跳过 `router`。
 - 助手路由仍使用 e5（`embedding-models/router`，指向 `embedding-models-internal/e5-small-router`）：其阈值与 `query:` 前缀是在 e5 上校准的，换模型会静默改变路由行为，所以它是内部编码器而不是用户选项。
@@ -229,7 +228,7 @@ cargo run -p neuink-ipc --bin retrieval-probe -- `
 | 区块 | 内容 |
 |---|---|
 | 文本嵌入模型 | 当前模型下拉 + 自定义目录 + 推荐列表（一键安装 / 模型页 / 导出命令） |
-| 视觉编码模型 | Qwen3-VL-Embedding-2B 模型页 + 服务说明（需 torch/PyMuPDF，不随包下载） |
+| 视觉编码模型 | Qwen3-VL-Embedding-2B 模型页 + 服务说明（本地服务需要 torch 等依赖，无需 PyMuPDF） |
 | 重排模型 | 推荐列表：`bge-reranker-base int8`（Xenova，279 MB）、官方 fp32（1112 MB）；一键安装后**跑一次打分**验证 |
 | 本机检索配置 | **一键测试**：文本模型（加载+embed）、资料库（条目与已解析数）、视觉服务（健康检查）、重排（模型打分或模式说明），逐条给出通过/未通过与耗时 |
 
@@ -242,7 +241,7 @@ cargo run -p neuink-ipc --bin retrieval-probe -- `
 - PDFium 非线程安全：单实例绑定于互斥锁后，所有渲染串行；**DLL 缺失时页面源不可用**，通道退化为仅 MinerU 资产并报 `pdfium_unavailable`，不崩溃。
 - 视觉编码协议简化：页面/区域像素由本进程渲染后，作为图片交给 `embed_assets`。**本地服务与远程 API 两条路径都保留**——两者都只收图片，服务端不再需要任何 PDF 库。
 - `qwen-visual-service/service.py` 移除 PyMuPDF：`/embed_pages` 标记废弃（保留端点返回明确错误），真实模式依赖降为 torch / transformers / qwen_vl_utils / pillow。
-- 分发要求：安装包必须带 `pdfium.dll`（BSD-3，需附版权声明）；本机因 GitHub 不可达尚未放入，页面向量暂不可用。
+- 分发要求：当前仓库包含 Windows x64 的 `pdfium.dll` 及随上游发行包提供的许可文件；其他平台需要对应的 PDFium 动态库。来源及校验信息见 `apps/desktop/src-tauri/resources/pdfium-licenses/PROVENANCE.md`。
 
 验证：`commands::search` 50 项、`neuink-search` 135 项通过；服务 `--stub` 健康检查与 `/embed` 冒烟通过。
 

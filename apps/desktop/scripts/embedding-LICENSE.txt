@@ -2,8 +2,7 @@ BAAI/bge-m3 (int8 ONNX export)
 Copyright 2024 BAAI. Licensed under the MIT License.
 
 Upstream model: https://huggingface.co/BAAI/bge-m3
-The int8 ONNX weights bundled here are a dynamic int8 quantisation of that checkpoint,
-produced locally with onnxruntime.quantization (weight_type=QInt8). The upstream repository
-publishes the fp32 checkpoint; it does not publish this int8 file.
+Pinned int8 ONNX distribution: https://huggingface.co/Xenova/bge-m3
+The downloaded model files are individually verified against embedding-lock.json.
 
 MIT License text: https://github.com/FlagOpen/FlagEmbedding/blob/master/LICENSE

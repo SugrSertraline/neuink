@@ -7,7 +7,7 @@ const LOCK = require('./embedding-lock.json');
 const DEFAULT_SOURCE = path.resolve(__dirname, '../src-tauri/resources/embedding-models/default');
 const CONFIG = {
   provider: 'fastembed-local',
-  model_name: LOCK.repository,
+  model_name: LOCK.model_name,
   dimensions: LOCK.dimensions,
   pooling: LOCK.pooling,
 };
@@ -55,8 +55,6 @@ async function prepare({ root = DEFAULT_SOURCE, lock = LOCK, fetchFile = downloa
     }
     if (verifyOnly) throw new Error(`Missing model resource: ${name}`);
     if (lock.downloadable === false) {
-      // bge-m3's int8 ONNX is a local export: Hugging Face serves the fp32 checkpoint, not
-      // this file, so downloading it would 404 and silently leave a broken bundle.
       throw new Error(
         `Missing model resource: ${name}; this weight set is not downloadable (${lock.packaging_note ?? 'local export'})`,
       );
@@ -77,7 +75,7 @@ async function prepare({ root = DEFAULT_SOURCE, lock = LOCK, fetchFile = downloa
     if (Object.entries(CONFIG).some(([key, value]) => config[key] !== value)) throw new Error('Existing embedding configuration mismatch');
   } else if (verifyOnly) throw new Error('Missing embedding configuration');
   else fs.writeFileSync(configPath, JSON.stringify(CONFIG, null, 2) + '\n', { flag: 'wx' });
-  // E5 model card declares MIT; upstream code/notice: https://github.com/microsoft/unilm/tree/master/e5
+  // Include the model's distribution notice alongside the verified resources.
   const license = fs.readFileSync(path.join(__dirname, 'embedding-LICENSE.txt'));
   const licensePath = path.join(root, 'LICENSE.txt');
   if (fs.existsSync(licensePath)) {

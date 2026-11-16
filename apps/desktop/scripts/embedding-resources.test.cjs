@@ -43,3 +43,15 @@ test('rejects traversal and unpinned revisions', async t => {
   for (const name of ['../secret', '/secret', 'x/../../secret', 'C:/secret', 'x\\secret']) assert.throws(() => targetPath(fixture(t), name));
   await assert.rejects(prepare({ root: fixture(t), lock: { ...lock, revision: 'main' } }), /Invalid pinned/);
 });
+test('production lock pins download URLs and excludes generated NeuInk metadata', async t => {
+  const production = require('./embedding-lock.json');
+  const root = fixture(t);
+  const requested = [];
+  await assert.rejects(prepare({ root, fetchFile: async (url, destination) => {
+    requested.push(url);
+    fs.writeFileSync(destination, 'wrong bytes');
+  } }), /checksum mismatch/);
+  assert.ok(requested[0].startsWith(`https://huggingface.co/${production.repository}/resolve/${production.revision}/`));
+  assert.equal(production.downloadable, true);
+  assert.equal(Object.hasOwn(production.files, 'neuink-embedding.json'), false);
+});
