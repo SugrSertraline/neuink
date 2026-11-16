@@ -8,12 +8,16 @@ import { ToastContext } from '@/shared/hooks/useToast';
 import { SearchPanel } from './SearchPanel';
 
 const mocks = vi.hoisted(() => ({
-  rebuildSearchIndex: vi.fn()
+  rebuildSearchIndex: vi.fn(),
+  getVisualIndexStatus: vi.fn(),
+  prepareVisualSearchIndex: vi.fn()
 }));
 
 vi.mock('@/shared/ipc/workspaceApi', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/ipc/workspaceApi')>()),
-  rebuildSearchIndex: mocks.rebuildSearchIndex
+  rebuildSearchIndex: mocks.rebuildSearchIndex,
+  getVisualIndexStatus: mocks.getVisualIndexStatus,
+  prepareVisualSearchIndex: mocks.prepareVisualSearchIndex
 }));
 
 vi.mock('../hooks/useEmbeddingStatus', () => ({
@@ -58,6 +62,11 @@ vi.mock('../hooks/useSearchIndexStatus', () => ({
 
 beforeEach(() => {
   mocks.rebuildSearchIndex.mockReset();
+  mocks.getVisualIndexStatus.mockReset();
+  mocks.getVisualIndexStatus.mockResolvedValue({ built: false, snapshot_count: 0, updated_at_ms: null });
+  mocks.prepareVisualSearchIndex.mockReset();
+  mocks.prepareVisualSearchIndex.mockResolvedValue({ provider: 'qwen_local', model_name: 'model', dimensions: 2048,
+    identity: 'identity', namespace: 'namespace', entry_count: 1, asset_count: 2, document_count: 3, embedded_count: 3 });
   mocks.rebuildSearchIndex.mockResolvedValue({
     rebuilt_vector_count: 10,
     status: {
@@ -100,5 +109,22 @@ describe('SearchPanel vector build consent', () => {
     fireEvent.click(screen.getByRole('button', { name: '开始构建' }));
     await waitFor(() => expect(mocks.rebuildSearchIndex).toHaveBeenCalledTimes(1));
     expect(mocks.rebuildSearchIndex).toHaveBeenCalledWith('D:\\workspace');
+  });
+
+  it('builds the visual index only after the explicit confirmation dialog', async () => {
+    render(
+      <ToastContext.Provider value={{ dismiss: vi.fn(), notify: vi.fn(() => 'toast') }}>
+        <SearchPanel root={'D:\\workspace'} status="ready" onOpenResult={vi.fn()} />
+      </ToastContext.Provider>
+    );
+
+    expect(mocks.prepareVisualSearchIndex).not.toHaveBeenCalled();
+    const build = await screen.findByRole('button', { name: '构建视觉索引' });
+    fireEvent.click(build);
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(mocks.prepareVisualSearchIndex).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '开始构建视觉索引' }));
+    await waitFor(() => expect(mocks.prepareVisualSearchIndex).toHaveBeenCalledWith('D:\\workspace'));
   });
 });

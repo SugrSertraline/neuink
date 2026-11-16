@@ -17,6 +17,7 @@ import { useSearchIndexStatus } from '../hooks/useSearchIndexStatus';
 import { EmbeddingStatusLine } from './EmbeddingStatusLine';
 import { SearchIndexStatusLine } from './SearchIndexStatusLine';
 import { SearchModeControl } from './SearchModeControl';
+import { VisualIndexControl } from './VisualIndexControl';
 import { SearchResultList } from './SearchResultList';
 import { AppearanceCommand, isAppearanceCommand } from './AppearanceCommand';
 
@@ -161,6 +162,12 @@ export function SearchDialog({
             error={searchIndexError}
             mode={mode}
             status={searchIndexStatus}
+          />
+          <VisualIndexControl
+            className="mt-1"
+            enabled={semanticMode}
+            root={root}
+            status={status}
           />
           {error ? (
             <div className="mt-2 rounded-md border border-destructive/25 bg-destructive/5 px-2.5 py-2 text-xs leading-5 text-destructive">

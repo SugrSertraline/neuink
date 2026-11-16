@@ -1384,6 +1384,16 @@ export function saveRetrievalSettings(settings: RetrievalSettingsState): Promise
   return invoke('save_retrieval_settings', { settings });
 }
 
+/** Whether a visual snapshot already exists; cheap to read, does not start the encoder. */
+export type VisualIndexStatus = {
+  built: boolean;
+  snapshot_count: number;
+  updated_at_ms: number | null;
+};
+
+export function getVisualIndexStatus(root: string): Promise<VisualIndexStatus> {
+  return invoke('get_visual_index_status', { request: { root } });
+}
 /** Encodes every page, region and MinerU asset once and writes the visual snapshot. */
 export function prepareVisualSearchIndex(
   root: string

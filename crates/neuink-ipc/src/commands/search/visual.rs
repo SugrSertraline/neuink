@@ -11,7 +11,7 @@
 //! reason, so an unprepared library never pays for a 500-asset encode.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use neuink_config::{VisualEmbeddingProviderKind, VisualEmbeddingSettings};
@@ -33,6 +33,47 @@ const VISUAL_QUERY_CACHE_LIMIT: usize = 256;
 pub(super) const VISUAL_REASON_MODEL_UNAVAILABLE: &str = "model_unavailable";
 pub(super) const VISUAL_REASON_INDEX_MISSING: &str = "index_missing";
 
+#[derive(Debug, Deserialize)]
+pub struct GetVisualIndexStatusRequest {
+    pub root: PathBuf,
+}
+
+#[derive(Debug, Serialize)]
+pub struct VisualIndexStatusResponse {
+    pub built: bool,
+    pub snapshot_count: usize,
+    pub updated_at_ms: Option<u64>,
+}
+
+/// Whether a visual snapshot exists, without starting the encoder or reading assets: the
+/// search sidebar needs to say "not built" before it offers the expensive build action.
+pub fn visual_index_status(root: &Path) -> Result<VisualIndexStatusResponse, String> {
+    let workspace = Workspace::open(root).map_err(|error| error.to_string())?;
+    let directory = workspace.layout().cache_dir().join("search");
+    let mut snapshot_count = 0usize;
+    let mut updated_at_ms: Option<u64> = None;
+    if let Ok(entries) = std::fs::read_dir(&directory) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !(name.starts_with("visual-") && name.ends_with(".vectors.json")) {
+                continue;
+            }
+            snapshot_count += 1;
+            if let Ok(modified) = entry.metadata().and_then(|metadata| metadata.modified()) {
+                let millis = modified
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .ok()
+                    .map(|duration| duration.as_millis() as u64);
+                updated_at_ms = updated_at_ms.max(millis);
+            }
+        }
+    }
+    Ok(VisualIndexStatusResponse {
+        built: snapshot_count > 0,
+        snapshot_count,
+        updated_at_ms,
+    })
+}
 #[derive(Debug, Deserialize)]
 pub struct PrepareVisualSearchIndexRequest {
     pub root: PathBuf,
@@ -225,20 +266,25 @@ pub fn prepare_visual_index(
             .map_err(|error| error.to_string())?;
         asset_bytes.insert(key.clone(), bytes);
     }
-    // Page and region vectors come from the service that rasterizes the PDF; everything
-    // else is embedded from the bytes read out of the stored ZIP.
-    let mut precomputed = BTreeMap::new();
-    if let Some(page_source) = provider.page_source() {
+    // Page and region vectors: rasterize the PDF in-process with the bound PDFium and let
+    // build_visual_index embed the PNG bytes with everything else. The local service is
+    // image-only now (its /embed_pages endpoint is deprecated), so the product owns
+    // rasterization for both local and remote transports.
+    let precomputed: BTreeMap<String, Vec<f32>> = BTreeMap::new();
+    if include_pages {
         for request in page_requests.values() {
-            let vectors = page_source
-                .embed_pdf_pages(&request.pdf_path, &request.pages, true)
-                .map_err(|error| error.to_string())?;
-            for item in vectors {
-                let key = page_key(&documents, &request.entry_id, item.page_idx, item.region)
-                    .ok_or_else(|| {
-                        "视觉分页编码返回了未收集的页面或区域".to_string()
-                    })?;
-                precomputed.insert(key, item.vector);
+            for page in &request.pages {
+                let crops = super::page_render::render_crops(
+                    &request.pdf_path,
+                    *page,
+                    (REGION_CROPS > 0).then_some(REGION_CROPS as usize),
+                )?;
+                for (index, bytes) in crops.into_iter().enumerate() {
+                    let region = if index == 0 { None } else { Some((index - 1) as u32) };
+                    let key = page_key(&documents, &request.entry_id, *page, region)
+                        .ok_or_else(|| "视觉分页渲染返回了未收集的页面或区域".to_string())?;
+                    asset_bytes.insert(key, bytes);
+                }
             }
         }
     }
@@ -538,8 +584,8 @@ fn page_key(
         .map(VisualIndexDocument::key)
 }
 
-/// Crop count per page: top, bottom, left, right, matching the measured protocol.
-const REGION_CROPS: u32 = 4;
+/// Crop count per page. Whole-page encoding is the default: the four geometric crops
+const REGION_CROPS: u32 = 0;
 
 fn page_document(
     entry_id: &str,

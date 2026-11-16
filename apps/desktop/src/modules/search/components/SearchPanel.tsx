@@ -27,6 +27,7 @@ import { useSearchIndexStatus } from '../hooks/useSearchIndexStatus';
 import { EmbeddingStatusLine } from './EmbeddingStatusLine';
 import { SearchIndexStatusLine } from './SearchIndexStatusLine';
 import { SearchModeControl } from './SearchModeControl';
+import { VisualIndexControl } from './VisualIndexControl';
 import { SearchResultList } from './SearchResultList';
 import { AppearanceCommand, isAppearanceCommand } from './AppearanceCommand';
 
@@ -112,7 +113,6 @@ export function SearchPanel({ buildStatus = null, root, status, onOpenResult, on
     setBuildConfirmOpen(false);
     void rebuildVectors();
   };
-
   return (
     <aside className="app-sidebar">
       <div className="side-head">
@@ -213,6 +213,7 @@ export function SearchPanel({ buildStatus = null, root, status, onOpenResult, on
               </Button>
             ) : null}
           </div>
+          <VisualIndexControl className="mt-1" enabled={semanticMode} root={root} status={status} />
           {buildStatus?.state === 'queued' || buildStatus?.state === 'running' ? (
             <Progress
               aria-label="向量索引构建进度"

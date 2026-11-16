@@ -102,6 +102,23 @@ pub fn run() {
                         .build()?;
                 }
             }
+            // Page rasterization is shared by PDF reading and the visual index. Bind the
+            // bundled PDFium once here; without it page/region vectors are silently skipped
+            // and the visual channel only sees MinerU assets.
+            {
+                let resource_dir = app.path().resource_dir()?;
+                let candidates = [
+                    resource_dir.join("resources").join("pdfium.dll"),
+                    resource_dir.join("pdfium.dll"),
+                ];
+                if let Some(dll) = candidates.iter().find(|path| path.is_file()) {
+                    if let Err(error) =
+                        neuink_ipc::commands::search::page_render::bind(dll)
+                    {
+                        eprintln!("PDFium 绑定失败：{error}");
+                    }
+                }
+            }
             if let (Some(window), Some(icon)) = (
                 app.get_webview_window("main"),
                 app.default_window_icon().cloned(),

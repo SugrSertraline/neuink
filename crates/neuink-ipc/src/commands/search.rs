@@ -2772,6 +2772,13 @@ pub async fn search_unified<R: tauri::Runtime>(
     .map_err(|error| error.to_string())?
 }
 
+/// Reports whether a visual snapshot already exists, without loading the vision model.
+#[tauri::command]
+pub fn get_visual_index_status(
+    request: visual::GetVisualIndexStatusRequest,
+) -> Result<visual::VisualIndexStatusResponse, String> {
+    visual::visual_index_status(&request.root)
+}
 /// Encodes every stored MinerU asset once and writes the visual snapshot. This is the
 /// only path that spends image-encoder work; queries only reread the snapshot.
 #[tauri::command]
