@@ -1352,6 +1352,8 @@ export type RerankSettings = {
   transport: 'local' | 'api';
   /** Hosted endpoint, used only by the `api` transport. */
   api_endpoint: string | null;
+  /** `protocol` = Jina/Cohere shape; `dashscope` = Model Studio native shape. */
+  api_style: 'protocol' | 'dashscope';
   /** Hosted model name. */
   api_model: string | null;
   /** Write-only: omit to keep the stored token. */
@@ -1735,21 +1737,5 @@ export function startVisualService(id: string): Promise<number> {
 }
 
 
-/** Outcome of applying the Qwen (Model Studio) preset. */
-export type QwenPresetSummary = {
-  text_endpoint: string;
-  text_model: string;
-  text_dimensions: number;
-  rerank_endpoint: string;
-  rerank_model: string;
-  /** Why the visual channel is not switched by the preset. */
-  visual_note: string;
-};
 
-/**
- * One key, text + rerank: Model Studio serves both through documented shapes.
- * The visual channel is left as-is because its multimodal endpoint is not OpenAI-compatible.
- */
-export function applyQwenPreset(apiKey: string): Promise<QwenPresetSummary> {
-  return invoke('apply_qwen_preset', { apiKey });
-}
+

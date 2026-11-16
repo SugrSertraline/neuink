@@ -126,6 +126,23 @@ export function RerankSettingsSection({ active }: { active: boolean }) {
         }}
       />
       {needsModel && usesApi && (
+        <SettingSelect
+          id="tools-rerank-api-style"
+          label="接口风格"
+          description="protocol：Jina / Cohere 形状（results[]）；dashscope：百炼原生形状（output.results[]，query 与 documents 嵌套在 input 内）。"
+          disabled={busy}
+          value={current?.api_style ?? "protocol"}
+          options={[
+            { value: "protocol", label: "protocol（Jina / Cohere）" },
+            { value: "dashscope", label: "dashscope（阿里百炼）" }
+          ]}
+          onValueChange={(value) => {
+            if (!current) return;
+            void persist({ ...current, api_style: value as "protocol" | "dashscope" });
+          }}
+        />
+      )}
+      {needsModel && usesApi && (
         <SettingRow
           id="tools-rerank-api"
           label="远程重排配置"

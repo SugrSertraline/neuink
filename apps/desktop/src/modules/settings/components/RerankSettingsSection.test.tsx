@@ -22,6 +22,7 @@ const base = {
   transport: 'local' as const,
   api_endpoint: null,
   api_model: null,
+  api_style: 'protocol' as const,
   model_present: false,
   has_api_key: false,
 };
