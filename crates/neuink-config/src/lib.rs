@@ -584,6 +584,19 @@ pub struct RerankSettings {
     /// fused order alone.
     #[serde(default = "default_true")]
     pub fallback_heuristic: bool,
+    /// Where the model-backed rung runs: local ONNX or a hosted rerank API.
+
+    #[serde(default)]
+    pub transport: RerankTransport,
+    /// Hosted endpoint; only used by [`RerankTransport::Api`].
+    #[serde(default)]
+    pub api_endpoint: Option<String>,
+    /// Bearer token for the hosted endpoint. Never returned by status calls.
+    #[serde(default)]
+    pub api_key: Option<String>,
+    /// Hosted model name, for example `jina-reranker-v2-base-multilingual`.
+    #[serde(default)]
+    pub api_model: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -596,6 +609,10 @@ impl Default for RerankSettings {
             mode: RerankMode::Off,
             model_dir: None,
             max_candidates: default_rerank_max_candidates(),
+            transport: RerankTransport::Local,
+            api_endpoint: None,
+            api_key: None,
+            api_model: None,
             fallback_heuristic: true,
         }
     }
@@ -980,4 +997,29 @@ impl VisualServiceStartup {
     }
 }
 
+
+/// Which backend runs the model-backed rerank rung.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RerankTransport {
+    /// Local ONNX cross-encoder in the app process.
+    Local,
+    /// Hosted rerank API (Jina, Cohere, or anything with the same shape).
+    Api,
+}
+
+impl Default for RerankTransport {
+    fn default() -> Self {
+        Self::Local
+    }
+}
+
+impl RerankTransport {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Api => "api",
+        }
+    }
+}
 

@@ -88,6 +88,7 @@ export function RerankSettingsSection({ active }: { active: boolean }) {
   }, [draft, saved, installedModels]);
   const current = draft ?? saved;
   const needsModel = current?.mode === 'cross_encoder';
+  const usesApi = current?.transport === 'api';
   const modelMissing = needsModel && saved !== null && !saved.model_present;
 
   return (
@@ -109,7 +110,68 @@ export function RerankSettingsSection({ active }: { active: boolean }) {
           void persist({ ...current, mode: value as RerankMode });
         }}
       />
-      {needsModel && (
+      <SettingSelect
+        id="tools-rerank-transport"
+        label="模型后端"
+        description="本地：应用内 ONNX 交叉编码器；API：托管 rerank 接口（Jina、Cohere 或同形接口）。"
+        disabled={busy}
+        value={current?.transport ?? "local"}
+        options={[
+          { value: "local", label: "本地 ONNX 模型" },
+          { value: "api", label: "远程 API（Jina / Cohere）" }
+        ]}
+        onValueChange={(value) => {
+          if (!current) return;
+          void persist({ ...current, transport: value as "local" | "api" });
+        }}
+      />
+      {needsModel && usesApi && (
+        <SettingRow
+          id="tools-rerank-api"
+          label="远程重排配置"
+          description="地址必须是 https；密钥只保存在本机，状态查询只回报是否已保存。"
+        >
+          <div className="flex flex-col gap-2">
+            <Input
+              aria-label="重排 API 地址"
+              className="w-full min-w-0 font-mono text-xs"
+              disabled={busy}
+              placeholder="https://api.jina.ai/v1/rerank"
+              value={current?.api_endpoint ?? ""}
+              onChange={(event) =>
+                setDraft({ ...current!, api_endpoint: event.target.value || null })
+              }
+              onBlur={() => {
+                if (current) void persist(current);
+              }}
+            />
+            <Input
+              aria-label="重排 API 模型"
+              className="w-full min-w-0 font-mono text-xs"
+              disabled={busy}
+              placeholder="jina-reranker-v2-base-multilingual"
+              value={current?.api_model ?? ""}
+              onChange={(event) => setDraft({ ...current!, api_model: event.target.value || null })}
+              onBlur={() => {
+                if (current) void persist(current);
+              }}
+            />
+            <Input
+              aria-label="重排 API 密钥"
+              className="w-full min-w-0 font-mono text-xs"
+              disabled={busy}
+              type="password"
+              placeholder={saved?.has_api_key ? "已保存（留空保持不变）" : "粘贴 API 密钥"}
+              value={current?.api_key ?? ""}
+              onChange={(event) => setDraft({ ...current!, api_key: event.target.value })}
+              onBlur={() => {
+                if (current) void persist(current);
+              }}
+            />
+          </div>
+        </SettingRow>
+      )}
+      {needsModel && !usesApi && (
         <SettingSelect
           id="tools-rerank-installed"
           label="已安装的重排模型"

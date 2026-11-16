@@ -19,7 +19,11 @@ const base = {
   model_dir: null,
   max_candidates: 20,
   fallback_heuristic: true,
-  model_present: false
+  transport: 'local' as const,
+  api_endpoint: null,
+  api_model: null,
+  model_present: false,
+  has_api_key: false,
 };
 
 afterEach(cleanup);
@@ -52,7 +56,8 @@ describe('RerankSettingsSection', () => {
     vi.mocked(getRerankSettings).mockResolvedValue({
       ...base,
       mode: 'cross_encoder',
-      model_present: false
+      model_present: false,
+  has_api_key: false,
     });
     render(<RerankSettingsSection active />);
     await waitFor(() =>
@@ -66,7 +71,8 @@ describe('RerankSettingsSection', () => {
     vi.mocked(getRerankSettings).mockResolvedValue({ ...base, model_present: true });
     vi.mocked(saveRerankSettings).mockImplementation(async (settings) => ({
       ...settings,
-      model_present: true
+      model_present: true,
+    has_api_key: false
     }));
     render(<RerankSettingsSection active />);
     await waitFor(() => expect(getRerankSettings).toHaveBeenCalled());
@@ -104,7 +110,8 @@ describe('RerankSettingsSection', () => {
     ]);
     vi.mocked(saveRerankSettings).mockImplementation(async (settings) => ({
       ...settings,
-      model_present: true
+      model_present: true,
+    has_api_key: false
     }));
     render(<RerankSettingsSection active />);
     await waitFor(() =>
@@ -114,3 +121,4 @@ describe('RerankSettingsSection', () => {
     );
   });
 });
+

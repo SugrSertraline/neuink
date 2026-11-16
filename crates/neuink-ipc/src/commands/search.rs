@@ -2752,8 +2752,13 @@ pub async fn search_unified<R: tauri::Runtime>(
     // Only a cross-encoder run needs the model; the heuristic rung is model-free.
     let rerank_provider: Option<Arc<dyn neuink_search::RerankProvider>> =
         if rerank_settings.mode == neuink_config::RerankMode::CrossEncoder {
-            let dir = rerank_model_dir(&app)?;
-            rerank_stage::reranker_for(&dir).map(|reranker| reranker as Arc<dyn neuink_search::RerankProvider>)
+            let dir = rerank_settings
+                .model_dir
+                .as_deref()
+                .map(std::path::PathBuf::from)
+                .unwrap_or(rerank_model_dir(&app)?);
+            // Transport decides between ONNX in-process and a hosted rerank API.
+            rerank_stage::provider_for(&rerank_settings, &dir)
         } else {
             None
         };
@@ -2809,6 +2814,12 @@ mod visual_service_tests;
 /// Which rerank rung is configured, with the model directory it would load.
 #[derive(Debug, serde::Serialize)]
 pub struct RerankSettingsState {
+    /// `local` (ONNX in-process) or `api` (hosted rerank endpoint).
+    pub transport: &'static str,
+    pub api_endpoint: Option<String>,
+    pub api_model: Option<String>,
+    /// Whether a token is stored; the token itself is never returned.
+    pub has_api_key: bool,
     pub mode: &'static str,
     pub model_dir: Option<String>,
     pub max_candidates: usize,
@@ -2826,6 +2837,13 @@ impl RerankSettingsState {
             max_candidates: settings.max_candidates,
             fallback_heuristic: settings.fallback_heuristic,
             model_present,
+            transport: settings.transport.as_str(),
+            api_endpoint: settings.api_endpoint.clone(),
+            api_model: settings.api_model.clone(),
+            has_api_key: settings
+                .api_key
+                .as_deref()
+                .is_some_and(|key| !key.trim().is_empty()),
         }
     }
 }
@@ -2939,6 +2957,14 @@ pub fn save_rerank_settings<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     settings: neuink_config::RerankSettings,
 ) -> Result<RerankSettingsState, String> {
+    // A None key means "keep the stored one": the screen never receives the token, so it
+    // cannot send it back unchanged.
+    let mut settings = settings;
+    if settings.api_key.is_none() {
+        if let Ok(saved) = crate::storage::read_settings(&app) {
+            settings.api_key = saved.rerank.api_key;
+        }
+    }
     settings.validate()?;
     let mut saved = crate::storage::read_settings(&app)?;
     saved.rerank = settings;
@@ -3485,18 +3511,35 @@ fn run_retrieval_self_check_impl<R: tauri::Runtime>(
                     .as_deref()
                     .map(std::path::PathBuf::from)
                     .unwrap_or(rerank_model_dir(&app)?);
-                let reranker = rerank_stage::reranker_for(&dir)
-                    .ok_or_else(|| format!("本地重排模型不可用：{}", dir.display()))?;
+                let provider = rerank_stage::provider_for(&settings, &dir).ok_or_else(|| {
+                    format!(
+                        "{}：{}",
+                        rerank_stage::unavailable_reason(&settings),
+                        settings
+                            .api_endpoint
+                            .clone()
+                            .unwrap_or_else(|| dir.display().to_string())
+                    )
+                })?;
                 let scores = neuink_search::RerankProvider::score(
-                    reranker.as_ref(),
+                    provider.as_ref(),
                     "probe query",
                     &["probe passage"],
                 )
                 .map_err(|error| error.to_string())?;
                 if scores.is_empty() {
-                    return Err("重排模型打分结果为空".to_string());
+                    return Err("重排打分结果为空".to_string());
                 }
-                Ok(format!("交叉编码器可用：{}", dir.display()))
+                Ok(match settings.transport {
+                    neuink_config::RerankTransport::Local => {
+                        format!("本地交叉编码器可用：{}", dir.display())
+                    }
+                    neuink_config::RerankTransport::Api => format!(
+                        "重排 API 可用：{}（{}）",
+                        settings.api_endpoint.clone().unwrap_or_default(),
+                        settings.api_model.clone().unwrap_or_default()
+                    ),
+                })
             }
         }
     })();

@@ -1348,6 +1348,14 @@ export type RerankMode = 'off' | 'heuristic' | 'cross_encoder';
 
 /** Rerank ladder: cross-encoder -> field coverage -> fused order. */
 export type RerankSettings = {
+  /** `local` runs ONNX in-process; `api` calls a hosted rerank endpoint. */
+  transport: 'local' | 'api';
+  /** Hosted endpoint, used only by the `api` transport. */
+  api_endpoint: string | null;
+  /** Hosted model name. */
+  api_model: string | null;
+  /** Write-only: omit to keep the stored token. */
+  api_key?: string | null;
   mode: RerankMode;
   /** Cross-encoder directory; `null` means the bundled resource path. */
   model_dir: string | null;
@@ -1359,6 +1367,8 @@ export type RerankSettings = {
 
 export type RerankSettingsState = RerankSettings & {
   /** Whether a model file is actually present at the resolved directory. */
+  /** Whether a token is stored; the token itself is never returned. */
+  has_api_key: boolean;
   model_present: boolean;
 };
 

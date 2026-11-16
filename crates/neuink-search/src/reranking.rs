@@ -39,6 +39,10 @@ pub enum RerankError {
     InferenceFailed(&'static str),
     #[error("rerank provider returned invalid output: {0}")]
     InvalidOutput(&'static str),
+    #[error("rerank configuration is invalid: {0}")]
+    Invalid(String),
+    #[error("rerank provider failed: {0}")]
+    Provider(String),
 }
 
 /// A search hit to reorder. `id` is opaque to the reranker and may repeat across
@@ -306,4 +310,5 @@ impl RerankProvider for LocalReranker {
             .collect())
     }
 }
+
 

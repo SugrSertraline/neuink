@@ -14,6 +14,7 @@ mod query;
 mod path_embedding;
 mod query_plan;
 mod rerank_hits;
+mod remote_reranking;
 mod reranking;
 #[cfg(test)]
 mod reranking_tests;
@@ -57,6 +58,7 @@ pub use query::{SearchInclude, SearchMode, SearchQuery, SearchScope};
 pub use query_plan::{infer_query_plan, QueryModality, QueryPlan};
 #[cfg(feature = "local-embedding")]
 pub use reranking::LocalReranker;
+pub use remote_reranking::{HttpReranker, COHERE_RERANK_ENDPOINT, COHERE_RERANK_MODEL, JINA_RERANK_ENDPOINT, JINA_RERANK_MODEL};
 pub use rerank_hits::rerank_hits_with_provider;
 pub use reranking::{
     rerank_candidates, LocalRerankerOptions, RerankCandidate, RerankError, RerankProvider,
@@ -108,4 +110,7 @@ pub use visual_sidecar::{
     aggregate_parents, fuse_entry_orders, parent_entry_order, ParentScore, VisualChannelStatus,
     VisualRecall, VisualScore,
 };
+
+
+
 

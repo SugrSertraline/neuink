@@ -47,6 +47,10 @@ fn settings(mode: RerankMode, fallback: bool) -> RerankSettings {
         model_dir: None,
         max_candidates: 20,
         fallback_heuristic: fallback,
+        transport: neuink_config::RerankTransport::Local,
+        api_endpoint: None,
+        api_key: None,
+        api_model: None,
     }
 }
 
@@ -106,3 +110,4 @@ fn a_missing_cross_encoder_reports_the_fallback_reason_per_item() {
     assert_eq!(applied[0].rerank_used, Some("heuristic"));
     assert_eq!(applied[0].rerank_reason, Some("model_unavailable"));
 }
+

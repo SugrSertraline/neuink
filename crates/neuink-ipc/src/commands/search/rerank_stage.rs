@@ -22,6 +22,8 @@ pub(super) const RERANK_CROSS_ENCODER: &str = "cross_encoder";
 pub(super) const RERANK_FUSED: &str = "fused";
 pub(super) const REASON_MODEL_UNAVAILABLE: &str = "model_unavailable";
 pub(super) const REASON_PROVIDER_ERROR: &str = "provider_error";
+/// The hosted transport is selected but endpoint, key or model is missing.
+pub(super) const REASON_API_UNCONFIGURED: &str = "api_unconfigured";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct RerankOutcome {
@@ -72,7 +74,7 @@ pub(super) fn apply_rerank(
                 Ok(ordered) => (ordered, RerankOutcome::plain(RERANK_CROSS_ENCODER)),
                 Err(_) => fall_back(hits, query, settings, REASON_PROVIDER_ERROR),
             },
-            None => fall_back(hits, query, settings, REASON_MODEL_UNAVAILABLE),
+            None => fall_back(hits, query, settings, unavailable_reason(settings)),
         },
     }
 }
@@ -202,6 +204,10 @@ mod tests {
             model_dir: None,
             max_candidates: 20,
             fallback_heuristic: fallback,
+            transport: neuink_config::RerankTransport::Local,
+            api_endpoint: None,
+            api_key: None,
+            api_model: None,
         }
     }
 
@@ -329,3 +335,69 @@ mod tests {
     }
 }
 
+
+/// Builds the model-backed rerank provider for the configured transport.
+///
+/// Local runs load ONNX through a directory cache; the hosted path constructs a request
+/// adapter. Both return `None` when they cannot be built, so the ladder keeps its
+/// documented fallback instead of failing the search.
+pub(super) fn provider_for(
+    settings: &RerankSettings,
+    local_dir: &Path,
+) -> Option<Arc<dyn neuink_search::RerankProvider>> {
+    match settings.transport {
+        neuink_config::RerankTransport::Local => {
+            reranker_for(local_dir).map(|reranker| reranker as Arc<dyn neuink_search::RerankProvider>)
+        }
+        neuink_config::RerankTransport::Api => {
+            let endpoint = settings.api_endpoint.clone()?;
+            let model = settings.api_model.clone()?;
+            let key = settings
+                .api_key
+                .clone()
+                .filter(|key| !key.trim().is_empty())?;
+            neuink_search::HttpReranker::new(endpoint, key, model)
+                .ok()
+                .map(|reranker| Arc::new(reranker) as Arc<dyn neuink_search::RerankProvider>)
+        }
+    }
+}
+/// Reason to report when the provider could not be built.
+pub(super) fn unavailable_reason(settings: &RerankSettings) -> &'static str {
+    match settings.transport {
+        neuink_config::RerankTransport::Local => REASON_MODEL_UNAVAILABLE,
+        neuink_config::RerankTransport::Api => REASON_API_UNCONFIGURED,
+    }
+}
+
+#[cfg(test)]
+mod api_transport_tests {
+    use super::*;
+    use neuink_config::{RerankMode, RerankSettings, RerankTransport};
+
+    fn settings(key: Option<&str>) -> RerankSettings {
+        RerankSettings {
+            mode: RerankMode::CrossEncoder,
+            model_dir: None,
+            max_candidates: 20,
+            fallback_heuristic: true,
+            transport: RerankTransport::Api,
+            api_endpoint: Some("https://api.jina.ai/v1/rerank".to_string()),
+            api_key: key.map(str::to_string),
+            api_model: Some("jina-reranker-v2-base-multilingual".to_string()),
+        }
+    }
+
+    #[test]
+    fn without_a_key_the_ladder_reports_api_unconfigured() {
+        let configured = settings(None);
+        assert!(provider_for(&configured, Path::new("unused")).is_none());
+        assert_eq!(unavailable_reason(&configured), REASON_API_UNCONFIGURED);
+    }
+
+    #[test]
+    fn with_endpoint_key_and_model_the_api_provider_is_built() {
+        let configured = settings(Some("token"));
+        assert!(provider_for(&configured, Path::new("unused")).is_some());
+    }
+}
