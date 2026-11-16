@@ -704,37 +704,161 @@ mod retrieval_settings_tests {
 
 
 
+/// Where text embeddings come from. Both transports return the same trait object, so
+/// retrieval and indexing code never branches on this value.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextEmbeddingProviderKind {
+    /// A local ONNX export loaded in-process (`FastEmbedProvider`).
+    #[default]
+    LocalOnnx,
+    /// An OpenAI-compatible `/embeddings` HTTP endpoint.
+    Api,
+}
+
+impl TextEmbeddingProviderKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::LocalOnnx => "local_onnx",
+            Self::Api => "api",
+        }
+    }
+}
+
+fn default_text_api_timeout_ms() -> u64 {
+    60_000
+}
+
 /// Which text embedding model the search path uses.
 ///
-/// `model_dir` is an absolute directory holding `neuink-embedding.json` plus an ONNX file;
-/// `None` means the bundled resource directory. The dimension and pooling come from that
-/// manifest, so switching models never needs a code change.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+/// Local mode reads `model_dir`: an absolute directory holding `neuink-embedding.json` plus
+/// an ONNX file; `None` means the bundled resource directory. API mode reads `endpoint`,
+/// `api_key`, `model` and `dimensions` and talks the OpenAI-compatible protocol.
+///
+/// The two transports share one trait (`EmbeddingProvider`) and therefore one vector store,
+/// one degradation vocabulary and one settings screen; adding a provider must not change
+/// the retrieval pipeline.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(default)]
 pub struct TextModelSettings {
-    /// Absolute model directory, or `None` for the bundled one.
+    /// Absolute model directory, or `None` for the bundled one. Local mode only.
     pub model_dir: Option<String>,
+    /// Which transport produces vectors.
+    pub provider: TextEmbeddingProviderKind,
+    /// OpenAI-compatible base URL, for example `https://api.example.com/v1`.
+    /// A URL already ending in `/embeddings` is accepted as-is.
+    pub endpoint: Option<String>,
+    /// Bearer token. Write-only from the UI's point of view: status calls report only
+    /// whether one is stored.
+    pub api_key: Option<String>,
+    /// Model id sent to the API, for example `text-embedding-3-small`. Never hardcoded.
+    pub model: Option<String>,
+    /// Output width the API is known to produce; vectors are validated against it.
+    pub dimensions: Option<usize>,
+    /// Per-request timeout for the API transport.
+    pub timeout_ms: u64,
+}
+
+impl Default for TextModelSettings {
+    fn default() -> Self {
+        Self {
+            model_dir: None,
+            provider: TextEmbeddingProviderKind::LocalOnnx,
+            endpoint: None,
+            api_key: None,
+            model: None,
+            dimensions: None,
+            timeout_ms: default_text_api_timeout_ms(),
+        }
+    }
 }
 
 impl TextModelSettings {
     pub fn validate(&self) -> Result<(), String> {
-        if let Some(dir) = self.model_dir.as_deref() {
-            if dir.trim().is_empty() {
-                return Err("文本嵌入模型目录不能是空串；留空表示使用内置模型".to_string());
+        match self.provider {
+            TextEmbeddingProviderKind::LocalOnnx => {
+                if let Some(dir) = self.model_dir.as_deref() {
+                    if dir.trim().is_empty() {
+                        return Err("文本嵌入模型目录不能是空串；留空表示使用内置模型".to_string());
+                    }
+                }
+                Ok(())
             }
+            TextEmbeddingProviderKind::Api => self.validate_api(),
+        }
+    }
+
+    fn validate_api(&self) -> Result<(), String> {
+        let endpoint = self.endpoint.as_deref().map(str::trim).unwrap_or_default();
+        if endpoint.is_empty() {
+            return Err("选择远程嵌入 API 时需要填写服务地址".to_string());
+        }
+        if !(endpoint.starts_with("http://") || endpoint.starts_with("https://")) {
+            return Err("嵌入 API 地址必须以 http:// 或 https:// 开头".to_string());
+        }
+        // A plain-http endpoint is only acceptable on the loopback interface, where the
+        // bytes never leave the machine; anything else would send the token in clear text.
+        if endpoint.starts_with("http://") && !is_loopback_endpoint(endpoint) {
+            return Err("远程嵌入 API 必须使用 https://；仅本机回环地址允许 http://".to_string());
+        }
+        if self.model.as_deref().map(str::trim).unwrap_or_default().is_empty() {
+            return Err("选择远程嵌入 API 时需要填写模型名称".to_string());
+        }
+        match self.dimensions {
+            Some(dimensions) if (1..=8192).contains(&dimensions) => {}
+            _ => return Err("远程嵌入 API 需要填写 1 到 8192 之间的向量维度".to_string()),
+        }
+        if self.timeout_ms == 0 || self.timeout_ms > 600_000 {
+            return Err("嵌入 API 超时必须介于 1 与 600000 毫秒之间".to_string());
         }
         Ok(())
     }
 }
 
+/// `true` when the endpoint host is the loopback interface. Used only to decide whether
+/// plain `http://` is safe; TLS is still required for every other host.
+pub fn is_loopback_endpoint(endpoint: &str) -> bool {
+    let without_scheme = endpoint
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(endpoint);
+    let authority = without_scheme
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or(without_scheme);
+    // Strip credentials and the port: `user:pass@host:port`.
+    let host_port = authority.rsplit('@').next().unwrap_or(authority);
+    let host = if let Some(rest) = host_port.strip_prefix('[') {
+        rest.split(']').next().unwrap_or(rest)
+    } else {
+        host_port.split(':').next().unwrap_or(host_port)
+    };
+    matches!(
+        host.to_ascii_lowercase().as_str(),
+        "127.0.0.1" | "localhost" | "::1"
+    )
+}
+
 #[cfg(test)]
 mod text_model_settings_tests {
-    use super::TextModelSettings;
+    use super::{is_loopback_endpoint, TextEmbeddingProviderKind, TextModelSettings};
+
+    fn api_settings() -> TextModelSettings {
+        TextModelSettings {
+            provider: TextEmbeddingProviderKind::Api,
+            endpoint: Some("https://api.example.com/v1".to_string()),
+            api_key: Some("token".to_string()),
+            model: Some("text-embedding-example".to_string()),
+            dimensions: Some(1024),
+            ..TextModelSettings::default()
+        }
+    }
 
     #[test]
     fn the_bundled_model_is_the_default() {
         let settings = TextModelSettings::default();
         assert_eq!(settings.model_dir, None);
+        assert_eq!(settings.provider, TextEmbeddingProviderKind::LocalOnnx);
         assert!(settings.validate().is_ok());
     }
 
@@ -742,10 +866,12 @@ mod text_model_settings_tests {
     fn an_empty_directory_is_rejected_but_an_absolute_one_is_accepted() {
         let blank = TextModelSettings {
             model_dir: Some("   ".to_string()),
+            ..TextModelSettings::default()
         };
         assert!(blank.validate().is_err());
         let absolute = TextModelSettings {
             model_dir: Some(r"D:\models\bge-m3-int8".to_string()),
+            ..TextModelSettings::default()
         };
         assert!(absolute.validate().is_ok());
     }
@@ -754,11 +880,74 @@ mod text_model_settings_tests {
     fn the_field_round_trips_and_older_settings_still_load() {
         let encoded = serde_json::to_string(&TextModelSettings {
             model_dir: Some("D:/m".to_string()),
+            ..TextModelSettings::default()
         })
         .expect("encode");
         assert!(encoded.contains("model_dir"));
         let legacy: TextModelSettings = serde_json::from_str("{}").expect("legacy");
         assert_eq!(legacy.model_dir, None);
+        assert_eq!(legacy.provider, TextEmbeddingProviderKind::LocalOnnx);
+        assert_eq!(legacy.timeout_ms, 60_000);
+    }
+
+    #[test]
+    fn an_api_provider_needs_endpoint_model_and_dimensions() {
+        assert!(api_settings().validate().is_ok());
+
+        let no_endpoint = TextModelSettings {
+            endpoint: None,
+            ..api_settings()
+        };
+        assert!(no_endpoint.validate().is_err());
+
+        let no_model = TextModelSettings {
+            model: None,
+            ..api_settings()
+        };
+        assert!(no_model.validate().is_err());
+
+        let no_dimensions = TextModelSettings {
+            dimensions: None,
+            ..api_settings()
+        };
+        assert!(no_dimensions.validate().is_err());
+
+        let bad_dimensions = TextModelSettings {
+            dimensions: Some(0),
+            ..api_settings()
+        };
+        assert!(bad_dimensions.validate().is_err());
+    }
+
+    #[test]
+    fn plain_http_is_only_allowed_on_loopback() {
+        assert!(is_loopback_endpoint("http://127.0.0.1:11434/v1"));
+        assert!(is_loopback_endpoint("http://localhost:8000"));
+        assert!(is_loopback_endpoint("http://[::1]:8000/v1"));
+        assert!(!is_loopback_endpoint("http://api.example.com/v1"));
+        assert!(is_loopback_endpoint("https://localhost:443/v1"));
+
+        let remote_http = TextModelSettings {
+            endpoint: Some("http://api.example.com/v1".to_string()),
+            ..api_settings()
+        };
+        assert!(remote_http.validate().is_err());
+
+        let local_http = TextModelSettings {
+            endpoint: Some("http://127.0.0.1:11434/v1".to_string()),
+            ..api_settings()
+        };
+        assert!(local_http.validate().is_ok());
+    }
+
+    #[test]
+    fn a_stored_api_key_survives_a_save_that_omits_it() {
+        // The settings screen writes the key only when the user types one; the command
+        // merges instead of clearing, so a value saved earlier must still validate.
+        let mut settings = api_settings();
+        settings.api_key = None;
+        assert!(settings.validate().is_ok());
+        assert_eq!(settings.api_key, None);
     }
 }
 

@@ -1499,15 +1499,41 @@ export type TextModelChoice = {
   bundled: boolean;
 };
 
-/** Configured choice plus what would actually be loaded. */
+/** Where text embeddings come from: local ONNX weights or an OpenAI-compatible API. */
+export type TextEmbeddingProviderKind = 'local_onnx' | 'api';
+
+/** Configured transport plus the facts of what would actually be loaded. */
 export type TextModelSettingsState = {
+  provider: TextEmbeddingProviderKind;
   model_dir: string | null;
-  resolved_dir: string;
-  model_name: string | null;
+  endpoint: string | null;
+  has_api_key: boolean;
+  model: string | null;
   dimensions: number | null;
-  pooling: string | null;
+  timeout_ms: number;
+  resolved_dir: string;
+  loaded_model_name: string | null;
+  loaded_dimensions: number | null;
   available: boolean;
   message: string | null;
+};
+
+/** Settings payload; the key is write-only, so omit it to keep the stored value. */
+export type TextModelSettingsInput = {
+  provider: TextEmbeddingProviderKind;
+  model_dir: string | null;
+  endpoint: string | null;
+  api_key?: string;
+  model: string | null;
+  dimensions: number | null;
+  timeout_ms: number;
+};
+
+export type TextEmbeddingProbeState = {
+  provider: string;
+  model_name: string | null;
+  dimensions: number;
+  latency_ms: number;
 };
 
 export function listTextModels(): Promise<TextModelChoice[]> {
@@ -1518,10 +1544,17 @@ export function getTextModelSettings(): Promise<TextModelSettingsState> {
   return invoke('get_text_model_settings');
 }
 
-export function saveTextModelSettings(settings: {
-  model_dir: string | null;
-}): Promise<TextModelSettingsState> {
+export function saveTextModelSettings(
+  settings: TextModelSettingsInput
+): Promise<TextModelSettingsState> {
   return invoke('save_text_model_settings', { settings });
+}
+
+/** Live probe: embeds a fixed probe string through the configured transport. */
+export function testTextEmbeddingConnection(
+  settings: TextModelSettingsInput
+): Promise<TextEmbeddingProbeState> {
+  return invoke('test_text_embedding_connection', { settings });
 }
 
 /** One curated text model the app can install and run as-is. */
@@ -1559,6 +1592,16 @@ export function installRecommendedTextModel(id: string): Promise<RecommendedText
 }
 
 
+/** A reranker directory that is already on disk and can be selected as-is. */
+export type InstalledRerankModel = {
+  id: string;
+  path: string;
+  label: string;
+};
+
+export function listInstalledRerankModels(): Promise<InstalledRerankModel[]> {
+  return invoke('list_installed_rerank_models');
+}
 /** One curated reranker the app can install in one click. */
 export type RecommendedRerankModel = {
   id: string;
@@ -1621,6 +1664,8 @@ export type VisualRuntimeState = {
   python: string;
   dependencies_installed: boolean;
   model_present: boolean;
+  /** Why the weights are missing, when they are. */
+  model_error?: string | null;
 };
 
 export function getVisualRuntimeState(id: string): Promise<VisualRuntimeState | null> {
@@ -1636,6 +1681,29 @@ export function installVisualRuntime(
   reuseModelDir?: string | null
 ): Promise<VisualRuntimeState> {
   return invoke('install_visual_runtime', {
+    id,
+    reuse_model_dir: reuseModelDir ?? null
+  });
+}
+
+/** Whether the configured visual transport is actually answering right now. */
+export type VisualServiceStatus = {
+  running: boolean;
+  model: string | null;
+  dimensions: number | null;
+  endpoint: string | null;
+  message: string | null;
+};
+
+export function getVisualServiceStatus(): Promise<VisualServiceStatus> {
+  return invoke('get_visual_service_status');
+}
+/** Retries only the weight download for an already prepared environment. */
+export function downloadVisualWeights(
+  id: string,
+  reuseModelDir?: string | null
+): Promise<VisualRuntimeState> {
+  return invoke('download_visual_weights', {
     id,
     reuse_model_dir: reuseModelDir ?? null
   });

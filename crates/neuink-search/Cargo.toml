@@ -12,6 +12,7 @@ ort = { version = "=2.0.0-rc.12", default-features = false, features = ["std", "
 tokenizers = { version = "0.22.2", default-features = false, features = ["onig"], optional = true }
 neuink-domain = { path = "../neuink-domain" }
 rayon.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

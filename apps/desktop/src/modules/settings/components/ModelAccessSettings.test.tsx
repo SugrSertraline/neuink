@@ -5,12 +5,15 @@ import { ModelAccessSettings } from './ModelAccessSettings';
 import {
   getTextModelSettings,
   getVisualRuntimeState,
+  getVisualServiceStatus,
   listRecommendedRerankModels,
   listRecommendedTextModels,
   listRecommendedVisualModels,
   listTextModels,
   rebuildSearchIndex,
-  saveTextModelSettings
+  saveTextModelSettings,
+  testTextEmbeddingConnection,
+  type TextModelSettingsState
 } from '@/shared/ipc/workspaceApi';
 
 vi.mock('@/shared/ipc/workspaceApi', () => ({
@@ -20,13 +23,16 @@ vi.mock('@/shared/ipc/workspaceApi', () => ({
   listRecommendedRerankModels: vi.fn(),
   listRecommendedVisualModels: vi.fn(),
   getVisualRuntimeState: vi.fn(),
+  getVisualServiceStatus: vi.fn(),
   installVisualRuntime: vi.fn(),
+  downloadVisualWeights: vi.fn(),
   startVisualService: vi.fn(),
   installRecommendedRerankModel: vi.fn(),
   runRetrievalSelfCheck: vi.fn(),
   installRecommendedTextModel: vi.fn(),
   saveTextModelSettings: vi.fn(),
-  rebuildSearchIndex: vi.fn()
+  rebuildSearchIndex: vi.fn(),
+  testTextEmbeddingConnection: vi.fn()
 }));
 
 const choices = [
@@ -48,12 +54,32 @@ const choices = [
   }
 ];
 
-const current = {
+const current: TextModelSettingsState = {
+  provider: 'local_onnx',
   model_dir: null,
+  endpoint: null,
+  has_api_key: false,
+  model: null,
+  dimensions: null,
+  timeout_ms: 60000,
   resolved_dir: 'D:/models/default',
-  model_name: 'BAAI/bge-m3',
+  loaded_model_name: 'BAAI/bge-m3',
+  loaded_dimensions: 1024,
+  available: true,
+  message: null
+};
+
+const currentApi: TextModelSettingsState = {
+  provider: 'api',
+  model_dir: null,
+  endpoint: 'https://api.example.com/v1',
+  has_api_key: true,
+  model: 'text-embedding-x',
   dimensions: 1024,
-  pooling: null,
+  timeout_ms: 60000,
+  resolved_dir: 'https://api.example.com/v1',
+  loaded_model_name: 'text-embedding-x',
+  loaded_dimensions: 1024,
   available: true,
   message: null
 };
@@ -69,6 +95,14 @@ beforeEach(() => {
   vi.mocked(listRecommendedRerankModels).mockResolvedValue([]);
   vi.mocked(listRecommendedVisualModels).mockReset();
   vi.mocked(getVisualRuntimeState).mockReset();
+  vi.mocked(getVisualServiceStatus).mockReset();
+  vi.mocked(getVisualServiceStatus).mockResolvedValue({
+    running: false,
+    model: null,
+    dimensions: null,
+    endpoint: null,
+    message: null
+  });
   vi.mocked(getVisualRuntimeState).mockResolvedValue(null);
   vi.mocked(listRecommendedVisualModels).mockResolvedValue([
     {
@@ -147,7 +181,14 @@ describe('ModelAccessSettings', () => {
     fireEvent.change(screen.getByLabelText('文本嵌入模型目录'), { target: { value: 'D:/models/e5' } });
     fireEvent.click(screen.getByRole('button', { name: '应用模型' }));
     await waitFor(() =>
-      expect(saveTextModelSettings).toHaveBeenCalledWith({ model_dir: 'D:/models/e5' })
+      expect(saveTextModelSettings).toHaveBeenCalledWith({
+        provider: 'local_onnx',
+        model_dir: 'D:/models/e5',
+        endpoint: null,
+        model: null,
+        dimensions: null,
+        timeout_ms: 60000
+      })
     );
     await waitFor(() =>
       expect(screen.getByTestId('text-model-note').textContent).toContain('请重建')
@@ -184,16 +225,47 @@ describe('ModelAccessSettings', () => {
       expect(screen.getByRole('alert').textContent).toContain('不是可用的文本嵌入模型')
     );
   });
+
+  it('saves an OpenAI-compatible API configuration with a write-only key', async () => {
+    vi.mocked(listTextModels).mockResolvedValue(choices);
+    vi.mocked(getTextModelSettings).mockResolvedValue(currentApi);
+    vi.mocked(saveTextModelSettings).mockResolvedValue(currentApi);
+    render(<ModelAccessSettings active root="/lib" />);
+    await waitFor(() => expect(getTextModelSettings).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByLabelText('文本嵌入 API 密钥'), {
+      target: { value: 'secret-token' }
+    });
+    fireEvent.click(screen.getByRole('button', { name: '应用模型' }));
+
+    await waitFor(() =>
+      expect(saveTextModelSettings).toHaveBeenCalledWith({
+        provider: 'api',
+        model_dir: null,
+        endpoint: 'https://api.example.com/v1',
+        api_key: 'secret-token',
+        model: 'text-embedding-x',
+        dimensions: 1024,
+        timeout_ms: 60000
+      })
+    );
+  });
+
+  it('probes the configured API and shows the returned dimensions', async () => {
+    vi.mocked(listTextModels).mockResolvedValue(choices);
+    vi.mocked(getTextModelSettings).mockResolvedValue(currentApi);
+    vi.mocked(testTextEmbeddingConnection).mockResolvedValue({
+      provider: 'openai-compatible',
+      model_name: 'text-embedding-x',
+      dimensions: 1024,
+      latency_ms: 42
+    });
+    render(<ModelAccessSettings active root="/lib" />);
+    await waitFor(() => expect(getTextModelSettings).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('text-model-probe').textContent).toContain('1024 维')
+    );
+  });
 });
-
-
-
-
-
-
-
-
-
-
-
-

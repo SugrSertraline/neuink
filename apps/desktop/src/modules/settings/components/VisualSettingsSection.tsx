@@ -124,7 +124,7 @@ export function VisualSettingsSection({ active, root }: { active: boolean; root:
           : `已写入索引：${result.entry_count} 篇 / ${result.asset_count} 个图表资产 / ${result.document_count} 个向量源（本次用到 ${result.embedded_count} 个）。`
       );
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '未能准备视觉索引。');
+      setError(cause instanceof Error ? cause.message : String(cause) || '未能准备视觉索引。');
     } finally {
       setPreparing(false);
     }

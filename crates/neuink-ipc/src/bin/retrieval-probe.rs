@@ -290,12 +290,18 @@ fn run() -> Result<(), String> {
     );
 
 
+    // The probe is headless, so it always uses the local ONNX transport; the app resolves
+    // the configured transport (local or API) through the same trait.
+    let text_provider: Arc<dyn neuink_search::EmbeddingProvider> =
+        Arc::new(neuink_search::FastEmbedProvider::from_model_dir(
+            args.model_dir.clone(),
+        ));
     // Optional: build the text index first, so a probe run on a fresh library exercises
     // the same semantic channel the app would use.
     if args.build_text_index {
         let build_started = Instant::now();
         let built = neuink_ipc::commands::search::rebuild_search_index_impl(
-            args.model_dir.clone(),
+            text_provider.clone(),
             neuink_ipc::commands::search::RebuildSearchIndexRequest {
                 root: args.root.clone(),
                 segments_only: true,
@@ -313,8 +319,7 @@ fn run() -> Result<(), String> {
     }
     // Surface why semantic retrieval did or did not run: a probe that hides the text
     // encoder state cannot explain a `hybrid_fallback_keyword` result.
-    let text_provider = neuink_search::FastEmbedProvider::from_model_dir(args.model_dir.clone());
-    let text_status = neuink_search::EmbeddingProvider::status(&text_provider);
+    let text_status = neuink_search::EmbeddingProvider::status(text_provider.as_ref());
     report.insert(
         "text_model".to_string(),
         serde_json::json!({
@@ -327,7 +332,7 @@ fn run() -> Result<(), String> {
     );
     let retrieval_started = Instant::now();
     let response = run_unified_search(
-        args.model_dir.clone(),
+        text_provider,
         provider,
         neuink_config::VisualFusionSettings::default(),
         rerank_settings,

@@ -82,7 +82,7 @@ pub fn rerank_model_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<
             .join(RERANK_DIR),
     );
     for candidate in &candidates {
-        if ["onnx/model_int8.onnx", "onnx/model.onnx", "model.onnx"]
+        if neuink_search::EMBEDDING_MODEL_FILE_NAMES
             .iter()
             .any(|relative| candidate.join(relative).is_file())
         {
@@ -119,7 +119,7 @@ pub fn router_model_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<
             .join(ROUTER_DIR),
     );
     for candidate in &candidates {
-        if ["onnx/model.onnx", "onnx/model_int8.onnx", "model.onnx"]
+        if neuink_search::EMBEDDING_MODEL_FILE_NAMES
             .iter()
             .any(|relative| candidate.join(relative).is_file())
         {
@@ -208,8 +208,10 @@ pub fn list_text_models<R: tauri::Runtime>(
 
 /// Reads the parts of `neuink-embedding.json` the UI shows.
 fn read_model_manifest(dir: &std::path::Path) -> Option<(Option<String>, Option<usize>, Option<String>)> {
-    const MODEL_FILES: [&str; 3] = ["onnx/model.onnx", "onnx/model_int8.onnx", "model.onnx"];
-    if !MODEL_FILES.iter().any(|name| dir.join(name).is_file()) {
+    if !neuink_search::EMBEDDING_MODEL_FILE_NAMES
+        .iter()
+        .any(|name| dir.join(name).is_file())
+    {
         return None;
     }
     let bytes = std::fs::read(dir.join("neuink-embedding.json")).ok()?;
@@ -221,3 +223,32 @@ fn read_model_manifest(dir: &std::path::Path) -> Option<(Option<String>, Option<
     ))
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A directory holding only `onnx/model_quantized.onnx` (Xenova's int8 export name) must
+    /// still be offered in the picker; otherwise a completed install shows as installed in the
+    /// recommended list while the current-model selector stays empty.
+    #[test]
+    fn a_quantized_export_is_listed_as_a_model_choice() {
+        let dir = std::env::temp_dir().join(format!(
+            "neuink-quantized-choice-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("onnx")).expect("create dir");
+        std::fs::write(dir.join("onnx/model_quantized.onnx"), b"placeholder").expect("write onnx");
+        std::fs::write(
+            dir.join("neuink-embedding.json"),
+            br#"{"model_name":"Xenova/multilingual-e5-small","dimensions":384,"pooling":"mean"}"#,
+        )
+        .expect("write manifest");
+
+        let manifest = read_model_manifest(&dir).expect("quantized model must be discoverable");
+        assert_eq!(manifest.1, Some(384));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

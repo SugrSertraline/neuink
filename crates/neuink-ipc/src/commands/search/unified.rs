@@ -88,7 +88,7 @@ pub struct UnifiedTaskOutput {
 
 #[allow(clippy::too_many_arguments)]
 pub fn run_unified_search(
-    model_dir: PathBuf,
+    provider: Arc<dyn neuink_search::EmbeddingProvider>,
     visual_provider: Arc<dyn neuink_search::VisualEmbeddingProvider>,
     fusion: neuink_config::VisualFusionSettings,
     rerank: neuink_config::RerankSettings,
@@ -100,7 +100,7 @@ pub fn run_unified_search(
         return Err("query is required".into());
     }
     let prepared = prepare_search(
-        model_dir,
+        provider,
         &request.root,
         true,
         request.mode != SearchMode::Keyword,

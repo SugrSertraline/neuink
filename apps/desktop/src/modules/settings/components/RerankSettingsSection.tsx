@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import {
   getRerankSettings,
-  listRecommendedRerankModels,
+  listInstalledRerankModels,
   saveRerankSettings,
-  type RecommendedRerankModelState,
+  type InstalledRerankModel,
   type RerankMode,
   type RerankSettings,
   type RerankSettingsState
@@ -27,17 +27,16 @@ export function RerankSettingsSection({ active }: { active: boolean }) {
   const [draft, setDraft] = useState<RerankSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [installed, setInstalled] = useState<RecommendedRerankModelState[]>([]);
+  const [installedModels, setInstalledModels] = useState<InstalledRerankModel[]>([]);
 
   useEffect(() => {
     if (!active || saved) return;
     let cancelled = false;
-    void Promise.all([getRerankSettings(), listRecommendedRerankModels()])
-      .then(([value, models]) => {
+    void getRerankSettings()
+      .then((value) => {
         if (cancelled) return;
         setSaved(value);
         setDraft(value);
-        setInstalled(models.filter((model) => model.installed));
       })
       .catch(() => {
         if (!cancelled) setError('未能读取重排设置。');
@@ -47,6 +46,23 @@ export function RerankSettingsSection({ active }: { active: boolean }) {
     };
   }, [active, saved]);
 
+  // Rescan installed reranker directories on every activation, so a model installed from
+  // the other settings group appears here without a hand-typed path.
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    void listInstalledRerankModels()
+      .then((models) => {
+        if (cancelled) return;
+        setInstalledModels(models);
+      })
+      .catch(() => {
+        if (!cancelled) setInstalledModels([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [active]);
   const persist = async (next: RerankSettings) => {
     setDraft(next);
     setBusy(true);
@@ -63,6 +79,13 @@ export function RerankSettingsSection({ active }: { active: boolean }) {
     }
   };
 
+  // A downloaded reranker should never require typing its path: once both the settings and
+  // the scanned directories are known, fill an empty directory with the first installed one.
+  useEffect(() => {
+    const settings = draft ?? saved;
+    if (!settings || settings.model_dir?.trim() || installedModels.length === 0) return;
+    void persist({ ...settings, model_dir: installedModels[0].path });
+  }, [draft, saved, installedModels]);
   const current = draft ?? saved;
   const needsModel = current?.mode === 'cross_encoder';
   const modelMissing = needsModel && saved !== null && !saved.model_present;
@@ -86,18 +109,19 @@ export function RerankSettingsSection({ active }: { active: boolean }) {
           void persist({ ...current, mode: value as RerankMode });
         }}
       />
-      {needsModel && installed.length > 0 && (
+      {needsModel && (
         <SettingSelect
           id="tools-rerank-installed"
           label="已安装的重排模型"
-          description="安装完成的模型目录，选择即写入下方目录。"
-          disabled={busy}
+          description={
+            installedModels.length > 0
+              ? "安装完成的模型目录，选择即写入下方目录。"
+              : "还没有检测到已安装的重排模型；可在「模型与接入」一键安装。"
+          }
+          disabled={busy || installedModels.length === 0}
           value={current?.model_dir ?? ""}
-          options={installed.map((entry) => ({
-            value: entry.installed_dir ?? "",
-            label: entry.model.display_name
-          }))}
-          placeholder="选择已安装模型"
+          options={installedModels.map((entry) => ({ value: entry.path, label: entry.label }))}
+          placeholder={installedModels.length > 0 ? "选择已安装模型" : "尚未安装"}
           onValueChange={(value) => {
             if (!current) return;
             void persist({ ...current, model_dir: value });

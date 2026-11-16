@@ -18,7 +18,7 @@ use crate::commands::search::recommended_visual_models::{RecommendedVisualModel,
 
 /// CPU-only torch: the CUDA wheel is multiple gigabytes larger and these laptops have no GPU.
 const TORCH_INDEX: &str = "https://download.pytorch.org/whl/cpu";
-const DEPENDENCIES: [&str; 4] = ["torch", "transformers", "qwen-vl-utils", "pillow"];
+const DEPENDENCIES: [&str; 5] = ["torch", "transformers", "torchvision", "qwen-vl-utils", "pillow"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VisualRuntimeState {
@@ -31,6 +31,10 @@ pub struct VisualRuntimeState {
     pub python: String,
     pub dependencies_installed: bool,
     pub model_present: bool,
+    /// Why the weights are missing, when they are. Free text from the downloader, truncated,
+    /// so the settings screen can show a real reason instead of a silent gap.
+    #[serde(default)]
+    pub model_error: Option<String>,
 }
 
 /// Fixed reasons the screen can translate without parsing messages.
@@ -126,21 +130,22 @@ pub fn install(
         .map_err(|error| format!("无法安装依赖：{error}"))?;
     let dependencies_installed = install.status.success();
 
-    // 3) Weights, unless a local directory was supplied.
+    // 3) Weights. A download failure is reported, not swallowed: the environment stays
+    // usable and "download weights" can be retried without redoing the dependency install.
     let mut model_present = model_weights_present(&model_dir);
-    if !model_present && reuse_model_dir.is_none() {
-        let download = Command::new(&uv)
-            .args(["run", "--python"])
-            .arg(&python)
-            .args(["python", "-c"])
-            .arg(format!(
-                "from huggingface_hub import snapshot_download; snapshot_download('{}', local_dir=r'{}')",
-                model.repository,
-                model_dir.display()
-            ))
-            .output()
-            .map_err(|error| format!("无法下载模型：{error}"))?;
-        model_present = download.status.success() && model_weights_present(&model_dir);
+    let mut model_error = None;
+    if !model_present {
+        if let Some(reuse) = reuse_model_dir {
+            model_error = Some(format!(
+                "指定的本地权重目录里没有 model.safetensors / pytorch_model.bin：{}",
+                reuse.display()
+            ));
+        } else {
+            match download_weights(&uv, &python, model.repository, &model_dir) {
+                Ok(()) => model_present = true,
+                Err(reason) => model_error = Some(reason),
+            }
+        }
     }
 
     let state = VisualRuntimeState {
@@ -150,6 +155,7 @@ pub fn install(
         python: python.to_string_lossy().to_string(),
         dependencies_installed,
         model_present,
+        model_error,
     };
     write_state(&state, resource_dir)?;
     if !dependencies_installed {
@@ -158,6 +164,115 @@ pub fn install(
             String::from_utf8_lossy(&install.stderr).trim()
         ));
     }
+    Ok(state)
+}
+
+/// One download attempt against a specific Hugging Face endpoint.
+fn run_download(
+    uv: &Path,
+    python: &Path,
+    repository: &str,
+    model_dir: &Path,
+    endpoint: Option<&str>,
+) -> Result<(), String> {
+    let mut command = Command::new(uv);
+    command
+        .args(["run", "--python"])
+        .arg(python)
+        .args(["python", "-c"])
+        .arg(format!(
+            "from huggingface_hub import snapshot_download; snapshot_download(''{repository}'', local_dir=r''{}'')",
+            model_dir.display()
+        ));
+    if let Some(endpoint) = endpoint {
+        command.env("HF_ENDPOINT", endpoint);
+    }
+    let download = command
+        .output()
+        .map_err(|error| format!("无法运行下载器：{error}"))?;
+    if !download.status.success() {
+        let stderr = String::from_utf8_lossy(&download.stderr);
+        let lines = stderr.lines().rev().take(6).collect::<Vec<_>>();
+        let tail = lines.into_iter().rev().collect::<Vec<_>>().join(" | ");
+        return Err(if tail.trim().is_empty() {
+            format!("退出码 {:?}，没有错误输出", download.status.code())
+        } else {
+            tail
+        });
+    }
+    if !model_weights_present(model_dir) {
+        return Err(format!(
+            "下载命令成功，但目录里没有 model.safetensors / pytorch_model.bin：{}",
+            model_dir.display()
+        ));
+    }
+    Ok(())
+}
+
+/// Downloads weights, preferring an explicitly configured endpoint (`NEUINK_HF_ENDPOINT`)
+/// and falling back to a mirror when the official host cannot deliver. Measured on a
+/// China-network machine: the official host stalls large files behind the local proxy while
+/// `hf-mirror.com` completes them.
+fn download_weights(
+    uv: &Path,
+    python: &Path,
+    repository: &str,
+    model_dir: &Path,
+) -> Result<(), String> {
+    // Weights that already exist are reused: a retry after a partial external download must
+    // not re-fetch 4 GB just to discover the file is there.
+    if model_weights_present(model_dir) {
+        return Ok(());
+    }
+    let configured = std::env::var("NEUINK_HF_ENDPOINT")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    if let Some(endpoint) = configured.as_deref() {
+        return run_download(uv, python, repository, model_dir, Some(endpoint))
+            .map_err(|reason| format!("权重下载失败（{endpoint}）：{reason}"));
+    }
+    match run_download(uv, python, repository, model_dir, None) {
+        Ok(()) => Ok(()),
+        Err(official) => {
+            const MIRROR: &str = "https://hf-mirror.com";
+            run_download(uv, python, repository, model_dir, Some(MIRROR))
+                .map_err(|mirror| format!("官方端点：{official}；镜像端点：{mirror}"))
+        }
+    }
+}
+/// Retries only the weights step for an already prepared environment, so a failed 4 GB
+/// download never forces the torch/pip install to run again.
+pub fn download_missing_weights(
+    resource_dir: &Path,
+    model_id: &str,
+    reuse_model_dir: Option<&Path>,
+) -> Result<VisualRuntimeState, String> {
+    let mut state = load_state(resource_dir, model_id)
+        .ok_or_else(|| format!("还没有安装依赖，请先执行一键安装：{model_id}"))?;
+    if !state.dependencies_installed {
+        return Err(REASON_INSTALL_FAILED.to_string());
+    }
+    let model = model_of(model_id).ok_or_else(|| format!("未知的视觉模型：{model_id}"))?;
+    let uv = find_uv().ok_or_else(|| REASON_UV_MISSING.to_string())?;
+    let python = PathBuf::from(&state.python);
+    let model_dir = reuse_model_dir
+        .map(|path| path.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from(&state.model_dir));
+    state.model_dir = model_dir.to_string_lossy().to_string();
+    match download_weights(&uv, &python, model.repository, &model_dir) {
+        Ok(()) => {
+            state.model_present = true;
+            state.model_error = None;
+        }
+        Err(reason) => {
+            state.model_present = model_weights_present(&model_dir);
+            state.model_error = Some(reason.clone());
+            write_state(&state, resource_dir)?;
+            return Err(reason);
+        }
+    }
+    write_state(&state, resource_dir)?;
     Ok(state)
 }
 
@@ -191,6 +306,7 @@ mod tests {
             python: "python".to_string(),
             dependencies_installed: true,
             model_present: false,
+            model_error: None,
         };
         write_state(&state, &root).expect("write");
         let loaded = load_state(&root, "qwen3-vl-embedding-2b").expect("load");

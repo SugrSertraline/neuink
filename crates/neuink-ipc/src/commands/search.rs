@@ -223,7 +223,7 @@ struct CachedSemanticIndex {
 }
 
 struct CachedEmbeddingProvider {
-    provider: Arc<FastEmbedProvider>,
+    provider: Arc<dyn EmbeddingProvider>,
     signature: String,
     last_used: Instant,
 }
@@ -254,10 +254,10 @@ pub async fn search_entries<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     request: SearchEntriesRequest,
 ) -> Result<SearchResults, String> {
-    let model_dir = embedding_model_dir(&app)?;
+    let provider = text_provider_for_app(&app)?;
     tokio::task::spawn_blocking(move || {
         run_search_bundle(
-            model_dir,
+            provider,
             request.root,
             request.query,
             request.english_query,
@@ -279,10 +279,10 @@ pub async fn search_segments<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     request: SearchSegmentsRequest,
 ) -> Result<SearchResults, String> {
-    let model_dir = embedding_model_dir(&app)?;
+    let provider = text_provider_for_app(&app)?;
     tokio::task::spawn_blocking(move || {
         run_search_bundle(
-            model_dir,
+            provider,
             request.root,
             request.query,
             request.english_query,
@@ -304,7 +304,7 @@ pub async fn search_segments<R: tauri::Runtime>(
 struct PreparedSearch {
     include: SearchInclude,
     keyword: Arc<MemorySearchIndex>,
-    provider: Arc<FastEmbedProvider>,
+    provider: Arc<dyn EmbeddingProvider>,
     semantic: Option<Arc<PersistentSemanticSearchIndex>>,
     /// Distinct entries in the prepared corpus. The document head needs the scope
     /// size to tell "no parsed documents" from "nothing ranked".
@@ -315,7 +315,7 @@ struct PreparedSearch {
 }
 
 fn prepare_search(
-    model_dir: PathBuf,
+    provider: Arc<dyn EmbeddingProvider>,
     root: &PathBuf,
     segments_only: bool,
     needs_semantic: bool,
@@ -337,7 +337,6 @@ fn prepare_search(
         records_fingerprint(&records),
         documents.clone(),
     )?;
-    let provider = cached_embedding_provider(model_dir).map_err(|e| e.to_string())?;
     let semantic_fingerprint = semantic_records_fingerprint(&records);
     let semantic = if needs_semantic {
         try_cached_semantic_index(
@@ -490,7 +489,7 @@ fn run_single_query(
 }
 
 fn run_search_bundle(
-    model_dir: PathBuf,
+    provider: Arc<dyn EmbeddingProvider>,
     root: PathBuf,
     primary: String,
     english: Option<String>,
@@ -506,7 +505,7 @@ fn run_search_bundle(
     if primary.is_empty() {
         return Err("query is required".into());
     }
-    let prepared = prepare_search(model_dir, &root, segments_only, mode != SearchMode::Keyword)?;
+    let prepared = prepare_search(provider, &root, segments_only, mode != SearchMode::Keyword)?;
     run_single_query(
         &prepared,
         &primary,
@@ -526,10 +525,10 @@ pub async fn search_segments_batch<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     request: SearchSegmentsBatchRequest,
 ) -> Result<Vec<SearchSegmentsBatchItem>, String> {
-    let model_dir = embedding_model_dir(&app)?;
+    let provider = text_provider_for_app(&app)?;
     let (rerank, rerank_provider) = resolve_rerank(&app)?;
     tokio::task::spawn_blocking(move || {
-        run_segments_batch(model_dir, rerank, rerank_provider, request)
+        run_segments_batch(provider, rerank, rerank_provider, request)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -588,7 +587,7 @@ fn apply_batch_rerank(
 /// Prepares the workspace index and embedding provider once per batch, then runs
 /// each task in order. Only a preparation failure fails the whole batch.
 fn run_segments_batch(
-    model_dir: PathBuf,
+    provider: Arc<dyn EmbeddingProvider>,
     rerank: neuink_config::RerankSettings,
     rerank_provider: Option<Arc<dyn neuink_search::RerankProvider>>,
     request: SearchSegmentsBatchRequest,
@@ -596,7 +595,7 @@ fn run_segments_batch(
     let SearchSegmentsBatchRequest { root, tasks } = request;
     let items = collect_segments_batch(
         tasks,
-        |needs_semantic| prepare_search(model_dir, &root, true, needs_semantic),
+        |needs_semantic| prepare_search(provider, &root, true, needs_semantic),
         |prepared, task| {
             run_single_query(
                 prepared,
@@ -708,8 +707,8 @@ pub async fn get_search_index_status<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     request: SearchIndexStatusRequest,
 ) -> Result<SearchIndexStatus, String> {
-    let model_dir = embedding_model_dir(&app)?;
-    tokio::task::spawn_blocking(move || get_search_index_status_impl(request, model_dir))
+    let provider = text_provider_for_app(&app)?;
+    tokio::task::spawn_blocking(move || get_search_index_status_impl(request, provider))
         .await
         .map_err(|error| error.to_string())?
 }
@@ -728,11 +727,11 @@ pub async fn rebuild_search_index<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     request: RebuildSearchIndexRequest,
 ) -> Result<RebuildSearchIndexResponse, String> {
-    let embedding_model_dir = embedding_model_dir(&app)?;
+    let provider = text_provider_for_app(&app)?;
     tokio::task::spawn_blocking(move || {
         begin_search_build(&request.root, "手动重建向量索引");
         let root = request.root.clone();
-        let result = rebuild_search_index_impl(embedding_model_dir, request);
+        let result = rebuild_search_index_impl(provider, request);
         if let Err(error) = &result {
             fail_search_build(&root, error);
         }
@@ -744,7 +743,7 @@ pub async fn rebuild_search_index<R: tauri::Runtime>(
 
 fn get_search_index_status_impl(
     request: SearchIndexStatusRequest,
-    model_dir: PathBuf,
+    provider: Arc<dyn EmbeddingProvider>,
 ) -> Result<SearchIndexStatus, String> {
     let (scope, options, include) = search_scope_status_options(request.segments_only);
     let workspace = Workspace::open(&request.root).map_err(|error| error.to_string())?;
@@ -774,7 +773,6 @@ fn get_search_index_status_impl(
         })
         .unwrap_or(false);
 
-    let provider = cached_embedding_provider(model_dir).map_err(|e| e.to_string())?;
     let identity = semantic_embedding_identity(provider.as_ref());
     let semantic_cache_key =
         model_semantic_cache_key(&request.root, &options, &include, identity.as_deref());
@@ -820,15 +818,13 @@ fn get_search_index_status_impl(
 }
 
 pub fn rebuild_search_index_impl(
-    embedding_model_dir: PathBuf,
+    provider: Arc<dyn EmbeddingProvider>,
     request: RebuildSearchIndexRequest,
 ) -> Result<RebuildSearchIndexResponse, String> {
     // The manual build intentionally keeps the previous disk snapshot so
     // `open_or_build_with_progress` only embeds documents that are new or
     // changed since the last build instead of re-embedding the workspace.
     let workspace = Workspace::open(&request.root).map_err(|error| error.to_string())?;
-    let provider = cached_embedding_provider(embedding_model_dir.clone())
-        .map_err(|error| error.to_string())?;
 
     // A global build also refreshes the segments-only scope so assistant
     // segment search keeps working after the startup warmup was removed.
@@ -884,7 +880,7 @@ pub fn rebuild_search_index_impl(
             root: request.root,
             segments_only: request.segments_only,
         },
-        embedding_model_dir,
+        provider,
     )?;
     Ok(RebuildSearchIndexResponse {
         status,
@@ -963,11 +959,30 @@ fn model_metadata_signature(model_dir: &std::path::Path) -> String {
         .join("|")
 }
 
-fn cached_embedding_provider(
-    embedding_model_dir: PathBuf,
-) -> Result<Arc<FastEmbedProvider>, neuink_search::SearchError> {
-    let cache_key = embedding_model_dir.display().to_string();
-    let signature = model_metadata_signature(&embedding_model_dir);
+/// One provider instance per transport configuration. Local providers cache a loaded ONNX
+/// session (the expensive part); API providers cache an HTTP client and its connections.
+fn cached_text_provider(
+    settings: &neuink_config::TextModelSettings,
+    local_dir: PathBuf,
+) -> Result<Arc<dyn EmbeddingProvider>, neuink_search::SearchError> {
+    use neuink_config::TextEmbeddingProviderKind;
+    let (cache_key, signature) = match settings.provider {
+        TextEmbeddingProviderKind::LocalOnnx => {
+            let key = format!("local:{}", local_dir.display());
+            (key, model_metadata_signature(&local_dir))
+        }
+        TextEmbeddingProviderKind::Api => {
+            let endpoint = settings.endpoint.clone().unwrap_or_default();
+            let model = settings.model.clone().unwrap_or_default();
+            let dimensions = settings.dimensions.unwrap_or_default();
+            let key = format!("api:{endpoint}|{model}|{dimensions}");
+            let mut hasher = DefaultHasher::new();
+            key.hash(&mut hasher);
+            hasher.write_u64(settings.timeout_ms);
+            settings.api_key.hash(&mut hasher);
+            (key, hasher.finish().to_string())
+        }
+    };
     let cache = EMBEDDING_PROVIDER_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let mut cache = cache
         .lock()
@@ -980,7 +995,18 @@ fn cached_embedding_provider(
     }
     cache.remove(&cache_key);
 
-    let provider = Arc::new(FastEmbedProvider::from_model_dir(embedding_model_dir));
+    let provider: Arc<dyn EmbeddingProvider> = match settings.provider {
+        TextEmbeddingProviderKind::LocalOnnx => {
+            Arc::new(FastEmbedProvider::from_model_dir(local_dir))
+        }
+        TextEmbeddingProviderKind::Api => Arc::new(neuink_search::RemoteEmbeddingProvider::new(
+            settings.endpoint.clone().unwrap_or_default(),
+            settings.api_key.clone(),
+            settings.model.clone().unwrap_or_default(),
+            settings.dimensions.unwrap_or_default(),
+            settings.timeout_ms,
+        )?),
+    };
     if !provider.status().available {
         return Ok(provider);
     }
@@ -996,13 +1022,27 @@ fn cached_embedding_provider(
     Ok(provider)
 }
 
+/// Resolves the configured text encoder for one app handle. Commands call this once per
+/// request; the pipeline below only ever sees `dyn EmbeddingProvider`.
+pub(crate) fn text_provider_for_app<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<Arc<dyn EmbeddingProvider>, String> {
+    let settings = crate::storage::read_settings(app)?.text_model;
+    let local_dir = if settings.provider == neuink_config::TextEmbeddingProviderKind::LocalOnnx {
+        embedding_model_dir(app)?
+    } else {
+        PathBuf::new()
+    };
+    cached_text_provider(&settings, local_dir).map_err(|error| error.to_string())
+}
+
 fn cached_semantic_index(
     root: &PathBuf,
     options: &WorkspaceSearchOptions,
     records_fingerprint: u64,
     include: &SearchInclude,
     documents: &[SearchDocument],
-    provider: Arc<FastEmbedProvider>,
+    provider: Arc<dyn EmbeddingProvider>,
     progress_scope: Option<&str>,
 ) -> Result<Arc<PersistentSemanticSearchIndex>, neuink_search::SearchError> {
     let identity = semantic_embedding_identity(provider.as_ref());
@@ -1100,7 +1140,7 @@ fn try_cached_semantic_index(
     records_fingerprint: u64,
     include: &SearchInclude,
     documents: &[SearchDocument],
-    provider: &FastEmbedProvider,
+    provider: &dyn EmbeddingProvider,
 ) -> Option<Arc<PersistentSemanticSearchIndex>> {
     let identity = semantic_embedding_identity(provider)?;
     let cache_key = model_semantic_cache_key(root, options, include, Some(&identity));
@@ -1143,7 +1183,7 @@ fn schedule_legacy_semantic_rebuild(
     records_fingerprint: u64,
     include: &SearchInclude,
     documents: &[SearchDocument],
-    provider: Arc<FastEmbedProvider>,
+    provider: Arc<dyn EmbeddingProvider>,
 ) {
     let cache_dir = WorkspaceLayout::new(root.clone()).cache_dir();
     let identity = semantic_embedding_identity(provider.as_ref());
@@ -1926,7 +1966,7 @@ mod tests {
     };
     use neuink_domain::{EntryId, SegmentType, SegmentUid};
     use neuink_search::{
-        FastEmbedProvider, MemorySearchIndex, SearchDocumentSource, SearchDocumentSourceKind,
+        EmbeddingProvider, FastEmbedProvider, MemorySearchIndex, SearchDocumentSource, SearchDocumentSourceKind,
         SearchEntryGroup, SearchHit, SearchInclude, SearchIndex, SearchMode, SearchResults,
         SearchTarget,
     };
@@ -2392,7 +2432,8 @@ mod tests {
         PreparedSearch {
             include,
             keyword: index,
-            provider: Arc::new(FastEmbedProvider::from_model_dir(model_dir)),
+            provider: Arc::new(FastEmbedProvider::from_model_dir(model_dir))
+                as Arc<dyn EmbeddingProvider>,
             semantic: None,
             // Fixtures below use two entries, so the head's scope size is 2.
             document_count: 2,
@@ -2700,11 +2741,13 @@ pub async fn search_unified<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     request: UnifiedSearchRequest,
 ) -> Result<UnifiedSearchResponse, String> {
-    let model_dir = embedding_model_dir(&app)?;
+    let provider = text_provider_for_app(&app)?;
     let saved = crate::storage::read_settings(&app)?;
     let settings = saved.visual;
-    let visual_provider = visual::provider_for(&settings);
     let fusion = settings.fusion;
+    // Constructing the provider probes the service over blocking HTTP; it must not run on
+    // the async worker or reqwest drops its runtime inside an async context and panics.
+    let visual_settings = settings.clone();
     let rerank_settings = saved.rerank;
     // Only a cross-encoder run needs the model; the heuristic rung is model-free.
     let rerank_provider: Option<Arc<dyn neuink_search::RerankProvider>> =
@@ -2715,8 +2758,9 @@ pub async fn search_unified<R: tauri::Runtime>(
             None
         };
     tokio::task::spawn_blocking(move || {
+        let visual_provider = visual::provider_for(&visual_settings);
         unified::run_unified_search(
-            model_dir,
+            provider,
             visual_provider,
             fusion,
             rerank_settings,
@@ -2737,13 +2781,18 @@ pub async fn prepare_visual_search_index<R: tauri::Runtime>(
 ) -> Result<PrepareVisualSearchIndexResponse, String> {
     let settings = crate::storage::read_settings(&app)?.visual;
     settings.validate()?;
-    let provider = visual::provider_for(&settings);
-    // Bring the local service up if the policy allows it, then proceed regardless: a failed
-    // start degrades the channel instead of failing the command.
-    let _ = ensure_visual_service(&app);
-    tokio::task::spawn_blocking(move || visual::prepare_visual_index(provider, request))
-        .await
-        .map_err(|error| error.to_string())?
+    let background = app.clone();
+    tokio::task::spawn_blocking(move || {
+        // Bring the local service up first: a provider built before the service is listening
+        // reports "unreachable" and the preparation would fail on its first click.
+        let _ = ensure_visual_service(&background);
+        // Provider construction and the health probe both use blocking HTTP, so they belong
+        // on this worker thread: doing it on an async worker panics reqwest's runtime drop.
+        let provider = visual::provider_for(&settings);
+        visual::prepare_visual_index(provider, request)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 
@@ -2788,6 +2837,96 @@ pub fn get_rerank_settings<R: tauri::Runtime>(
     Ok(RerankSettingsState::from_settings(&settings, model_present))
 }
 
+/// One reranker directory that can be used as-is.
+#[derive(Debug, serde::Serialize)]
+pub struct InstalledRerankModel {
+    pub id: String,
+    pub path: String,
+    pub label: String,
+}
+
+/// A directory is a reranker when its ONNX file loads and it carries a tokenizer; the name
+/// and config architecture are used to keep text-embedding directories out of the list.
+fn looks_like_reranker(dir: &PathBuf, id: &str) -> bool {
+    if !rerank_stage::reranker_model_present(dir) || !dir.join("tokenizer.json").is_file() {
+        return false;
+    }
+    if id.to_ascii_lowercase().contains("rerank") {
+        return true;
+    }
+    let config = std::fs::read_to_string(dir.join("config.json")).unwrap_or_default();
+    let config = config.to_ascii_lowercase();
+    config.contains("forsequenceclassification") || config.contains("reranker")
+}
+
+/// Lists reranker directories the user can pick, so a completed download never needs a
+/// hand-typed path. Scans the same roots the model loader resolves plus the configured one.
+#[tauri::command]
+pub fn list_installed_rerank_models<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<InstalledRerankModel>, String> {
+    use std::collections::BTreeSet;
+    let mut roots: Vec<PathBuf> = Vec::new();
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        roots.push(resource_dir.join("embedding-models"));
+    }
+    if let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|parent| parent.to_path_buf()))
+    {
+        roots.push(exe_dir.join("embedding-models"));
+    }
+    roots.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../apps/desktop/src-tauri/resources/embedding-models"),
+    );
+    let settings = crate::storage::read_settings(&app)?.rerank;
+
+    let mut entries: Vec<InstalledRerankModel> = Vec::new();
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    for root in roots {
+        let Ok(dirs) = std::fs::read_dir(&root) else {
+            continue;
+        };
+        for entry in dirs.flatten() {
+            let dir = entry.path();
+            if !dir.is_dir() {
+                continue;
+            }
+            let id = dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default()
+                .to_string();
+            if !seen.insert(dir.to_string_lossy().to_string()) || !looks_like_reranker(&dir, &id) {
+                continue;
+            }
+            let label = crate::commands::search::recommended_rerank_models::RECOMMENDED_RERANK
+                .iter()
+                .find(|model| model.id == id)
+                .map(|model| model.display_name.to_string())
+                .unwrap_or_else(|| id.clone());
+            entries.push(InstalledRerankModel {
+                id,
+                path: dir.to_string_lossy().to_string(),
+                label,
+            });
+        }
+    }
+    // A configured directory outside the resource roots still belongs in the picker.
+    if let Some(dir) = settings.model_dir.as_deref().map(PathBuf::from) {
+        let path = dir.to_string_lossy().to_string();
+        if seen.insert(path.clone()) && looks_like_reranker(&dir, "custom") {
+            entries.push(InstalledRerankModel {
+                id: "custom".to_string(),
+                path,
+                label: "自定义目录".to_string(),
+            });
+        }
+    }
+    entries.sort_by(|left, right| left.label.cmp(&right.label));
+    Ok(entries)
+}
 #[tauri::command]
 pub fn save_rerank_settings<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -2841,17 +2980,89 @@ pub fn save_retrieval_settings<R: tauri::Runtime>(
 
 
 
-/// What the text model settings screen shows: the configured choice, the directory that
-/// would actually be loaded, and the manifest facts of that directory.
+/// What the text model settings screen shows: the configured transport, the resolved model
+/// facts, and (for the local transport) the directory that would actually be loaded.
 #[derive(Debug, serde::Serialize)]
 pub struct TextModelSettingsState {
+    pub provider: String,
     pub model_dir: Option<String>,
-    pub resolved_dir: String,
-    pub model_name: Option<String>,
+    pub endpoint: Option<String>,
+    pub has_api_key: bool,
+    pub model: Option<String>,
     pub dimensions: Option<usize>,
-    pub pooling: Option<String>,
+    pub timeout_ms: u64,
+    pub resolved_dir: String,
+    pub loaded_model_name: Option<String>,
+    pub loaded_dimensions: Option<usize>,
     pub available: bool,
     pub message: Option<String>,
+}
+
+/// Result of a live probe, used by the settings screen's "测试连接" button.
+#[derive(Debug, serde::Serialize)]
+pub struct TextEmbeddingProbeState {
+    pub provider: String,
+    pub model_name: Option<String>,
+    pub dimensions: usize,
+    pub latency_ms: u64,
+}
+
+impl TextModelSettingsState {
+    fn from_settings<R: tauri::Runtime>(
+        app: &tauri::AppHandle<R>,
+        settings: &neuink_config::TextModelSettings,
+    ) -> Result<Self, String> {
+        let local_dir = if settings.provider == neuink_config::TextEmbeddingProviderKind::LocalOnnx {
+            embedding_model_dir(app)?
+        } else {
+            PathBuf::new()
+        };
+        let provider =
+            cached_text_provider(settings, local_dir).map_err(|error| error.to_string())?;
+        let status = provider.status();
+        let resolved_dir = status
+            .model_path
+            .clone()
+            .or_else(|| settings.endpoint.clone())
+            .unwrap_or_default();
+        Ok(Self {
+            provider: settings.provider.as_str().to_string(),
+            model_dir: settings.model_dir.clone(),
+            endpoint: settings.endpoint.clone(),
+            has_api_key: settings
+                .api_key
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|key| !key.is_empty()),
+            model: settings.model.clone(),
+            dimensions: settings.dimensions,
+            timeout_ms: settings.timeout_ms,
+            resolved_dir,
+            loaded_model_name: status.model_name,
+            loaded_dimensions: status.dimensions,
+            available: status.available,
+            message: status.message,
+        })
+    }
+}
+
+/// The settings screen writes the API key only when the user types one. Keeping the stored
+/// value here means saving unrelated fields never clears the credential.
+fn merge_stored_api_key<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    settings: &mut neuink_config::TextModelSettings,
+) {
+    if settings
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default()
+        .is_empty()
+    {
+        if let Ok(saved) = crate::storage::read_settings(app) {
+            settings.api_key = saved.text_model.api_key;
+        }
+    }
 }
 
 #[tauri::command]
@@ -2866,18 +3077,7 @@ pub fn get_text_model_settings<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
 ) -> Result<TextModelSettingsState, String> {
     let settings = crate::storage::read_settings(&app)?.text_model;
-    let resolved = crate::commands::embedding_resources::embedding_model_dir(&app)?;
-    let provider = neuink_search::FastEmbedProvider::from_model_dir(resolved.clone());
-    let status = neuink_search::EmbeddingProvider::status(&provider);
-    Ok(TextModelSettingsState {
-        model_dir: settings.model_dir,
-        resolved_dir: resolved.to_string_lossy().to_string(),
-        model_name: status.model_name,
-        dimensions: status.dimensions,
-        pooling: status.message,
-        available: status.available,
-        message: None,
-    })
+    TextModelSettingsState::from_settings(&app, &settings)
 }
 
 #[tauri::command]
@@ -2885,30 +3085,84 @@ pub fn save_text_model_settings<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     settings: neuink_config::TextModelSettings,
 ) -> Result<TextModelSettingsState, String> {
+    let mut settings = settings;
+    merge_stored_api_key(&app, &mut settings);
     settings.validate()?;
-    // Refuse a directory that cannot serve the search path: shipping a setting that silently
-    // disables semantic retrieval would look like a search regression later.
-    if let Some(dir) = settings.model_dir.as_deref() {
-        let path = std::path::PathBuf::from(dir);
-        let provider = neuink_search::FastEmbedProvider::from_model_dir(path);
-        if !neuink_search::EmbeddingProvider::status(&provider).available {
-            return Err("该目录不是可用的文本嵌入模型（需 neuink-embedding.json 与 ONNX 权重）".to_string());
+    // Local mode: refuse a directory that cannot serve the search path. Shipping a setting
+    // that silently disables semantic retrieval would look like a search regression later.
+    if settings.provider == neuink_config::TextEmbeddingProviderKind::LocalOnnx {
+        if let Some(dir) = settings.model_dir.as_deref() {
+            let path = std::path::PathBuf::from(dir);
+            let provider = neuink_search::FastEmbedProvider::from_model_dir(path);
+            if !neuink_search::EmbeddingProvider::status(&provider).available {
+                return Err(
+                    "该目录不是可用的文本嵌入模型（需 neuink-embedding.json 与 ONNX 权重）".to_string(),
+                );
+            }
         }
     }
     let mut saved = crate::storage::read_settings(&app)?;
     saved.text_model = settings;
     crate::storage::write_settings(&app, &saved)?;
-    let resolved = crate::commands::embedding_resources::embedding_model_dir(&app)?;
-    let provider = neuink_search::FastEmbedProvider::from_model_dir(resolved.clone());
-    let status = neuink_search::EmbeddingProvider::status(&provider);
-    Ok(TextModelSettingsState {
-        model_dir: saved.text_model.model_dir,
-        resolved_dir: resolved.to_string_lossy().to_string(),
+    TextModelSettingsState::from_settings(&app, &saved.text_model)
+}
+
+/// Live probe for the settings screen: embeds two strings through the configured transport
+/// and reports the vector width, so "configured" and "actually works" stay distinguishable.
+#[tauri::command]
+pub async fn test_text_embedding_connection<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    settings: neuink_config::TextModelSettings,
+) -> Result<TextEmbeddingProbeState, String> {
+    tokio::task::spawn_blocking(move || test_text_embedding_connection_impl(&app, settings))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn test_text_embedding_connection_impl<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    settings: neuink_config::TextModelSettings,
+) -> Result<TextEmbeddingProbeState, String> {
+    let mut settings = settings;
+    merge_stored_api_key(&app, &mut settings);
+    settings.validate()?;
+    let local_dir = if settings.provider == neuink_config::TextEmbeddingProviderKind::LocalOnnx {
+        embedding_model_dir(&app)?
+    } else {
+        PathBuf::new()
+    };
+    let provider = cached_text_provider(&settings, local_dir).map_err(|error| error.to_string())?;
+    let status = provider.status();
+    if !status.available {
+        return Err(status
+            .message
+            .unwrap_or_else(|| "文本嵌入模型不可用".to_string()));
+    }
+    let started = Instant::now();
+    let vectors = provider
+        .embed(&[
+            neuink_search::EmbeddingInput {
+                id: "probe".to_string(),
+                text: "probe".to_string(),
+            },
+            neuink_search::EmbeddingInput {
+                id: "probe-2".to_string(),
+                text: "检索探针".to_string(),
+            },
+        ])
+        .map_err(|error| error.to_string())?;
+    let dimensions = vectors
+        .first()
+        .map(|vector| vector.dimensions())
+        .unwrap_or(0);
+    if vectors.len() != 2 || dimensions == 0 {
+        return Err("嵌入模型返回的向量数量或维度不正确".to_string());
+    }
+    Ok(TextEmbeddingProbeState {
+        provider: status.provider,
         model_name: status.model_name,
-        dimensions: status.dimensions,
-        pooling: None,
-        available: status.available,
-        message: status.message,
+        dimensions,
+        latency_ms: started.elapsed().as_millis() as u64,
     })
 }
 
@@ -2927,8 +3181,17 @@ pub fn list_recommended_text_models<R: tauri::Runtime>(
 /// Only entries flagged `directly_installable` are accepted: everything else would need an
 /// export or an external-data merge, which this command must not pretend to do.
 #[tauri::command]
-pub fn install_recommended_text_model<R: tauri::Runtime>(
+pub async fn install_recommended_text_model<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
+    id: String,
+) -> Result<crate::commands::search::recommended_text_models::RecommendedState, String> {
+    tokio::task::spawn_blocking(move || install_recommended_text_model_impl(&app, id))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn install_recommended_text_model_impl<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     id: String,
 ) -> Result<crate::commands::search::recommended_text_models::RecommendedState, String> {
     use crate::commands::search::recommended_text_models as recommended;
@@ -3020,8 +3283,17 @@ pub fn list_recommended_rerank_models<R: tauri::Runtime>(
 
 /// Downloads one reranker and proves it scores before reporting success.
 #[tauri::command]
-pub fn install_recommended_rerank_model<R: tauri::Runtime>(
+pub async fn install_recommended_rerank_model<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
+    id: String,
+) -> Result<crate::commands::search::recommended_rerank_models::RecommendedRerankState, String> {
+    tokio::task::spawn_blocking(move || install_recommended_rerank_model_impl(&app, id))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn install_recommended_rerank_model_impl<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     id: String,
 ) -> Result<crate::commands::search::recommended_rerank_models::RecommendedRerankState, String> {
     use crate::commands::search::recommended_rerank_models as recommended;
@@ -3088,8 +3360,17 @@ pub struct RetrievalCheck {
 /// Verifies the three channels plus the library, so "does retrieval work here" is a single
 /// button instead of four separate guesses.
 #[tauri::command]
-pub fn run_retrieval_self_check<R: tauri::Runtime>(
+pub async fn run_retrieval_self_check<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
+    root: std::path::PathBuf,
+) -> Result<Vec<RetrievalCheck>, String> {
+    tokio::task::spawn_blocking(move || run_retrieval_self_check_impl(&app, root))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn run_retrieval_self_check_impl<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     root: std::path::PathBuf,
 ) -> Result<Vec<RetrievalCheck>, String> {
     let mut checks = Vec::new();
@@ -3097,25 +3378,25 @@ pub fn run_retrieval_self_check<R: tauri::Runtime>(
     // Text encoder: load and embed one probe string.
     let started = std::time::Instant::now();
     let text = (|| -> Result<String, String> {
-        let dir = embedding_model_dir(&app)?;
-        let provider = neuink_search::FastEmbedProvider::from_model_dir(dir.clone());
-        let status = neuink_search::EmbeddingProvider::status(&provider);
+        let provider = text_provider_for_app(&app)?;
+        let status = provider.status();
         if !status.available {
             return Err(status.message.unwrap_or_else(|| "模型不可用".to_string()));
         }
-        let vectors = neuink_search::EmbeddingProvider::embed(
-            &provider,
-            &[neuink_search::EmbeddingInput {
+        let vectors = provider
+            .embed(&[neuink_search::EmbeddingInput {
                 id: "probe".to_string(),
                 text: "probe".to_string(),
-            }],
-        )
-        .map_err(|error| error.to_string())?;
+            }])
+            .map_err(|error| error.to_string())?;
         Ok(format!(
             "{} · {} 维 · {}",
             status.model_name.unwrap_or_else(|| "未知模型".to_string()),
             vectors.first().map(|vector| vector.dimensions()).unwrap_or(0),
-            dir.display()
+            status
+                .model_path
+                .or_else(|| status.message.clone())
+                .unwrap_or_default()
         ))
     })();
     checks.push(RetrievalCheck {
@@ -3244,27 +3525,110 @@ pub fn get_visual_runtime_state<R: tauri::Runtime>(
 /// One action: isolated Python environment, CPU inference dependencies and model weights.
 /// A supplied `reuse_model_dir` skips the multi-gigabyte download.
 #[tauri::command]
-pub fn install_visual_runtime<R: tauri::Runtime>(
+pub async fn install_visual_runtime<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     id: String,
     reuse_model_dir: Option<String>,
 ) -> Result<crate::commands::search::visual_runtime::VisualRuntimeState, String> {
-    let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
-    let reuse = reuse_model_dir.map(std::path::PathBuf::from);
-    crate::commands::search::visual_runtime::install(&resource_dir, &id, reuse.as_deref())
+    tokio::task::spawn_blocking(move || {
+        let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
+        let reuse = reuse_model_dir.map(std::path::PathBuf::from);
+        crate::commands::search::visual_runtime::install(&resource_dir, &id, reuse.as_deref())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// Downloads only the weights for an environment that is already prepared, so a failed
+/// multi-gigabyte download can be retried without reinstalling torch.
+#[tauri::command]
+pub async fn download_visual_weights<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    id: String,
+    reuse_model_dir: Option<String>,
+) -> Result<crate::commands::search::visual_runtime::VisualRuntimeState, String> {
+    tokio::task::spawn_blocking(move || {
+        let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
+        let reuse = reuse_model_dir.map(std::path::PathBuf::from);
+        crate::commands::search::visual_runtime::download_missing_weights(
+            &resource_dir,
+            &id,
+            reuse.as_deref(),
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// Starts the prepared service and returns its process id.
+/// Whether the local visual service is actually answering, for the settings screen.
+///
+/// `get_visual_runtime_state` only knows what is installed on disk; this probe asks the
+/// configured transport, so "downloaded" and "running" are distinguishable at a glance.
+#[derive(Debug, serde::Serialize)]
+pub struct VisualServiceStatus {
+    pub running: bool,
+    pub model: Option<String>,
+    pub dimensions: Option<usize>,
+    pub endpoint: Option<String>,
+    pub message: Option<String>,
+}
+
 #[tauri::command]
-pub fn start_visual_service<R: tauri::Runtime>(
+pub async fn get_visual_service_status<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<VisualServiceStatus, String> {
+    let settings = crate::storage::read_settings(&app)?.visual;
+    tokio::task::spawn_blocking(move || {
+        // Provider construction probes the service over blocking HTTP; keep it off the
+        // async worker for the same runtime-drop reason as the other visual commands.
+        let provider = visual::provider_for(&settings);
+        let status = provider.status();
+        VisualServiceStatus {
+            running: status.available,
+            model: status.model_name,
+            dimensions: status.dimensions,
+            endpoint: settings.endpoint.clone(),
+            message: status.message,
+        }
+    })
+    .await
+    .map_err(|error| error.to_string())
+}
+/// The port the local visual service binds. Checked before spawning so a second click
+/// cannot load another 4 GB checkpoint and fail to bind.
+fn visual_service_listening() -> bool {
+    use std::net::{SocketAddr, TcpStream};
+    let addr = SocketAddr::from(([127, 0, 0, 1], 8765));
+    TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(300)).is_ok()
+}
+
+#[tauri::command]
+pub async fn start_visual_service<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     id: String,
 ) -> Result<u32, String> {
-    let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
-    let script = visual_service_script(&app)?;
-    let state = visual_runtime::load_state(&resource_dir, &id)
-        .ok_or_else(|| "视觉服务尚未安装".to_string())?;
-    visual_runtime::start_with_state(&state, &script)
+    tokio::task::spawn_blocking(move || {
+        if visual_service_listening() {
+            return Ok(0);
+        }
+        let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
+        let script = visual_service_script(&app)?;
+        let state = visual_runtime::load_state(&resource_dir, &id)
+            .ok_or_else(|| "视觉服务尚未安装".to_string())?;
+        let pid = visual_runtime::start_with_state(&state, &script)?;
+        // Loading the 4 GB checkpoint takes tens of seconds; only report success once the
+        // port answers, so the settings screen can show "running" instead of guessing.
+        for _ in 0..180 {
+            if visual_service_listening() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+        Ok(pid)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// Locates the service script in the packaged resources, then in the checkout layout.

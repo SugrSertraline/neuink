@@ -8,6 +8,7 @@ mod error;
 mod fastembed_provider;
 mod memory_index;
 mod persistent_semantic_index;
+mod remote_embedding_provider;
 mod query;
 #[cfg(feature = "local-embedding")]
 mod path_embedding;
@@ -43,8 +44,10 @@ pub use embedding_representation::{
 };
 pub use error::{SearchError, SearchResult};
 pub use fastembed_provider::{
-    FastEmbedProvider, DEFAULT_EMBEDDING_MODEL_RESOURCE_DIR, LOCAL_EMBEDDING_BATCH_SIZE,
+    FastEmbedProvider, DEFAULT_EMBEDDING_MODEL_RESOURCE_DIR, EMBEDDING_MODEL_FILE_NAMES,
+    LOCAL_EMBEDDING_BATCH_SIZE,
 };
+pub use remote_embedding_provider::RemoteEmbeddingProvider;
 pub use memory_index::MemorySearchIndex;
 pub use persistent_semantic_index::{
     merge_hybrid_results, semantic_index_path, semantic_result_mode, PersistentSemanticSearchIndex,

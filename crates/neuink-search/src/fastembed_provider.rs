@@ -16,7 +16,14 @@ use crate::{
 
 pub const DEFAULT_EMBEDDING_MODEL_RESOURCE_DIR: &str = "embedding-models/default";
 const DEFAULT_PROVIDER_NAME: &str = "fastembed-local";
-const MODEL_FILE_NAMES: &[&str] = &["onnx/model.onnx", "onnx/model_int8.onnx", "model.onnx"];
+pub const EMBEDDING_MODEL_FILE_NAMES: &[&str] = &[
+    "onnx/model.onnx",
+    "onnx/model_int8.onnx",
+    // Xenova exports name their int8 file `model_quantized.onnx`; the recommended
+    // multilingual-e5-small entry is one of them. Same lesson as the reranker.
+    "onnx/model_quantized.onnx",
+    "model.onnx",
+];
 const TOKENIZER_FILE_NAME: &str = "tokenizer.json";
 const MANIFEST_FILE_NAME: &str = "neuink-embedding.json";
 pub const LOCAL_EMBEDDING_BATCH_SIZE: usize = 8;
@@ -158,7 +165,7 @@ impl EmbeddingProvider for FastEmbedProvider {
 // harmless; only inference inputs are hashed, so documentation changes do not
 // force an unnecessary vector rebuild.
 fn model_content_identity(model_dir: &Path) -> std::io::Result<String> {
-    let mut files = MODEL_FILE_NAMES
+    let mut files = EMBEDDING_MODEL_FILE_NAMES
         .iter()
         .map(|relative| model_dir.join(relative))
         .chain([
@@ -172,7 +179,7 @@ fn model_content_identity(model_dir: &Path) -> std::io::Result<String> {
         .filter(|path| path.is_file())
         .collect::<Vec<_>>();
     files.sort();
-    if first_existing_file(model_dir, MODEL_FILE_NAMES).is_none()
+    if first_existing_file(model_dir, EMBEDDING_MODEL_FILE_NAMES).is_none()
         || !model_dir.join(TOKENIZER_FILE_NAME).is_file()
     {
         return Err(std::io::Error::new(
@@ -232,9 +239,9 @@ fn has_external_data(model_file: &Path) -> bool {
 
 #[cfg(feature = "local-embedding")]
 fn load_backend(model_dir: &Path, intra_threads: Option<usize>) -> SearchResult<Backend> {
-    let model_file = first_existing_file(model_dir, MODEL_FILE_NAMES).ok_or_else(|| {
+    let model_file = first_existing_file(model_dir, EMBEDDING_MODEL_FILE_NAMES).ok_or_else(|| {
         SearchError::EmbeddingUnavailable(
-            "Embedding ONNX model is missing; expected onnx/model.onnx, onnx/model_int8.onnx or model.onnx.".to_string(),
+            "Embedding ONNX model is missing; expected onnx/model.onnx, onnx/model_int8.onnx, onnx/model_quantized.onnx or model.onnx.".to_string(),
         )
     })?;
     if has_external_data(&model_file) {
@@ -269,9 +276,9 @@ fn load_text_embedding(
     model_dir: &Path,
     intra_threads: Option<usize>,
 ) -> SearchResult<Mutex<TextEmbedding>> {
-    let model_file = first_existing_file(model_dir, MODEL_FILE_NAMES).ok_or_else(|| {
+    let model_file = first_existing_file(model_dir, EMBEDDING_MODEL_FILE_NAMES).ok_or_else(|| {
         SearchError::EmbeddingUnavailable(
-            "Embedding ONNX model is missing; expected onnx/model.onnx, onnx/model_int8.onnx or model.onnx.".to_string(),
+            "Embedding ONNX model is missing; expected onnx/model.onnx, onnx/model_int8.onnx, onnx/model_quantized.onnx or model.onnx.".to_string(),
         )
     })?;
     let pooling = match read_manifest(&model_dir.join(MANIFEST_FILE_NAME))
@@ -342,7 +349,7 @@ fn inspect_model_dir(model_dir: &Path) -> EmbeddingProviderStatus {
         .and_then(|manifest| manifest.model_name.clone())
         .or_else(|| Some("bundled-default".to_string()));
     let dimensions = manifest.as_ref().and_then(|manifest| manifest.dimensions);
-    let model_path = first_existing_file(model_dir, MODEL_FILE_NAMES);
+    let model_path = first_existing_file(model_dir, EMBEDDING_MODEL_FILE_NAMES);
     let tokenizer_path = model_dir.join(TOKENIZER_FILE_NAME);
     let provider = manifest
         .as_ref()
@@ -375,7 +382,7 @@ fn inspect_model_dir(model_dir: &Path) -> EmbeddingProviderStatus {
             model_name,
             Some(model_dir.display().to_string()),
             dimensions,
-            "Embedding ONNX model is missing; expected onnx/model.onnx, onnx/model_int8.onnx or model.onnx.",
+            "Embedding ONNX model is missing; expected onnx/model.onnx, onnx/model_int8.onnx, onnx/model_quantized.onnx or model.onnx.",
         );
     };
 
@@ -460,6 +467,38 @@ impl EmbeddingManifest {
 }
 
 #[cfg(test)]
+mod quantized_model_file_tests {
+    use super::*;
+
+    /// Xenova's int8 export is named `onnx/model_quantized.onnx`; a loader whitelist that
+    /// misses it rejects a fully downloaded recommended model, so this pins the name.
+    #[test]
+    fn accepts_a_quantized_onnx_export_name() {
+        let dir = std::env::temp_dir().join(format!(
+            "neuink-quantized-model-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("onnx")).unwrap();
+        std::fs::write(dir.join("onnx/model_quantized.onnx"), b"placeholder").unwrap();
+        std::fs::write(dir.join(TOKENIZER_FILE_NAME), b"placeholder").unwrap();
+
+        let status = inspect_model_dir(&dir);
+        assert!(
+            status.model_path.is_some(),
+            "onnx/model_quantized.onnx must be accepted as the model file"
+        );
+        assert!(!status
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("ONNX model is missing"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::{fs, time::SystemTime};
 
@@ -514,7 +553,7 @@ mod tests {
             .join("../../apps/desktop/src-tauri/resources/embedding-models/default");
         // The bundled model is replaceable (e5-small 384, bge-m3 1024), so this test looks
         // for any accepted file name and follows the manifest instead of pinning one model.
-        if first_existing_file(&model_dir, MODEL_FILE_NAMES).is_none() {
+        if first_existing_file(&model_dir, EMBEDDING_MODEL_FILE_NAMES).is_none() {
             return;
         }
         let declared = read_manifest(&model_dir.join(MANIFEST_FILE_NAME))

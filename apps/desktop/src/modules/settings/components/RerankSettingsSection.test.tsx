@@ -4,13 +4,13 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { RerankSettingsSection } from './RerankSettingsSection';
 import {
   getRerankSettings,
-  listRecommendedRerankModels,
+  listInstalledRerankModels,
   saveRerankSettings
 } from '@/shared/ipc/workspaceApi';
 
 vi.mock('@/shared/ipc/workspaceApi', () => ({
   getRerankSettings: vi.fn(),
-  listRecommendedRerankModels: vi.fn(),
+  listInstalledRerankModels: vi.fn(),
   saveRerankSettings: vi.fn()
 }));
 
@@ -26,8 +26,8 @@ afterEach(cleanup);
 
 beforeEach(() => {
   vi.mocked(getRerankSettings).mockReset();
-  vi.mocked(listRecommendedRerankModels).mockReset();
-  vi.mocked(listRecommendedRerankModels).mockResolvedValue([]);
+  vi.mocked(listInstalledRerankModels).mockReset();
+  vi.mocked(listInstalledRerankModels).mockResolvedValue([]);
   vi.mocked(saveRerankSettings).mockReset();
 });
 
@@ -92,7 +92,25 @@ describe('RerankSettingsSection', () => {
       expect(screen.getByRole('alert').textContent).toContain('重排候选上限必须在 1 到 200 之间')
     );
   });
+
+  it('auto-selects an installed reranker when no directory is configured', async () => {
+    vi.mocked(getRerankSettings).mockResolvedValue({ ...base, mode: 'cross_encoder' });
+    vi.mocked(listInstalledRerankModels).mockResolvedValue([
+      {
+        id: 'rerank-base-int8-xenova',
+        path: 'D:/models/rerank',
+        label: 'bge-reranker-base int8（Xenova）'
+      }
+    ]);
+    vi.mocked(saveRerankSettings).mockImplementation(async (settings) => ({
+      ...settings,
+      model_present: true
+    }));
+    render(<RerankSettingsSection active />);
+    await waitFor(() =>
+      expect(saveRerankSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ model_dir: 'D:/models/rerank' })
+      )
+    );
+  });
 });
-
-
-

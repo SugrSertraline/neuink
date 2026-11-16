@@ -312,6 +312,9 @@ export function App() {
   const [pendingMarkdownNoteDelete, setPendingMarkdownNoteDelete] =
     useState<PendingMarkdownNoteDelete | null>(null);
   const parseRefreshDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Set when a newly created entry opens the parsing view, so the view can leave that
+  // quiet state once the job finishes instead of showing an empty list.
+  const autoSwitchParsingView = useRef(false);
   const parserErrorToastRef = useRef<{ message: string; id: string } | null>(null);
   const pendingMarkdownDeleteRef = useRef(new Set<string>());
   const pdfJumpCounter = useRef(0);
@@ -1689,6 +1692,13 @@ export function App() {
     return () => window.clearInterval(interval);
   }, [hasActiveParseTasks, refreshParseStatus]);
 
+  // Creation opens the parsing view to watch the job; when no parse task is active the
+  // entry has moved to the parsed list, so switch away from the now-empty view.
+  useEffect(() => {
+    if (hasActiveParseTasks || libraryView !== 'parsing') return;
+    autoSwitchParsingView.current = false;
+    setLibraryView('parsed');
+  }, [hasActiveParseTasks, libraryView]);
   useUnsavedWindowCloseGuard();
   const closeGuard = useSurfaceCloseGuard({
     root: workspace.root,
@@ -2133,6 +2143,7 @@ export function App() {
             dispatchSurface({ type: 'close', pane: 'left', key: 'create-entry' });
             dispatchSurface({ type: 'close', pane: 'right', key: 'create-entry' });
             dispatchSurface({ type: 'open', pane: 'left', surface: { kind: 'library' } });
+            autoSwitchParsingView.current = Boolean(result.createdWithPdf) && !result.importedMineruClientResult;
             setLibraryView(result.importedMineruClientResult ? 'parsed' : result.createdWithPdf ? 'parsing' : 'all');
             setActiveTag(null);
               setLibrarySection('papers');

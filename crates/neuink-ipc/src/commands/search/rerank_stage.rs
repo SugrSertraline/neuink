@@ -102,7 +102,13 @@ fn fall_back(
 /// 279 MB ONNX graph takes seconds and is a live read that changes nothing about the
 /// answer, so presence is answered by the file layout that `LocalReranker` looks for.
 pub fn reranker_model_present(model_dir: &Path) -> bool {
-    const CANDIDATES: [&str; 3] = ["onnx/model_int8.onnx", "onnx/model.onnx", "model.onnx"];
+    const CANDIDATES: [&str; 4] = [
+        "onnx/model_int8.onnx",
+        "onnx/model.onnx",
+        // Xenova exports name their int8 file this way; the loader accepts it.
+        "onnx/model_quantized.onnx",
+        "model.onnx",
+    ];
     CANDIDATES
         .iter()
         .any(|relative| model_dir.join(relative).is_file())

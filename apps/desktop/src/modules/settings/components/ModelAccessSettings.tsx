@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import {
   getTextModelSettings,
   getVisualRuntimeState,
+  getVisualServiceStatus,
   installRecommendedRerankModel,
   installRecommendedTextModel,
+  downloadVisualWeights,
   installVisualRuntime,
   listRecommendedRerankModels,
   listRecommendedTextModels,
@@ -13,12 +15,17 @@ import {
   runRetrievalSelfCheck,
   saveTextModelSettings,
   startVisualService,
+  testTextEmbeddingConnection,
   type RecommendedRerankModelState,
   type RecommendedTextModelState,
   type RecommendedVisualModel,
   type VisualRuntimeState,
+  type VisualServiceStatus,
   type RetrievalCheck,
+  type TextEmbeddingProbeState,
+  type TextEmbeddingProviderKind,
   type TextModelChoice,
+  type TextModelSettingsInput,
   type TextModelSettingsState
 } from '@/shared/ipc/workspaceApi';
 import { Button } from '@/components/ui/button';
@@ -48,9 +55,19 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
   const [rerankModels, setRerankModels] = useState<RecommendedRerankModelState[]>([]);
   const [visualModels, setVisualModels] = useState<RecommendedVisualModel[]>([]);
   const [runtimes, setRuntimes] = useState<Record<string, VisualRuntimeState | null>>({});
+  const [serviceStatus, setServiceStatus] = useState<VisualServiceStatus | null>(null);
+  const [startingService, setStartingService] = useState(false);
   const [reuseDirs, setReuseDirs] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<string>('');
   const [custom, setCustom] = useState('');
+  const [provider, setProvider] = useState<TextEmbeddingProviderKind>('local_onnx');
+  const [endpoint, setEndpoint] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [apiModel, setApiModel] = useState('');
+  const [apiDimensions, setApiDimensions] = useState('');
+  const [timeoutMs, setTimeoutMs] = useState('60000');
+  const [probe, setProbe] = useState<TextEmbeddingProbeState | null>(null);
+  const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [installing, setInstalling] = useState<string | null>(null);
@@ -59,12 +76,13 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
   const [checking, setChecking] = useState(false);
 
   const reload = async () => {
-    const [models, current, textRecommended, rerankRecommended, visualRecommended] = await Promise.all([
+    const [models, current, textRecommended, rerankRecommended, visualRecommended, service] = await Promise.all([
       listTextModels(),
       getTextModelSettings(),
       listRecommendedTextModels(),
       listRecommendedRerankModels(),
-      listRecommendedVisualModels()
+      listRecommendedVisualModels(),
+      getVisualServiceStatus().catch(() => null)
     ]);
     const runtimeStates = await Promise.all(
       visualRecommended.map(async (model) => [model.id, await getVisualRuntimeState(model.id)] as const)
@@ -75,8 +93,15 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
     setRerankModels(rerankRecommended);
     setVisualModels(visualRecommended);
     setRuntimes(Object.fromEntries(runtimeStates));
+    setServiceStatus(service);
     setSelected(current.model_dir ?? models.find((model) => model.bundled)?.path ?? '');
     setCustom(current.model_dir ?? '');
+    setProvider(current.provider);
+    setEndpoint(current.endpoint ?? '');
+    setApiModel(current.model ?? '');
+    setApiDimensions(current.dimensions ? String(current.dimensions) : '');
+    setTimeoutMs(String(current.timeout_ms));
+    setApiKey('');
   };
 
   useEffect(() => {
@@ -103,7 +128,9 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
         setRebuildNote('模型已下载并验证；点“应用模型”后重建索引即可使用。');
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '未能安装推荐模型。');
+      // Tauri rejects command errors with the backend string, not an Error instance;
+      // showing the generic copy would hide why the install stopped.
+      setError(cause instanceof Error ? cause.message : String(cause) || '未能安装推荐模型。');
     } finally {
       setInstalling(null);
     }
@@ -117,24 +144,55 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
       await reload();
       setRebuildNote('重排模型已下载并验证打分；在“重排”设置里选择它即可。');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '未能安装重排模型。');
+      setError(cause instanceof Error ? cause.message : String(cause) || '未能安装重排模型。');
     } finally {
       setInstalling(null);
     }
   };
 
+  /** One payload shape for both saving and the live probe. */
+  const textModelPayload = (): TextModelSettingsInput => ({
+    provider,
+    model_dir: provider === 'local_onnx' ? selected || null : state?.model_dir ?? null,
+    endpoint: provider === 'api' ? endpoint.trim() || null : state?.endpoint ?? null,
+    // Write-only: omit the key to keep the stored one; the backend merges it back in.
+    ...(provider === 'api' && apiKey ? { api_key: apiKey } : {}),
+    model: provider === 'api' ? apiModel.trim() || null : state?.model ?? null,
+    dimensions: provider === 'api' ? Number(apiDimensions) || null : state?.dimensions ?? null,
+    timeout_ms: Math.min(600000, Math.max(1, Math.round(Number(timeoutMs) || 60000)))
+  });
+
   const apply = async () => {
     setBusy(true);
     setError(null);
     setRebuildNote(null);
+    setProbe(null);
     try {
-      const saved = await saveTextModelSettings({ model_dir: selected || null });
+      const saved = await saveTextModelSettings(textModelPayload());
       setState(saved);
-      setRebuildNote('模型已切换：现有文本索引属于上一个模型，请重建后再检索。');
+      setApiKey('');
+      setRebuildNote(
+        saved.provider === 'api'
+          ? '已切换到远程嵌入 API。现有索引属于上一种编码，请重建后再检索。'
+          : '模型已切换：现有文本索引属于上一个模型，请重建后再检索。'
+      );
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '未能保存文本嵌入模型设置。');
+      setError(cause instanceof Error ? cause.message : String(cause) || '未能保存文本嵌入模型设置。');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const testConnection = async () => {
+    setTesting(true);
+    setError(null);
+    setProbe(null);
+    try {
+      setProbe(await testTextEmbeddingConnection(textModelPayload()));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause) || '连接测试失败。');
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -161,8 +219,8 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
       setRuntimes({ ...runtimes, [id]: state });
       setRebuildNote(
         state.dependencies_installed && state.model_present
-          ? `视觉服务已就绪：${state.model_dir}。点“启动服务”即可。`
-          : `依赖已安装，但权重缺失（${state.model_dir}）。`
+          ? '视觉服务已就绪：' + state.model_dir + '。点“启动服务”即可。'
+          : '依赖已安装，但权重缺失' + (state.model_error ? '：' + state.model_error : '') + '。'
       );
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
@@ -176,13 +234,42 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
     }
   };
 
+  const downloadWeights = async (id: string) => {
+    setInstalling(id);
+    setError(null);
+    setRebuildNote(null);
+    try {
+      const reuse = reuseDirs[id]?.trim();
+      const state = await downloadVisualWeights(id, reuse ? reuse : null);
+      setRuntimes({ ...runtimes, [id]: state });
+      setRebuildNote('权重已下载：' + state.model_dir + '。点“启动服务”即可。');
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setError('权重下载失败：' + message);
+      const fresh = await getVisualRuntimeState(id).catch(() => null);
+      if (fresh) setRuntimes({ ...runtimes, [id]: fresh });
+    } finally {
+      setInstalling(null);
+    }
+  };
   const startService = async (id: string) => {
     setError(null);
+    setStartingService(true);
     try {
       const pid = await startVisualService(id);
-      setRebuildNote(`视觉服务已启动（进程 ${pid}），地址 http://127.0.0.1:8765。`);
+      const status = await getVisualServiceStatus().catch(() => null);
+      if (status) setServiceStatus(status);
+      setRebuildNote(
+        status?.running
+          ? '视觉服务运行中' + (status.dimensions ? '（' + status.dimensions + ' 维）' : '') + '，地址 http://127.0.0.1:8765。'
+          : pid === 0
+            ? '视觉服务已在运行（http://127.0.0.1:8765）。'
+            : '视觉服务已启动（进程 ' + pid + '），地址 http://127.0.0.1:8765。'
+      );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "未能启动视觉服务。");
+    } finally {
+      setStartingService(false);
     }
   };
 
@@ -215,50 +302,152 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
 
       <p className="mt-1 text-xs font-medium text-muted-foreground">文本嵌入模型</p>
       <SettingSelect
-        id="tools-text-model"
-        label="当前模型"
-        description="切换后需重建索引；维度与池化由模型目录内的 neuink-embedding.json 声明。"
-        disabled={!state || busy || options.length === 0}
-        value={selected}
-        options={options}
-        placeholder="选择模型目录"
-        onValueChange={(value) => {
-          setSelected(value);
-          setCustom(value);
-        }}
+        id="tools-text-provider"
+        label="编码方式"
+        description="本地 ONNX 权重，或 OpenAI 兼容的 /embeddings 接口；两种方式共用同一套向量索引与检索管线。"
+        disabled={!state || busy}
+        value={provider}
+        options={[
+          { value: 'local_onnx', label: '本地 ONNX 模型' },
+          { value: 'api', label: '远程 API（OpenAI 兼容）' }
+        ]}
+        onValueChange={(value) => setProvider(value as TextEmbeddingProviderKind)}
       />
-      <SettingRow
-        id="tools-text-model-custom"
-        label="自定义模型目录"
-        description="目录内需有 neuink-embedding.json 与 onnx/model.onnx 或 onnx/model_int8.onnx。"
-      >
-        <Input
-          aria-label="文本嵌入模型目录"
-          className="w-full min-w-0"
-          disabled={busy}
-          value={custom}
-          onChange={(event) => {
-            setCustom(event.target.value);
-            setSelected(event.target.value);
-          }}
-        />
-      </SettingRow>
+      {provider === 'local_onnx' ? (
+        <>
+          <SettingSelect
+            id="tools-text-model"
+            label="当前模型"
+            description="切换后需重建索引；维度与池化由模型目录内的 neuink-embedding.json 声明。"
+            disabled={!state || busy || options.length === 0}
+            value={selected}
+            options={options}
+            placeholder="选择模型目录"
+            onValueChange={(value) => {
+              setSelected(value);
+              setCustom(value);
+            }}
+          />
+          <SettingRow
+            id="tools-text-model-custom"
+            label="自定义模型目录"
+            description="目录内需有 neuink-embedding.json 与任一 ONNX 权重文件（model.onnx / model_int8.onnx / model_quantized.onnx）。"
+          >
+            <Input
+              aria-label="文本嵌入模型目录"
+              className="w-full min-w-0"
+              disabled={busy}
+              value={custom}
+              onChange={(event) => {
+                setCustom(event.target.value);
+                setSelected(event.target.value);
+              }}
+            />
+          </SettingRow>
+        </>
+      ) : (
+        <>
+          <SettingRow
+            id="tools-text-api-endpoint"
+            label="服务地址"
+            description="OpenAI 兼容基址，例如 https://api.example.com/v1；仅本机回环地址允许 http://。"
+          >
+            <Input
+              aria-label="文本嵌入 API 地址"
+              className="w-full min-w-0"
+              disabled={busy}
+              value={endpoint}
+              onChange={(event) => setEndpoint(event.target.value)}
+            />
+          </SettingRow>
+          <SettingRow
+            id="tools-text-api-key"
+            label="访问密钥"
+            description="只写字段：不填则保留已保存的密钥；保存后不再回传明文。"
+          >
+            <Input
+              aria-label="文本嵌入 API 密钥"
+              type="password"
+              className="w-full min-w-0"
+              disabled={busy}
+              placeholder={state?.has_api_key ? "已保存（留空不修改）" : "尚未设置"}
+              value={apiKey}
+              onChange={(event) => setApiKey(event.target.value)}
+            />
+          </SettingRow>
+          <SettingRow
+            id="tools-text-api-model"
+            label="模型名称"
+            description="请求体中的 model 字段，例如 text-embedding-3-small；不写死任何厂商模型。"
+          >
+            <Input
+              aria-label="文本嵌入 API 模型"
+              className="w-full min-w-0"
+              disabled={busy}
+              value={apiModel}
+              onChange={(event) => setApiModel(event.target.value)}
+            />
+          </SettingRow>
+          <SettingRow
+            id="tools-text-api-dimensions"
+            label="向量维度"
+            description="服务端输出的维度；返回向量会按该维度校验，不匹配即报错。"
+          >
+            <Input
+              aria-label="文本嵌入 API 维度"
+              type="number"
+              min={1}
+              max={8192}
+              className="w-28"
+              disabled={busy}
+              value={apiDimensions}
+              onChange={(event) => setApiDimensions(event.target.value)}
+            />
+          </SettingRow>
+          <SettingRow
+            id="tools-text-api-timeout"
+            label="超时（毫秒）"
+            description="单次请求超时，上限 600000。"
+          >
+            <Input
+              aria-label="文本嵌入 API 超时"
+              type="number"
+              min={1}
+              max={600000}
+              className="w-28"
+              disabled={busy}
+              value={timeoutMs}
+              onChange={(event) => setTimeoutMs(event.target.value)}
+            />
+          </SettingRow>
+        </>
+      )}
       {state && (
         <p className="text-xs leading-5 text-muted-foreground" data-testid="text-model-status">
           {state.available
-            ? `当前加载：${state.model_name ?? '未知模型'}${state.dimensions ? `，${state.dimensions} 维` : ''}（${state.resolved_dir}）`
-            : `模型不可用：${state.message ?? '未检测到可用权重'}`}
+            ? '当前加载：' + (state.loaded_model_name ?? '未知模型') + (state.loaded_dimensions ? '，' + state.loaded_dimensions + ' 维' : '') + '（' + state.resolved_dir + '）'
+            : '模型不可用：' + (state.message ?? '未检测到可用模型')}
         </p>
       )}
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <Button size="sm" disabled={busy || !state} onClick={() => void apply()}>
           应用模型
         </Button>
+        {provider === 'api' && (
+          <Button size="sm" variant="outline" disabled={busy || testing} onClick={() => void testConnection()}>
+            {testing ? '测试中…' : '测试连接'}
+          </Button>
+        )}
         <Button size="sm" variant="outline" disabled={busy || !root} onClick={() => void rebuild()}>
           重建检索索引
         </Button>
       </div>
-      {recommended.length > 0 && (
+      {probe && (
+        <p className="mt-1 text-xs leading-5 text-muted-foreground" data-testid="text-model-probe">
+          连接正常：{probe.provider} · {probe.model_name ?? '未知模型'} · {probe.dimensions} 维 · {probe.latency_ms} ms
+        </p>
+      )}
+      {provider === 'local_onnx' && recommended.length > 0 && (
         <ul className="mt-2 space-y-1">
           {recommended.map((entry) => (
             <li
@@ -268,7 +457,7 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
             >
               <span className="font-medium text-foreground">{entry.model.display_name}</span>
               <span>
-                {entry.model.dimensions} 维 · {entry.model.onnx_megabytes} MB ·{' '}
+                {entry.model.dimensions} 维 · {entry.model.onnx_megabytes} MB ·{" "}
                 {entry.model.pooling.toUpperCase()} 池化 · {entry.model.languages} · {entry.model.license}
               </span>
               {entry.installed ? (
@@ -343,16 +532,43 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={!runtimes[model.id]?.dependencies_installed || checking}
+                  disabled={!runtimes[model.id]?.dependencies_installed || checking || startingService || (model.id === 'qwen3-vl-embedding-2b' && serviceStatus?.running)}
                   onClick={() => void startService(model.id)}
                 >
-                  启动服务
+                  {startingService
+                    ? '启动中…'
+                    : model.id === 'qwen3-vl-embedding-2b' && serviceStatus?.running
+                      ? '服务运行中'
+                      : '启动服务'}
                 </Button>
+                {model.id === 'qwen3-vl-embedding-2b' && (serviceStatus || startingService) && (
+                  <span data-testid="visual-service-status">
+                    {startingService
+                      ? '服务启动中…'
+                      : serviceStatus?.running
+                        ? '服务运行中' +
+                          (serviceStatus.dimensions ? '（' + serviceStatus.dimensions + ' 维）' : '')
+                        : '服务未运行'}
+                  </span>
+                )}
+                {runtimes[model.id]?.dependencies_installed && !runtimes[model.id]?.model_present && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={installing !== null}
+                    onClick={() => void downloadWeights(model.id)}
+                  >
+                    {installing === model.id ? '下载中…' : '下载权重'}
+                  </Button>
+                )}
                 <span data-testid={`visual-runtime-${model.id}`}>
                   {runtimes[model.id]?.dependencies_installed
                     ? runtimes[model.id]?.model_present
-                      ? `已就绪：${runtimes[model.id]?.model_dir}`
-                      : "依赖已装，权重缺失"
+                      ? '已就绪：' + runtimes[model.id]?.model_dir
+                      : '依赖已装，权重缺失' +
+                        (runtimes[model.id]?.model_error
+                          ? '：' + runtimes[model.id]?.model_error
+                          : '')
                     : "未安装"}
                 </span>
               </span>
