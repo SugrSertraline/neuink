@@ -26,7 +26,6 @@ vi.mock('@/shared/ipc/workspaceApi', () => ({
   listRecommendedVisualModels: vi.fn(),
   getVisualRuntimeState: vi.fn(),
   getRerankSettings: vi.fn(),
-  applyQwenPreset: vi.fn(),
   getVisualEmbeddingSettings: vi.fn(),
   getVisualServiceStatus: vi.fn(),
   installVisualRuntime: vi.fn(),
