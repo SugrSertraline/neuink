@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  applyQwenPreset,
   getRerankSettings,
   getTextModelSettings,
   getVisualEmbeddingSettings,
@@ -21,6 +22,7 @@ import {
   type RecommendedRerankModelState,
   type RecommendedTextModelState,
   type RecommendedVisualModel,
+  type QwenPresetSummary,
   type RerankSettingsState,
   type VisualRuntimeState,
   type VisualEmbeddingSettingsState,
@@ -62,6 +64,9 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
   const [serviceStatus, setServiceStatus] = useState<VisualServiceStatus | null>(null);
   const [rerankState, setRerankState] = useState<RerankSettingsState | null>(null);
   const [visualState, setVisualState] = useState<VisualEmbeddingSettingsState | null>(null);
+  const [qwenKey, setQwenKey] = useState('');
+  const [qwenSummary, setQwenSummary] = useState<QwenPresetSummary | null>(null);
+  const [applyingPreset, setApplyingPreset] = useState(false);
   const [startingService, setStartingService] = useState(false);
   const [reuseDirs, setReuseDirs] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<string>('');
@@ -284,6 +289,23 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
     }
   };
 
+  const applyPreset = async () => {
+    setApplyingPreset(true);
+    setError(null);
+    setQwenSummary(null);
+    try {
+      const summary = await applyQwenPreset(qwenKey);
+      setQwenSummary(summary);
+      setQwenKey('');
+      await reload();
+      setRebuildNote('已切换到 Qwen 云端：文本与重排使用百炼接口，请重建检索索引。');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '一键配置失败。');
+    } finally {
+      setApplyingPreset(false);
+    }
+  };
+
   const check = async () => {
     setChecking(true);
     setError(null);
@@ -312,6 +334,40 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
       {error && <p role="alert" className="mt-2 text-xs leading-5 text-destructive">{error}</p>}
 
       <div className="mt-2 flex items-baseline justify-between gap-2">
+        <p className="text-xs font-medium text-foreground">Qwen 一键配置</p>
+        <span className="text-xs text-muted-foreground">阿里云百炼 · 文本 + 重排</span>
+      </div>
+      <div className="mt-1 flex flex-wrap items-center gap-2">
+        <Input
+          aria-label="Qwen API Key"
+          className="h-8 w-80 min-w-0 font-mono text-xs"
+          type="password"
+          placeholder="sk-…（百炼 API Key）"
+          value={qwenKey}
+          onChange={(event) => setQwenKey(event.target.value)}
+        />
+        <Button size="sm" disabled={applyingPreset || !qwenKey.trim()} onClick={() => void applyPreset()}>
+          {applyingPreset ? '配置中…' : '用这个 Key 配置'}
+        </Button>
+        <span className="text-xs leading-5 text-muted-foreground">
+          写入 text-embedding-v4（1024 维）与 qwen3-rerank；视觉通道不变，原因见下。
+        </span>
+      </div>
+      {qwenSummary && (
+        <ul className="mt-1 space-y-1 text-xs leading-5 text-muted-foreground" data-testid="qwen-preset-result">
+          <li>
+            文本：{qwenSummary.text_model} · {qwenSummary.text_dimensions} 维 ·{' '}
+            <code className="font-mono text-[11px]">{qwenSummary.text_endpoint}</code>
+          </li>
+          <li>
+            重排：{qwenSummary.rerank_model} ·{' '}
+            <code className="font-mono text-[11px]">{qwenSummary.rerank_endpoint}</code>
+          </li>
+          <li>视觉：{qwenSummary.visual_note}</li>
+        </ul>
+      )}
+
+      <div className="mt-3 flex items-baseline justify-between gap-2">
         <p className="text-xs font-medium text-foreground">通道总览</p>
         <Button size="sm" disabled={checking || !root} onClick={() => void check()}>
           {checking ? '自检中…' : '一键自检'}
@@ -748,6 +804,7 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
     </SettingsGroup>
   );
 }
+
 
 
 

@@ -180,6 +180,7 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
             commands::search::list_recommended_rerank_models,
             commands::search::install_recommended_rerank_model,
             commands::search::run_retrieval_self_check,
+            commands::search::apply_qwen_preset,
             commands::tag::create_tag,
             commands::tag::delete_tag,
             commands::tag::rename_tag,
@@ -214,6 +215,7 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
         handler(invoke)
     })
 }
+
 
 
 

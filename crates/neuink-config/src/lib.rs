@@ -597,6 +597,10 @@ pub struct RerankSettings {
     /// Hosted model name, for example `jina-reranker-v2-base-multilingual`.
     #[serde(default)]
     pub api_model: Option<String>,
+    /// Request/response shape of the hosted endpoint.
+
+    #[serde(default)]
+    pub api_style: RemoteApiStyle,
 }
 
 fn default_true() -> bool {
@@ -613,6 +617,7 @@ impl Default for RerankSettings {
             api_endpoint: None,
             api_key: None,
             api_model: None,
+            api_style: RemoteApiStyle::Protocol,
             fallback_heuristic: true,
         }
     }
@@ -1023,3 +1028,29 @@ impl RerankTransport {
     }
 }
 
+/// Request/response shape of a hosted embedding or rerank endpoint.
+///
+/// `protocol` is the Jina/Cohere shape the app shipped first (`results[]` at the top level,
+/// `{model, query, documents}`); `dashscope` is Alibaba Model Studio's native shape
+/// (`output.results[]`, `{model, input:{query, documents}, parameters:{...}}`).
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteApiStyle {
+    Protocol,
+    DashScope,
+}
+
+impl Default for RemoteApiStyle {
+    fn default() -> Self {
+        Self::Protocol
+    }
+}
+
+impl RemoteApiStyle {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Protocol => "protocol",
+            Self::DashScope => "dashscope",
+        }
+    }
+}

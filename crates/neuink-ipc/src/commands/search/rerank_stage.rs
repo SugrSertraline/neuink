@@ -208,6 +208,7 @@ mod tests {
             api_endpoint: None,
             api_key: None,
             api_model: None,
+            api_style: neuink_config::RemoteApiStyle::Protocol,
         }
     }
 
@@ -356,7 +357,7 @@ pub(super) fn provider_for(
                 .api_key
                 .clone()
                 .filter(|key| !key.trim().is_empty())?;
-            neuink_search::HttpReranker::new(endpoint, key, model)
+            neuink_search::HttpReranker::new(endpoint, key, model, settings.api_style)
                 .ok()
                 .map(|reranker| Arc::new(reranker) as Arc<dyn neuink_search::RerankProvider>)
         }
@@ -385,6 +386,7 @@ mod api_transport_tests {
             api_endpoint: Some("https://api.jina.ai/v1/rerank".to_string()),
             api_key: key.map(str::to_string),
             api_model: Some("jina-reranker-v2-base-multilingual".to_string()),
+            api_style: neuink_config::RemoteApiStyle::Protocol,
         }
     }
 
@@ -401,3 +403,4 @@ mod api_transport_tests {
         assert!(provider_for(&configured, Path::new("unused")).is_some());
     }
 }
+

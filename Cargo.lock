@@ -3343,6 +3343,7 @@ version = "0.1.3"
 dependencies = [
  "blake3",
  "fastembed",
+ "neuink-config",
  "neuink-domain",
  "ort",
  "rayon",

@@ -51,6 +51,7 @@ fn settings(mode: RerankMode, fallback: bool) -> RerankSettings {
         api_endpoint: None,
         api_key: None,
         api_model: None,
+        api_style: neuink_config::RemoteApiStyle::Protocol,
     }
 }
 
