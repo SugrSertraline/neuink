@@ -9,7 +9,7 @@ import { AssistantHarnessError } from './runState';
 const INPUT_KEYS = ['question', 'assistantContext', 'availableEntries', 'availableNotes', 'availableTags',
   'contextPlan', 'composerSnapshot', 'conversationHistory', 'conversationId', 'currentEntry', 'currentNote',
   'currentSegment', 'currentSurface', 'destinationEntryId', 'mentionScope', 'tagMentionScopes',
-  'preferredAgentId', 'scope'] as const;
+  'preferredAgentId', 'retrievalScope', 'scope'] as const;
 
 export async function runDurableHarness(
   options: RunAssistantHarnessOptions,
@@ -33,6 +33,9 @@ export async function runDurableHarness(
     // Restore only known task inputs. Current callbacks, permissions and credentials remain authoritative.
     const restored = Object.fromEntries(INPUT_KEYS.filter(key => key in original).map(key => [key, original[key]]));
     input = { ...options, ...restored, resumedFromRunId: saved.id };
+    // A checkpoint without a frozen retrieval scope (legacy or never supplied) must not inherit the current UI scope.
+    // Removing the key makes search_library ask for clarification instead of searching the wrong papers.
+    if (!('retrievalScope' in restored)) delete input.retrievalScope;
     record = saved;
     budget.restore(saved.payload.budget as ReturnType<RunBudget['snapshot']>);
   } else {

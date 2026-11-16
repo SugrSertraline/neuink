@@ -50,7 +50,10 @@
     "targets": "all",
     "resources": [
       "resources/embedding-models/default/**/*",
-      "resources/onboarding-availability.json"
+      "resources/onboarding-availability.json",
+      "resources/pdfium.dll",
+      "resources/pdfium-licenses/**/*",
+      "resources/scripts/**/*"
     ],
     "icon": [
       "icons/32x32.png",

@@ -69,6 +69,10 @@ const ALL_SETTINGS_CATALOG: SettingDefinition[] = [
   { id: 'agent-subagents', tab: 'subagents', title: '子助手', description: '配置内置子助手的模型、权限和系统提示词。', keywords: '子Agent 子 Agent worker 权限 启用' },
   { id: 'tools-services', tab: 'external-tools', title: 'Sciverse 外部检索', description: '配置科学文献检索服务和访问凭据。', keywords: 'Sciverse 检索 服务 插件 工具 API Key 密钥 外部工具' },
   { id: 'tools-research', tab: 'external-tools', title: '论文与网页检索', description: '免费免密钥检索、网页读取、确认下载 PDF，以及可选 Tavily 增强。', keywords: 'arXiv Crossref OpenAlex DuckDuckGo Tavily 免费 免配置 论文 下载 PDF 搜索 网页 URL API Key 密钥' },
+  { id: 'tools-retrieval-path', tab: 'external-tools', title: '检索路径', description: '在批次检索与组合检索之间切换；组合检索启用文档路由、视觉投票与重排。', keywords: '检索路径 统一 unified 组合 路由 视觉 重排 开关' },
+  { id: 'tools-model-access', tab: 'external-tools', title: '模型与接入', description: '选择文本嵌入模型、填写自定义目录，查看模型来源与本地视觉服务入口。', keywords: '模型 embedding 嵌入 bge-m3 e5 维度 模型目录 onnx 下载 HuggingFace 接入' },
+  { id: 'tools-visual', tab: 'external-tools', title: '视觉检索', description: '配置 Qwen 视觉编码服务，并准备页面/区域与图表资产的视觉索引。', keywords: '视觉 双通道 旁路 Qwen 图像 页面 图表 资产 索引 prepare 服务 endpoint' },
+  { id: 'tools-rerank', tab: 'external-tools', title: '重排', description: '本地交叉编码器、无模型字段覆盖，以及模型不可用时的回退顺序。', keywords: '重排 rerank 交叉编码器 cross encoder 精排 字段覆盖 数字 指标 模型 onnx' },
   { id: 'tools-assistant-debug', tab: 'external-tools', title: '助手调试信息', description: '仅本机显示安全错误类别和状态码，默认关闭。', keywords: '调试 debug 诊断 工具报错 错误详情' },
   { id: 'tools-mcp', tab: 'external-tools', title: 'MCP 与工具连接', description: '注册工具服务并配置连接参数。', keywords: 'MCP 服务 插件 工具 外部工具' }
 ];
@@ -103,3 +107,6 @@ export function readSettingsTab(): SettingsTab {
 export function rememberSettingsTab(tab: SettingsTab) {
   try { window.localStorage.setItem(LAST_TAB_KEY, tab); } catch { /* Navigation remains usable without persistence. */ }
 }
+
+
+

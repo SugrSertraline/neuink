@@ -101,6 +101,8 @@ export type RunAssistantHarnessOptions = {
   question: string;
   resumeFromNodeId?: string | null;
   resumedFromRunId?: string | null;
+  /** Set by the run controller. Absent means `search_library` asks for clarification, never the legacy scope. */
+  retrievalScope?: ScopeSnapshot;
   root: string;
   scope: ScopeSnapshot;
   settings: LlmProfile;
@@ -136,6 +138,7 @@ async function executeAssistantHarness(options: RunAssistantHarnessOptions): Pro
     question,
     resumeFromNodeId,
     resumedFromRunId,
+    retrievalScope,
     root,
     scope,
     settings
@@ -300,6 +303,7 @@ async function executeAssistantHarness(options: RunAssistantHarnessOptions): Pro
       plan,
       profiles,
       question,
+      retrievalScope,
       root,
       runtimeSettings,
       scope,

@@ -9,7 +9,7 @@ export const PLANNING_READ_TOOLS: ReadonlySet<string> = new Set([
   'read_pdf_pages', 'search_pdf_text',
   'search_papers', 'search_web', 'read_webpage', 'read_browser_tab',
   'read_current_note', 'read_note', 'read_entry_assistant_context', 'read_segment_content',
-  'search_segments', 'search_sciverse_evidence', 'read_sciverse_content',
+  'get_entry_outline', 'search_segments', 'search_library', 'search_sciverse_evidence', 'read_sciverse_content',
   'search_sciverse_metadata', 'get_sciverse_metadata_catalog',
   'search_sciverse_paper_schema', 'get_sciverse_paper_schema'
 ]);

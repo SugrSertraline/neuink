@@ -5,7 +5,12 @@ const { createHash, randomUUID } = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const LOCK = require('./embedding-lock.json');
 const DEFAULT_SOURCE = path.resolve(__dirname, '../src-tauri/resources/embedding-models/default');
-const CONFIG = { provider: 'fastembed-local', model_name: LOCK.repository, dimensions: 384 };
+const CONFIG = {
+  provider: 'fastembed-local',
+  model_name: LOCK.model_name,
+  dimensions: LOCK.dimensions,
+  pooling: LOCK.pooling,
+};
 
 async function hashFile(file) {
   const hash = createHash('sha256');
@@ -49,6 +54,11 @@ async function prepare({ root = DEFAULT_SOURCE, lock = LOCK, fetchFile = downloa
       continue;
     }
     if (verifyOnly) throw new Error(`Missing model resource: ${name}`);
+    if (lock.downloadable === false) {
+      throw new Error(
+        `Missing model resource: ${name}; this weight set is not downloadable (${lock.packaging_note ?? 'local export'})`,
+      );
+    }
     fs.mkdirSync(path.dirname(target), { recursive: true });
     const temporary = `${target}.${randomUUID()}.tmp`;
     try {
@@ -65,7 +75,7 @@ async function prepare({ root = DEFAULT_SOURCE, lock = LOCK, fetchFile = downloa
     if (Object.entries(CONFIG).some(([key, value]) => config[key] !== value)) throw new Error('Existing embedding configuration mismatch');
   } else if (verifyOnly) throw new Error('Missing embedding configuration');
   else fs.writeFileSync(configPath, JSON.stringify(CONFIG, null, 2) + '\n', { flag: 'wx' });
-  // E5 model card declares MIT; upstream code/notice: https://github.com/microsoft/unilm/tree/master/e5
+  // Include the model's distribution notice alongside the verified resources.
   const license = fs.readFileSync(path.join(__dirname, 'embedding-LICENSE.txt'));
   const licensePath = path.join(root, 'LICENSE.txt');
   if (fs.existsSync(licensePath)) {
@@ -78,3 +88,5 @@ module.exports = { prepare, hashFile, targetPath };
 if (require.main === module) prepare({ verifyOnly: process.argv.includes('--verify') })
   .then(() => console.log('Pinned embedding files and SHA256 verified.'))
   .catch(error => { console.error(error.message); process.exitCode = 1; });
+
+

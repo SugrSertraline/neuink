@@ -31,6 +31,7 @@ export type RunSubagentTaskOptions = {
   instruction: string;
   question: string;
   root: string;
+  retrievalScope?: ScopeSnapshot;
   runtimeSettings: AgentRuntimeSettings;
   scope: ScopeSnapshot;
   settings: LlmProfile;

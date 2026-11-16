@@ -325,7 +325,8 @@ it('uses a fixed tag and its descendants as the reading scope instead of the vis
   await waitFor(() => expect(pending.has('整理标签论文')).toBe(true));
   expect(pending.get('整理标签论文')!.options.currentEntry).toBeNull();
   expect(pending.get('整理标签论文')!.options.mentionScope).toEqual({
-    tag_ids: ['topic', 'forecast'], tag_names: ['时间序列', '预测'], entry_ids: ['A'], entry_titles: ['论文 A']
+    tag_ids: ['topic', 'forecast'], tag_names: ['时间序列', '预测'], entry_ids: ['A'], entry_titles: ['论文 A'],
+    scope_intent: 'selection'
   });
   await act(async () => pending.get('整理标签论文')!.finish({ answer: '完成', sources: [] }));
   ui.rerender(<AssistantPanel {...props} entries={[a, b]} tags={[childTag]} activeEntry={b} />);

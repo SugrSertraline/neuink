@@ -552,6 +552,10 @@ fn mineru_metadata_from_v2_block(
     insert_metadata_string(&mut metadata, "angle", block, "angle");
     insert_metadata_string(&mut metadata, "index", block, "index");
     insert_metadata_string(&mut metadata, "sub_type", block, "sub_type");
+    if block_type == "title" {
+        insert_metadata_string(&mut metadata, "level", block, "level");
+        insert_metadata_string(&mut metadata, "level", block, "text_level");
+    }
 
     for key in metadata_keys_for_block_type(block_type) {
         insert_metadata_string(&mut metadata, key, content, key);
@@ -566,6 +570,12 @@ fn mineru_metadata_from_content_list(block_type: &str, block: &Value) -> BTreeMa
     insert_metadata_string(&mut metadata, "angle", block, "angle");
     insert_metadata_string(&mut metadata, "index", block, "index");
     insert_metadata_string(&mut metadata, "sub_type", block, "sub_type");
+    if block_type == "title" {
+        // MinerU v1 calls the heading depth `text_level`; expose the same
+        // canonical key used by v2 so downstream readers have one contract.
+        insert_metadata_string(&mut metadata, "level", block, "level");
+        insert_metadata_string(&mut metadata, "level", block, "text_level");
+    }
 
     for key in metadata_keys_for_block_type(block_type) {
         insert_metadata_string(&mut metadata, key, block, key);
@@ -1401,6 +1411,47 @@ mod tests {
 
         assert_eq!(document.segments.len(), 1);
         assert_eq!(document.segments[0].page_idx, 2);
+    }
+
+    #[test]
+    fn maps_mineru_v1_text_level_to_canonical_level() {
+        let value = json!({
+            "content_list": [{
+                "type": "title",
+                "text": "1 Introduction",
+                "text_level": 2,
+                "page_idx": 0
+            }]
+        });
+
+        let document = normalize_parser_response(&value).unwrap();
+
+        assert_eq!(
+            document.segments[0].mineru_metadata.get("level"),
+            Some(&"2".to_string())
+        );
+        assert!(!document.segments[0]
+            .mineru_metadata
+            .contains_key("text_level"));
+    }
+
+    #[test]
+    fn maps_mineru_v2_outer_heading_level_to_canonical_level() {
+        let value = json!({
+            "content_list_v2": [[{
+                "type": "title",
+                "level": 3,
+                "content": {"title_content": [{"type": "text", "content": "1.1 Detail"}]},
+                "bbox": [0, 0, 100, 20]
+            }]]
+        });
+
+        let document = normalize_parser_response(&value).unwrap();
+
+        assert_eq!(
+            document.segments[0].mineru_metadata.get("level"),
+            Some(&"3".to_string())
+        );
     }
 
     #[test]

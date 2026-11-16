@@ -1,4 +1,4 @@
-use neuink_domain::EntryId;
+use neuink_domain::{EntryId, SegmentType};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -10,6 +10,16 @@ pub struct SearchQuery {
     pub scope: SearchScope,
     #[serde(default)]
     pub include: SearchInclude,
+    #[serde(default)]
+    pub section_filter: Option<String>,
+    #[serde(default)]
+    pub segment_types: Vec<SegmentType>,
+    /// Internal retrieval constraint applied before either channel truncates.
+    #[serde(default)]
+    pub segments_only: bool,
+    /// Query-side English stopword filtering; indexing remains unchanged.
+    #[serde(default)]
+    pub filter_stopwords: bool,
     #[serde(default = "default_limit")]
     pub limit: usize,
 }
@@ -21,6 +31,10 @@ impl SearchQuery {
             mode: SearchMode::Keyword,
             scope: SearchScope::default(),
             include: SearchInclude::default(),
+            section_filter: None,
+            segment_types: Vec::new(),
+            segments_only: false,
+            filter_stopwords: false,
             limit: default_limit(),
         }
     }

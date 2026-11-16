@@ -11,11 +11,13 @@ import type { SearchHit, SearchMode } from '@/shared/ipc/workspaceApi';
 
 import { useEmbeddingStatus } from '../hooks/useEmbeddingStatus';
 import { useGlobalSearch } from '../hooks/useGlobalSearch';
+import { useBilingualSearchQuery } from '../hooks/useBilingualSearchQuery';
 import { useSearchIndexBuildStatus } from '../hooks/useSearchIndexBuildStatus';
 import { useSearchIndexStatus } from '../hooks/useSearchIndexStatus';
 import { EmbeddingStatusLine } from './EmbeddingStatusLine';
 import { SearchIndexStatusLine } from './SearchIndexStatusLine';
 import { SearchModeControl } from './SearchModeControl';
+import { VisualIndexControl } from './VisualIndexControl';
 import { SearchResultList } from './SearchResultList';
 import { AppearanceCommand, isAppearanceCommand } from './AppearanceCommand';
 
@@ -39,11 +41,17 @@ export function SearchDialog({
   const [query, setQuery] = useState('');
   const appearanceCommand = isAppearanceCommand(query);
   const [mode, setMode] = useState<SearchMode>('hybrid');
+  const [bilingualSearchEnabled, setBilingualSearchEnabled] = useState(false);
   const [hoverPreviewEnabled, setHoverPreviewEnabled] = useState(true);
+  const { available: bilingualAvailable, busy: bilingualBusy, englishQuery } = useBilingualSearchQuery(
+    query,
+    bilingualSearchEnabled
+  );
   const { busy, error, results } = useGlobalSearch({
     root,
     status,
     query: appearanceCommand ? '' : query,
+    englishQuery,
     mode,
     limit: 80
   });
@@ -120,6 +128,19 @@ export function SearchDialog({
               )}
               悬停预览
             </Button>
+            {bilingualAvailable ? (
+              <Button
+                aria-pressed={bilingualSearchEnabled}
+                size="xs"
+                title="使用已配置的助手模型把中文查询扩展为英文学术检索词"
+                type="button"
+                variant={bilingualSearchEnabled ? 'secondary' : 'ghost'}
+                onClick={() => setBilingualSearchEnabled((enabled) => !enabled)}
+              >
+                {bilingualBusy ? <Loader2 className="animate-spin" size={12} aria-hidden="true" /> : null}
+                AI 双语扩展
+              </Button>
+            ) : null}
             <div className="flex items-center justify-end">
               <SearchModeControl
                 disabled={!root || status !== 'ready'}
@@ -141,6 +162,12 @@ export function SearchDialog({
             error={searchIndexError}
             mode={mode}
             status={searchIndexStatus}
+          />
+          <VisualIndexControl
+            className="mt-1"
+            enabled={semanticMode}
+            root={root}
+            status={status}
           />
           {error ? (
             <div className="mt-2 rounded-md border border-destructive/25 bg-destructive/5 px-2.5 py-2 text-xs leading-5 text-destructive">

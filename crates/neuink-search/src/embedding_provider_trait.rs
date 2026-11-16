@@ -40,6 +40,13 @@ pub struct EmbeddingProviderStatus {
 pub trait EmbeddingProvider: Send + Sync {
     fn status(&self) -> EmbeddingProviderStatus;
 
+    /// An identity derived from immutable model contents and tokenizer/config.
+    /// Returning `None` opts out of persistent vector reuse. A filesystem path
+    /// or a display model name alone is insufficient to identify model weights.
+    fn cache_identity(&self) -> Option<String> {
+        None
+    }
+
     fn embed(&self, inputs: &[EmbeddingInput]) -> SearchResult<Vec<EmbeddingVector>>;
 
     fn embed_with_progress(

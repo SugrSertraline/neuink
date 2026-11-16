@@ -56,6 +56,14 @@ pub enum WorkspaceError {
     PdfNotParsed(String),
     #[error("invalid PDF parse transition: {0}")]
     InvalidPdfParseTransition(String),
+    #[error("MinerU asset path escapes the entry asset directory: {0}")]
+    AssetPathTraversal(String),
+    #[error("MinerU asset is larger than the per-file budget: {0}")]
+    AssetFileTooLarge(String),
+    #[error("entry asset does not exist: {0}")]
+    AssetMissing(String),
+    #[error("visual asset scope names an entry that is not in the live library: {0}")]
+    VisualScopeUnknownEntry(String),
     #[error("workspace path does not exist: {0}")]
     WorkspaceMissing(PathBuf),
     #[error("workspace marker is missing: {0}")]

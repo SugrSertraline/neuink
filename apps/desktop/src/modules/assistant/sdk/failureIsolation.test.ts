@@ -309,7 +309,10 @@ describe('SDK failure results reach the model through production wiring', () => 
     vi.mocked(invokeAssistantTool).mockResolvedValue({ query: 'participants', mode: 'semantic_fallback_keyword',
       index_generation: 1, total_hit_count: 1, warnings: ['Embedding unavailable at C:\\Private\\models\\secret-model.onnx; Authorization: Bearer secret-token'],
       entries: [{ entry_id: 'entry', entry_title: 'Paper', hit_count: 1, max_score: 1, hits: [{
-        entry_id: 'entry', entry_title: 'Paper', target: { kind: 'segment', entry_id: 'entry', segment_uid: 's1', page_idx: 2 },
+        entry_id: 'entry', entry_title: 'Paper', matched_terms: ['participants'], title: 'Results', source: {
+          kind: 'segment', label: 'Results', field_name: null, tag_id: null, note_id: null, segment_uid: 's1', page_idx: 2,
+          section_id: 'results', section_path: 'Results'
+        }, target: { kind: 'segment', entry_id: 'entry', segment_uid: 's1', page_idx: 2 },
         snippet: '42 participants.', score: 1
       }] }]
     });

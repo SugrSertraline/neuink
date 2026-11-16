@@ -18,7 +18,8 @@ describe('local search degradation', () => {
       const output = formatSearchSegmentsOutput({ query: 'participants', mode, index_generation: 1,
         total_hit_count: 0, entries: [], warnings: ['Embedding unavailable at C:\\Private\\models\\secret-model.onnx; Authorization: Bearer secret-token']
       }, () => 1);
-      expect(output.modelOutput.warnings).toHaveLength(1);
+      // Fallback modes add the keyword notice before the generic limitation notice.
+      expect(output.modelOutput.warnings).toHaveLength(mode === 'keyword' ? 1 : 2);
       expect(output.modelOutput.warnings[0]).toContain(mode === 'keyword' ? 'limitation' : 'keyword fallback');
       expect(JSON.stringify(output)).not.toMatch(/Private|secret-model|Authorization|secret-token/);
     }

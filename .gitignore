@@ -91,3 +91,8 @@ apps/desktop/src-tauri/resources/onboarding-availability.json
 apps/desktop/src-tauri/resources/browser-reader/
 apps/desktop/src-tauri/resources/.browser-reader-prepare-*/
 apps/desktop/src-tauri/resources/.browser-reader-backup-*/
+
+# Locally provisioned model links: weights are installed through the app, never committed.
+apps/desktop/src-tauri/resources/visual-service/**/model/
+apps/desktop/src-tauri/resources/visual-service/**/state.json
+apps/desktop/src-tauri/resources/embedding-models/rerank-*/

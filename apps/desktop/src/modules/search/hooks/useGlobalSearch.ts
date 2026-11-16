@@ -6,12 +6,14 @@ export function useGlobalSearch({
   root,
   status,
   query,
+  englishQuery,
   mode = 'hybrid',
   limit = 60
 }: {
   root: string | null;
   status: 'loading' | 'ready' | 'error';
   query: string;
+  englishQuery?: string | null;
   mode?: SearchMode;
   limit?: number;
 }) {
@@ -33,7 +35,7 @@ export function useGlobalSearch({
     setError(null);
 
     const timer = window.setTimeout(() => {
-      void searchEntries(root, trimmedQuery, { limit, mode })
+      void searchEntries(root, trimmedQuery, { limit, mode, englishQuery: englishQuery ?? undefined })
         .then((nextResults) => {
           if (!cancelled) {
             setResults(nextResults);
@@ -56,7 +58,7 @@ export function useGlobalSearch({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [limit, mode, root, status, trimmedQuery]);
+  }, [englishQuery, limit, mode, root, status, trimmedQuery]);
 
   return {
     busy,

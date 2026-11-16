@@ -73,11 +73,20 @@ function publishLlmSettings(settings: LlmSettingsState) {
   }
 }
 
+/**
+ * `library`: no selection, the whole library (entry_ids mirrors it for legacy readers only).
+ * `selection`: entry_ids is the exact selected set, possibly empty.
+ * `unresolved`: a referenced Tag or Entry no longer exists; retrieval must ask for clarification.
+ * Absent on snapshots written before this field existed.
+ */
+export type ScopeIntent = 'library' | 'selection' | 'unresolved';
+
 export type ScopeSnapshot = {
   tag_ids: TagId[];
   tag_names: string[];
   entry_ids: EntryId[];
   entry_titles: string[];
+  scope_intent?: ScopeIntent;
 };
 
 export type LocalConversationSourceLink = {
@@ -306,6 +315,24 @@ export type ReadEntryAssistantContextResponse = {
   entry_title: string;
   markdown: string;
   sources: EntryAssistantSource[];
+};
+
+export type GetEntryOutlineResponse = {
+  entry_id: EntryId;
+  entry_title: string;
+  compact_summary?: string;
+  sections: Array<{
+    section_id: string;
+    title: string;
+    level: number;
+    section_path: string;
+    role: string;
+    segment_count: number;
+    start_page_idx?: number;
+    end_page_idx?: number;
+    table_count?: number;
+    figure_count?: number;
+  }>;
 };
 
 export type AssistantContextSnapshotPinnedSegment = {
@@ -570,13 +597,27 @@ export async function searchSegmentsTool(args: {
   root: string;
   scopeEntryIds?: EntryId[];
   topK?: number;
+  englishQuery?: string;
+  subQueries?: string[];
 }): Promise<SearchResults> {
   return invokeAssistantTool<SearchResults>('search_segments', {
     root: args.root,
     query: args.query,
     mode: args.mode ?? 'hybrid',
     scope_entry_ids: args.scopeEntryIds ?? [],
-    top_k: args.topK ?? 8
+    top_k: args.topK ?? 8,
+    english_query: args.englishQuery ?? null,
+    sub_queries: args.subQueries ?? []
+  });
+}
+
+export async function getEntryOutlineTool(args: {
+  root: string;
+  entryId: EntryId;
+}): Promise<GetEntryOutlineResponse> {
+  return invokeAssistantTool<GetEntryOutlineResponse>('get_entry_outline', {
+    root: args.root,
+    entry_id: args.entryId
   });
 }
 

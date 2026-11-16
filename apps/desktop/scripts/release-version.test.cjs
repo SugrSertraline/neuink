@@ -86,7 +86,18 @@ test('only main builds artifacts; main PRs remain validation-only', () => {
 
 test('version tags may release main history but cannot release beta-only commits', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'neuink-release-source-test-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.after(() => {
+    // Git creates read-only loose objects, which Windows cannot unlink until made writable.
+    const makeFilesWritable = directory => {
+      for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+        const child = path.join(directory, entry.name);
+        if (entry.isDirectory()) makeFilesWritable(child);
+        else if (entry.isFile()) fs.chmodSync(child, 0o666);
+      }
+    };
+    makeFilesWritable(root);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
   const git = (...args) => execFileSync('git', args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }).toString().trim();
   git('init', '--initial-branch=main');
   git('-c', 'user.name=Neuink test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-m', 'approved main');

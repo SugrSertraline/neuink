@@ -1,4 +1,4 @@
-use neuink_domain::{EntryId, NoteId, SegmentUid, TagId};
+use neuink_domain::{CanonicalSectionRole, EntryId, NoteId, SegmentType, SegmentUid, TagId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -74,6 +74,14 @@ pub struct SearchDocumentSource {
     pub segment_uid: Option<SegmentUid>,
     #[serde(default)]
     pub page_idx: Option<u32>,
+    #[serde(default)]
+    pub section_id: Option<String>,
+    #[serde(default)]
+    pub section_path: Option<String>,
+    #[serde(default)]
+    pub section_role: Option<CanonicalSectionRole>,
+    #[serde(default)]
+    pub segment_type: Option<SegmentType>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]

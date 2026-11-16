@@ -9,12 +9,15 @@ use rayon::prelude::*;
 
 use crate::{
     token::{tokenize, tokenize_unique},
-    SearchDocument, SearchDocumentSourceKind, SearchEntryGroup, SearchError, SearchHit,
-    SearchInclude, SearchIndex, SearchMode, SearchQuery, SearchResult, SearchResults,
+    SearchDocument, SearchEntryGroup, SearchError, SearchHit, SearchIndex, SearchMode, SearchQuery,
+    SearchResult, SearchResults,
 };
 
 const QUERY_CACHE_LIMIT: usize = 64;
-const MAX_RESULT_LIMIT: usize = 200;
+const MAX_RESULT_LIMIT: usize = 1000;
+/// Okapi BM25 parameters (Robertson & Zaragoza, 2009), the Lucene/tantivy defaults.
+const BM25_K1: f32 = 1.2;
+const BM25_B: f32 = 0.75;
 
 #[derive(Debug, Default)]
 pub struct MemorySearchIndex {
@@ -100,6 +103,7 @@ struct SearchSnapshot {
     generation: u64,
     documents: Vec<IndexedDocument>,
     postings: HashMap<String, Vec<Posting>>,
+    average_length: f32,
 }
 
 impl SearchSnapshot {
@@ -112,6 +116,13 @@ impl SearchSnapshot {
 
         let mut ordered = locals;
         ordered.sort_by_key(|document| document.doc_idx);
+
+        let total_length = ordered.iter().map(|document| document.length).sum::<f32>();
+        let average_length = if ordered.is_empty() {
+            1.0
+        } else {
+            (total_length / ordered.len() as f32).max(1.0)
+        };
 
         let mut postings: HashMap<String, Vec<Posting>> = HashMap::new();
         for document in &ordered {
@@ -130,14 +141,20 @@ impl SearchSnapshot {
                 .map(|document| IndexedDocument {
                     document: document.document,
                     text_for_snippet: document.text_for_snippet,
+                    length: document.length,
                 })
                 .collect(),
             postings,
+            average_length,
         }
     }
 
     fn search(&self, query: &SearchQuery, normalized_query: String) -> SearchResult<SearchResults> {
-        let query_terms = tokenize_unique(&normalized_query);
+        let query_terms = if query.filter_stopwords {
+            crate::token::tokenize_content_query(&normalized_query)
+        } else {
+            tokenize_unique(&normalized_query)
+        };
         if query_terms.is_empty() {
             return Err(SearchError::EmptyQuery);
         }
@@ -149,11 +166,15 @@ impl SearchSnapshot {
             let Some(postings) = self.postings.get(term) else {
                 continue;
             };
-            let idf = ((document_count + 1.0) / (postings.len() as f32 + 1.0)).ln() + 1.0;
+            let idf = bm25_idf(document_count, postings.len() as f32);
 
             for posting in postings {
+                let Some(indexed) = self.documents.get(posting.doc_idx) else {
+                    continue;
+                };
                 let candidate = scores.entry(posting.doc_idx).or_default();
-                candidate.score += posting.weight * idf;
+                candidate.score +=
+                    idf * bm25_term_weight(posting.weight, indexed.length, self.average_length);
                 candidate.matched_terms.insert(term.clone());
             }
         }
@@ -163,14 +184,15 @@ impl SearchSnapshot {
             .into_iter()
             .filter_map(|(doc_idx, candidate)| {
                 let indexed = self.documents.get(doc_idx)?;
-                if !query.scope.contains_entry(&indexed.document.entry_id)
-                    || !included_by_query(&query.include, indexed.document.source.kind)
-                {
+                if !crate::embedding_representation::matches_semantic_document(
+                    query,
+                    &indexed.document,
+                ) {
                     return None;
                 }
 
                 let coverage = candidate.matched_terms.len() as f32 / query_terms.len() as f32;
-                let score = candidate.score * (0.6 + coverage * 0.4);
+                let score = candidate.score * indexed.document.boost * (0.6 + coverage * 0.4);
                 Some(SearchHit {
                     entry_id: indexed.document.entry_id.clone(),
                     entry_title: indexed.document.entry_title.clone(),
@@ -232,11 +254,14 @@ impl SearchSnapshot {
 struct IndexedDocument {
     document: SearchDocument,
     text_for_snippet: String,
+    /// Field-weighted token count used for BM25 length normalization.
+    length: f32,
 }
 
 #[derive(Clone, Copy, Debug)]
 struct Posting {
     doc_idx: usize,
+    /// Field-weighted term frequency (BM25F-style section boosts).
     weight: f32,
 }
 
@@ -246,6 +271,7 @@ struct LocalIndexedDocument {
     document: SearchDocument,
     text_for_snippet: String,
     term_weights: HashMap<String, f32>,
+    length: f32,
 }
 
 #[derive(Debug, Default)]
@@ -255,14 +281,28 @@ struct CandidateScore {
 }
 
 fn index_document((doc_idx, document): (usize, SearchDocument)) -> LocalIndexedDocument {
+    // Section boosts scale term frequency and length together (BM25F); the
+    // document boost is applied to the final score so k1 does not saturate it.
     let mut term_weights = HashMap::<String, f32>::new();
+    let mut length = 0.0;
     for section in &document.sections {
         for token in tokenize(&section.text) {
-            *term_weights.entry(token).or_insert(0.0) += section.boost * document.boost;
+            *term_weights.entry(token).or_insert(0.0) += section.boost;
+            length += section.boost;
         }
     }
-    for token in tokenize(&document.title) {
-        *term_weights.entry(token).or_insert(0.0) += 2.0 * document.boost;
+    // `document.title` is the display title and is usually also represented by
+    // a title section. Index it only as a fallback so a segment label cannot be
+    // counted twice in the high-weight field.
+    if !document
+        .sections
+        .iter()
+        .any(|section| section.label == "title")
+    {
+        for token in tokenize(&document.title) {
+            *term_weights.entry(token).or_insert(0.0) += 2.0;
+            length += 2.0;
+        }
     }
 
     let text_for_snippet = document.text_for_snippet();
@@ -271,20 +311,18 @@ fn index_document((doc_idx, document): (usize, SearchDocument)) -> LocalIndexedD
         document,
         text_for_snippet,
         term_weights,
+        length,
     }
 }
 
-fn included_by_query(include: &SearchInclude, kind: SearchDocumentSourceKind) -> bool {
-    match kind {
-        SearchDocumentSourceKind::EntryTitle
-        | SearchDocumentSourceKind::EntryField
-        | SearchDocumentSourceKind::EntryTag => include.entry_meta,
-        SearchDocumentSourceKind::NoteTitle
-        | SearchDocumentSourceKind::NoteBody
-        | SearchDocumentSourceKind::SegmentNote
-        | SearchDocumentSourceKind::Annotation => include.notes,
-        SearchDocumentSourceKind::PdfPage | SearchDocumentSourceKind::Segment => include.segments,
-    }
+/// BM25 idf with the +1 inside the log so very common terms never go negative.
+fn bm25_idf(document_count: f32, document_frequency: f32) -> f32 {
+    (1.0 + (document_count - document_frequency + 0.5) / (document_frequency + 0.5)).ln()
+}
+
+fn bm25_term_weight(term_frequency: f32, length: f32, average_length: f32) -> f32 {
+    let normalization = BM25_K1 * (1.0 - BM25_B + BM25_B * length / average_length);
+    term_frequency * (BM25_K1 + 1.0) / (term_frequency + normalization)
 }
 
 fn compare_hits(left: &SearchHit, right: &SearchHit) -> Ordering {
@@ -294,6 +332,8 @@ fn compare_hits(left: &SearchHit, right: &SearchHit) -> Ordering {
         .unwrap_or(Ordering::Equal)
         .then_with(|| left.entry_title.cmp(&right.entry_title))
         .then_with(|| left.title.cmp(&right.title))
+        // Stable identity decides equal titles, so truncation never depends on HashMap order.
+        .then_with(|| crate::hit_identity(left).cmp(&crate::hit_identity(right)))
 }
 
 fn result_mode_and_warnings(mode: SearchMode) -> (String, Vec<String>) {
@@ -325,14 +365,18 @@ fn cache_key(query: &SearchQuery, normalized_query: &str) -> String {
         .collect::<Vec<_>>();
     scope.sort();
     format!(
-        "{}|{:?}|{}|{}:{}:{}|{}",
+        "{}|{:?}|{}|{}:{}:{}|{}|{:?}|{}|{}|{}",
         normalized_query,
         query.mode,
         query.limit,
         query.include.entry_meta,
         query.include.notes,
         query.include.segments,
-        scope.join(",")
+        query.section_filter.as_deref().unwrap_or_default(),
+        query.segment_types,
+        scope.join(","),
+        query.segments_only,
+        query.filter_stopwords
     )
 }
 
@@ -388,7 +432,7 @@ mod tests {
     use neuink_domain::{EntryId, SegmentUid};
 
     use super::*;
-    use crate::{SearchDocumentSource, SearchTarget, SearchTextSection};
+    use crate::{SearchDocumentSource, SearchDocumentSourceKind, SearchTarget, SearchTextSection};
 
     #[test]
     fn searches_keyword_documents() {
@@ -416,6 +460,31 @@ mod tests {
 
         assert_eq!(results.total_hit_count, 1);
         assert_eq!(results.entries[0].entry_id, entry_id);
+    }
+
+    #[test]
+    fn display_title_is_not_counted_again_when_title_section_exists() {
+        let entry_id = EntryId::from_string("entry-a");
+        let document = SearchDocument {
+            entry_id: entry_id.clone(),
+            entry_title: "Paper".to_string(),
+            source: SearchDocumentSource::default(),
+            target: SearchTarget::Entry { entry_id },
+            title: "PDF Segment · Page 1 · paragraph".to_string(),
+            sections: vec![
+                SearchTextSection::with_boost("title", "PDF Segment · Page 1 · paragraph", 0.25),
+                SearchTextSection::body("clean body"),
+            ],
+            boost: 1.0,
+        };
+
+        let indexed = index_document((0, document));
+        let paragraph_weight = indexed
+            .term_weights
+            .get("paragraph")
+            .copied()
+            .expect("title token");
+        assert!((paragraph_weight - 0.25).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -515,6 +584,133 @@ mod tests {
             }])
             .unwrap();
 
+        let mut query = SearchQuery::new("keyword recall");
+        query.mode = SearchMode::Hybrid;
+        let results = index.search(query).unwrap();
+
+        assert_eq!(results.total_hit_count, 1);
+        assert_eq!(results.mode, "hybrid_fallback_keyword");
+        assert_eq!(results.warnings.len(), 1);
+    }
+
+    fn segment_document(entry: &str, segment: &str, body: &str) -> SearchDocument {
+        let entry_id = EntryId::from_string(entry);
+        SearchDocument {
+            entry_id: entry_id.clone(),
+            entry_title: entry.to_string(),
+            source: SearchDocumentSource {
+                kind: SearchDocumentSourceKind::Segment,
+                label: "Segment".to_string(),
+                segment_uid: Some(SegmentUid::from_string(segment)),
+                page_idx: Some(0),
+                ..Default::default()
+            },
+            target: SearchTarget::Segment {
+                entry_id,
+                segment_uid: SegmentUid::from_string(segment),
+                page_idx: 0,
+            },
+            title: "Page 1".to_string(),
+            sections: vec![SearchTextSection::body(body)],
+            boost: 1.0,
+        }
+    }
+
+    fn sectioned_segment(
+        entry: &str,
+        segment: &str,
+        section_path: &str,
+        body: &str,
+        boost: f32,
+    ) -> SearchDocument {
+        let mut document = segment_document(entry, segment, body);
+        document.source.section_path = Some(section_path.to_string());
+        document.boost = boost;
+        document
+    }
+
+    #[test]
+    fn section_filter_runs_before_the_candidate_limit() {
+        let index = MemorySearchIndex::default();
+        index
+            .replace_documents(vec![
+                // Higher-scoring but outside the filter; must not take the single slot.
+                sectioned_segment(
+                    "entry-a",
+                    "seg-off",
+                    "Background",
+                    "attention attention attention",
+                    5.0,
+                ),
+                sectioned_segment(
+                    "entry-a",
+                    "seg-on",
+                    "Methods > Answer",
+                    "attention once",
+                    1.0,
+                ),
+            ])
+            .unwrap();
+        let mut query = SearchQuery::new("attention");
+        query.section_filter = Some("Answer".into());
+        query.limit = 1;
+
+        let results = index.search(query).unwrap();
+
+        assert_eq!(results.total_hit_count, 1);
+        assert!(results.entries[0].hits[0].snippet.contains("once"));
+    }
+
+    #[test]
+    fn bm25_prefers_focused_segments_over_long_pages() {
+        let index = MemorySearchIndex::default();
+        let filler = "unrelated background discussion ".repeat(120);
+        index
+            .replace_documents(vec![
+                segment_document(
+                    "entry-long",
+                    "seg-long",
+                    &format!("{filler} attention {filler}"),
+                ),
+                segment_document("entry-short", "seg-short", "Sparse attention reduces cost."),
+                segment_document("entry-other", "seg-other", "Convolution baseline results."),
+            ])
+            .unwrap();
+
+        let results = index.search(SearchQuery::new("attention")).unwrap();
+
+        assert_eq!(results.entries[0].entry_id.as_str(), "entry-short");
+    }
+
+    #[test]
+    fn bm25_saturates_repeated_terms() {
+        let index = MemorySearchIndex::default();
+        index
+            .replace_documents(vec![
+                segment_document("entry-spam", "seg-spam", &"retrieval ".repeat(50)),
+                segment_document(
+                    "entry-both",
+                    "seg-both",
+                    "retrieval with reranking and retrieval",
+                ),
+                segment_document("entry-other", "seg-other", "Unrelated text about parsing."),
+            ])
+            .unwrap();
+
+        let results = index
+            .search(SearchQuery::new("retrieval reranking"))
+            .unwrap();
+
+        // Matching both query terms beats spamming one, which BM25 caps via k1.
+        assert_eq!(results.entries[0].entry_id.as_str(), "entry-both");
+    }
+
+    #[test]
+    fn hybrid_query_cache_key_keeps_mode() {
+        let index = MemorySearchIndex::default();
+        index
+            .replace_documents(vec![segment_document("entry-a", "seg-a", "keyword recall")])
+            .unwrap();
         let mut query = SearchQuery::new("keyword recall");
         query.mode = SearchMode::Hybrid;
         let results = index.search(query).unwrap();

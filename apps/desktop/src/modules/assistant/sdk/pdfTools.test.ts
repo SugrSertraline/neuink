@@ -124,10 +124,14 @@ describe('bounded PDF text tools', () => {
     const restricted = await createAssistantTools({ root: 'r', scope, runtimeSettings: settings, activeExecution: { agent: settings.mainAssistant }, ...buildDirectExecution(settings, 'Read PDF') });
     expect(restricted.tools.read_pdf_pages).toBeUndefined(); expect(normalizeAgentRuntimeSettings(settings).mainAssistant.enabledToolIds).toEqual(['read_note']);
     const old = structuredClone(DEFAULT_AGENT_RUNTIME_SETTINGS); old.capabilityRevision = 1;
-    old.mainAssistant.enabledToolIds = old.mainAssistant.enabledToolIds.filter(id => !['read_pdf_pages', 'search_pdf_text', 'import_papers'].includes(id));
+    old.mainAssistant.enabledToolIds = old.mainAssistant.enabledToolIds.filter(id => !['read_pdf_pages', 'search_pdf_text'].includes(id));
     const upgraded = normalizeAgentRuntimeSettings(old);
-    expect(upgraded.mainAssistant.enabledToolIds).toContain('read_pdf_pages'); expect(upgraded.mainAssistant.enabledToolIds).not.toContain('import_papers');
+    expect(upgraded.mainAssistant.enabledToolIds).toContain('read_pdf_pages');
     upgraded.mainAssistant.enabledToolIds = upgraded.mainAssistant.enabledToolIds.filter(id => id !== 'read_pdf_pages');
     expect(normalizeAgentRuntimeSettings(upgraded).mainAssistant.enabledToolIds).not.toContain('read_pdf_pages');
+    // Dropping import_papers from a revision-1 grant is an explicit restriction, so PDF tools are not added.
+    const restrictedOld = structuredClone(old);
+    restrictedOld.mainAssistant.enabledToolIds = restrictedOld.mainAssistant.enabledToolIds.filter(id => id !== 'import_papers');
+    expect(normalizeAgentRuntimeSettings(restrictedOld).mainAssistant.enabledToolIds).not.toContain('read_pdf_pages');
   });
 });

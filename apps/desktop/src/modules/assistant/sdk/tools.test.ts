@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_AGENT_RUNTIME_SETTINGS } from '@/shared/lib/agentRuntimeSettings';
-import { readNote } from '@/shared/ipc/workspaceApi';
+import type { ScopeSnapshot } from '@/shared/ipc/assistantApi';
+import { readNote, searchSegmentsBatch } from '@/shared/ipc/workspaceApi';
 import { createAgentLoopState, AgentLoopGuard } from '../agent-core';
 import {
   createAssistantTools,
@@ -15,7 +16,8 @@ vi.mock('@/shared/ipc/assistantApi', async (importOriginal) => ({
   listTools: vi.fn(async () => [])
 }));
 vi.mock('@/shared/ipc/workspaceApi', () => ({
-  readNote: vi.fn()
+  readNote: vi.fn(),
+  searchSegmentsBatch: vi.fn()
 }));
 
 const scope = {
@@ -24,6 +26,114 @@ const scope = {
   tag_ids: [],
   tag_names: []
 };
+
+// Library entries the search may bind to. Selected ids must exist here, or the search stops for clarification.
+const libraryEntries = [
+  { id: 'entry-allowed', title: 'Allowed' },
+  { id: 'entry-other', title: 'Other' }
+] as never;
+
+describe('search_library tool wiring', () => {
+  const emptyBatch = (tasks: Array<{ task_id: string }>) => tasks.map((task) => ({
+    task_id: task.task_id,
+    results: { query: 'q', mode: 'hybrid', index_generation: 1, total_hit_count: 0, entries: [], warnings: [] }
+  }));
+
+  async function runSearchLibraryTool(
+    input: Record<string, unknown>,
+    frozenScope: ScopeSnapshot = scope,
+    legacyScope: ScopeSnapshot = frozenScope
+  ) {
+    const runtime = await createAssistantTools({
+      activeExecution: { agent: DEFAULT_AGENT_RUNTIME_SETTINGS.mainAssistant },
+      availableEntries: libraryEntries,
+      root: 'C:/workspace',
+      retrievalScope: frozenScope,
+      scope: legacyScope,
+      runtimeSettings: DEFAULT_AGENT_RUNTIME_SETTINGS
+    });
+    const execute = runtime.tools.search_library.execute as NonNullable<typeof runtime.tools.search_library.execute>;
+    const output = await execute(input, { toolCallId: 'search-1', messages: [] } as never);
+    return { runtime, output: output as Record<string, unknown> };
+  }
+
+  it('is registered by default for the main assistant', async () => {
+    const runtime = await createAssistantTools({
+      activeExecution: { agent: DEFAULT_AGENT_RUNTIME_SETTINGS.mainAssistant },
+      root: 'C:/workspace',
+      scope,
+      runtimeSettings: DEFAULT_AGENT_RUNTIME_SETTINGS
+    });
+    expect(runtime.toolNames).toContain('search_library');
+  });
+
+  it('defaults to planning and sends one batch call scoped to the frozen selection', async () => {
+    vi.mocked(searchSegmentsBatch).mockReset().mockImplementation(async (_root, tasks) => emptyBatch(tasks));
+    const { output } = await runSearchLibraryTool({ question: '论文 A 使用什么数据集？' });
+
+    // No model is configured in this test, so the planner degrades; the reason proves planning was requested.
+    expect(output.planning).toMatchObject({ status: 'degraded', reason: 'no_model_configured' });
+    expect(searchSegmentsBatch).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(searchSegmentsBatch).mock.calls[0][1]).toEqual([expect.objectContaining({
+      task_id: 'direct',
+      query: '论文 A 使用什么数据集？',
+      mode: 'hybrid',
+      scope_entry_ids: ['entry-allowed']
+    })]);
+  });
+
+  it('turns planning off only for an explicit false', async () => {
+    vi.mocked(searchSegmentsBatch).mockReset().mockImplementation(async (_root, tasks) => emptyBatch(tasks));
+    const { output } = await runSearchLibraryTool({ question: '论文 A 使用什么数据集？', use_planning: false });
+    expect(output.planning).toMatchObject({ status: 'disabled' });
+  });
+
+  it('never searches when the frozen scope is unresolved', async () => {
+    vi.mocked(searchSegmentsBatch).mockReset();
+    const { output } = await runSearchLibraryTool(
+      { question: '论文 A 使用什么数据集？' },
+      { ...scope, scope_intent: 'unresolved' }
+    );
+    expect(searchSegmentsBatch).not.toHaveBeenCalled();
+    expect(String(output.warnings)).toContain('请先明确');
+  });
+
+  it('never searches for an explicit empty scope array', async () => {
+    vi.mocked(searchSegmentsBatch).mockReset();
+    const { output } = await runSearchLibraryTool({ question: '论文 A 使用什么数据集？', scope_entry_ids: [] });
+    expect(searchSegmentsBatch).not.toHaveBeenCalled();
+    expect(output.warnings).toContain('范围内没有可检索条目。');
+  });
+
+  it('searches only the retrieval scope even when the legacy run scope is the whole library', async () => {
+    vi.mocked(searchSegmentsBatch).mockReset().mockImplementation(async (_root, tasks) => emptyBatch(tasks));
+    const legacyLibrary = {
+      entry_ids: ['entry-allowed', 'entry-other'],
+      entry_titles: ['Allowed', 'Other'],
+      tag_ids: [],
+      tag_names: [],
+      scope_intent: 'library' as const
+    };
+    await runSearchLibraryTool({ question: '论文 A 使用什么方法？', use_planning: false }, scope, legacyLibrary);
+    expect(vi.mocked(searchSegmentsBatch).mock.calls[0][1]).toEqual([
+      expect.objectContaining({ scope_entry_ids: ['entry-allowed'] })
+    ]);
+  });
+
+  it('asks for clarification instead of using the legacy scope when no retrieval scope is supplied', async () => {
+    vi.mocked(searchSegmentsBatch).mockReset();
+    const runtime = await createAssistantTools({
+      activeExecution: { agent: DEFAULT_AGENT_RUNTIME_SETTINGS.mainAssistant },
+      root: 'C:/workspace',
+      scope: { entry_ids: [], entry_titles: [], tag_ids: [], tag_names: [], scope_intent: 'library' },
+      runtimeSettings: DEFAULT_AGENT_RUNTIME_SETTINGS
+    });
+    const execute = runtime.tools.search_library.execute as NonNullable<typeof runtime.tools.search_library.execute>;
+    const output = await execute({ question: '论文 A？', use_planning: false }, { toolCallId: 'search-2', messages: [] } as never) as Record<string, unknown>;
+    expect(output.status).toBe('needs_clarification');
+    expect(searchSegmentsBatch).not.toHaveBeenCalled();
+  });
+});
 
 describe('Assistant tool scope', () => {
   it('accepts an Entry inside the frozen scope', () => {

@@ -1,5 +1,24 @@
 # Neuink 开发计划
 
+### 2026-11-04：统一检索工具规划与 BM25 初步诊断
+
+- 新增[统一检索工具补全计划](retrieval-tool-completion-plan.md)，说明问题分析、范围解析、论文级与片段级候选召回及按需补查的待实施设计。
+- 新增[章节感知 BM25 初步诊断](section-aware-bm25-diagnostic.md)。当前仅完成小样本关键词离线对照；标注尚未人工确认，章节权重候选未在独立留出集、混合检索或原生助手入口验收，不改变生产排序。
+
+### 2026-11-03：BookRAG Lite 检索实施记录（生产默认保持 Legacy，章节重排关闭）
+
+- 共享检索入口位于 `crates/neuink-search/src/retrieval_pipeline.rs`（`recall_candidates`、`fuse_query_candidates`、`finalize_candidates`）。IPC 与 bench 共用同一路径。候选窗口为 `max(5K, 60)`，K 截到 200。过滤先于截断，最终 K 只截断一次。
+- 同分候选以 `hit_identity` 作最终 tie-break，修复候选尾部随 HashMap 顺序漂移的问题。RRF 未改。References 只在 finalize 阶段乘 0.35 一次；显式 section_filter（ID 或路径）豁免。
+- 缓存索引格式 v6，表示版本 1，身份为模型内容 blake3、维度与表示版本。译文、boost、显示标签不进入稳定键。章节完整性不足时整题旁路。前端 section 身份按 Entry 限定。
+- 数据：Qasper 原始 dev 1005 题，按哈希划分 select 140 篇（455 题）与 gate 141 篇（467 题）。整题排除（不保留部分 qrels）。float 只按 caption 文本匹配，不证明表内容理解。
+- 冻结结果：select 阶段一赢家 H1；章节最佳 B 的两指标平均增益 0.0013，低于 0.005，章节重排保持关闭。Qasper gate 与 test 的 evaluator 均选中 H1，`reselected` 为 false。test 结果已标注为事后分析的冻结评估。
+- 回归：SciFact 中 H1 点估计通过，Semantic 诊断项失败。COVID（本地中文，非 TREC-COVID）中 H1 相对 Legacy 的 nDCG@10 与 R@10 点估计均失败（−0.019178，−0.013172）。因此生产默认保持 `Legacy`、alpha 0。未挑选 H2 或 H3，未做语言路由。H1 在 Qasper test 的 Overall 双指标为正，这一结果不改变默认。
+- 确定性：两进程比较 select 6 方法 × 455 题的 raw 与 candidate 字段，零差异（证明 `D:\neuink-orchestration\bookrag-v5-determinism-proof.json`）。
+- 测试：`neuink-search` 52 通过（默认）与 53 通过（local-embedding），IPC search 9 通过，parser 单元 40 与集成 2 通过，前端 418 文件、2996 项通过，3 项跳过。
+- 成本协议为固定机器与线程、单方法独立进程、warm 1 次预热加 3 次计时，结果为当前单机有效观测；不保证其他机器或负载下的普适性。冷构建墙钟按 watcher process_start 到 observed_finish 计算，两次冷构建与 COVID 预构建重叠，因此冷构建数值不作隔离比较。
+- 未验收与限制：原生 Tauri UI 未验收（用户物理停止）；IPC 真实原地模型替换无端到端测试；语义索引缺少 limit 1 加高分候选的组合断言；ORT 线程调度未观测。
+- 冻结报告：`D:\neuink-orchestration\bookrag-lite-acceptance.md`；状态 `D:\neuink-orchestration\bookrag-acceptance-state.json`；索引 `D:\neuink-orchestration\bookrag-live-handoff.md`。
+
 ### 2026-10-22：阅读交互与助手改进从 beta 合并到 main
 
 - 按用户明确要求，先提交并推送 beta，再将其合并到 main。纳入 PDF 空格拖动、以中心为锚点的动态滚轮缩放与 1% 微调、译文添加高亮批注、逐句翻译与联动、离线词库、标签合并、助手执行和设置改进，以及使用既有资料的开发启动脚本。
@@ -1589,3 +1608,30 @@ Hover 即时反馈（2026-09-17）：按用户要求删除 PDF 600ms 冷却、�
 - 复用执行详情：生成期间显示最近 220 字的两行预览，点击或键盘展开查看已返回全文，完成后收起预览并保留入口。思考置于详情首位，沿用既有消息 parts 保存；答复重置不清除思考，取消后忽略迟到内容。
 - 状态仍归运行控制器和消息所有，单条详情自己持有展开状态；聊天列表负责外层滚动，展开详情保留 256px 内层滚动。复用共享 Button、语义色和原有键盘操作，没有新增拖动方式或依赖。ChatMessage 仅传递已有派生内容并调整原区块顺序，未增加其业务状态。
 - 验证：协议、消息组件、运行控制器及本地 Agent runner 共 64 项测试通过，TypeScript 检查通过。浏览器隔离演示核对正常／生成中／错误、无思考、展开收起、Enter 操作、窄面板及 125% 缩放，长思考无横向溢出，详情高度受限。未调用真实模型；原生 Tauri 视觉验收未完成。改动仅在 beta 工作区，未提交、合并或打包，现有便携版尚不包含此功能。
+
+## 2026-10-22：本地检索排序、助手证据多样化与增量对话记忆
+
+- 关键词索引由无长度归一化的 TF-IDF 改为 Okapi BM25（k1=1.2、b=0.75）。分段 boost 同时计入词频与文档长度（BM25F），文档 boost 乘在最终分数上；保留原匹配覆盖率系数、CJK 双字切分和摘要逻辑。长页面不再因体量压过聚焦片段，单词重复受 k1 饱和。
+- 修复助手 `search_segments` 与“构建向量索引”片段范围不一致：前者含笔记，后者不含，语义缓存命名空间永不命中，混合检索始终退回关键词。两处统一取 `search_scope_options(true)`（片段 + 锚定笔记/批注）；片段向量索引因此多嵌入笔记，需重新构建一次。
+- `search_segments` 工具结果先按全局分数重排，再用 MMR（λ=0.7，词集 Jaccard，CJK 双字）选取 12 条；同一片段的正文、片段笔记、批注合并为一个来源，相似度 ≥0.9 的近重复不再占用名额。纯函数位于 `sdk/evidenceDiversity.ts`。
+- 对话记忆检查点改为 Mem0 式增量操作：已有条目以 d/o/e/p 编号提供给模型，模型返回 ADD/UPDATE/DELETE/NONE，由宿主确定性应用；未提及条目保留，近重复 ADD 改写原条目，超限时先淘汰最旧项。兼容仍返回整份列表的模型；`AssistantConversationMemory` 存储形状不变，旧会话可直接读取。
+- 验证：neuink-search 18 项、neuink-ipc 289 项（28 项既有忽略）、neuink-workspace 145 项（4 项既有忽略）通过；TypeScript 检查与前端全量 2981 项通过。新增 BM25 排序/饱和、片段范围一致性、MMR 与记忆操作测试。未调用真实模型，未用真实资料对比检索质量，原生 Tauri 验收未完成；改动未提交。
+
+## 2026-11-14：双通道视觉旁路（页面/区域 + MinerU 资产同步）
+
+- 文档级路由：新增 `document_head`（head 20 / cap 20，点名论文单独传入不被 cap 丢弃）、`carrier_binding`（唯一编号才收窄，未编号/多编号只报告）、`unified_retrieval`（路由 → 视觉投票 → 文档头 → 载体 → 证据，子问题只进证据层，路由为空不扩散）。
+- 视觉通道固定 Qwen3-VL-Embedding-2B，两种传输：`qwen_local`（默认 `http://127.0.0.1:8765`，`.no_proxy()`）与 `qwen_api`（https + 只写密钥）。随包 fastembed 视觉编码停用，旧设置值经 `Retired` 承接并拒绝运行。
+- **页面与区域来自原生 PDF，图表资产来自 MinerU，同进一个快照**：`VisualSourceKind::{Page,Region,Figure,Table}`，页面与四个 region 共享 `page:{idx}` 父级（一页一票、region 取最大），资产按 `asset:` 独立投票。栅格化在本地服务内完成（`/embed_pages`），产品不存页面位图，Rust 不引入 PDF 库；`qwen_api` 无页面源。
+- 融合参数恢复为设置项：`append_gated`（默认，文本顺序不变、门控打开才追加）与 `weighted`，含权重、RRF k、门控阈值；`RoutingStage.visual_gate_open` 暴露门控结果。
+- 资产持久化：MinerU ZIP 的 `images/**` 落盘 `<entry>/assets/`（zip-slip/符号链接/超限校验、原子发布、blake3 清单幂等），并新增 `backfill_entry_assets` 从已存 `full.zip` 回填旧库。
+- 验证：`neuink-search` 109、`neuink-workspace` 161、`neuink-ipc commands::search` 24、回填 4、`tsc --noEmit` 通过、前端 3110 项通过（3 跳过）。
+- 未完成：本地 Qwen 服务脚本（`/health`、`/embed`、`/embed_pages` + PyMuPDF）、设置页 UI 与下载引导、原生端到端验收。视觉通道在无服务时报 `model_unavailable`，不影响文本检索。
+
+## 2026-11-14：图表资产改为从已存 MinerU ZIP 直读（取代落盘副本与回填）
+
+- 判定：图片字节是纯派生数据，`full.zip` 已有唯一一份，不应再复制到 `<entry>/assets/`。
+- 移除：`assets/` 目录、`assets.manifest.json`、`import_entry_assets_from_zip`、`backfill_entry_assets` 命令、`AssetBudgetExceeded`/`AssetSymlink` 错误、`entry_assets_dir`/`entry_assets_manifest_file` 布局函数，以及 MinerU 导入路径中的复制步骤。
+- 改为：`collect_entry_visual_assets` / `entry_asset_bytes` 只读 zip；逐文件限 32 MiB，非白名单扩展名与危险路径跳过，未知 scope 条目仍报错。
+- 效果：老库与新库行为一致，无需迁移；磁盘不再翻倍；写盘与迁移代码整体消失。
+- 视觉快照陈旧检测不变：重开时比对完整文档集合（含 PDF 与图片内容哈希），任何源变化自动报 `index_missing`。
+- 验证：`neuink-workspace` 156（资产 7 项）、`neuink-ipc commands::search` 38、`tsc --noEmit` 通过。

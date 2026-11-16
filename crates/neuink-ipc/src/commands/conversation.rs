@@ -46,6 +46,10 @@ pub struct ScopeSnapshot {
     pub entry_ids: Vec<EntryId>,
     #[serde(default)]
     pub entry_titles: Vec<String>,
+    /// Host scope intent: "library", "selection", or "unresolved". Absent in legacy
+    /// snapshots. The TypeScript side interprets it; Rust only stores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope_intent: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -630,6 +634,88 @@ mod tests {
             .expect("read index after delete")
             .is_empty());
 
+        fs::remove_dir_all(root).expect("remove test workspace");
+    }
+
+    #[test]
+    fn scope_snapshot_roundtrips_scope_intent_and_accepts_legacy_snapshots() {
+        let snapshot: ScopeSnapshot = serde_json::from_value(json!({
+            "tag_ids": [],
+            "tag_names": [],
+            "entry_ids": ["paper-a"],
+            "entry_titles": ["Paper A"],
+            "scope_intent": "selection"
+        }))
+        .expect("current snapshot deserializes");
+        assert_eq!(snapshot.scope_intent.as_deref(), Some("selection"));
+
+        let value = serde_json::to_value(&snapshot).expect("serialize current snapshot");
+        assert_eq!(value["scope_intent"], "selection");
+        assert_eq!(value["entry_ids"], json!(["paper-a"]));
+        let decoded: ScopeSnapshot = serde_json::from_value(value).expect("roundtrip");
+        assert_eq!(decoded.scope_intent.as_deref(), Some("selection"));
+        assert_eq!(decoded.entry_ids, snapshot.entry_ids);
+        assert_eq!(decoded.entry_titles, snapshot.entry_titles);
+
+        let legacy: ScopeSnapshot = serde_json::from_value(json!({
+            "tag_ids": [],
+            "entry_ids": ["paper-a"]
+        }))
+        .expect("legacy snapshot without scope_intent deserializes");
+        assert_eq!(legacy.scope_intent, None);
+        let legacy_value = serde_json::to_value(&legacy).expect("serialize legacy snapshot");
+        assert!(legacy_value.get("scope_intent").is_none());
+        assert_eq!(legacy_value["entry_ids"], json!(["paper-a"]));
+    }
+
+    #[test]
+    fn persisted_scope_intent_survives_index_and_file_round_trips() {
+        let root = test_workspace_root();
+        Workspace::create(&root).expect("create workspace");
+        let created = create_conversation(CreateConversationRequest {
+            root: root.clone(),
+            title: "Scoped conversation".to_string(),
+            scope_snapshot: ScopeSnapshot {
+                scope_intent: Some("library".to_string()),
+                ..ScopeSnapshot::default()
+            },
+        })
+        .expect("create conversation");
+
+        let loaded = load_conversation(ConversationRequest {
+            root: root.clone(),
+            conversation_id: created.id.clone(),
+        })
+        .expect("load conversation");
+        assert_eq!(
+            loaded.scope_snapshot.scope_intent.as_deref(),
+            Some("library")
+        );
+        let listed = list_conversations(RootRequest { root: root.clone() }).expect("list");
+        assert_eq!(
+            listed[0].scope_snapshot.scope_intent.as_deref(),
+            Some("library")
+        );
+
+        // A conversation file written before scope_intent existed must load with the intent unset.
+        let layout = WorkspaceLayout::new(root.clone());
+        let path = conversation_file(&layout, &created.id);
+        let mut raw: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).expect("read conversation file"))
+                .expect("parse conversation file");
+        raw["scope_snapshot"]
+            .as_object_mut()
+            .expect("scope snapshot object")
+            .remove("scope_intent");
+        fs::write(&path, serde_json::to_vec(&raw).expect("encode legacy file"))
+            .expect("write legacy conversation file");
+
+        let legacy = load_conversation(ConversationRequest {
+            root: root.clone(),
+            conversation_id: created.id,
+        })
+        .expect("load legacy conversation");
+        assert_eq!(legacy.scope_snapshot.scope_intent, None);
         fs::remove_dir_all(root).expect("remove test workspace");
     }
 

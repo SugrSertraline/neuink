@@ -1,11 +1,10 @@
-use neuink_search::{EmbeddingProvider, EmbeddingProviderStatus, FastEmbedProvider};
+use neuink_search::EmbeddingProviderStatus;
 
-use super::embedding_resources::embedding_model_dir;
+use super::search::text_provider_for_app;
 
 #[tauri::command]
 pub fn get_embedding_status<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
 ) -> Result<EmbeddingProviderStatus, String> {
-    let model_dir = embedding_model_dir(&app)?;
-    Ok(FastEmbedProvider::from_model_dir(model_dir).status())
+    Ok(text_provider_for_app(&app)?.status())
 }

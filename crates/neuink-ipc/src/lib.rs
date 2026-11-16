@@ -124,6 +124,7 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
             commands::assistant::get_assistant_context_snapshot,
             commands::assistant::read_entry_assistant_context,
             commands::assistant::read_segment_content,
+            commands::assistant::get_entry_outline,
             commands::conversation::list_conversations,
             commands::conversation::load_conversation,
             commands::conversation::delete_conversation,
@@ -153,6 +154,32 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
             commands::search::rebuild_search_index,
             commands::search::search_entries,
             commands::search::search_segments,
+            commands::search::search_segments_batch,
+            commands::search::search_unified,
+            commands::search::prepare_visual_search_index,
+            commands::search::get_visual_index_status,
+            commands::search::get_visual_embedding_settings,
+            commands::search::save_visual_embedding_settings,
+            commands::search::get_rerank_settings,
+            commands::search::list_installed_rerank_models,
+            commands::search::save_rerank_settings,
+            commands::search::get_retrieval_settings,
+            commands::search::save_retrieval_settings,
+            commands::search::list_text_models,
+            commands::search::get_text_model_settings,
+            commands::search::save_text_model_settings,
+            commands::search::test_text_embedding_connection,
+            commands::search::list_recommended_text_models,
+            commands::search::install_recommended_text_model,
+            commands::search::list_recommended_visual_models,
+            commands::search::get_visual_runtime_state,
+            commands::search::install_visual_runtime,
+            commands::search::download_visual_weights,
+            commands::search::get_visual_service_status,
+            commands::search::start_visual_service,
+            commands::search::list_recommended_rerank_models,
+            commands::search::install_recommended_rerank_model,
+            commands::search::run_retrieval_self_check,
             commands::tag::create_tag,
             commands::tag::delete_tag,
             commands::tag::rename_tag,
@@ -187,3 +214,13 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
         handler(invoke)
     })
 }
+
+
+
+
+
+
+
+
+
+

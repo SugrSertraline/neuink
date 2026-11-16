@@ -8,6 +8,75 @@ pub fn tokenize_unique(text: &str) -> Vec<String> {
     seen.into_iter().collect()
 }
 
+/// Only the query changes. Preserve all-stopword queries and CJK tokens.
+pub fn tokenize_content_query(text: &str) -> Vec<String> {
+    let original = tokenize_unique(text);
+    let filtered = original
+        .iter()
+        .filter(|term| !is_english_stopword(term))
+        .cloned()
+        .collect::<Vec<_>>();
+    if filtered.is_empty() {
+        original
+    } else {
+        filtered
+    }
+}
+
+fn is_english_stopword(term: &str) -> bool {
+    matches!(
+        term,
+        "a" | "an"
+            | "and"
+            | "are"
+            | "as"
+            | "at"
+            | "be"
+            | "been"
+            | "being"
+            | "by"
+            | "can"
+            | "could"
+            | "did"
+            | "do"
+            | "does"
+            | "for"
+            | "from"
+            | "had"
+            | "has"
+            | "have"
+            | "how"
+            | "if"
+            | "in"
+            | "into"
+            | "is"
+            | "it"
+            | "its"
+            | "of"
+            | "on"
+            | "or"
+            | "that"
+            | "the"
+            | "their"
+            | "these"
+            | "they"
+            | "this"
+            | "those"
+            | "to"
+            | "was"
+            | "were"
+            | "what"
+            | "when"
+            | "where"
+            | "which"
+            | "who"
+            | "why"
+            | "will"
+            | "with"
+            | "would"
+    )
+}
+
 pub fn tokenize(text: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut latin = String::new();

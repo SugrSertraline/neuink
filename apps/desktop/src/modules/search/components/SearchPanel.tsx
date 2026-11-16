@@ -22,10 +22,12 @@ import { useToast } from '@/shared/hooks/useToast';
 
 import { useEmbeddingStatus } from '../hooks/useEmbeddingStatus';
 import { useGlobalSearch } from '../hooks/useGlobalSearch';
+import { useBilingualSearchQuery } from '../hooks/useBilingualSearchQuery';
 import { useSearchIndexStatus } from '../hooks/useSearchIndexStatus';
 import { EmbeddingStatusLine } from './EmbeddingStatusLine';
 import { SearchIndexStatusLine } from './SearchIndexStatusLine';
 import { SearchModeControl } from './SearchModeControl';
+import { VisualIndexControl } from './VisualIndexControl';
 import { SearchResultList } from './SearchResultList';
 import { AppearanceCommand, isAppearanceCommand } from './AppearanceCommand';
 
@@ -41,11 +43,22 @@ export function SearchPanel({ buildStatus = null, root, status, onOpenResult, on
   const [query, setQuery] = useState('');
   const appearanceCommand = isAppearanceCommand(query);
   const [mode, setMode] = useState<SearchMode>('hybrid');
+  const [bilingualSearchEnabled, setBilingualSearchEnabled] = useState(false);
   const [hoverPreviewEnabled, setHoverPreviewEnabled] = useState(true);
   const [rebuildRequested, setRebuildRequested] = useState(false);
   const [buildConfirmOpen, setBuildConfirmOpen] = useState(false);
   const { notify } = useToast();
-  const { busy, error, results } = useGlobalSearch({ root, status, query: appearanceCommand ? '' : query, mode });
+  const { available: bilingualAvailable, busy: bilingualBusy, englishQuery } = useBilingualSearchQuery(
+    query,
+    bilingualSearchEnabled
+  );
+  const { busy, error, results } = useGlobalSearch({
+    root,
+    status,
+    query: appearanceCommand ? '' : query,
+    englishQuery,
+    mode
+  });
   const semanticMode = mode === 'hybrid' || mode === 'semantic';
   const { embeddingError, embeddingStatus } = useEmbeddingStatus(
     semanticMode && Boolean(root) && status === 'ready'
@@ -100,7 +113,6 @@ export function SearchPanel({ buildStatus = null, root, status, onOpenResult, on
     setBuildConfirmOpen(false);
     void rebuildVectors();
   };
-
   return (
     <aside className="app-sidebar">
       <div className="side-head">
@@ -145,6 +157,20 @@ export function SearchPanel({ buildStatus = null, root, status, onOpenResult, on
                 )}
                 悬停预览
               </Button>
+              {bilingualAvailable ? (
+                <Button
+                  aria-pressed={bilingualSearchEnabled}
+                  className="shrink-0"
+                  size="xs"
+                  title="使用已配置的助手模型把中文查询扩展为英文学术检索词"
+                  type="button"
+                  variant={bilingualSearchEnabled ? 'secondary' : 'ghost'}
+                  onClick={() => setBilingualSearchEnabled((enabled) => !enabled)}
+                >
+                  {bilingualBusy ? <Loader2 className="animate-spin" size={12} aria-hidden="true" /> : null}
+                  AI 双语扩展
+                </Button>
+              ) : null}
               <SearchModeControl
                 disabled={!root || status !== 'ready'}
                 mode={mode}
@@ -187,6 +213,7 @@ export function SearchPanel({ buildStatus = null, root, status, onOpenResult, on
               </Button>
             ) : null}
           </div>
+          <VisualIndexControl className="mt-1" enabled={semanticMode} root={root} status={status} />
           {buildStatus?.state === 'queued' || buildStatus?.state === 'running' ? (
             <Progress
               aria-label="向量索引构建进度"

@@ -130,6 +130,62 @@ describe('mergeScopeWithContextEntries', () => {
   });
 });
 
+describe('scope intent', () => {
+  it('marks a run with no selection as library intent, while keeping entry ids for legacy readers', () => {
+    const result = buildAssistantScope({
+      activeEntry: null, activeTag: null, selectedTagIds: [], tags: [],
+      entries: [entry('paper-a', []), entry('paper-b', [])]
+    });
+    expect(result.scope_intent).toBe('library');
+    expect(result.entry_ids).toEqual(['paper-a', 'paper-b']);
+  });
+
+  it('marks an explicit empty Tag as selection with no entries, not library', () => {
+    const result = buildAssistantScope({
+      activeEntry: null, activeTag: null, selectedTagIds: ['empty'], tags: [tag('empty', 'Empty')],
+      entries: [entry('paper-a', ['other'])]
+    });
+    expect(result).toMatchObject({ scope_intent: 'selection', entry_ids: [] });
+  });
+
+  it('marks a Tag that no longer exists as unresolved', () => {
+    const result = buildAssistantScope({
+      activeEntry: null, activeTag: null, selectedTagIds: ['gone'], tags: [],
+      entries: [entry('paper-a', [])]
+    });
+    expect(result.scope_intent).toBe('unresolved');
+  });
+
+  it('marks a mention of a deleted Entry as unresolved and keeps the existing mentions', () => {
+    const result = buildConversationMentionScope({
+      entries: [entry('destination', [])], tags: [],
+      messages: [{ message_id: 'user', role: 'user', content: 'x', created_at: '', source_links: [],
+        parts: [{ type: 'context-snapshot', items: [], composer: { text: 'x', mentions: [{
+          charOffset: 0, entryId: 'deleted', entryTitle: 'Deleted', id: 'entry:deleted', kind: 'entry', label: 'Deleted', marker: '[C1]'
+        }] } }] }]
+    });
+    expect(result.scope_intent).toBe('unresolved');
+    expect(result.entry_ids).toEqual([]);
+  });
+
+  it('never widens a selection when merged with a library scope, and never widens an unresolved one', () => {
+    const selected = { ...scope([], ['paper-a']), scope_intent: 'selection' as const };
+    const library = { ...scope([], ['paper-a', 'paper-b']), scope_intent: 'library' as const };
+    const unresolved = { ...scope([], []), scope_intent: 'unresolved' as const };
+    expect(mergeScopeWithContextEntries(selected, { items: [] })).toEqual(selected);
+    expect(assistantRunBaseScope({ currentScope: library, conversationScope: selected }).scope_intent).toBe('library');
+    expect(assistantRunBaseScope({ currentScope: unresolved, conversationScope: selected }).scope_intent).toBe('unresolved');
+  });
+
+  it('narrows a legacy unscoped run to attached composer papers', () => {
+    const result = mergeScopeWithContextEntries(
+      { ...scope([], []) },
+      { items: [{ addedAt: '', entryId: 'paper-a', entryTitle: 'A', id: 'entry:paper-a', kind: 'entry' }] }
+    );
+    expect(result).toMatchObject({ entry_ids: ['paper-a'], scope_intent: 'selection' });
+  });
+});
+
 function scope(tag_ids: string[], entry_ids: string[]) {
   return { entry_ids, entry_titles: entry_ids, tag_ids, tag_names: tag_ids };
 }

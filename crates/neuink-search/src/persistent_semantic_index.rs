@@ -2,24 +2,34 @@ use std::{
     cmp::Ordering,
     collections::{BTreeMap, HashMap},
     fs,
-    hash::{DefaultHasher, Hash, Hasher},
     path::{Path, PathBuf},
+    sync::OnceLock,
 };
 
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    EmbeddingInput, EmbeddingProvider, SearchDocument, SearchDocumentSourceKind, SearchEntryGroup,
-    SearchError, SearchHit, SearchInclude, SearchMode, SearchQuery, SearchResult, SearchResults,
-    SearchTarget, SearchTextSection,
+use crate::embedding_representation::{
+    embed_query_vector, embedding_text, included_by_query, matches_semantic_document,
+    normalize_embedding_vector as normalize, semantic_embedding_identity, stable_document_key,
+    validate_embedding_vector, validate_embedding_vectors, SemanticVectorDocument,
+    EMBEDDING_REPRESENTATION_VERSION,
 };
 
-const INDEX_FORMAT_VERSION: u32 = 3;
+use crate::{
+    adaptive_hybrid_weights, weighted_reciprocal_rank_fusion, EmbeddingInput, EmbeddingProvider,
+    SearchDocument, SearchEntryGroup, SearchError, SearchHit, SearchInclude, SearchMode,
+    SearchQuery, SearchResult, SearchResults, SearchTarget,
+};
+
+pub const INDEX_FORMAT_VERSION: u32 = 6;
+pub const SEMANTIC_INDEX_FORMAT_VERSION: u32 = INDEX_FORMAT_VERSION;
 
 #[derive(Debug)]
 pub struct PersistentSemanticSearchIndex {
     documents: Vec<PersistentSemanticDocument>,
+    embedding_identity: Option<String>,
+    chapters: OnceLock<crate::ChapterCentroids>,
 }
 
 impl PersistentSemanticSearchIndex {
@@ -42,13 +52,33 @@ impl PersistentSemanticSearchIndex {
 
     /// Opens the index from disk only when the cached snapshot matches the
     /// current fingerprint. Never embeds documents or writes to disk.
+    /// The caller must bind the path namespace to the model identity. Prefer
+    /// `open_cached_with_identity` when a provider is available.
     pub fn open_cached(
         path: impl AsRef<Path>,
         documents: &[SearchDocument],
         include: &SearchInclude,
         fingerprint: u64,
     ) -> SearchResult<Option<Self>> {
-        Self::try_open(path.as_ref(), documents, include, fingerprint)
+        Self::try_open(path.as_ref(), documents, include, fingerprint, None)
+    }
+
+    /// Verifies the model contents as well as the document fingerprint without
+    /// running embedding inference or changing the snapshot.
+    pub fn open_cached_with_identity(
+        path: impl AsRef<Path>,
+        documents: &[SearchDocument],
+        include: &SearchInclude,
+        fingerprint: u64,
+        embedding_identity: &str,
+    ) -> SearchResult<Option<Self>> {
+        Self::try_open(
+            path.as_ref(),
+            documents,
+            include,
+            fingerprint,
+            Some(embedding_identity),
+        )
     }
 
     pub fn open_or_build_with_progress(
@@ -60,13 +90,18 @@ impl PersistentSemanticSearchIndex {
         on_progress: &dyn Fn(usize, usize),
     ) -> SearchResult<Self> {
         let path = path.as_ref();
-        if let Some(index) = Self::try_open(path, documents, include, fingerprint)? {
-            let total = index.document_count();
-            on_progress(total, total);
-            return Ok(index);
+        let identity = semantic_embedding_identity(provider);
+        if let Some(identity) = identity.as_deref() {
+            if let Some(index) =
+                Self::try_open(path, documents, include, fingerprint, Some(identity))?
+            {
+                let total = index.document_count();
+                on_progress(total, total);
+                return Ok(index);
+            }
         }
 
-        let cached_vectors = Self::read_cached_vectors(path)?;
+        let cached_vectors = Self::read_cached_vectors(path, identity.as_deref())?;
         let index = Self::build_reusing(documents, provider, include, cached_vectors, on_progress)?;
         index.persist(path, fingerprint)?;
         Ok(index)
@@ -110,6 +145,7 @@ impl PersistentSemanticSearchIndex {
                 on_progress(reused + completed, total);
             })?
         };
+        validate_embedding_vectors(&vectors, missing_inputs.len(), provider.status().dimensions)?;
         by_id.extend(
             missing_inputs
                 .into_iter()
@@ -119,11 +155,28 @@ impl PersistentSemanticSearchIndex {
 
         Ok(Self {
             documents: semantic_documents_from_vectors(documents, include, by_id),
+            embedding_identity: semantic_embedding_identity(provider),
+            chapters: OnceLock::new(),
         })
     }
 
     pub fn document_count(&self) -> usize {
         self.documents.len()
+    }
+
+    /// Borrows existing normalized document vectors; no inference or copying.
+    pub fn vector_documents(&self) -> impl Iterator<Item = SemanticVectorDocument<'_>> {
+        self.documents.iter().map(|indexed| SemanticVectorDocument {
+            document: &indexed.document,
+            vector: &indexed.vector,
+        })
+    }
+
+    /// Section vectors are derived once from the immutable document snapshot.
+    /// Repeated queries reuse both paragraph and section vectors.
+    pub fn chapter_centroids(&self) -> &crate::ChapterCentroids {
+        self.chapters
+            .get_or_init(|| crate::ChapterCentroids::from_vectors(self.vector_documents()))
     }
 
     pub fn search(
@@ -135,23 +188,36 @@ impl PersistentSemanticSearchIndex {
         warnings: Vec<String>,
         index_generation: u64,
     ) -> SearchResult<SearchResults> {
-        let query_vector = provider
-            .embed(&[EmbeddingInput {
-                id: "query".to_string(),
-                text: normalized_query.to_string(),
-            }])?
-            .into_iter()
-            .next()
-            .map(|vector| normalize(vector.values))
-            .unwrap_or_default();
+        let query_vector = embed_query_vector(provider, normalized_query)?;
+        self.search_with_vector(
+            query,
+            normalized_query,
+            &query_vector,
+            result_mode,
+            warnings,
+            index_generation,
+        )
+    }
+
+    pub fn search_with_vector(
+        &self,
+        query: &SearchQuery,
+        normalized_query: &str,
+        query_vector: &[f32],
+        result_mode: impl Into<String>,
+        warnings: Vec<String>,
+        index_generation: u64,
+    ) -> SearchResult<SearchResults> {
+        validate_embedding_vector(
+            query_vector,
+            self.documents.first().map(|indexed| indexed.vector.len()),
+        )?;
+        let query_vector = normalize(query_vector.to_vec());
 
         let mut hits = self
             .documents
             .par_iter()
-            .filter(|indexed| {
-                query.scope.contains_entry(&indexed.document.entry_id)
-                    && included_by_query(&query.include, indexed.document.source.kind)
-            })
+            .filter(|indexed| matches_semantic_document(query, &indexed.document))
             .filter_map(|indexed| {
                 let score = dot_product(&query_vector, &indexed.vector);
                 if !score.is_finite() {
@@ -186,6 +252,7 @@ impl PersistentSemanticSearchIndex {
         documents: &[SearchDocument],
         include: &SearchInclude,
         fingerprint: u64,
+        expected_identity: Option<&str>,
     ) -> SearchResult<Option<Self>> {
         if !path.is_file() {
             return Ok(None);
@@ -195,7 +262,13 @@ impl PersistentSemanticSearchIndex {
         let Ok(snapshot) = serde_json::from_slice::<PersistedSemanticIndex>(&bytes) else {
             return Ok(None);
         };
-        if snapshot.version != INDEX_FORMAT_VERSION || snapshot.fingerprint != fingerprint {
+        if snapshot.version != SEMANTIC_INDEX_FORMAT_VERSION
+            || snapshot.representation_version != EMBEDDING_REPRESENTATION_VERSION
+            || snapshot.fingerprint != fingerprint
+            || expected_identity
+                .is_some_and(|identity| snapshot.embedding_identity.as_deref() != Some(identity))
+            || !snapshot.valid_vectors()
+        {
             return Ok(None);
         }
 
@@ -204,12 +277,28 @@ impl PersistentSemanticSearchIndex {
             .into_iter()
             .map(|record| (record.id, record.vector))
             .collect::<HashMap<_, _>>();
+        let indexed_documents = semantic_documents_from_vectors(documents, include, vectors);
+        let expected_count = documents
+            .iter()
+            .filter(|document| included_by_query(include, document.source.kind))
+            .count();
+        if indexed_documents.len() != expected_count {
+            return Ok(None);
+        }
         Ok(Some(Self {
-            documents: semantic_documents_from_vectors(documents, include, vectors),
+            documents: indexed_documents,
+            embedding_identity: snapshot.embedding_identity,
+            chapters: OnceLock::new(),
         }))
     }
 
-    fn read_cached_vectors(path: &Path) -> SearchResult<HashMap<String, Vec<f32>>> {
+    fn read_cached_vectors(
+        path: &Path,
+        identity: Option<&str>,
+    ) -> SearchResult<HashMap<String, Vec<f32>>> {
+        let Some(identity) = identity else {
+            return Ok(HashMap::new());
+        };
         if !path.is_file() {
             return Ok(HashMap::new());
         }
@@ -217,7 +306,11 @@ impl PersistentSemanticSearchIndex {
         let Ok(snapshot) = serde_json::from_slice::<PersistedSemanticIndex>(&bytes) else {
             return Ok(HashMap::new());
         };
-        if snapshot.version != INDEX_FORMAT_VERSION {
+        if snapshot.version != SEMANTIC_INDEX_FORMAT_VERSION
+            || snapshot.representation_version != EMBEDDING_REPRESENTATION_VERSION
+            || snapshot.embedding_identity.as_deref() != Some(identity)
+            || !snapshot.valid_vectors()
+        {
             return Ok(HashMap::new());
         }
         Ok(snapshot
@@ -233,8 +326,15 @@ impl PersistentSemanticSearchIndex {
         }
 
         let snapshot = PersistedSemanticIndex {
-            version: INDEX_FORMAT_VERSION,
+            version: SEMANTIC_INDEX_FORMAT_VERSION,
             fingerprint,
+            representation_version: EMBEDDING_REPRESENTATION_VERSION,
+            embedding_identity: self.embedding_identity.clone(),
+            dimensions: self
+                .documents
+                .first()
+                .map(|indexed| indexed.vector.len())
+                .unwrap_or_default(),
             records: self
                 .documents
                 .iter()
@@ -248,9 +348,6 @@ impl PersistentSemanticSearchIndex {
             .map_err(|error| SearchError::VectorIndexIo(error.to_string()))?;
         let tmp = tmp_path(path);
         fs::write(&tmp, bytes).map_err(io_error)?;
-        if path.exists() {
-            fs::remove_file(path).map_err(io_error)?;
-        }
         fs::rename(tmp, path).map_err(io_error)?;
         Ok(())
     }
@@ -268,7 +365,21 @@ struct PersistentSemanticDocument {
 struct PersistedSemanticIndex {
     version: u32,
     fingerprint: u64,
+    #[serde(default)]
+    representation_version: u32,
+    #[serde(default)]
+    embedding_identity: Option<String>,
+    #[serde(default)]
+    dimensions: usize,
     records: Vec<PersistedSemanticRecord>,
+}
+
+impl PersistedSemanticIndex {
+    fn valid_vectors(&self) -> bool {
+        self.records
+            .iter()
+            .all(|record| validate_embedding_vector(&record.vector, Some(self.dimensions)).is_ok())
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -302,29 +413,25 @@ pub fn merge_hybrid_results(
 ) -> SearchResults {
     let keyword_hits = flatten_hits(keyword_results);
     let semantic_hits = flatten_hits(semantic_results);
-    let mut scored = Vec::<(String, SearchHit, f32)>::new();
-
-    for (rank, hit) in keyword_hits.into_iter().enumerate() {
-        let key = hit_key(&hit);
-        scored.push((key, hit, 1.0 / (60.0 + rank as f32 + 1.0)));
+    let top_keyword_terms = keyword_hits.first().map(|hit| hit.matched_terms.as_slice());
+    let (keyword_weight, semantic_weight) = adaptive_hybrid_weights(&query, top_keyword_terms);
+    let keyword_keys = keyword_hits.iter().map(hit_key).collect::<Vec<_>>();
+    let semantic_keys = semantic_hits.iter().map(hit_key).collect::<Vec<_>>();
+    let fused = weighted_reciprocal_rank_fusion(
+        &[keyword_keys, semantic_keys],
+        &[keyword_weight, semantic_weight],
+        60.0,
+    );
+    let mut hit_by_key = BTreeMap::<String, SearchHit>::new();
+    for hit in keyword_hits.into_iter().chain(semantic_hits) {
+        hit_by_key.entry(hit_key(&hit)).or_insert(hit);
     }
-
-    for (rank, hit) in semantic_hits.into_iter().enumerate() {
-        let key = hit_key(&hit);
-        scored.push((key, hit, 1.0 / (60.0 + rank as f32 + 1.0)));
-    }
-
-    let mut by_key = BTreeMap::<String, (SearchHit, f32)>::new();
-    for (key, hit, score) in scored {
-        let entry = by_key.entry(key).or_insert((hit, 0.0));
-        entry.1 += score;
-    }
-
-    let mut hits = by_key
-        .into_values()
-        .map(|(mut hit, score)| {
+    let mut hits = fused
+        .into_iter()
+        .filter_map(|(key, score)| {
+            let mut hit = hit_by_key.remove(&key)?;
             hit.score = score;
-            hit
+            Some(hit)
         })
         .collect::<Vec<_>>();
     hits.sort_by(compare_hits);
@@ -359,44 +466,6 @@ fn semantic_documents_from_vectors(
         .collect()
 }
 
-fn stable_document_key(document: &SearchDocument) -> String {
-    let target = match &document.target {
-        SearchTarget::Entry { entry_id } => format!("entry:{}", entry_id.as_str()),
-        SearchTarget::Note { entry_id, note_id } => {
-            format!("note:{}:{}", entry_id.as_str(), note_id.as_str())
-        }
-        SearchTarget::Page { entry_id, page_idx } => {
-            format!("page:{}:{}", entry_id.as_str(), page_idx)
-        }
-        SearchTarget::Segment {
-            entry_id,
-            segment_uid,
-            page_idx,
-        } => format!(
-            "segment:{}:{}:{}",
-            entry_id.as_str(),
-            segment_uid.as_str(),
-            page_idx
-        ),
-    };
-    let mut hasher = DefaultHasher::new();
-    document.source.kind.hash(&mut hasher);
-    document.source.label.hash(&mut hasher);
-    document.source.field_name.hash(&mut hasher);
-    document.source.tag_id.hash(&mut hasher);
-    document.source.note_id.hash(&mut hasher);
-    document.source.segment_uid.hash(&mut hasher);
-    document.source.page_idx.hash(&mut hasher);
-    document.title.hash(&mut hasher);
-    document.boost.to_bits().hash(&mut hasher);
-    for section in &document.sections {
-        section.label.hash(&mut hasher);
-        section.text.hash(&mut hasher);
-        section.boost.to_bits().hash(&mut hasher);
-    }
-    format!("{target}:{:016x}", hasher.finish())
-}
-
 #[cfg(test)]
 mod tests {
     use std::{
@@ -409,7 +478,7 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use super::{stable_document_key, PersistentSemanticSearchIndex};
+    use super::{embedding_text, stable_document_key, PersistentSemanticSearchIndex};
     use crate::{
         EmbeddingInput, EmbeddingProvider, EmbeddingProviderStatus, EmbeddingVector,
         SearchDocument, SearchDocumentSource, SearchInclude, SearchResult, SearchTarget,
@@ -433,6 +502,12 @@ mod tests {
             stable_document_key(&document("entry-a", "Alpha")),
             stable_document_key(&document("entry-a", "Changed"))
         );
+    }
+
+    #[test]
+    fn embedding_text_uses_one_passage_prefix_and_one_title() {
+        let document = document("entry-a", "Alpha");
+        assert_eq!(embedding_text(&document), "passage: Alpha");
     }
 
     #[test]
@@ -510,9 +585,259 @@ mod tests {
         assert_eq!(progress.last(), Some(&(2, 2)));
     }
 
+    #[test]
+    fn chapter_centroids_are_cached_without_extra_embedding_inference() {
+        let provider = CountingProvider::default();
+        let documents = vec![document("entry-a", "Alpha")];
+        let index =
+            PersistentSemanticSearchIndex::build(&documents, &provider, &SearchInclude::default())
+                .unwrap();
+        let first = index.chapter_centroids();
+        let second = index.chapter_centroids();
+        assert!(std::ptr::eq(first, second));
+        assert_eq!(provider.embedded.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn restart_translation_weights_and_display_labels_reuse_vectors_but_body_changes_once() {
+        let cache_dir = test_cache_dir("representation");
+        let cache_path = cache_dir.join("semantic.vectors.json");
+        let provider = CountingProvider::default();
+        let include = SearchInclude::default();
+        let original = vec![document("entry-a", "Alpha"), document("entry-b", "Beta")];
+        PersistentSemanticSearchIndex::open_or_build(
+            &cache_path,
+            &original,
+            &provider,
+            &include,
+            1,
+        )
+        .unwrap();
+        assert_eq!(provider.embedded.load(Ordering::SeqCst), 2);
+
+        let mut changed = original.clone();
+        changed[0]
+            .sections
+            .push(SearchTextSection::with_boost("translation", "译文", 0.85));
+        changed[0].boost = 0.35;
+        changed[0].sections[0].boost = 4.0;
+        changed[0].source.label = "A display label".to_string();
+        let index = PersistentSemanticSearchIndex::open_or_build(
+            &cache_path,
+            &changed,
+            &provider,
+            &include,
+            2,
+        )
+        .unwrap();
+        assert_eq!(index.document_count(), 2);
+        assert_eq!(provider.embedded.load(Ordering::SeqCst), 2);
+        drop(index);
+
+        let identity = super::semantic_embedding_identity(&provider).unwrap();
+        let restarted = PersistentSemanticSearchIndex::open_cached_with_identity(
+            &cache_path,
+            &changed,
+            &include,
+            2,
+            &identity,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(restarted.vector_documents().count(), 2);
+        assert_eq!(provider.embedded.load(Ordering::SeqCst), 2);
+
+        changed[0].sections[0].text = "Changed original body".to_string();
+        PersistentSemanticSearchIndex::open_or_build(&cache_path, &changed, &provider, &include, 3)
+            .unwrap();
+        assert_eq!(provider.embedded.load(Ordering::SeqCst), 3);
+        fs::remove_dir_all(cache_dir).unwrap();
+    }
+
+    #[test]
+    fn changing_model_contents_rebuilds_all_vectors_in_the_same_cache_path() {
+        let cache_dir = test_cache_dir("model-change");
+        let cache_path = cache_dir.join("semantic.vectors.json");
+        let include = SearchInclude::default();
+        let documents = vec![document("entry-a", "Alpha"), document("entry-b", "Beta")];
+        let first = CountingProvider::default();
+        PersistentSemanticSearchIndex::open_or_build(&cache_path, &documents, &first, &include, 1)
+            .unwrap();
+        let replacement = CountingProvider {
+            model: "different-weights".to_string(),
+            ..CountingProvider::default()
+        };
+        let identity = super::semantic_embedding_identity(&replacement).unwrap();
+        assert!(PersistentSemanticSearchIndex::open_cached_with_identity(
+            &cache_path,
+            &documents,
+            &include,
+            1,
+            &identity,
+        )
+        .unwrap()
+        .is_none());
+        PersistentSemanticSearchIndex::open_or_build(
+            &cache_path,
+            &documents,
+            &replacement,
+            &include,
+            1,
+        )
+        .unwrap();
+        assert_eq!(replacement.embedded.load(Ordering::SeqCst), 2);
+        PersistentSemanticSearchIndex::open_or_build(
+            &cache_path,
+            &documents,
+            &replacement,
+            &include,
+            1,
+        )
+        .unwrap();
+        assert_eq!(replacement.embedded.load(Ordering::SeqCst), 2);
+        fs::remove_dir_all(cache_dir).unwrap();
+    }
+
+    #[test]
+    fn legacy_or_corrupt_snapshot_rebuilds_once_instead_of_returning_partial_ready_index() {
+        let cache_dir = test_cache_dir("legacy");
+        let cache_path = cache_dir.join("semantic.vectors.json");
+        let provider = CountingProvider::default();
+        let include = SearchInclude::default();
+        let documents = vec![document("entry-a", "Alpha"), document("entry-b", "Beta")];
+        PersistentSemanticSearchIndex::open_or_build(
+            &cache_path,
+            &documents,
+            &provider,
+            &include,
+            1,
+        )
+        .unwrap();
+        let mut snapshot: serde_json::Value =
+            serde_json::from_slice(&fs::read(&cache_path).unwrap()).unwrap();
+        snapshot["version"] = 4.into();
+        fs::write(&cache_path, serde_json::to_vec(&snapshot).unwrap()).unwrap();
+        PersistentSemanticSearchIndex::open_or_build(
+            &cache_path,
+            &documents,
+            &provider,
+            &include,
+            1,
+        )
+        .unwrap();
+        assert_eq!(provider.embedded.load(Ordering::SeqCst), 4);
+        PersistentSemanticSearchIndex::open_or_build(
+            &cache_path,
+            &documents,
+            &provider,
+            &include,
+            1,
+        )
+        .unwrap();
+        assert_eq!(provider.embedded.load(Ordering::SeqCst), 4);
+
+        let mut snapshot: serde_json::Value =
+            serde_json::from_slice(&fs::read(&cache_path).unwrap()).unwrap();
+        snapshot["records"][0]["vector"] = serde_json::json!([1.0]);
+        fs::write(&cache_path, serde_json::to_vec(&snapshot).unwrap()).unwrap();
+        let rebuilt = PersistentSemanticSearchIndex::open_or_build(
+            &cache_path,
+            &documents,
+            &provider,
+            &include,
+            1,
+        )
+        .unwrap();
+        assert_eq!(rebuilt.document_count(), 2);
+        assert_eq!(provider.embedded.load(Ordering::SeqCst), 6);
+        fs::remove_dir_all(cache_dir).unwrap();
+    }
+
+    #[test]
+    fn shared_vector_search_and_in_memory_search_apply_identical_prefilters_without_inference() {
+        use crate::{
+            InMemorySemanticSearchIndex, SearchDocumentSourceKind, SearchQuery, SearchScope,
+        };
+        use neuink_domain::{SegmentType, SegmentUid};
+        let provider = CountingProvider::default();
+        let mut documents = vec![
+            document("entry-a", "Alpha"),
+            document("entry-b", "Beta"),
+            document("entry-a", "Entry title"),
+        ];
+        for (index, document) in documents.iter_mut().take(2).enumerate() {
+            document.source.kind = SearchDocumentSourceKind::Segment;
+            document.source.section_id = Some("section-1".to_string());
+            document.source.section_path = Some("Methods / Dataset".to_string());
+            document.source.segment_type = Some(if index == 0 {
+                SegmentType::Table
+            } else {
+                SegmentType::Figure
+            });
+            document.target = SearchTarget::Segment {
+                entry_id: document.entry_id.clone(),
+                segment_uid: SegmentUid::from_string(format!("segment-{index}")),
+                page_idx: 0,
+            };
+        }
+        let persistent =
+            PersistentSemanticSearchIndex::build(&documents, &provider, &SearchInclude::default())
+                .unwrap();
+        let in_memory =
+            InMemorySemanticSearchIndex::build(&documents, &provider, &SearchInclude::default())
+                .unwrap();
+        let before_search = provider.embedded.load(Ordering::SeqCst);
+        let mut query = SearchQuery::new("Dataset");
+        query.scope = SearchScope {
+            entry_ids: vec![EntryId::from_string("entry-a")],
+        };
+        query.section_filter = Some("section-1".to_string());
+        query.segment_types = vec![SegmentType::Table];
+        query.segments_only = true;
+        for result in [
+            persistent
+                .search_with_vector(&query, "Dataset", &[1.0, 0.0], "semantic", vec![], 0)
+                .unwrap(),
+            in_memory
+                .search_with_vector(&query, "Dataset", &[1.0, 0.0], "semantic", vec![], 0)
+                .unwrap(),
+        ] {
+            assert_eq!(result.total_hit_count, 1);
+            assert_eq!(result.entries[0].entry_id, EntryId::from_string("entry-a"));
+            assert_eq!(
+                result.entries[0].hits[0].source.segment_type,
+                Some(SegmentType::Table)
+            );
+        }
+        assert_eq!(provider.embedded.load(Ordering::SeqCst), before_search);
+        assert!(persistent
+            .search_with_vector(&query, "Dataset", &[1.0], "semantic", vec![], 0)
+            .is_err());
+        query.segment_types = vec![SegmentType::Figure];
+        assert_eq!(
+            persistent
+                .search_with_vector(&query, "Dataset", &[1.0, 0.0], "semantic", vec![], 0)
+                .unwrap()
+                .total_hit_count,
+            0
+        );
+    }
+
+    fn test_cache_dir(label: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "neuink-cache-{label}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
     #[derive(Default)]
     struct CountingProvider {
         embedded: AtomicUsize,
+        model: String,
     }
 
     impl EmbeddingProvider for CountingProvider {
@@ -520,8 +845,13 @@ mod tests {
             EmbeddingProviderStatus {
                 available: true,
                 provider: "test".to_string(),
+                dimensions: Some(2),
                 ..EmbeddingProviderStatus::default()
             }
+        }
+
+        fn cache_identity(&self) -> Option<String> {
+            Some(format!("counting-provider-weights:{}", self.model))
         }
 
         fn embed(&self, inputs: &[EmbeddingInput]) -> SearchResult<Vec<EmbeddingVector>> {
@@ -596,40 +926,6 @@ fn group_hits(
     }
 }
 
-fn embedding_text(document: &SearchDocument) -> String {
-    let mut parts = Vec::with_capacity(document.sections.len() + 4);
-    if !document.entry_title.trim().is_empty() {
-        parts.push(format!("Entry: {}", document.entry_title.trim()));
-    }
-    if !document.title.trim().is_empty() {
-        parts.push(format!("Title: {}", document.title.trim()));
-    }
-    if !document.source.label.trim().is_empty() {
-        parts.push(format!("Source: {}", document.source.label.trim()));
-    }
-    for section in &document.sections {
-        if let Some(text) = section_text(section) {
-            parts.push(format!("{}: {}", section.label, text));
-        }
-    }
-    parts.join("\n")
-}
-
-fn section_text(section: &SearchTextSection) -> Option<String> {
-    let text = section.text.trim();
-    (!text.is_empty()).then(|| text.to_string())
-}
-
-fn normalize(mut values: Vec<f32>) -> Vec<f32> {
-    let norm = values.iter().map(|value| value * value).sum::<f32>().sqrt();
-    if norm > 0.0 {
-        for value in &mut values {
-            *value /= norm;
-        }
-    }
-    values
-}
-
 fn dot_product(left: &[f32], right: &[f32]) -> f32 {
     left.iter()
         .zip(right.iter())
@@ -651,19 +947,6 @@ fn trim_chars(text: &str, start: usize, len: usize) -> String {
     }
 }
 
-fn included_by_query(include: &SearchInclude, kind: SearchDocumentSourceKind) -> bool {
-    match kind {
-        SearchDocumentSourceKind::EntryTitle
-        | SearchDocumentSourceKind::EntryField
-        | SearchDocumentSourceKind::EntryTag => include.entry_meta,
-        SearchDocumentSourceKind::NoteTitle
-        | SearchDocumentSourceKind::NoteBody
-        | SearchDocumentSourceKind::SegmentNote
-        | SearchDocumentSourceKind::Annotation => include.notes,
-        SearchDocumentSourceKind::PdfPage | SearchDocumentSourceKind::Segment => include.segments,
-    }
-}
-
 fn compare_hits(left: &SearchHit, right: &SearchHit) -> Ordering {
     right
         .score
@@ -671,6 +954,8 @@ fn compare_hits(left: &SearchHit, right: &SearchHit) -> Ordering {
         .unwrap_or(Ordering::Equal)
         .then_with(|| left.entry_title.cmp(&right.entry_title))
         .then_with(|| left.title.cmp(&right.title))
+        // Stable identity decides equal titles, so truncation never depends on HashMap order.
+        .then_with(|| crate::hit_identity(left).cmp(&crate::hit_identity(right)))
 }
 
 fn hit_key(hit: &SearchHit) -> String {

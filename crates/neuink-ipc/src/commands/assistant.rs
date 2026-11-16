@@ -5,7 +5,7 @@ use std::{
 };
 
 use neuink_config::LlmProfile;
-use neuink_domain::{EntryId, NoteId, SegmentUid, TagId, TagMeta};
+use neuink_domain::{build_document_outline, EntryId, NoteId, SegmentUid, TagId, TagMeta};
 use neuink_search::SearchMode;
 use neuink_workspace::Workspace;
 use serde::{Deserialize, Serialize};
@@ -87,6 +87,12 @@ pub struct ReadSegmentContentRequest {
     pub root: PathBuf,
     pub entry_id: EntryId,
     pub segment_uid: SegmentUid,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct GetEntryOutlineRequest {
+    pub root: PathBuf,
+    pub entry_id: EntryId,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -238,6 +244,10 @@ pub fn list_tools<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Vec<ToolDescri
                 "properties": {
                     "root": {"type": "string"},
                     "query": {"type": "string"},
+                    "english_query": {"type": "string", "description": "Optional English academic query for Chinese questions about English papers."},
+                    "sub_queries": {"type": "array", "items": {"type": "string"}, "maxItems": 3},
+                    "section_filter": {"type": "string", "description": "Optional section id or section path fragment."},
+                    "segment_types": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
                     "scope_entry_ids": {"type": "array", "items": {"type": "string"}},
                     "mode": {"type": "string", "enum": ["keyword", "semantic", "hybrid"]},
                     "top_k": {"type": "number"}
@@ -262,6 +272,18 @@ pub fn list_tools<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Vec<ToolDescri
             name: "read_entry_assistant_context".to_string(),
             description: "Read parsed PDF segments for one Entry as assistant-ready markdown."
                 .to_string(),
+            parameters_schema: json!({
+                "type": "object",
+                "properties": {
+                    "root": {"type": "string"},
+                    "entry_id": {"type": "string"}
+                },
+                "required": ["root", "entry_id"]
+            }),
+        },
+        ToolDescriptor {
+            name: "get_entry_outline".to_string(),
+            description: "Read the compact section outline for one Entry. Use this before section-specific retrieval or when answering structure questions.".to_string(),
             parameters_schema: json!({
                 "type": "object",
                 "properties": {
@@ -554,6 +576,11 @@ pub async fn invoke_tool<R: tauri::Runtime>(
                 serde_json::from_value(request.args).map_err(|error| error.to_string())?;
             read_entry_assistant_context(args).map(|response| json!(response))
         }
+        "get_entry_outline" => {
+            let args: GetEntryOutlineRequest =
+                serde_json::from_value(request.args).map_err(|error| error.to_string())?;
+            get_entry_outline(args).map(|response| json!(response))
+        }
         name if name.starts_with("mcp.") => {
             agent_runtime::invoke_mcp_tool(name.to_string(), request.args).await
         }
@@ -575,6 +602,44 @@ pub fn read_entry_assistant_context(
 ) -> Result<ReadEntryAssistantContextResponse, String> {
     let workspace = Workspace::open(&request.root).map_err(|error| error.to_string())?;
     read_entry_assistant_context_from_workspace(&workspace, request.entry_id)
+}
+
+#[tauri::command]
+pub fn get_entry_outline(
+    request: GetEntryOutlineRequest,
+) -> Result<Value, String> {
+    let workspace = Workspace::open(&request.root).map_err(|error| error.to_string())?;
+    let entry = workspace
+        .read_entry(&request.entry_id)
+        .map_err(|error| error.to_string())?;
+    let segments = workspace
+        .read_segments(&request.entry_id)
+        .map_err(|error| error.to_string())?;
+    let outline = build_document_outline(&segments);
+    let sections = outline
+        .flatten()
+        .into_iter()
+        .map(|section| {
+            json!({
+                "section_id": section.section_id,
+                "title": section.title,
+                "level": section.level,
+                "section_path": section.section_path,
+                "role": section.section_role,
+                "segment_count": section.segment_uids.len(),
+                "start_page_idx": section.start_page_idx,
+                "end_page_idx": section.end_page_idx,
+                "table_count": section.table_count,
+                "figure_count": section.figure_count,
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(json!({
+        "entry_id": request.entry_id,
+        "entry_title": entry.title,
+        "compact_summary": outline.compact_summary(500),
+        "sections": sections,
+    }))
 }
 
 #[tauri::command]
@@ -904,6 +969,14 @@ async fn invoke_search_segments<R: tauri::Runtime>(
         root: PathBuf,
         query: String,
         #[serde(default)]
+        english_query: Option<String>,
+        #[serde(default)]
+        sub_queries: Vec<String>,
+        #[serde(default)]
+        section_filter: Option<String>,
+        #[serde(default)]
+        segment_types: Vec<String>,
+        #[serde(default)]
         scope_entry_ids: Vec<EntryId>,
         #[serde(default)]
         mode: Option<SearchMode>,
@@ -917,6 +990,10 @@ async fn invoke_search_segments<R: tauri::Runtime>(
         SearchSegmentsRequest {
             root: args.root,
             query: args.query,
+            english_query: args.english_query,
+            sub_queries: args.sub_queries,
+            section_filter: args.section_filter,
+            segment_types: args.segment_types,
             scope_entry_ids: args.scope_entry_ids,
             mode: args.mode.unwrap_or(SearchMode::Hybrid),
             top_k: args.top_k,

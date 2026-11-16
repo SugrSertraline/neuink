@@ -1,7 +1,7 @@
 import { asSchema } from 'ai';
 import { runLocalAgent } from '@/shared/ipc/localAgentApi';
 import { readLocalAgentEnabled } from '@/shared/lib/localAgentSettings';
-import { loadAgentRuntimeSettings, getAssistantContextSnapshot } from '@/shared/ipc/assistantApi';
+import { loadAgentRuntimeSettings, getAssistantContextSnapshot, readEntryAssistantContext } from '@/shared/ipc/assistantApi';
 import { normalizeAgentRuntimeSettings, readAgentRuntimeSettings } from '@/shared/lib/agentRuntimeSettings';
 import type { AssistantNoteProposal, AssistantEntryMetaProposal, AssistantTagProposal } from '@/shared/types/assistant';
 import type { RunAssistantHarnessOptions } from '../harness/engine';
@@ -99,10 +99,31 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
         page_idx:segment.page_idx, segment_uid:segment.segment_uid, quote:segment.text});
       return `[S${marker}] ${segment.entry_title}, p.${segment.page_idx + 1}\n${segment.text}`;
     }).join('\n\n');
+    // Preload the focused paper so a question about it does not cost one model round trip
+    // per 12k-char tool page. Sources join the ledger, keeping [S#] citations valid.
+    const preloadTarget = snapshot.active_entry
+      ? { id: snapshot.active_entry.entry_id, title: snapshot.active_entry.entry_title }
+      : options.currentEntry ? { id: options.currentEntry.id, title: options.currentEntry.title } : null;
+    let preloadedPaper = '';
+    if (preloadTarget) {
+      try {
+        const preloaded = await readEntryAssistantContext({ entryId: preloadTarget.id, root: options.root });
+        if (preloaded.markdown.trim() && preloaded.sources.length > 0) {
+          const originalToMarker = new Map<number, number>();
+          preloaded.sources.forEach((source, index) => originalToMarker.set(index + 1, ledger.add(source)));
+          preloadedPaper = preloaded.markdown.replace(/\[S(\d+)]/g, (full, digits: string) => {
+            const marker = originalToMarker.get(Number(digits));
+            return marker === undefined ? full : `[S${marker}]`;
+          }).trim();
+        }
+      } catch {
+        // Preloading is an optimisation; the agent tools remain the fallback when it fails.
+      }
+    }
     const browserTabTarget = options.currentSurface?.kind === 'browser' ? options.currentSurface.browserTab : null;
     const restoredState = execution?.get<ToolRuntimeState>('tools:local');
     const runtime = await createAssistantTools({ execution, budget, plan,
-      restoredState: restoredState && { ...restoredState, readNotes: [] }, root:options.root, scope:options.scope, abortSignal:options.abortSignal,
+      restoredState: restoredState && { ...restoredState, readNotes: [] }, retrievalScope:options.retrievalScope, root:options.root, scope:options.scope, abortSignal:options.abortSignal,
       activeExecution:{agent:main}, runtimeSettings, currentEntry:options.currentEntry, currentNote:options.currentNote,
       contextSnapshot:snapshot, assistantContext:options.assistantContext, availableEntries:options.availableEntries,
       browserTabTarget,
@@ -165,7 +186,7 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
             entry_id:snapshot.active_note.entry_id, note_id:snapshot.active_note.note_id, note_title:snapshot.active_note.note_title},
             document:snapshot.document && {entry_id:snapshot.document.entry_id, entry_title:snapshot.document.entry_title}, warnings:snapshot.warnings},
           selectedNotes:selected.text.slice(0,36_000), selectedNotesTruncated:selected.text.length > 36_000,
-          pinnedEvidence:[pinned.text,pinnedSnapshot].filter(Boolean).join('\n\n').slice(0,32_000),
+          pinnedEvidence:[preloadedPaper ? `The current paper parsed text (preloaded by the host; [S#] markers are valid citations):\n${preloadedPaper}` : '',pinned.text,pinnedSnapshot].filter(Boolean).join('\n\n').slice(0,preloadedPaper ? 80_000 : 32_000),
           targets:{entry:options.currentEntry,note:options.currentNote,mentions:options.composerSnapshot?.mentions,scope:options.scope},
           catalog:{entries:options.availableEntries,notes:options.availableNotes,tags:options.availableTags},
           priorProposalDecisions:(options.conversationHistory ?? []).flatMap(message => (message.note_proposals ?? []).map(p => ({id:p.id,status:p.status}))),
@@ -173,7 +194,7 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
           instructions:[
             'The user can switch reading tabs without starting a new conversation. Preserve prior discussion, but resolve "this paper", "this note" and "the current page" using this request\'s frozen context and targets, not a previous turn or native session memory. The host has already resolved any explicitly pinned reading target. Explicit references to earlier documents and requests to compare them still apply; read their evidence again when needed. Null current targets mean no target is selected: never silently restore the previous one. If the intended target remains ambiguous, ask. A tab change during execution does not retarget this frozen request. Treat historical source markers as historical; only this task\'s retrieved or explicitly recovered markers are valid for new citations.',
             buildToolNotes(runtime.toolNames,plan,{agent:main},invocationPlan),web.instructions,USER_INPUT_INSTRUCTIONS,
-            executionModeInstructions(plan.executionMode!),PAPER_PRESENTATION_INSTRUCTIONS,
+            executionModeInstructions(plan.executionMode!),PAPER_PRESENTATION_INSTRUCTIONS,preloadedPaper ? 'The current paper parsed text is preloaded in pinnedEvidence with valid [S#] citations. Answer directly from it; do not call read_entry_assistant_context again unless the user asks for content outside this paper.' : '',
             TOOL_FAILURE_INSTRUCTIONS,...runtime.availabilityNotes].join('\n\n') }) }, options.abortSignal,
         event => { if (event.type === 'message') stream.consume(event.value); },
         async event => {

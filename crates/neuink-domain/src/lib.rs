@@ -4,6 +4,7 @@ pub mod error;
 pub mod ids;
 pub mod list_item;
 pub mod note;
+pub mod outline;
 pub mod parser;
 pub mod pdf;
 pub mod reading;
@@ -22,6 +23,9 @@ pub use error::DomainError;
 pub use ids::{AnnotationId, ConversationId, EntryId, NoteId, SegmentUid, SourceLinkId, TagId};
 pub use list_item::{find_source_segment, list_item_segments};
 pub use note::{NoteOwner, NoteTarget, ReadingAuxiliaryView};
+pub use outline::{
+    build_document_outline, CanonicalSectionRole, DocumentOutline, DocumentSectionNode,
+};
 pub use parser::NeuinkDocument;
 pub use pdf::{PdfAsset, PdfParseState, PdfParseStatus};
 pub use reading::{EntryReadingState, ReadingMode, ReadingState, ReadingStateUpdate};

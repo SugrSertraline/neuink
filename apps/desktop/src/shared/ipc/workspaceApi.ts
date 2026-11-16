@@ -66,6 +66,10 @@ export type SearchDocumentSource = {
   note_id: NoteId | null;
   segment_uid: string | null;
   page_idx: number | null;
+  section_id?: string | null;
+  section_path?: string | null;
+  section_role?: string | null;
+  segment_type?: string | null;
 };
 
 export type SearchHit = {
@@ -1177,6 +1181,10 @@ export async function searchEntries(
     limit?: number;
     mode?: SearchMode;
     scopeEntryIds?: EntryId[];
+    englishQuery?: string;
+    subQueries?: string[];
+    sectionFilter?: string;
+    segmentTypes?: string[];
   } = {}
 ): Promise<SearchResults> {
   return invoke<SearchResults>('search_entries', {
@@ -1185,8 +1193,235 @@ export async function searchEntries(
       query,
       limit: options.limit ?? null,
       mode: options.mode ?? 'keyword',
-      scope_entry_ids: options.scopeEntryIds ?? []
+      scope_entry_ids: options.scopeEntryIds ?? [],
+      english_query: options.englishQuery ?? null,
+      sub_queries: options.subQueries ?? [],
+      section_filter: options.sectionFilter ?? null,
+      segment_types: options.segmentTypes ?? []
     }
+  });
+}
+
+export type SearchSegmentsBatchTask = {
+  task_id: string;
+  query: string;
+  mode: SearchMode;
+  top_k: number;
+  scope_entry_ids: EntryId[];
+  english_query: string | null;
+  sub_queries: string[];
+  section_filter: string | null;
+  segment_types: string[];
+};
+
+/** Ordered like the submitted tasks. `error` codes are fixed, path-free strings from the backend. */
+export type SearchSegmentsBatchItem = {
+  task_id: string;
+  results?: SearchResults | null;
+  error?: { code: string; message: string } | null;
+  /** Which rerank rung ran for this task: `off`, `heuristic`, `cross_encoder`, `fused`. */
+  rerank_used?: string | null;
+  /** Why a rung was skipped: `model_unavailable`, `provider_error`. */
+  rerank_reason?: string | null;
+};
+
+/** One IPC call that prepares the workspace index once for every task in the batch. */
+export function searchSegmentsBatch(
+  root: string,
+  tasks: SearchSegmentsBatchTask[]
+): Promise<SearchSegmentsBatchItem[]> {
+  return invoke<SearchSegmentsBatchItem[]>('search_segments_batch', {
+    request: { root, tasks }
+  });
+}
+
+/** Composed retrieval: document routing, carrier binding, the visual vote, evidence. */
+export type UnifiedSearchRequest = {
+  question: string;
+  sub_questions?: string[];
+  scope_entry_ids?: EntryId[];
+  mandated_entry_ids?: EntryId[];
+  section_filter?: string | null;
+  segment_types?: string[];
+  mode?: SearchMode;
+  top_k?: number;
+  head_units?: number;
+  max_documents?: number;
+  bind_carriers?: boolean;
+};
+
+export type UnifiedCarrierWire = { kind: 'section' | 'table' | 'figure'; label: string };
+
+export type UnifiedSearchTaskWire = {
+  question: string;
+  carrier_applied: boolean;
+  mode: string;
+  total_hit_count: number;
+  /** Which rerank rung ran: `off`, `heuristic`, `cross_encoder`, `fused`. */
+  rerank_used: string;
+  /** Why a rung was skipped: `model_unavailable`, `provider_error`. */
+  rerank_reason?: string | null;
+  results: SearchResults;
+};
+
+/** Fixed, path-free degradation codes. Copy is host-owned. */
+export type UnifiedSearchResponse = {
+  question: string;
+  routed_documents: string[];
+  routing_skip: string | null;
+  truncated: boolean;
+  text_entries: number;
+  visual_entries: number;
+  /** `ready` | `disabled` | `model_unavailable` | `index_missing`. */
+  visual_status: string;
+  /** Present only under gated append: whether the gate admitted visual entries. */
+  visual_gate_open?: boolean | null;
+  carriers: UnifiedCarrierWire[];
+  tasks: UnifiedSearchTaskWire[];
+  degradations: string[];
+};
+
+export function searchUnified(
+  root: string,
+  request: UnifiedSearchRequest
+): Promise<UnifiedSearchResponse> {
+  return invoke<UnifiedSearchResponse>('search_unified', {
+    request: { root, ...request }
+  });
+}
+
+/** How visual votes enter the document order. */
+export type VisualFusionMode = 'weighted' | 'append_gated';
+
+/** Gold-free gate for `append_gated`: thin text head, or weak question/hit overlap. */
+export type VisualAppendGate = {
+  min_head_entries: number;
+  max_snippet_overlap: number;
+};
+
+export type VisualFusionSettings = {
+  mode: VisualFusionMode;
+  text_weight: number;
+  visual_weight: number;
+  rrf_k: number;
+  gate: VisualAppendGate;
+};
+
+/** The visual channel runs Qwen3-VL-Embedding-2B, locally or behind an API. */
+export type VisualEmbeddingProviderKind = 'qwen_local' | 'qwen_api';
+
+export type VisualEmbeddingSettings = {
+  provider: VisualEmbeddingProviderKind;
+  endpoint: string | null;
+  timeout_ms: number;
+  fusion: VisualFusionSettings;
+  startup: 'on_demand' | 'manual';
+};
+/** Status view. `has_api_key` reports whether a token is stored; the token is not returned. */
+export type VisualEmbeddingSettingsState = {
+  provider: 'qwen_local' | 'qwen_api' | 'retired';
+  has_api_key: boolean;
+  endpoint: string | null;
+  timeout_ms: number;
+  fusion: VisualFusionSettings;
+  startup: 'on_demand' | 'manual';
+};
+
+export type VisualEmbeddingSettingsInput = VisualEmbeddingSettings & {
+  /** Omit to keep the stored key; pass an empty string to clear it. */
+  api_key?: string | null;
+};
+
+export function getVisualEmbeddingSettings(): Promise<VisualEmbeddingSettingsState> {
+  return invoke('get_visual_embedding_settings');
+}
+
+/** Validated backend-side; a configuration that cannot run is rejected at save time. */
+export function saveVisualEmbeddingSettings(
+  settings: VisualEmbeddingSettingsInput
+): Promise<VisualEmbeddingSettingsState> {
+  return invoke('save_visual_embedding_settings', { settings });
+}
+
+/** Which rerank stage runs after fusion. */
+export type RerankMode = 'off' | 'heuristic' | 'cross_encoder';
+
+/** Rerank ladder: cross-encoder -> field coverage -> fused order. */
+export type RerankSettings = {
+  /** `local` runs ONNX in-process; `api` calls a hosted rerank endpoint. */
+  transport: 'local' | 'api';
+  /** Hosted endpoint, used only by the `api` transport. */
+  api_endpoint: string | null;
+  /** `protocol` = Jina/Cohere shape; `dashscope` = Model Studio native shape. */
+  api_style: 'protocol' | 'dashscope';
+  /** Hosted model name. */
+  api_model: string | null;
+  /** Write-only: omit to keep the stored token. */
+  api_key?: string | null;
+  mode: RerankMode;
+  /** Cross-encoder directory; `null` means the bundled resource path. */
+  model_dir: string | null;
+  /** Head of the fused list a cross-encoder may score. */
+  max_candidates: number;
+  /** Fall back to field coverage when the encoder cannot run. */
+  fallback_heuristic: boolean;
+};
+
+export type RerankSettingsState = RerankSettings & {
+  /** Whether a model file is actually present at the resolved directory. */
+  /** Whether a token is stored; the token itself is never returned. */
+  has_api_key: boolean;
+  model_present: boolean;
+};
+
+export function getRerankSettings(): Promise<RerankSettingsState> {
+  return invoke('get_rerank_settings');
+}
+
+export function saveRerankSettings(settings: RerankSettings): Promise<RerankSettingsState> {
+  return invoke('save_rerank_settings', { settings });
+}
+
+/** Which retrieval path the assistant's library tool uses. */
+export type RetrievalSettingsState = {
+  /** Composed path: document routing, carrier binding, visual vote and rerank. */
+  unified: boolean;
+};
+
+export function getRetrievalSettings(): Promise<RetrievalSettingsState> {
+  return invoke('get_retrieval_settings');
+}
+
+export function saveRetrievalSettings(settings: RetrievalSettingsState): Promise<RetrievalSettingsState> {
+  return invoke('save_retrieval_settings', { settings });
+}
+
+/** Whether a visual snapshot already exists; cheap to read, does not start the encoder. */
+export type VisualIndexStatus = {
+  built: boolean;
+  snapshot_count: number;
+  updated_at_ms: number | null;
+};
+
+export function getVisualIndexStatus(root: string): Promise<VisualIndexStatus> {
+  return invoke('get_visual_index_status', { request: { root } });
+}
+/** Encodes every page, region and MinerU asset once and writes the visual snapshot. */
+export function prepareVisualSearchIndex(
+  root: string
+): Promise<{
+  provider: string;
+  model_name: string | null;
+  dimensions: number | null;
+  identity: string;
+  namespace: string;
+  entry_count: number;
+  asset_count: number;
+  document_count: number;
+  embedded_count: number;
+}> {
+  return invoke('prepare_visual_search_index', {
+    request: { root }
   });
 }
 
@@ -1197,6 +1432,10 @@ export async function searchSegments(
     topK?: number;
     mode?: SearchMode;
     scopeEntryIds?: EntryId[];
+    englishQuery?: string;
+    subQueries?: string[];
+    sectionFilter?: string;
+    segmentTypes?: string[];
   } = {}
 ): Promise<SearchResults> {
   return invoke<SearchResults>('search_segments', {
@@ -1205,7 +1444,11 @@ export async function searchSegments(
       query,
       top_k: options.topK ?? null,
       mode: options.mode ?? 'keyword',
-      scope_entry_ids: options.scopeEntryIds ?? []
+      scope_entry_ids: options.scopeEntryIds ?? [],
+      english_query: options.englishQuery ?? null,
+      sub_queries: options.subQueries ?? [],
+      section_filter: options.sectionFilter ?? null,
+      segment_types: options.segmentTypes ?? []
     }
   });
 }
@@ -1266,3 +1509,233 @@ export async function rebuildSearchIndex(
     }
   });
 }
+
+
+/** One selectable text embedding model directory that carries a manifest and ONNX file. */
+export type TextModelChoice = {
+  id: string;
+  model_name: string | null;
+  dimensions: number | null;
+  pooling: string | null;
+  path: string;
+  bundled: boolean;
+};
+
+/** Where text embeddings come from: local ONNX weights or an OpenAI-compatible API. */
+export type TextEmbeddingProviderKind = 'local_onnx' | 'api';
+
+/** Configured transport plus the facts of what would actually be loaded. */
+export type TextModelSettingsState = {
+  provider: TextEmbeddingProviderKind;
+  model_dir: string | null;
+  endpoint: string | null;
+  has_api_key: boolean;
+  model: string | null;
+  dimensions: number | null;
+  timeout_ms: number;
+  resolved_dir: string;
+  loaded_model_name: string | null;
+  loaded_dimensions: number | null;
+  available: boolean;
+  message: string | null;
+};
+
+/** Settings payload; the key is write-only, so omit it to keep the stored value. */
+export type TextModelSettingsInput = {
+  provider: TextEmbeddingProviderKind;
+  model_dir: string | null;
+  endpoint: string | null;
+  api_key?: string;
+  model: string | null;
+  dimensions: number | null;
+  timeout_ms: number;
+};
+
+export type TextEmbeddingProbeState = {
+  provider: string;
+  model_name: string | null;
+  dimensions: number;
+  latency_ms: number;
+};
+
+export function listTextModels(): Promise<TextModelChoice[]> {
+  return invoke('list_text_models');
+}
+
+export function getTextModelSettings(): Promise<TextModelSettingsState> {
+  return invoke('get_text_model_settings');
+}
+
+export function saveTextModelSettings(
+  settings: TextModelSettingsInput
+): Promise<TextModelSettingsState> {
+  return invoke('save_text_model_settings', { settings });
+}
+
+/** Live probe: embeds a fixed probe string through the configured transport. */
+export function testTextEmbeddingConnection(
+  settings: TextModelSettingsInput
+): Promise<TextEmbeddingProbeState> {
+  return invoke('test_text_embedding_connection', { settings });
+}
+
+/** One curated text model the app can install and run as-is. */
+export type RecommendedTextModel = {
+  id: string;
+  display_name: string;
+  repository: string;
+  dimensions: number;
+  pooling: string;
+  onnx_path: string;
+  onnx_megabytes: number;
+  languages: string;
+  license: string;
+  note: string;
+  directly_installable: boolean;
+  /** Model page, so an entry is never a dead end. */
+  homepage: string;
+  /** Copyable export command when the repository publishes no ONNX. */
+  export_hint: string;
+};
+
+export type RecommendedTextModelState = {
+  model: RecommendedTextModel;
+  installed_dir: string | null;
+  installed: boolean;
+};
+
+export function listRecommendedTextModels(): Promise<RecommendedTextModelState[]> {
+  return invoke('list_recommended_text_models');
+}
+
+/** Downloads a self-contained export; rejects entries that would need an export step. */
+export function installRecommendedTextModel(id: string): Promise<RecommendedTextModelState> {
+  return invoke('install_recommended_text_model', { id });
+}
+
+
+/** A reranker directory that is already on disk and can be selected as-is. */
+export type InstalledRerankModel = {
+  id: string;
+  path: string;
+  label: string;
+};
+
+export function listInstalledRerankModels(): Promise<InstalledRerankModel[]> {
+  return invoke('list_installed_rerank_models');
+}
+/** One curated reranker the app can install in one click. */
+export type RecommendedRerankModel = {
+  id: string;
+  display_name: string;
+  repository: string;
+  onnx_megabytes: number;
+  note: string;
+  homepage: string;
+};
+
+export type RecommendedRerankModelState = {
+  model: RecommendedRerankModel;
+  installed_dir: string | null;
+  installed: boolean;
+};
+
+export function listRecommendedRerankModels(): Promise<RecommendedRerankModelState[]> {
+  return invoke('list_recommended_rerank_models');
+}
+
+export function installRecommendedRerankModel(id: string): Promise<RecommendedRerankModelState> {
+  return invoke('install_recommended_rerank_model', { id });
+}
+
+/** One line of the on-device retrieval self check. */
+export type RetrievalCheck = {
+  name: 'text_model' | 'library' | 'visual_model' | 'rerank';
+  ok: boolean;
+  detail: string;
+  ms: number;
+};
+
+export function runRetrievalSelfCheck(root: string): Promise<RetrievalCheck[]> {
+  return invoke('run_retrieval_self_check', { root });
+}
+
+/** One visual encoder the local service can host. */
+export type RecommendedVisualModel = {
+  id: string;
+  display_name: string;
+  repository: string;
+  homepage: string;
+  weights_megabytes: number;
+  dimensions: number;
+  note: string;
+  install_path: string;
+  install_commands: string[];
+  current_default: boolean;
+};
+
+export function listRecommendedVisualModels(): Promise<RecommendedVisualModel[]> {
+  return invoke('list_recommended_visual_models');
+}
+
+/** Prepared state of the optional local visual service for one model. */
+export type VisualRuntimeState = {
+  model_id: string;
+  env_dir: string;
+  model_dir: string;
+  python: string;
+  dependencies_installed: boolean;
+  model_present: boolean;
+  /** Why the weights are missing, when they are. */
+  model_error?: string | null;
+};
+
+export function getVisualRuntimeState(id: string): Promise<VisualRuntimeState | null> {
+  return invoke('get_visual_runtime_state', { id });
+}
+
+/**
+ * One action: isolated Python env, CPU inference dependencies, and weights.
+ * Passing `reuse_model_dir` skips the multi-gigabyte download.
+ */
+export function installVisualRuntime(
+  id: string,
+  reuseModelDir?: string | null
+): Promise<VisualRuntimeState> {
+  return invoke('install_visual_runtime', {
+    id,
+    reuse_model_dir: reuseModelDir ?? null
+  });
+}
+
+/** Whether the configured visual transport is actually answering right now. */
+export type VisualServiceStatus = {
+  running: boolean;
+  model: string | null;
+  dimensions: number | null;
+  endpoint: string | null;
+  message: string | null;
+};
+
+export function getVisualServiceStatus(): Promise<VisualServiceStatus> {
+  return invoke('get_visual_service_status');
+}
+/** Retries only the weight download for an already prepared environment. */
+export function downloadVisualWeights(
+  id: string,
+  reuseModelDir?: string | null
+): Promise<VisualRuntimeState> {
+  return invoke('download_visual_weights', {
+    id,
+    reuse_model_dir: reuseModelDir ?? null
+  });
+}
+
+/** Starts the prepared service; resolves to its process id. */
+export function startVisualService(id: string): Promise<number> {
+  return invoke('start_visual_service', { id });
+}
+
+
+
+

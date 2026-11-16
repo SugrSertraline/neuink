@@ -1,6 +1,7 @@
 pub mod agent_execution;
 pub mod annotation_index;
 pub mod atomic_write;
+pub mod entry_assets;
 pub mod entry_meta;
 mod downloaded_pdf;
 pub mod error;
@@ -33,6 +34,7 @@ pub use annotation_index::{
     AnnotationIndexRecord, AnnotationSegmentContext, AnnotationSegmentStatus,
 };
 pub use atomic_write::{atomic_write, atomic_write_json};
+pub use entry_assets::EntryVisualAsset;
 pub use error::WorkspaceError;
 pub use layout::WorkspaceLayout;
 pub use search::{WorkspaceSearchOptions, WorkspaceSearchRecord, WorkspaceSearchRecordKind};
@@ -41,3 +43,4 @@ pub use workspace::{
     EntryTranslation, TranslatedSegment, TranslatedSegmentStatus, TranslationPaperContext,
     TranslationProgress, TranslationStatus, TranslationTaskSnapshot, TranslationTerm, Workspace,
 };
+

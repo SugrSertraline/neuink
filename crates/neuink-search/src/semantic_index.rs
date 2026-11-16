@@ -2,10 +2,15 @@ use std::{cmp::Ordering, collections::BTreeMap};
 
 use rayon::prelude::*;
 
+use crate::embedding_representation::{
+    embed_query_vector, embedding_text, included_by_query, matches_semantic_document,
+    normalize_embedding_vector as normalize, validate_embedding_vector, validate_embedding_vectors,
+    SemanticVectorDocument,
+};
+
 use crate::{
-    EmbeddingInput, EmbeddingProvider, SearchDocument, SearchDocumentSourceKind, SearchEntryGroup,
-    SearchHit, SearchInclude, SearchMode, SearchQuery, SearchResult, SearchResults,
-    SearchTextSection,
+    EmbeddingInput, EmbeddingProvider, SearchDocument, SearchEntryGroup, SearchHit, SearchInclude,
+    SearchQuery, SearchResult, SearchResults,
 };
 
 #[derive(Debug)]
@@ -30,6 +35,7 @@ impl InMemorySemanticSearchIndex {
             .collect::<Vec<_>>();
 
         let vectors = provider.embed(&inputs)?;
+        validate_embedding_vectors(&vectors, inputs.len(), provider.status().dimensions)?;
         let mut semantic_documents = Vec::with_capacity(vectors.len());
         for (input, vector) in inputs.into_iter().zip(vectors.into_iter()) {
             let document_index = input.id.parse::<usize>().unwrap_or_default();
@@ -51,6 +57,13 @@ impl InMemorySemanticSearchIndex {
         self.documents.len()
     }
 
+    pub fn vector_documents(&self) -> impl Iterator<Item = SemanticVectorDocument<'_>> {
+        self.documents.iter().map(|indexed| SemanticVectorDocument {
+            document: &indexed.document,
+            vector: &indexed.vector,
+        })
+    }
+
     pub fn search(
         &self,
         query: &SearchQuery,
@@ -60,23 +73,36 @@ impl InMemorySemanticSearchIndex {
         warnings: Vec<String>,
         index_generation: u64,
     ) -> SearchResult<SearchResults> {
-        let query_vector = provider
-            .embed(&[EmbeddingInput {
-                id: "query".to_string(),
-                text: normalized_query.to_string(),
-            }])?
-            .into_iter()
-            .next()
-            .map(|vector| normalize(vector.values))
-            .unwrap_or_default();
+        let query_vector = embed_query_vector(provider, normalized_query)?;
+        self.search_with_vector(
+            query,
+            normalized_query,
+            &query_vector,
+            result_mode,
+            warnings,
+            index_generation,
+        )
+    }
+
+    pub fn search_with_vector(
+        &self,
+        query: &SearchQuery,
+        normalized_query: &str,
+        query_vector: &[f32],
+        result_mode: impl Into<String>,
+        warnings: Vec<String>,
+        index_generation: u64,
+    ) -> SearchResult<SearchResults> {
+        validate_embedding_vector(
+            query_vector,
+            self.documents.first().map(|indexed| indexed.vector.len()),
+        )?;
+        let query_vector = normalize(query_vector.to_vec());
 
         let mut hits = self
             .documents
             .par_iter()
-            .filter(|indexed| {
-                query.scope.contains_entry(&indexed.document.entry_id)
-                    && included_by_query(&query.include, indexed.document.source.kind)
-            })
+            .filter(|indexed| matches_semantic_document(query, &indexed.document))
             .filter_map(|indexed| {
                 let score = dot_product(&query_vector, &indexed.vector);
                 if !score.is_finite() {
@@ -112,60 +138,6 @@ struct SemanticDocument {
     document: SearchDocument,
     text_for_snippet: String,
     vector: Vec<f32>,
-}
-
-pub fn merge_hybrid_results(
-    query: String,
-    index_generation: u64,
-    keyword_results: SearchResults,
-    semantic_results: SearchResults,
-    limit: usize,
-    warnings: Vec<String>,
-) -> SearchResults {
-    let keyword_hits = flatten_hits(keyword_results);
-    let semantic_hits = flatten_hits(semantic_results);
-    let mut scored = Vec::<(String, SearchHit, f32)>::new();
-
-    for (rank, hit) in keyword_hits.into_iter().enumerate() {
-        let key = hit_key(&hit);
-        scored.push((key, hit, 1.0 / (60.0 + rank as f32 + 1.0)));
-    }
-
-    for (rank, hit) in semantic_hits.into_iter().enumerate() {
-        let key = hit_key(&hit);
-        scored.push((key, hit, 1.0 / (60.0 + rank as f32 + 1.0)));
-    }
-
-    let mut by_key = BTreeMap::<String, (SearchHit, f32)>::new();
-    for (key, hit, score) in scored {
-        let entry = by_key.entry(key).or_insert((hit, 0.0));
-        entry.1 += score;
-    }
-
-    let mut hits = by_key
-        .into_values()
-        .map(|(mut hit, score)| {
-            hit.score = score;
-            hit
-        })
-        .collect::<Vec<_>>();
-    hits.sort_by(compare_hits);
-    hits.truncate(limit);
-    group_hits(
-        query,
-        "hybrid".to_string(),
-        index_generation,
-        hits,
-        warnings,
-    )
-}
-
-fn flatten_hits(results: SearchResults) -> Vec<SearchHit> {
-    results
-        .entries
-        .into_iter()
-        .flat_map(|entry| entry.hits)
-        .collect()
 }
 
 fn group_hits(
@@ -209,34 +181,6 @@ fn group_hits(
     }
 }
 
-fn embedding_text(document: &SearchDocument) -> String {
-    let mut parts = Vec::with_capacity(document.sections.len() + 1);
-    if !document.title.trim().is_empty() {
-        parts.push(document.title.trim().to_string());
-    }
-    for section in &document.sections {
-        if let Some(text) = section_text(section) {
-            parts.push(text);
-        }
-    }
-    parts.join("\n")
-}
-
-fn section_text(section: &SearchTextSection) -> Option<String> {
-    let text = section.text.trim();
-    (!text.is_empty()).then(|| text.to_string())
-}
-
-fn normalize(mut values: Vec<f32>) -> Vec<f32> {
-    let norm = values.iter().map(|value| value * value).sum::<f32>().sqrt();
-    if norm > 0.0 {
-        for value in &mut values {
-            *value /= norm;
-        }
-    }
-    values
-}
-
 fn dot_product(left: &[f32], right: &[f32]) -> f32 {
     left.iter()
         .zip(right.iter())
@@ -258,19 +202,6 @@ fn trim_chars(text: &str, start: usize, len: usize) -> String {
     }
 }
 
-fn included_by_query(include: &SearchInclude, kind: SearchDocumentSourceKind) -> bool {
-    match kind {
-        SearchDocumentSourceKind::EntryTitle
-        | SearchDocumentSourceKind::EntryField
-        | SearchDocumentSourceKind::EntryTag => include.entry_meta,
-        SearchDocumentSourceKind::NoteTitle
-        | SearchDocumentSourceKind::NoteBody
-        | SearchDocumentSourceKind::SegmentNote
-        | SearchDocumentSourceKind::Annotation => include.notes,
-        SearchDocumentSourceKind::PdfPage | SearchDocumentSourceKind::Segment => include.segments,
-    }
-}
-
 fn compare_hits(left: &SearchHit, right: &SearchHit) -> Ordering {
     right
         .score
@@ -278,37 +209,35 @@ fn compare_hits(left: &SearchHit, right: &SearchHit) -> Ordering {
         .unwrap_or(Ordering::Equal)
         .then_with(|| left.entry_title.cmp(&right.entry_title))
         .then_with(|| left.title.cmp(&right.title))
+        // Stable identity decides equal titles, so truncation never depends on HashMap order.
+        .then_with(|| crate::hit_identity(left).cmp(&crate::hit_identity(right)))
 }
 
-fn hit_key(hit: &SearchHit) -> String {
-    let source_kind = format!("{:?}", hit.source.kind);
-    match &hit.target {
-        crate::SearchTarget::Entry { entry_id } => {
-            format!("entry:{}:{source_kind}", entry_id.as_str())
-        }
-        crate::SearchTarget::Note { entry_id, note_id } => {
-            format!("note:{}:{}:{source_kind}", entry_id.as_str(), note_id.as_str())
-        }
-        crate::SearchTarget::Page { entry_id, page_idx } => {
-            format!("page:{}:{}:{source_kind}", entry_id.as_str(), page_idx)
-        }
-        crate::SearchTarget::Segment {
-            entry_id,
-            segment_uid,
-            page_idx,
-        } => format!(
-            "segment:{}:{}:{}:{source_kind}",
-            entry_id.as_str(),
-            segment_uid.as_str(),
-            page_idx
-        ),
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::embedding_text;
+    use crate::{SearchDocument, SearchDocumentSource, SearchTarget, SearchTextSection};
+    use neuink_domain::EntryId;
 
-pub fn semantic_result_mode(mode: SearchMode) -> &'static str {
-    match mode {
-        SearchMode::Keyword => "keyword",
-        SearchMode::Semantic => "semantic",
-        SearchMode::Hybrid => "semantic",
+    #[test]
+    fn embedding_text_uses_one_passage_prefix_and_one_title() {
+        let entry_id = EntryId::from_string("entry-a");
+        let document = SearchDocument {
+            entry_id: entry_id.clone(),
+            entry_title: "Entry title".to_string(),
+            source: SearchDocumentSource::default(),
+            target: SearchTarget::Entry { entry_id },
+            title: "Display title".to_string(),
+            sections: vec![
+                SearchTextSection::title("Display title"),
+                SearchTextSection::body("Clean body"),
+            ],
+            boost: 1.0,
+        };
+
+        assert_eq!(
+            embedding_text(&document),
+            "passage: Display title\nClean body"
+        );
     }
 }

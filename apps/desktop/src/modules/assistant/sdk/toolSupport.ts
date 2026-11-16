@@ -8,6 +8,7 @@ import { formatSciverseSearchOutput } from './sciverseOutput';
 export { formatSciverseSearchOutput } from './sciverseOutput';
 import { isPdfTool, runPdfTool } from './pdfTools';
 import { entryContextWindow, formatReadEntryOutput, ENTRY_CONTEXT_MAX_CHARS } from './entryContext';
+import { selectDiverseEvidence } from './evidenceDiversity';
 export { formatReadEntryOutput } from './entryContext';
 
 import type {
@@ -16,6 +17,7 @@ import type {
   AssistantToolTraceEvent,
   ConversationMessage,
   ConversationSourceLink,
+  GetEntryOutlineResponse,
   LlmProfile,
   ReadEntryAssistantContextResponse,
   ReadSegmentContentResponse,
@@ -72,6 +74,7 @@ const SUPPORTED_TOOL_NAMES = new Set([
   'search_segments',
   'read_segment_content',
   'read_entry_assistant_context',
+  'get_entry_outline',
   'search_sciverse_evidence',
   'read_sciverse_content',
   'search_sciverse_metadata',
@@ -213,7 +216,11 @@ export function normalizeToolInput(
       query: requiredString(object.query, 'query'),
       mode: searchMode(object.mode),
       scope_entry_ids: scopedEntryIds(object.scope_entry_ids, scope),
-      top_k: clampTopK(object.top_k)
+      top_k: clampTopK(object.top_k),
+      ...(optionalString(object.english_query) ? { english_query: optionalString(object.english_query) } : {}),
+      sub_queries: stringArray(object.sub_queries).map(query => query.trim()).filter(Boolean).slice(0, 3),
+      ...(optionalString(object.section_filter) ? { section_filter: optionalString(object.section_filter) } : {}),
+      segment_types: stringArray(object.segment_types).map(type => type.trim().toLowerCase()).filter(Boolean).slice(0, 8)
     };
   }
 
@@ -222,6 +229,13 @@ export function normalizeToolInput(
       root,
       entry_id: entryIdOrSingleScope(object.entry_id, scope),
       segment_uid: requiredString(object.segment_uid, 'segment_uid')
+    };
+  }
+
+  if (toolName === 'get_entry_outline') {
+    return {
+      root,
+      entry_id: entryIdOrSingleScope(object.entry_id, scope)
     };
   }
 
@@ -340,7 +354,8 @@ export async function executeTool(
 
   if (toolName === 'search_segments') {
     const results = await invokeAssistantTool<SearchResults>('search_segments', input);
-    return formatSearchSegmentsOutput(results, addSource);
+    const sectionFilter = typeof input.section_filter === 'string' ? input.section_filter : null;
+    return formatSearchSegmentsOutput(results, addSource, sectionFilter);
   }
 
   if (toolName === 'read_segment_content') {
@@ -363,6 +378,25 @@ export async function executeTool(
         note: 'PDF 尚未完整解析，已自动读取前 3 页以内的文字层；按 next_page 继续 read_pdf_pages，不能把这部分当成全文。' } };
     }
     return formatReadEntryOutput(result, addSource, contextBudget, input);
+  }
+
+  if (toolName === 'get_entry_outline') {
+    const result = await invokeAssistantTool<GetEntryOutlineResponse>('get_entry_outline', {
+      root: input.root,
+      entry_id: input.entry_id
+    });
+    const sections = result.sections.map((section) => `${'  '.repeat(Math.max(0, section.level - 1))}- ${section.section_path} (${section.segment_count} segments)`);
+    return {
+      modelOutput: {
+        entry_id: result.entry_id,
+        entry_title: result.entry_title,
+        compact_summary: result.compact_summary ?? '',
+        kind: 'get_entry_outline',
+        sections
+      },
+      sources: [],
+      summary: sections.length > 0 ? `Read the outline for "${result.entry_title}".` : `No section outline is available for "${result.entry_title}".`
+    };
   }
 
   if (toolName === 'search_sciverse_evidence') {
@@ -462,15 +496,32 @@ export function numberMarkdownLines(markdown: string) {
     .join('\n');
 }
 
+function sectionIdentity(entryId: string, source: SearchHit['source']) {
+  const section = source.section_id || source.section_path;
+  return section ? `${entryId}::${section}` : null;
+}
+
 export function formatSearchSegmentsOutput(
   results: SearchResults,
-  addSource: (source: ConversationSourceLink) => number
+  addSource: (source: ConversationSourceLink) => number,
+  sectionFilter?: string | null
 ) {
-  const hits = results.entries.flatMap((group) => group.hits).slice(0, 24);
-  const evidence = hits
+  // Hits arrive grouped by Entry, so re-rank globally with MMR and collapse
+  // segment notes/annotations that point at the same cited segment.
+  const segmentHits = results.entries
+    .flatMap((group) => group.hits)
     .filter((hit): hit is SearchHit & { target: { kind: 'segment'; entry_id: string; segment_uid: string; page_idx: number } } => hit.target.kind === 'segment')
-    .slice(0, 12)
-    .map((hit) => {
+    .map((hit) => ({
+      hit,
+      key: `${hit.target.entry_id}:${hit.target.segment_uid}`,
+      score: hit.score,
+      text: hit.snippet,
+      // Empty strings are not identities; `||` (not `??`) keeps a blank section_id from
+      // collapsing every section of the Entry onto one key.
+      sectionKey: sectionIdentity(hit.target.entry_id, hit.source)
+    }));
+  const evidence = selectDiverseEvidence(segmentHits, 12, 0.7, { sectionFilter })
+    .map(({ hit }) => {
       const source: ConversationSourceLink = {
         entry_id: hit.target.entry_id,
         entry_title: hit.entry_title,
@@ -493,9 +544,14 @@ export function formatSearchSegmentsOutput(
   // Backend warnings may embed provider errors and private model paths. Keep the
   // successful evidence, but expose only host-owned degradation copy.
   const keywordFallback = results.mode === 'semantic_fallback_keyword' || results.mode === 'hybrid_fallback_keyword';
-  const warnings = keywordFallback
-    ? ['Semantic search is unavailable. These are keyword fallback results, not semantic matches.']
-    : results.warnings?.length ? ['Search reported a limitation. Use only the returned evidence; completeness is not guaranteed.'] : [];
+  const warnings = [
+    ...(keywordFallback
+      ? ['Semantic search is unavailable. These are keyword fallback results, not semantic matches.']
+      : []),
+    ...(results.warnings?.length
+      ? ['Search reported a limitation. Use only the returned evidence; completeness is not guaranteed.']
+      : [])
+  ].filter((warning, index, all) => all.indexOf(warning) === index);
   const modelOutput = {
     evidence,
     kind: 'search_segments',
@@ -1466,6 +1522,8 @@ export function modelInputSchema(descriptor: AssistantToolDescriptor): JSONSchem
     objectSchema.properties.offset = { type: 'integer', minimum: 0, description: 'Start at 0. For continuation, copy the exact next_read returned by this tool.' };
     objectSchema.properties.limit = { type: 'integer', minimum: 100, maximum: ENTRY_CONTEXT_MAX_CHARS, description: 'Maximum characters per parsed-text chunk; defaults to 8000.' };
     objectSchema.properties.revision = { type: 'string', pattern: '^[a-f0-9]{8}$', description: 'For offset > 0, copy revision from next_read so changed content cannot be silently mixed.' };
+  } else if (descriptor.name === 'get_entry_outline') {
+    objectSchema.required = ['entry_id'];
   } else {
     objectSchema.required = (objectSchema.required ?? []).filter((key: string) => key !== 'root');
   }
@@ -1474,6 +1532,10 @@ export function modelInputSchema(descriptor: AssistantToolDescriptor): JSONSchem
   describeProperty(objectSchema, 'mode', 'Search mode. Prefer hybrid for content lookup; use keyword for exact terms.');
   describeProperty(objectSchema, 'scope_entry_ids', 'Optional Entry ids. Omit this to use the current Neuink scope.');
   describeProperty(objectSchema, 'top_k', 'Optional maximum number of segment hits to return.');
+  describeProperty(objectSchema, 'english_query', 'Optional English academic query. For a Chinese question about an English paper, provide this in the same search_segments call.');
+  describeProperty(objectSchema, 'sub_queries', 'Optional additional focused queries, at most three.');
+  describeProperty(objectSchema, 'section_filter', 'Optional section id or case-insensitive section path fragment.');
+  describeProperty(objectSchema, 'segment_types', 'Optional segment types such as paragraph, table, figure, math, or heading.');
   describeProperty(objectSchema, 'entry_id', 'Required Entry id for explicit Entry or segment reads.');
   describeProperty(objectSchema, 'segment_uid', 'Segment uid returned by search_segments.');
   describeProperty(objectSchema, 'doc_id', 'Sciverse document id returned by search_sciverse_evidence.');
@@ -1513,13 +1575,16 @@ export function describeProperty(
 
 export function toolDescription(descriptor: AssistantToolDescriptor) {
   if (descriptor.name === 'search_segments') {
-    return `${descriptor.description} Use this for find/locate questions and questions about experiments, methods, datasets, results, tables, figures, or conclusions.`;
+    return `${descriptor.description} Use this for find/locate questions and questions about experiments, methods, datasets, results, tables, figures, or conclusions. For a Chinese question about an English paper, fill english_query in the same call with concise English academic terms; use sub_queries for up to three focused variants.`;
   }
   if (descriptor.name === 'read_segment_content') {
     return `${descriptor.description} Use this after search_segments when a snippet is not enough.`;
   }
   if (descriptor.name === 'read_entry_assistant_context') {
     return `${descriptor.description} Use this only for an explicitly selected, named, or confirmed Entry. Omit limit for the default 8000 characters; if supplied, limit must be between 100 and ${ENTRY_CONTEXT_MAX_CHARS}. Parsed text is returned in bounded chunks: when more is true, call this tool again with the returned next_read arguments. Read all chunks when full reading is requested; otherwise state partial coverage. Never read CLI tool-result files with native Read/shell to obtain the rest. If no parsed segments exist, the host reads up to the first 3 PDF text-layer pages automatically. Continue with read_pdf_pages / search_pdf_text; respect next_page and incomplete/OCR warnings.`;
+  }
+  if (descriptor.name === 'get_entry_outline') {
+    return `${descriptor.description} Use this for a multi-entry or structure question when the compact outline is needed before section-specific retrieval.`;
   }
   if (descriptor.name === 'search_sciverse_evidence') {
     return `${descriptor.description} Preserve every returned marker and source identifier in the answer.`;
@@ -1587,6 +1652,9 @@ export function runningSummary(toolName: string, input: JsonObject) {
   }
   if (toolName === 'read_segment_content') {
     return `Reading segment ${String(input.segment_uid)}.`;
+  }
+  if (toolName === 'get_entry_outline') {
+    return `Reading the section outline for Entry ${String(input.entry_id)}.`;
   }
   if (toolName === 'search_sciverse_evidence') {
     return `Searching Sciverse for "${String(input.query)}".`;

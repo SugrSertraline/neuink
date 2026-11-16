@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 #[cfg(feature = "local-embedding")]
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
+use std::{io::Read, sync::OnceLock};
 
 #[cfg(feature = "local-embedding")]
 use fastembed::{
@@ -15,7 +16,14 @@ use crate::{
 
 pub const DEFAULT_EMBEDDING_MODEL_RESOURCE_DIR: &str = "embedding-models/default";
 const DEFAULT_PROVIDER_NAME: &str = "fastembed-local";
-const MODEL_FILE_NAMES: &[&str] = &["onnx/model.onnx", "model.onnx"];
+pub const EMBEDDING_MODEL_FILE_NAMES: &[&str] = &[
+    "onnx/model.onnx",
+    "onnx/model_int8.onnx",
+    // Xenova exports name their int8 file `model_quantized.onnx`; the recommended
+    // multilingual-e5-small entry is one of them. Same lesson as the reranker.
+    "onnx/model_quantized.onnx",
+    "model.onnx",
+];
 const TOKENIZER_FILE_NAME: &str = "tokenizer.json";
 const MANIFEST_FILE_NAME: &str = "neuink-embedding.json";
 pub const LOCAL_EMBEDDING_BATCH_SIZE: usize = 8;
@@ -23,20 +31,42 @@ pub const LOCAL_EMBEDDING_BATCH_SIZE: usize = 8;
 pub struct FastEmbedProvider {
     model_dir: PathBuf,
     status: EmbeddingProviderStatus,
+    /// `None` keeps ONNX Runtime's default (all cores). Thread count changes speed
+    /// only; it is not part of the content identity, so it never forces re-embedding.
+    intra_threads: Option<usize>,
+    cache_identity: OnceLock<Option<String>>,
     #[cfg(feature = "local-embedding")]
-    model: OnceLock<SearchResult<Mutex<TextEmbedding>>>,
+    backend: OnceLock<SearchResult<Backend>>,
 }
 
 impl FastEmbedProvider {
     pub fn from_model_dir(model_dir: impl Into<PathBuf>) -> Self {
-        let model_dir = model_dir.into();
+        Self::build(model_dir.into(), None)
+    }
+
+    /// Caps ONNX Runtime intra-op threads, for fixed-thread cost measurement.
+    /// A zero thread count is clamped to one.
+    pub fn from_model_dir_with_intra_threads(
+        model_dir: impl Into<PathBuf>,
+        intra_threads: usize,
+    ) -> Self {
+        Self::build(model_dir.into(), Some(intra_threads.max(1)))
+    }
+
+    fn build(model_dir: PathBuf, intra_threads: Option<usize>) -> Self {
         let status = inspect_model_dir(&model_dir);
         Self {
             model_dir,
             status,
+            intra_threads,
+            cache_identity: OnceLock::new(),
             #[cfg(feature = "local-embedding")]
-            model: OnceLock::new(),
+            backend: OnceLock::new(),
         }
+    }
+
+    pub fn intra_threads(&self) -> Option<usize> {
+        self.intra_threads
     }
 
     pub fn model_dir(&self) -> &Path {
@@ -47,6 +77,12 @@ impl FastEmbedProvider {
 impl EmbeddingProvider for FastEmbedProvider {
     fn status(&self) -> EmbeddingProviderStatus {
         self.status.clone()
+    }
+
+    fn cache_identity(&self) -> Option<String> {
+        self.cache_identity
+            .get_or_init(|| model_content_identity(&self.model_dir).ok())
+            .clone()
     }
 
     #[cfg(feature = "local-embedding")]
@@ -69,24 +105,43 @@ impl EmbeddingProvider for FastEmbedProvider {
             ));
         }
 
-        let model = match self
-            .model
-            .get_or_init(|| load_text_embedding(&self.model_dir))
+        let backend = match self
+            .backend
+            .get_or_init(|| load_backend(&self.model_dir, self.intra_threads))
         {
-            Ok(model) => model,
+            Ok(backend) => backend,
             Err(error) => return Err(clone_search_error(error)),
         };
-        let mut model = model.lock().map_err(|_| SearchError::LockPoisoned)?;
         let mut vectors = Vec::with_capacity(inputs.len());
         for batch in inputs.chunks(LOCAL_EMBEDDING_BATCH_SIZE) {
-            let texts = batch
-                .iter()
-                .map(|input| input.text.as_str())
-                .collect::<Vec<_>>();
-            let batch_vectors = model
-                .embed(texts, Some(LOCAL_EMBEDDING_BATCH_SIZE))
-                .map_err(|error| SearchError::EmbeddingUnavailable(error.to_string()))?;
-            vectors.extend(batch_vectors.into_iter().map(EmbeddingVector::new));
+            let texts = batch.iter().map(|input| input.text.clone()).collect::<Vec<_>>();
+            let batch_vectors = match backend {
+                Backend::SingleFile(model) => {
+                    let mut model = model.lock().map_err(|_| SearchError::LockPoisoned)?;
+                    let borrowed = texts.iter().map(String::as_str).collect::<Vec<_>>();
+                    model
+                        .embed(borrowed, Some(LOCAL_EMBEDDING_BATCH_SIZE))
+                        .map_err(|error| SearchError::EmbeddingUnavailable(error.to_string()))?
+                }
+                Backend::ExternalData(engine) => engine
+                    .embed(&texts)
+                    .map_err(SearchError::EmbeddingUnavailable)?,
+            };
+            for vector in batch_vectors {
+                // The manifest is the contract. A directory holding both an old and a new
+                // weight file used to load the wrong one and silently change every vector,
+                // so a mismatch is an error rather than a quietly different result.
+                if let Some(declared) = self.status.dimensions {
+                    if vector.len() != declared {
+                        return Err(SearchError::EmbeddingUnavailable(format!(
+                            "Embedding manifest declares {declared} dimensions but the loaded ONNX produced {}; remove stale weight files from {}",
+                            vector.len(),
+                            self.model_dir.display()
+                        )));
+                    }
+                }
+                vectors.push(EmbeddingVector::new(vector));
+            }
             on_progress(vectors.len(), inputs.len());
         }
         if inputs.is_empty() {
@@ -105,13 +160,138 @@ impl EmbeddingProvider for FastEmbedProvider {
     }
 }
 
+// Hash once per immutable provider instance, streaming weights instead of
+// retaining another model-sized byte buffer. Relative paths make relocation
+// harmless; only inference inputs are hashed, so documentation changes do not
+// force an unnecessary vector rebuild.
+fn model_content_identity(model_dir: &Path) -> std::io::Result<String> {
+    let mut files = EMBEDDING_MODEL_FILE_NAMES
+        .iter()
+        .map(|relative| model_dir.join(relative))
+        .chain([
+            model_dir.join(TOKENIZER_FILE_NAME),
+            model_dir.join("config.json"),
+            model_dir.join("special_tokens_map.json"),
+            model_dir.join("tokenizer_config.json"),
+            model_dir.join("sentencepiece.bpe.model"),
+            model_dir.join(MANIFEST_FILE_NAME),
+        ])
+        .filter(|path| path.is_file())
+        .collect::<Vec<_>>();
+    files.sort();
+    if first_existing_file(model_dir, EMBEDDING_MODEL_FILE_NAMES).is_none()
+        || !model_dir.join(TOKENIZER_FILE_NAME).is_file()
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Missing model inputs",
+        ));
+    }
+    let mut hasher = blake3::Hasher::new();
+    // Pooling belongs to the identity: the same weights pooled differently produce
+    // incompatible vectors, so a manifest change must invalidate cached embeddings.
+    let pooling = read_manifest(&model_dir.join(MANIFEST_FILE_NAME))
+        .and_then(|manifest| manifest.pooling_tag())
+        .unwrap_or("mean");
+    hasher.update(format!("neuink-fastembed-pooling-v2:{pooling}").as_bytes());
+    let mut buffer = [0_u8; 64 * 1024];
+    for path in files {
+        let relative = path
+            .strip_prefix(model_dir)
+            .map_err(std::io::Error::other)?;
+        let relative = relative.to_string_lossy().replace('\\', "/");
+        hasher.update(&(relative.len() as u64).to_le_bytes());
+        hasher.update(relative.as_bytes());
+        let mut file = std::fs::File::open(&path)?;
+        hasher.update(&file.metadata()?.len().to_le_bytes());
+        loop {
+            let count = file.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            hasher.update(&buffer[..count]);
+        }
+    }
+    Ok(hasher.finalize().to_hex().to_string())
+}
+
+/// Which ONNX backend a model directory needs.
+///
+/// `SingleFile` covers exports where graph and weights live in one `.onnx` (fastembed path).
+/// `ExternalData` covers the official bge-m3 shape: a small graph plus a `*_data` sidecar that
+/// only ONNX Runtime's path-based loader resolves.
 #[cfg(feature = "local-embedding")]
-fn load_text_embedding(model_dir: &Path) -> SearchResult<Mutex<TextEmbedding>> {
-    let model_file = first_existing_file(model_dir, MODEL_FILE_NAMES).ok_or_else(|| {
+pub enum Backend {
+    SingleFile(Mutex<TextEmbedding>),
+    ExternalData(crate::path_embedding::PathEmbeddingEngine),
+}
+
+/// True when the chosen graph references weights kept beside it.
+#[cfg(feature = "local-embedding")]
+fn has_external_data(model_file: &Path) -> bool {
+    let Some(name) = model_file.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    model_file
+        .with_file_name(format!("{name}_data"))
+        .is_file()
+}
+
+#[cfg(feature = "local-embedding")]
+fn load_backend(model_dir: &Path, intra_threads: Option<usize>) -> SearchResult<Backend> {
+    let model_file = first_existing_file(model_dir, EMBEDDING_MODEL_FILE_NAMES).ok_or_else(|| {
         SearchError::EmbeddingUnavailable(
-            "Embedding ONNX model is missing; expected onnx/model.onnx or model.onnx.".to_string(),
+            "Embedding ONNX model is missing; expected onnx/model.onnx, onnx/model_int8.onnx, onnx/model_quantized.onnx or model.onnx.".to_string(),
         )
     })?;
+    if has_external_data(&model_file) {
+        let manifest = read_manifest(&model_dir.join(MANIFEST_FILE_NAME));
+        let pooling = crate::path_embedding::PoolKind::from_manifest(
+            manifest.as_ref().and_then(|manifest| manifest.pooling.as_deref()),
+        );
+        let dimensions = manifest
+            .as_ref()
+            .and_then(|manifest| manifest.dimensions)
+            .ok_or_else(|| {
+                SearchError::EmbeddingUnavailable(
+                    "Embedding manifest must declare dimensions for an external-data model."
+                        .to_string(),
+                )
+            })?;
+        let engine = crate::path_embedding::PathEmbeddingEngine::load(
+            model_dir,
+            &model_file,
+            pooling,
+            dimensions,
+            intra_threads,
+        )
+        .map_err(SearchError::EmbeddingUnavailable)?;
+        return Ok(Backend::ExternalData(engine));
+    }
+    load_text_embedding(model_dir, intra_threads).map(Backend::SingleFile)
+}
+
+#[cfg(feature = "local-embedding")]
+fn load_text_embedding(
+    model_dir: &Path,
+    intra_threads: Option<usize>,
+) -> SearchResult<Mutex<TextEmbedding>> {
+    let model_file = first_existing_file(model_dir, EMBEDDING_MODEL_FILE_NAMES).ok_or_else(|| {
+        SearchError::EmbeddingUnavailable(
+            "Embedding ONNX model is missing; expected onnx/model.onnx, onnx/model_int8.onnx, onnx/model_quantized.onnx or model.onnx.".to_string(),
+        )
+    })?;
+    let pooling = match read_manifest(&model_dir.join(MANIFEST_FILE_NAME))
+        .and_then(|manifest| manifest.pooling_tag())
+    {
+        Some("cls") => Pooling::Cls,
+        Some(_) => Pooling::Mean,
+        None => {
+            return Err(SearchError::EmbeddingUnavailable(
+                "Embedding manifest names an unsupported pooling; use mean or cls.".to_string(),
+            ))
+        }
+    };
     let tokenizer_files = TokenizerFiles {
         tokenizer_file: read_required_file(&model_dir.join(TOKENIZER_FILE_NAME))?,
         config_file: read_required_file(&model_dir.join("config.json"))?,
@@ -120,8 +300,12 @@ fn load_text_embedding(model_dir: &Path) -> SearchResult<Mutex<TextEmbedding>> {
     };
     let user_model =
         UserDefinedEmbeddingModel::new(read_required_file(&model_file)?, tokenizer_files)
-            .with_pooling(Pooling::Mean);
-    TextEmbedding::try_new_from_user_defined(user_model, InitOptionsUserDefined::default())
+            .with_pooling(pooling);
+    let mut options = InitOptionsUserDefined::default();
+    if let Some(threads) = intra_threads {
+        options = options.with_intra_threads(threads);
+    }
+    TextEmbedding::try_new_from_user_defined(user_model, options)
         .map(Mutex::new)
         .map_err(|error| SearchError::EmbeddingUnavailable(error.to_string()))
 }
@@ -165,7 +349,7 @@ fn inspect_model_dir(model_dir: &Path) -> EmbeddingProviderStatus {
         .and_then(|manifest| manifest.model_name.clone())
         .or_else(|| Some("bundled-default".to_string()));
     let dimensions = manifest.as_ref().and_then(|manifest| manifest.dimensions);
-    let model_path = first_existing_file(model_dir, MODEL_FILE_NAMES);
+    let model_path = first_existing_file(model_dir, EMBEDDING_MODEL_FILE_NAMES);
     let tokenizer_path = model_dir.join(TOKENIZER_FILE_NAME);
     let provider = manifest
         .as_ref()
@@ -198,7 +382,7 @@ fn inspect_model_dir(model_dir: &Path) -> EmbeddingProviderStatus {
             model_name,
             Some(model_dir.display().to_string()),
             dimensions,
-            "Embedding ONNX model is missing; expected onnx/model.onnx or model.onnx.",
+            "Embedding ONNX model is missing; expected onnx/model.onnx, onnx/model_int8.onnx, onnx/model_quantized.onnx or model.onnx.",
         );
     };
 
@@ -263,6 +447,55 @@ struct EmbeddingManifest {
     model_name: Option<String>,
     #[serde(default)]
     dimensions: Option<usize>,
+    /// `mean` (default, e5 family) or `cls` (bge-m3 family). Pooling belongs to the model
+    /// identity: mean-pooling a CLS model silently produces near-useless vectors, so the
+    /// manifest declares it instead of the code assuming one kind.
+    #[serde(default)]
+    pooling: Option<String>,
+}
+
+impl EmbeddingManifest {
+    /// Normalised pooling tag, or `None` when the manifest names an unsupported one.
+    fn pooling_tag(&self) -> Option<&'static str> {
+        match self.pooling.as_deref().map(str::to_ascii_lowercase) {
+            None => Some("mean"),
+            Some(value) if value == "mean" => Some("mean"),
+            Some(value) if value == "cls" => Some("cls"),
+            Some(_) => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod quantized_model_file_tests {
+    use super::*;
+
+    /// Xenova's int8 export is named `onnx/model_quantized.onnx`; a loader whitelist that
+    /// misses it rejects a fully downloaded recommended model, so this pins the name.
+    #[test]
+    fn accepts_a_quantized_onnx_export_name() {
+        let dir = std::env::temp_dir().join(format!(
+            "neuink-quantized-model-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("onnx")).unwrap();
+        std::fs::write(dir.join("onnx/model_quantized.onnx"), b"placeholder").unwrap();
+        std::fs::write(dir.join(TOKENIZER_FILE_NAME), b"placeholder").unwrap();
+
+        let status = inspect_model_dir(&dir);
+        assert!(
+            status.model_path.is_some(),
+            "onnx/model_quantized.onnx must be accepted as the model file"
+        );
+        assert!(!status
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("ONNX model is missing"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }
 
 #[cfg(test)]
@@ -314,12 +547,18 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "local-embedding")]
     fn embeds_with_bundled_model_when_present() {
         let model_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../apps/desktop/src-tauri/resources/embedding-models/default");
-        if !model_dir.join("onnx").join("model.onnx").is_file() {
+        // The bundled model is replaceable (e5-small 384, bge-m3 1024), so this test looks
+        // for any accepted file name and follows the manifest instead of pinning one model.
+        if first_existing_file(&model_dir, EMBEDDING_MODEL_FILE_NAMES).is_none() {
             return;
         }
+        let declared = read_manifest(&model_dir.join(MANIFEST_FILE_NAME))
+            .and_then(|manifest| manifest.dimensions)
+            .expect("the bundled manifest must declare dimensions");
 
         let provider = FastEmbedProvider::from_model_dir(model_dir);
         let vectors = provider
@@ -330,7 +569,60 @@ mod tests {
             .unwrap();
 
         assert_eq!(vectors.len(), 1);
-        assert_eq!(vectors[0].dimensions(), 384);
+        assert_eq!(vectors[0].dimensions(), declared);
+    }
+
+    #[test]
+    fn identity_follows_model_and_tokenizer_contents_instead_of_absolute_path() {
+        let first_dir = std::env::temp_dir().join(unique_name("neuink-identity-a"));
+        let second_dir = std::env::temp_dir().join(unique_name("neuink-identity-b"));
+        for dir in [&first_dir, &second_dir] {
+            fs::create_dir_all(dir).unwrap();
+            fs::write(dir.join("model.onnx"), b"weights-A").unwrap();
+            fs::write(dir.join(TOKENIZER_FILE_NAME), b"tokenizer-A").unwrap();
+            fs::write(dir.join(MANIFEST_FILE_NAME), br#"{"dimensions":2}"#).unwrap();
+        }
+        let original = FastEmbedProvider::from_model_dir(&first_dir)
+            .cache_identity()
+            .unwrap();
+        assert_eq!(
+            original,
+            FastEmbedProvider::from_model_dir(&second_dir)
+                .cache_identity()
+                .unwrap()
+        );
+        fs::write(first_dir.join("model.onnx"), b"weights-B").unwrap();
+        let changed_weights = FastEmbedProvider::from_model_dir(&first_dir)
+            .cache_identity()
+            .unwrap();
+        assert_ne!(original, changed_weights);
+        fs::write(first_dir.join(TOKENIZER_FILE_NAME), b"tokenizer-B").unwrap();
+        assert_ne!(
+            changed_weights,
+            FastEmbedProvider::from_model_dir(&first_dir)
+                .cache_identity()
+                .unwrap()
+        );
+        fs::remove_dir_all(first_dir).unwrap();
+        fs::remove_dir_all(second_dir).unwrap();
+    }
+
+    #[test]
+    fn intra_thread_cap_is_optional_and_never_changes_content_identity() {
+        let dir = std::env::temp_dir().join(unique_name("neuink-threads"));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("model.onnx"), b"weights").unwrap();
+        fs::write(dir.join(TOKENIZER_FILE_NAME), b"tokenizer").unwrap();
+        fs::write(dir.join(MANIFEST_FILE_NAME), br#"{"dimensions":2}"#).unwrap();
+
+        let default = FastEmbedProvider::from_model_dir(&dir);
+        let capped = FastEmbedProvider::from_model_dir_with_intra_threads(&dir, 4);
+        let clamped = FastEmbedProvider::from_model_dir_with_intra_threads(&dir, 0);
+        assert_eq!(default.intra_threads(), None);
+        assert_eq!(capped.intra_threads(), Some(4));
+        assert_eq!(clamped.intra_threads(), Some(1));
+        assert_eq!(default.cache_identity(), capped.cache_identity());
+        fs::remove_dir_all(dir).unwrap();
     }
 
     fn unique_name(prefix: &str) -> String {
@@ -341,3 +633,6 @@ mod tests {
         format!("{prefix}-{nanos}")
     }
 }
+
+
+

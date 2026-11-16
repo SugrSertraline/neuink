@@ -44,10 +44,12 @@ import { acknowledgeExecution } from '../harness/durableHarness';
 import {
   assistantRunBaseScope,
   buildConversationMentionScope,
+  buildMentionScope,
   buildTagMentionScopes,
   composerMentionsFromMessages,
   mergeScopeSnapshots,
   mergeScopeWithContextEntries,
+  retrievalRunScope,
 } from "./assistantScope";
 import {
   buildAssistantMessageParts as buildBaseMessageParts,
@@ -220,6 +222,17 @@ export async function runAssistantPanelTask({
       ),
       runContext,
     );
+    // Retrieval uses only this submission's explicit scope. Conversation history feeds the legacy
+    // run scope above, and it never widens or narrows what `search_library` may search.
+    const retrievalScope = retrievalRunScope({
+      contextItems: runContext.items,
+      currentScope: scope,
+      mentionScope: buildMentionScope({
+        entries,
+        mentions: submittedComposerSnapshot.mentions,
+        tags,
+      }),
+    });
     const currentConversation =
       conversation ??
       (await createConversation(
@@ -521,6 +534,7 @@ export async function runAssistantPanelTask({
       },
       question: trimmedQuestion,
       profiles,
+      retrievalScope,
       root,
       scope: runScope,
       settings: selectedProfile,
