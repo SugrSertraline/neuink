@@ -253,3 +253,13 @@ cargo run -p neuink-ipc --bin retrieval-probe -- `
 - 重排设置新增「已安装的重排模型」下拉：选中即写入 `model_dir`，不必手抄路径。
 
 已验证：`neuink-search` 重排 18 项、前端 `RerankSettingsSection` 5 项通过。
+
+### 重排也支持远程 API
+
+- 新增 `RerankTransport { local, api }`：`local` 走进程内 ONNX 交叉编码器（原路径），`api` 走托管 rerank 接口。
+- `neuink-search/src/remote_reranking.rs`：`HttpReranker` 适配 Jina / Cohere 同形接口（`POST {model, query, documents, top_n}` → `results[]`，按 `index` 回填 `relevance_score`）。要求 https、非空密钥；响应缺项、越界、非有限值都按错误处理，不做静默填充。
+- 阶梯保持不变：API 不可用（缺密钥/地址/模型）→ 字段覆盖 → 融合序；原因码新增 `api_unconfigured`，与 `model_unavailable` 区分。
+- 设置：`transport`、`api_endpoint`、`api_model`、`api_key`（只写不读，状态只回报 `has_api_key`）；保存时 `api_key` 为空表示保留原值。
+- 自检的重排项按后端输出：本地显示目录，API 显示地址与模型名。
+
+验证：`neuink-config` 16 项、`remote_reranking` 11 项、`commands::search` 53 项、前端 3139 项通过。
