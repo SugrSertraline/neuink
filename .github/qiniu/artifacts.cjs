@@ -6,7 +6,6 @@ const { pipeline } = require('node:stream/promises');
 
 const PLATFORMS = [
   { platform: 'windows-x64', zip: 'Neuink-windows-x64-portable.zip', info: 'build-info.json', sums: 'SHA256SUMS.txt' },
-  ...['arm64', 'x64'].map(arch => ({ platform: `macos-${arch}`, zip: `Neuink-macos-${arch}.app.zip`, info: `Neuink-macos-${arch}-build-info.json`, sums: `Neuink-macos-${arch}-SHA256SUMS.txt` })),
 ];
 const TAG_PATTERN = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/;
 

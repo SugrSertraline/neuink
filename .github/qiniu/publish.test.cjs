@@ -271,3 +271,10 @@ test('server fetch rejects wrong bytes, existing versions and unexpected source 
     await assert.rejects(fetchChecked(storage, key, { ...file, sourceUrl }), /Unexpected/);
   }
 });
+
+
+test('publication supports Windows only and ignores historical macOS attachments', () => {
+  assert.deepEqual(PLATFORMS.map(group => group.platform), ['windows-x64']);
+  const assets = [PLATFORMS[0].zip, PLATFORMS[0].info, PLATFORMS[0].sums, 'Neuink-macos-arm64.app.zip'].map(name => ({ name }));
+  assert.deepEqual(releaseFiles({ ...release, assets }, tag), [PLATFORMS[0]]);
+});
