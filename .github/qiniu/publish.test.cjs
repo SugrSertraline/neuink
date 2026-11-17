@@ -285,3 +285,10 @@ test('installer assets are included in checksum verification when present', asyn
   await assert.rejects(verifyArtifacts(directory, groups, tag, commit), /Checksum mismatch/);
   assert.throws(()=>releaseFiles({...release,assets:[group.zip,group.info,group.sums,extras[0]].map(name=>({name}))},tag),/Incomplete installer/);
 });
+
+
+test('publication supports Windows only and ignores historical macOS attachments', () => {
+  assert.deepEqual(PLATFORMS.map(group => group.platform), ['windows-x64']);
+  const assets = [...[PLATFORMS[0].zip, PLATFORMS[0].info, PLATFORMS[0].sums], 'Neuink-macos-arm64.app.zip'].map(name => ({ name }));
+  assert.deepEqual(releaseFiles({ ...release, assets }, tag), [PLATFORMS[0]]);
+});

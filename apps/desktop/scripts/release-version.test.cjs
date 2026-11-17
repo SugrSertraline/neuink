@@ -50,14 +50,9 @@ test('Rust workspace and npm workspace lock versions are checked', t => {
   fs.writeFileSync(file, JSON.stringify(lock));
   assert.throws(() => validateVersion(next, ''), /desktop/);
 });
-test('Mac check always prepares absent demo manifests first; version gate runs before builds', () => {
+test('Windows-only release validates the version before building', () => {
   const workflow = fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows/windows-portable.yml'), 'utf8');
-  const mac = workflow.split('\n  macos:')[1].split('\n  release-draft:')[0];
-  const prepare = mac.indexOf('run: npm --workspace apps/desktop run prepare:resources');
-  assert.ok(prepare > 0 && prepare < mac.indexOf('run: cargo check'));
-  const model = mac.indexOf('run: node apps/desktop/scripts/embedding-resources.cjs');
-  assert.ok(model > 0 && model < prepare);
-  assert.ok(!mac.slice(0, prepare).includes('if: github.event_name'));
+  assert.doesNotMatch(workflow, /macos|aarch64-apple|x86_64-apple/);
   const verify = workflow.split('\n  verify:')[1].split('\n  build:')[0];
   assert.ok(verify.indexOf('run: node apps/desktop/scripts/release-version.cjs') < verify.indexOf('run: npm run desktop:build'));
 });
@@ -83,7 +78,7 @@ test('release source gate runs before dependency installation, and all packages 
   const verify = workflow.split('\n  verify:')[1].split('\n  build:')[0];
   assert.match(verify, /fetch-depth: 0/);
   assert.ok(verify.indexOf('run: node apps/desktop/scripts/release-source.cjs') < verify.indexOf('run: npm ci'));
-  for (const name of ['build', 'macos']) {
+  for (const name of ['build']) {
     assert.match(workflow.split(`\n  ${name}:`)[1], /^\r?\n    needs: verify/);
   }
   const pages = fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows/pages.yml'), 'utf8');
