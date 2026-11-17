@@ -7,9 +7,9 @@
   },
   {
     "id": "updates",
-    "title": "近期更新与版本范围",
+    "title": "近期产品更新",
     "group": "开始",
-    "description": "区分当前 alpha 内测、稳定性候选与公开下载，了解新功能和使用边界。"
+    "description": "了解属性管理、表格编辑、中英阅读详略与账号解析队列。"
   },
   {
     "id": "concepts",
@@ -33,13 +33,13 @@
     "id": "library",
     "title": "条目、标签与属性",
     "group": "整理资料",
-    "description": "表格与标签文件夹三种视图、路径导航、可调列宽、云端状态与标签笔记。"
+    "description": "统一属性、表格直接编辑、表头排序、三种视图与标签笔记。"
   },
   {
     "id": "import",
     "title": "PDF 导入与 MinerU 解析",
     "group": "整理资料",
-    "description": "PDF 与客户端 ZIP 两条路径，以及自建解析服务。"
+    "description": "选择账号解析或自建 MinerU，管理队列，导入已有解析结果。"
   },
   {
     "id": "zotero",
@@ -57,7 +57,7 @@
     "id": "reflow",
     "title": "重排阅读与图表",
     "group": "阅读与理解",
-    "description": "按内容阅读段落、公式、表格、图片和 Mermaid。"
+    "description": "中英阅读详略与逐句对照，以及段落、公式、表格和图片。"
   },
   {
     "id": "translation",
@@ -123,7 +123,7 @@
     "id": "settings",
     "title": "账户、模型与阅读设置",
     "group": "成果与设置",
-    "description": "账户与本地存储、模型连接、翻译、主题与阅读偏好。"
+    "description": "账户与本地存储、解析方式、自定义大模型、本地 Agent 与阅读偏好。"
   },
   {
     "id": "sync",

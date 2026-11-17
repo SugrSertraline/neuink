@@ -1,13 +1,10 @@
 # Neuink 产品介绍与使用手册
 
-> 2026-11-13 发布规则更新：经用户确认的 alpha、beta 或 main 提交均可发布官网和发行包，不再要求先合并 main。保留来源提交记录、版本一致性、测试、空 data、凭据排除及下载校验。下文历史流程中限定 main 的表述不再适用。
-
-
 **[打开 Neuink 官网 →](https://sugrsertraline.github.io/neuink/)**
 
 在线了解完整功能、实机界面与使用方法：[开始阅读](https://sugrsertraline.github.io/neuink/start.html) · [核心概念](https://sugrsertraline.github.io/neuink/concepts.html) · [实机界面图解](https://sugrsertraline.github.io/neuink/screenshots.html)。
 
-面向 GitHub Pages 的独立静态网站，中文首页与按任务组织的专题指南。原有 `docs/` 继续承担产品、架构、开发状态与工程规范；本站只组织用户使用说明，不维护第二份开发流水账。
+位于 Neuink 仓库 `website/` 的静态网站，发布到 GitHub Pages，包含中文首页与按任务组织的专题指南。不是另一个官网仓库。原有 `docs/` 继续承担产品、架构、开发状态与工程规范；本站只组织用户使用说明，不维护第二份开发流水账。
 
 ## 本地预览
 
@@ -33,15 +30,15 @@ npm run preview --prefix website
 
 Markdown 渲染使用独立锁定的 markdown-it，不修改桌面应用依赖。原始 HTML 默认禁用；发布检查验证内部链接、锚点、搜索覆盖与产物白名单。不复制 Workspace、演示论文、服务地址或 `.env`。`public/screenshots/` 只发布审核过的界面截图；原生窗口实拍与浏览器中运行真实组件的示例图分别标明。新增图保留完整窗口或完整示例视口，仅遮挡服务地址和私人路径（历史图曾裁掉底栏）；首页流程示意与实机截图分别标明。图片点击后打开原尺寸，无需额外脚本。新增图片时同步更新 `screenshots.json` 尺寸白名单，并人工核对画面、脱敏区域、步骤说明及实际完成状态。完整窗口实拍分布于专题教程及截图导航；过时界面应从当前教程移除。
 
-当前内容区分 2026-11-13 的 alpha 内测功能与公开下载包；新增 `sync.md` 说明校园网同步、来源边界及问题处理。证书配置本轮暂缓，不在文档中公开测试地址或凭据。截图沿用已审核示例，旧布局需明确标注。
+产品文案覆盖自定义属性、表格内编辑、三种条目库视图、中英阅读详略、账号解析队列与校园网同步。当前仅维护 Windows x64，不展示 macOS 下载入口。下载链接使用稳定的 CDN 对象名，文案更新不能被表述为远程文件已替换；包内容以发行说明为准。截图沿用已审核示例，旧布局需明确标注。不公开服务地址、测试账号或凭据。
 
 更新功能说明前核对当前实现和 `docs/development/dev-plan.md`。涉及可用性变化时同时检查相关专题、FAQ 和 README；不要把计划功能写成已支持。
 
 ## GitHub Pages
 
-工作流位于 `.github/workflows/pages.yml`。网站相关 PR 只构建和检查；仅 main 上的网站变更可以发布，手动运行也仅允许 main 部署。部署 job 独占 `pages: write` 与 `id-token: write`，只上传 `website/dist`。发布任务共享并发组，避免同时覆盖。
+工作流位于 `.github/workflows/pages.yml`。网站相关 PR 只构建和检查；经用户确认的 alpha、beta 或 main 提交均可发布，网站相关 push 或手动运行可触发部署，不要求先合并 main。部署 job 独占 `pages: write` 与 `id-token: write`，只上传 `website/dist`。发布任务共享并发组，避免同时覆盖。发布时记录来源提交和本地验证结果。
 
-官网与图文手册已统一从 main 维护。作者主页统一链接到 `https://sugrsertraline.top/`，不在 Neuink 内维护个人主页内容；本仓库继续发布到 `/neuink/`。构建的 `GUIDE_SOURCE_REF` 让“查看本页源文档”链接指向实际构建分支。
+作者主页统一链接到 `https://sugrsertraline.top/`，不在 Neuink 内维护个人主页内容；本仓库继续发布到 `/neuink/`。构建的 `GUIDE_SOURCE_REF` 让“查看本页源文档”链接指向实际构建分支。
 
 首次需要在仓库 **Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**。之后推送网站变更或从 Actions 手动运行 **Documentation Pages**。仅当部署 job 成功且访问确认后，才能声称网站已上线。
 
