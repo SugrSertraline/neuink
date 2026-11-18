@@ -284,6 +284,13 @@ impl Replica {
             .query_row("SELECT cursor FROM identity WHERE id=1", [], |r| r.get(0))
             .map_err(error)
     }
+    /// Last server-confirmed document, distinct from newer locally saved content.
+    pub(crate) fn confirmed_content(&self, id: &str) -> Result<Option<Value>> {
+        let raw: Option<String> = self.db.query_row(
+            "SELECT base_content FROM documents WHERE id=?1", [id], |row| row.get(0),
+        ).optional().map_err(error)?.flatten();
+        raw.map(|value| serde_json::from_str(&value).map_err(error)).transpose()
+    }
     /// Persist a conflict before advancing the download cursor. A conflict is not a dropped update.
     pub fn receive(&mut self, change: &RemoteChange) -> Result<()> {
         let tx = self.db.transaction().map_err(error)?;

@@ -9,7 +9,9 @@ use std::{
 struct Schedule {
     stamp: Option<String>,
     changed_at: u64,
+    dirty_since: u64,
     dirty: bool,
+    remote_pending: bool,
     started: bool,
     last_run: u64,
     next_attempt: u64,
@@ -51,6 +53,7 @@ impl Schedule {
         if self.stamp.as_ref() != Some(&stamp) {
             self.stamp = Some(stamp);
             self.changed_at = now;
+            if !self.dirty { self.dirty_since = now; }
             self.dirty = true;
         }
         if self.blocked || now < self.next_attempt {
@@ -58,12 +61,14 @@ impl Schedule {
         }
         let due = !self.started
             || self.retry_pending
-            || (self.dirty && now.saturating_sub(self.changed_at) >= 3000)
-            || now.saturating_sub(self.last_run) >= 60000;
+            || self.remote_pending
+            || (self.dirty && (now.saturating_sub(self.changed_at) >= 3000
+                || now.saturating_sub(self.dirty_since) >= 30000));
         if due {
             self.started = true;
             self.dirty = false;
             self.retry_pending = false;
+            self.remote_pending = false;
             self.last_run = now;
         }
         due
@@ -125,6 +130,15 @@ pub(super) fn reset_all() -> Result<(), String> {
         .clear();
     Ok(())
 }
+/// A hint requests normal delta sync; it never advances the durable cursor,
+/// resets failure backoff, or clears edits observed while a request was running.
+pub(super) fn remote_changed(root: &Path, generation: u64) -> Result<(), String> {
+    let mut schedules = schedules().lock().map_err(|_| "自动同步状态不可用")?;
+    if let Some(schedule) = schedules.get_mut(root).filter(|s| s.generation == generation) {
+        schedule.remote_pending = true;
+    }
+    Ok(())
+}
 pub(super) fn cancelled(root: &Path, generation: u64) -> Result<(), String> {
     let mut schedules = schedules().lock().map_err(|_| "自动同步状态不可用")?;
     let Some(schedule) = schedules
@@ -158,7 +172,25 @@ pub(super) fn view(root: &Path) -> Result<View, String> {
 mod tests {
     use super::*;
     #[test]
-    fn startup_changes_remote_poll_and_business_failures_have_distinct_schedules() {
+    fn idle_library_does_not_start_another_full_sync_each_minute() {
+        let mut schedule = Schedule::default();
+        assert!(schedule.claim("a".into(), 10000));
+        schedule.complete(false, false, 11000, 0);
+        assert!(!schedule.claim("a".into(), 71000));
+        assert!(!schedule.claim("a".into(), 3600000));
+    }
+    #[test]
+    fn continuous_edits_cannot_postpone_sync_forever() {
+        let mut schedule = Schedule::default();
+        assert!(schedule.claim("a".into(), 10000));
+        schedule.complete(false, false, 11000, 0);
+        for t in 0..30 {
+            assert!(!schedule.claim(format!("edit-{t}"), 12000 + t * 1000));
+        }
+        assert!(schedule.claim("edit-30".into(), 42000));
+    }
+    #[test]
+    fn startup_changes_remote_hints_and_business_failures_have_distinct_schedules() {
         let mut schedule = Schedule::default();
         assert!(schedule.claim("a".into(), 10000));
         schedule.complete(false, false, 11000, 0);
@@ -167,9 +199,25 @@ mod tests {
         assert!(schedule.claim("b".into(), 15000));
         schedule.complete(false, false, 16000, 0);
         assert!(!schedule.claim("b".into(), 75999));
-        assert!(schedule.claim("b".into(), 76000));
+        assert!(!schedule.claim("b".into(), 76000));
+        schedule.remote_pending = true;
+        assert!(schedule.claim("b".into(), 76001));
         schedule.complete(true, false, 77000, 0);
+        // An unfinished audit remains due, but must not bypass a local failure.
+        schedule.remote_pending = true;
         assert!(!schedule.claim("c".into(), 200000));
+    }
+    #[test]
+    fn remote_hints_keep_backoff_and_stale_completion_does_not_consume_new_work() {
+        let mut schedule = Schedule::default();
+        assert!(schedule.claim("a".into(), 10000));
+        schedule.remote_pending = true;
+        schedule.complete(true, true, 11000, 0);
+        assert!(!schedule.claim("a".into(), 12000));
+        assert!(schedule.claim("a".into(), schedule.next_attempt));
+        assert!(!schedule.claim("b".into(), 18000));
+        schedule.complete(false, false, 19000, 0);
+        assert!(schedule.claim("b".into(), 21000));
     }
     #[test]
     fn retry_backoff_is_bounded_and_success_resets_it() {

@@ -16,6 +16,9 @@ pub(super) struct Files {
     trashed_entry: Option<String>,
     observed: BTreeMap<String, Option<String>>,
     directories: BTreeMap<String, Vec<String>>,
+    incremental: bool,
+    resource_stamps: BTreeMap<String, super::fingerprints::Stamp>,
+    strong_paths: std::collections::BTreeSet<String>,
     pub blobs: BTreeMap<String, BlobSource>,
 }
 
@@ -69,6 +72,8 @@ pub(crate) fn fingerprint(path: &Path) -> io::Result<Option<(String, u64)>> {
             return Err(invalid("附件超过 2 GiB"));
         }
         hasher.update(&buffer[..count]);
+        #[cfg(test)]
+        record_read(path, count as u64);
     }
     let after = fs::metadata(path)?;
     if size != before.len() || size != after.len() || before.modified()? != after.modified()? {
@@ -77,13 +82,59 @@ pub(crate) fn fingerprint(path: &Path) -> io::Result<Option<(String, u64)>> {
     Ok(Some((hasher.finalize().to_hex().to_string(), size)))
 }
 
+/// Discovery and already verified staging blobs may use a bounded observation
+/// hint. Upload, download, reads and incoming apply must use `fingerprint`.
+pub(crate) fn incremental_fingerprint(
+    root: &Path,
+    relative: &str,
+    path: &Path,
+) -> io::Result<(String, u64)> {
+    super::fingerprints::resource(root, relative, path).map(|(hash, size, _)| (hash, size))
+}
+
+#[cfg(test)]
+thread_local! {
+    static PDF_READ_BYTES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static READ_COUNTS: std::cell::RefCell<BTreeMap<String, u64>> = const { std::cell::RefCell::new(BTreeMap::new()) };
+}
+
+#[cfg(test)]
+pub(super) fn record_read(path: &Path, bytes: u64) {
+    READ_COUNTS.with(|counts| {
+        *counts
+            .borrow_mut()
+            .entry(path.file_name().unwrap().to_string_lossy().into_owned())
+            .or_default() += bytes;
+    });
+    if path.extension().is_some_and(|value| value == "pdf") {
+        PDF_READ_BYTES.with(|counter| counter.set(counter.get() + bytes));
+    }
+}
+
+#[cfg(test)]
+pub(super) fn take_read_counts() -> BTreeMap<String, u64> {
+    READ_COUNTS.with(|counts| std::mem::take(&mut *counts.borrow_mut()))
+}
+
+#[cfg(test)]
+pub(super) fn take_pdf_read_bytes() -> u64 {
+    PDF_READ_BYTES.with(|counter| counter.replace(0))
+}
+
 impl Files {
     pub fn new(root: &Path) -> io::Result<Self> {
+        Self::with_incremental_resources(root, false)
+    }
+
+    pub fn with_incremental_resources(root: &Path, incremental: bool) -> io::Result<Self> {
         Ok(Self {
             root: root.canonicalize()?,
             trashed_entry: None,
             observed: BTreeMap::new(),
             directories: BTreeMap::new(),
+            incremental,
+            resource_stamps: BTreeMap::new(),
+            strong_paths: std::collections::BTreeSet::new(),
             blobs: BTreeMap::new(),
         })
     }
@@ -112,6 +163,8 @@ impl Files {
     }
 
     pub fn read_optional(&mut self, relative: &str) -> io::Result<Option<Vec<u8>>> {
+        self.strong_paths.insert(relative.into());
+        self.resource_stamps.remove(relative);
         let path = self.path(relative)?;
         let file = match fs::File::open(&path) {
             Ok(file) => file,
@@ -150,8 +203,15 @@ impl Files {
 
     pub fn resource(&mut self, relative: &str, name: &str) -> io::Result<Resource> {
         let path = self.path(relative)?;
-        let (hash, size) =
-            fingerprint(&path)?.ok_or_else(|| invalid("引用的附件缺失，不能保证完整恢复"))?;
+        let (hash, size) = if self.incremental {
+            let (hash, size, stamp) = super::fingerprints::resource(&self.root, relative, &path)?;
+            if !self.strong_paths.contains(relative) {
+                self.resource_stamps.insert(relative.into(), stamp);
+            }
+            (hash, size)
+        } else {
+            fingerprint(&path)?.ok_or_else(|| invalid("引用的附件缺失，不能保证完整恢复"))?
+        };
         self.observe(relative, Some(hash.clone()))?;
         self.blobs
             .entry(hash.clone())
@@ -186,6 +246,12 @@ impl Files {
             }
         }
         for (relative, expected) in &self.observed {
+            if let Some(stamp) = self.resource_stamps.get(relative) {
+                if &super::fingerprints::Stamp::read(&self.path(relative)?)? != stamp {
+                    return Err(invalid("源附件已变化，请重新生成同步清单"));
+                }
+                continue;
+            }
             let actual = fingerprint(&self.path(relative)?)?.map(|(hash, _)| hash);
             if &actual != expected {
                 return Err(invalid("源内容已变化，请重新生成同步清单"));
@@ -221,6 +287,8 @@ impl Files {
                 file.seek(SeekFrom::Start(offset))?;
                 let mut bytes = vec![0; (*size - offset).min(length as u64) as usize];
                 file.read_exact(&mut bytes)?;
+                #[cfg(test)]
+                record_read(&self.path(relative)?, bytes.len() as u64);
                 Ok(bytes)
             }
         }

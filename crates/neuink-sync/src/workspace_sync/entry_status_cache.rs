@@ -1,14 +1,22 @@
-//! Bounded, disposable UI cache. Network publication still exports and verifies bytes.
-use neuink_workspace::{sync_control::entry_status_stamp, sync_export, Workspace};
+//! Bounded, disposable UI cache sharing the sync resource fingerprints.
+use neuink_workspace::{sync_export, Workspace};
+use super::super::candidates;
 use std::{collections::BTreeMap, path::PathBuf, sync::{Mutex, OnceLock}, time::{Duration, Instant}};
 type Documents = BTreeMap<String, serde_json::Value>;
 struct Cached { stamp: String, checked: Instant, bytes: usize, docs: Documents }
 static CACHE: OnceLock<Mutex<BTreeMap<PathBuf, Cached>>> = OnceLock::new();
 
+pub(super) fn invalidate(workspace: &Workspace) {
+    let Ok(root) = workspace.layout().root().canonicalize() else { return };
+    if let Some(cache) = CACHE.get() {
+        if let Ok(mut entries) = cache.lock() { entries.retain(|path, _| !path.starts_with(&root)); }
+    }
+}
+
 pub(super) fn documents(workspace: &Workspace, id: &str) -> Result<Documents, String> {
     let root = workspace.layout().root();
     let key = root.canonicalize().map_err(|e| e.to_string())?.join("entries").join(id);
-    let before = entry_status_stamp(root, id).map_err(|e| e.to_string())?;
+    let before = candidates::stamp(root, id).map_err(|e| e.to_string())?;
     let cache = CACHE.get_or_init(Default::default);
     {
         let entries = cache.lock().map_err(|e| e.to_string())?;
@@ -18,10 +26,10 @@ pub(super) fn documents(workspace: &Workspace, id: &str) -> Result<Documents, St
             }
         }
     }
-    let bundle = sync_export::export_entry(root, id).map_err(|e| e.to_string())?;
+    let bundle = sync_export::export_entry_incremental(root, id).map_err(|e| e.to_string())?;
     let docs = bundle.manifest().documents.iter().map(|doc|
         Ok((doc.entity_id.clone(), super::wire::encode(doc)?))).collect::<Result<Documents, String>>()?;
-    let after = entry_status_stamp(root, id).map_err(|e| e.to_string())?;
+    let after = candidates::stamp(root, id).map_err(|e| e.to_string())?;
     if before != after { return Err("条目正在更新，请稍后重新检查".into()); }
     let mut entries = cache.lock().map_err(|e| e.to_string())?;
     // Large libraries remain correct even when their manifests exceed the cache budget.
@@ -47,6 +55,10 @@ mod tests {
         let first = documents(&ws, entry.id.as_str()).unwrap();
         let key = dir.path().canonicalize().unwrap().join("entries").join(entry.id.as_str());
         let checked = CACHE.get().unwrap().lock().unwrap()[&key].checked;
+        assert_eq!(documents(&ws, entry.id.as_str()).unwrap(), first);
+        assert_eq!(CACHE.get().unwrap().lock().unwrap()[&key].checked, checked);
+        // Replica bookkeeping is not an edit to every paper in the library.
+        std::fs::write(dir.path().join("sync-sequence.json"), b"123").unwrap();
         assert_eq!(documents(&ws, entry.id.as_str()).unwrap(), first);
         assert_eq!(CACHE.get().unwrap().lock().unwrap()[&key].checked, checked);
         ws.create_note(&entry.id, "Unsynced note").unwrap();

@@ -11,6 +11,6 @@ class ProtocolTest {
     @Test void operationSerializationKeepsRustFieldOrderAndCanonicalContent() throws Exception {
         ObjectMapper json=new ObjectMapper();
         var op=json.readTree("{\"kind\":\"note\",\"object_id\":\"n\",\"operation_id\":\"op\",\"mutation\":{\"content\":{\"z\":1,\"a\":2},\"action\":\"put\"}}");
-        assertEquals("{\"operation_id\":\"op\",\"object_id\":\"n\",\"kind\":\"note\",\"base_revision\":null,\"mutation\":{\"action\":\"put\",\"content\":{\"a\":2,\"z\":1}}}",new SyncService(null,null,null,json,null).canonicalOperation(op));
+        assertEquals("{\"operation_id\":\"op\",\"object_id\":\"n\",\"kind\":\"note\",\"base_revision\":null,\"mutation\":{\"action\":\"put\",\"content\":{\"a\":2,\"z\":1}}}",new SyncService(null,null,null,json,null,null).canonicalOperation(op));
     }
 }

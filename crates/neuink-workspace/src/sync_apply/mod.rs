@@ -119,6 +119,46 @@ impl Workspace {
         binding: &WorkspaceSyncBinding,
         bundle: &ExportBundle,
     ) -> Result<()> {
+        self.stage_sync_bundle_selection_locked(binding, bundle, None, &Default::default())
+    }
+
+    /// Only resources referenced by changed documents need a retained snapshot.
+    /// Unchanged resources keep their acknowledged immutable snapshot, while new
+    /// snapshots are still copied and content-verified before a queue can freeze.
+    pub fn stage_sync_bundle_entities(
+        &self,
+        binding: &WorkspaceSyncBinding,
+        bundle: &ExportBundle,
+        entity_ids: &std::collections::BTreeSet<String>,
+    ) -> Result<()> {
+        self.stage_sync_bundle_entities_with_confirmed(binding, bundle, entity_ids, &Default::default())
+    }
+
+    /// `confirmed_resources` must come from durable server acknowledgments for
+    /// this binding, not from the current dirty or queued document contents.
+    pub fn stage_sync_bundle_entities_with_confirmed(
+        &self,
+        binding: &WorkspaceSyncBinding,
+        bundle: &ExportBundle,
+        entity_ids: &std::collections::BTreeSet<String>,
+        confirmed_resources: &std::collections::BTreeSet<(String, u64)>,
+    ) -> Result<()> {
+        let _guard = crate::tag_transaction::lock_metadata().map_err(error)?;
+        if entity_ids.iter().any(|id| {
+            !bundle.manifest().documents.iter().any(|d| &d.entity_id == id)
+        }) {
+            return Err("待暂存实体不在本次同步清单中".into());
+        }
+        self.stage_sync_bundle_selection_locked(binding, bundle, Some(entity_ids), confirmed_resources)
+    }
+
+    fn stage_sync_bundle_selection_locked(
+        &self,
+        binding: &WorkspaceSyncBinding,
+        bundle: &ExportBundle,
+        entity_ids: Option<&std::collections::BTreeSet<String>>,
+        confirmed_resources: &std::collections::BTreeSet<(String, u64)>,
+    ) -> Result<()> {
         self.check_sync_binding(binding)?;
         bundle.verify_unchanged_locked().map_err(error)?;
         let mut hashes = std::collections::BTreeSet::new();
@@ -126,10 +166,15 @@ impl Workspace {
             .manifest()
             .documents
             .iter()
+            .filter(|document| entity_ids.is_none_or(|ids| ids.contains(&document.entity_id)))
             .flat_map(|d| &d.resources)
         {
             if hashes.insert(&resource.hash) {
-                cache::stage(self, bundle, resource)?;
+                if confirmed_resources.contains(&(resource.hash.clone(), resource.size)) {
+                    cache::stage_with_confirmation(self, bundle, resource, true)?;
+                } else {
+                    cache::stage(self, bundle, resource)?;
+                }
             }
         }
         bundle.verify_unchanged_locked().map_err(error)

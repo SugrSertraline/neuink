@@ -6,8 +6,11 @@ use std::collections::BTreeMap;
 #[path = "entry_status_cache.rs"]
 mod cache;
 
+pub(super) fn invalidate_cache(workspace: &Workspace) { cache::invalidate(workspace); }
+
 pub fn inspect(workspace: &Workspace) -> Result<BTreeMap<String, &'static str>, String> {
     let binding = workspace.sync_binding().map_err(|e| e.to_string())?;
+    if binding.is_some() { super::local_change_stamp(workspace)?; }
     let replica = if let Some(b) = &binding {
         let path = workspace.sync_replica_path(b)?;
         if path.exists() { Some(Replica::read_snapshot(&path,

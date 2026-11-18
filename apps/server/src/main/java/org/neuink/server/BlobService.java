@@ -8,22 +8,23 @@ import java.nio.file.*;
 import java.util.*;
 import org.bouncycastle.crypto.digests.Blake3Digest;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.neuink.server.persistence.BlobServiceMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 class BlobService {
     static final int CHUNK=4*1024*1024;
-    private final Path storage; private final JdbcTemplate db; private final TransactionTemplate transactions;
-    BlobService(@Value("${neuink.storage}") String directory,JdbcTemplate db,TransactionTemplate transactions) throws IOException {
-        storage=Path.of(directory).toAbsolutePath().normalize(); this.db=db; this.transactions=transactions;
+    private final StorageUsage usage;
+    private final Path storage; private final BlobServiceMapper db; private final TransactionTemplate transactions;
+    BlobService(@Value("${neuink.storage}") String directory,BlobServiceMapper db,TransactionTemplate transactions,StorageUsage usage) throws IOException {
+        storage=Path.of(directory).toAbsolutePath().normalize(); this.db=db; this.transactions=transactions; this.usage=usage;
         Files.createDirectories(storage.resolve("uploads")); Files.createDirectories(storage.resolve("blobs"));
     }
     private Path upload(String id) { if(!Api.hash(id)) throw Api.fail(400,"invalid_upload"); return storage.resolve("uploads").resolve(id); }
     private Map<String,Object> record(String owner,String id,boolean lock) {
         if(!Api.hash(id)) throw Api.fail(400,"invalid_upload");
-        var rows=db.queryForList("SELECT hash,size,offset_bytes FROM uploads WHERE id=? AND owner=? AND expires_at>?"+(lock?" FOR UPDATE":""),id,owner,Api.now());
+        var rows=db.findUpload(id, owner, Api.now(), lock);
         if(rows.isEmpty()) throw Api.fail(404,"upload_missing"); return rows.getFirst();
     }
     Object create(String owner,JsonNode request) {
@@ -31,19 +32,28 @@ class BlobService {
         if(!Api.hash(hash) || length==null || !length.isIntegralNumber() || !length.canConvertToLong() || length.longValue()<0 || length.longValue()>2147483648L) throw Api.fail(400,"invalid_blob");
         long size=length.longValue();
         return transactions.execute(tx->{
-            long quota=db.queryForObject("SELECT quota FROM users WHERE id=? FOR UPDATE",Long.class,owner);
-            db.update("DELETE FROM blob_gc WHERE owner=? AND hash=? AND NOT deleting",owner,hash);
-            if(Boolean.TRUE.equals(db.queryForObject("SELECT EXISTS(SELECT 1 FROM blobs WHERE owner=? AND hash=? AND size=?)",Boolean.class,owner,hash,size))) return Map.of("complete",true,"hash",hash);
+            long quota=db.lockQuota(owner);
+            db.cancelCollection(owner, hash);
+            if(Boolean.TRUE.equals(db.hasBlob(owner, hash, size))) {
+                // Clients reuse confirmed resources without rereading their local PDF.
+                // A database row alone must not claim a lost/truncated file is available.
+                Path path=storage.resolve("blobs").resolve(owner).resolve(hash);
+                try {
+                    var attributes=Files.readAttributes(path,java.nio.file.attribute.BasicFileAttributes.class,LinkOption.NOFOLLOW_LINKS);
+                    if(!attributes.isRegularFile() || attributes.size()!=size) throw Api.fail(503,"stored_blob_unavailable");
+                } catch(IOException ignored) { throw Api.fail(503,"stored_blob_unavailable"); }
+                return Map.of("complete",true,"hash",hash);
+            }
             // The owner lock serializes reservations across devices. Reuse an
             // unfinished identical upload rather than charging its size twice.
-            var pending=db.queryForList("SELECT id,offset_bytes FROM uploads WHERE owner=? AND hash=? AND size=? AND expires_at>? ORDER BY expires_at DESC LIMIT 1",owner,hash,size,Api.now());
+            var pending=db.findPendingUpload(owner, hash, size, Api.now());
             if(!pending.isEmpty()) return Map.of("id",pending.getFirst().get("id"),"offset",pending.getFirst().get("offset_bytes"),"complete",false);
-            long used=new StorageUsage(db).blobs(owner)+new StorageUsage(db).metadata(owner);
-            long reserved=db.queryForObject("SELECT COALESCE(SUM(size),0)::BIGINT FROM uploads u WHERE owner=? AND expires_at>? AND NOT EXISTS(SELECT 1 FROM blobs b WHERE b.owner=u.owner AND b.hash=u.hash)",Long.class,owner,Api.now());
+            long used=usage.blobs(owner)+usage.metadata(owner);
+            long reserved=db.reservedBytes(owner, Api.now());
             if(used+reserved+size>quota) throw Api.fail(507,"quota_exceeded");
             String id=Api.token();
             try { Files.createFile(upload(id)); } catch(IOException ignored) { throw Api.fail(500,"file_error"); }
-            db.update("INSERT INTO uploads(id,owner,hash,size,expires_at) VALUES(?,?,?,?,?)",id,owner,hash,size,Api.now()+86400);
+            db.insertUpload(id, owner, hash, size, Api.now()+86400);
             return Map.of("id",id,"offset",0,"complete",false);
         });
     }
@@ -54,14 +64,14 @@ class BlobService {
     Object cancel(String owner,String id) {
         if(!Api.hash(id)) throw Api.fail(400,"invalid_upload");
         transactions.executeWithoutResult(tx -> {
-            var rows=db.queryForList("SELECT id FROM uploads WHERE id=? AND owner=? FOR UPDATE",id,owner);
+            var rows=db.lockUpload(id, owner);
             if(rows.isEmpty()) throw Api.fail(404,"upload_missing");
             // Invalidate before removing bytes so a crash cannot resume a missing file.
-            db.update("UPDATE uploads SET expires_at=0 WHERE id=?",id);
+            db.expireUpload(id);
         });
         try { Files.deleteIfExists(upload(id)); }
         catch(IOException ignored) { throw Api.fail(503,"upload_cleanup_pending"); }
-        db.update("DELETE FROM uploads WHERE id=? AND owner=? AND expires_at=0",id,owner);
+        db.deleteExpiredUpload(id, owner);
         return Map.of("ok",true);
     }
     Object chunk(String owner,String id,long offset,byte[] bytes) {
@@ -75,7 +85,7 @@ class BlobService {
                 file.force(true);
             } catch(IOException ignored) { throw Api.fail(500,"file_error"); }
             long next=offset+bytes.length;
-            db.update("UPDATE uploads SET offset_bytes=? WHERE id=?",next,id);
+            db.updateOffset(next, id);
             return Map.of("offset",next);
         });
     }
@@ -86,7 +96,7 @@ class BlobService {
     }
     Object complete(String owner,String id) {
         return transactions.execute(tx->{
-            db.queryForObject("SELECT id FROM users WHERE id=? FOR UPDATE",String.class,owner);
+            db.lockOwner(owner);
             var row=record(owner,id,true); long size=((Number)row.get("size")).longValue(); String hash=(String)row.get("hash");
             if(size!=((Number)row.get("offset_bytes")).longValue()) throw Api.fail(400,"upload_incomplete");
             try {
@@ -107,14 +117,14 @@ class BlobService {
                 }
                 if(Files.size(destination)!=size || !fileHash(destination).equals(hash)) throw Api.fail(500,"stored_blob_corrupt");
             } catch(IOException ignored) { throw Api.fail(500,"file_error"); }
-            db.update("INSERT INTO blobs(owner,hash,size) VALUES(?,?,?) ON CONFLICT DO NOTHING",owner,hash,size);
+            db.insertBlob(owner, hash, size);
             return Map.of("hash",hash,"size",size);
         });
     }
     record Download(byte[] content,long size,long start,long end,boolean range) {}
     Download download(String owner,String hash,String offset,String range) {
         if(!Api.hash(hash)) throw Api.fail(400,"invalid_hash");
-        var rows=db.queryForList("SELECT size FROM blobs WHERE owner=? AND hash=?",owner,hash);
+        var rows=db.findBlob(owner, hash);
         if(rows.isEmpty()) throw Api.fail(404,"blob_missing");
         long size=((Number)rows.getFirst().get("size")).longValue(), start=0,end;
         try {

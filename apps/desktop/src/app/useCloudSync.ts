@@ -56,6 +56,23 @@ export function useCloudSync(root: string | null, ready: boolean, onOpenIssues?:
     let closed = false;
     let running = false;
     let timer: ReturnType<typeof setTimeout>;
+    let watchTimer: ReturnType<typeof setTimeout>;
+    let watching = false;
+    // The server waits for a library revision change. Keep this independent of
+    // local edits so a long poll never delays a saved note or translation.
+    async function watch() {
+      if (closed || watching) return;
+      watching = true;
+      let delay = 60000;
+      try {
+        const result = await cloudAccount<{ delay_ms?: number }>({ action: 'sync_watch', root: root! });
+        delay = Math.max(1000, Math.min(60000, result?.delay_ms ?? 60000));
+      } catch { /* The normal sync task owns error reporting and retry backoff. */ }
+      finally {
+        watching = false;
+        if (!closed) watchTimer = setTimeout(() => void watch(), delay);
+      }
+    }
     async function tick() {
       if (closed || running) return;
       running = true;
@@ -69,11 +86,17 @@ export function useCloudSync(root: string | null, ready: boolean, onOpenIssues?:
     }
     const online = () => {
       void cloudAccount({ action: 'sync_wake', root }).then(() => {
-        if (!closed) { clearTimeout(timer); void tick(); }
+        if (!closed) { clearTimeout(timer); clearTimeout(watchTimer); void tick(); void watch(); }
       }).catch(() => undefined);
     };
     window.addEventListener('online', online);
+    const visible = () => { if (document.visibilityState === 'visible') online(); };
+    document.addEventListener('visibilitychange', visible);
     void tick();
-    return () => { closed = true; clearTimeout(timer); window.removeEventListener('online', online); };
+    void watch();
+    return () => {
+      closed = true; clearTimeout(timer); clearTimeout(watchTimer);
+      window.removeEventListener('online', online); document.removeEventListener('visibilitychange', visible);
+    };
   }, [root, ready]);
 }

@@ -97,11 +97,15 @@ pub(super) async fn handle<R: Runtime>(
         }
         let stamp_root = root.clone();
         let stamp = tokio::task::spawn_blocking(move || {
-            neuink_workspace::sync_control::change_stamp(&stamp_root)
+            let workspace = neuink_workspace::Workspace::open_existing(&stamp_root).map_err(|e| e.to_string())?;
+            neuink_sync::workspace_sync::local_change_stamp(&workspace)
         })
         .await
         .map_err(|_| "本地同步检查中断")?
         .map_err(|_| "本地同步检查未完成，请检查资料库")?;
+        if neuink_sync::workspace_sync::local_audit_due(&workspace) {
+            scheduler::remote_changed(&root, scheduler::generation(&root)?)?;
+        }
         if !scheduler::claim(&root, stamp)? {
             return Ok(Some(Value::Null));
         }

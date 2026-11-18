@@ -22,6 +22,8 @@ class HttpIntegrationTest {
     @Autowired ObjectMapper json;
     @Autowired org.springframework.jdbc.core.JdbcTemplate db;
     @Autowired UploadCleanup cleanup;
+    @Autowired StorageUsage usage;
+    @org.springframework.beans.factory.annotation.Value("${neuink.storage}") String storage;
     final HttpClient http=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     HttpRequest request(String method,String path,String token,String body) {
         var builder=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+path)).timeout(Duration.ofSeconds(30)).header("Content-Type","application/json");
@@ -32,6 +34,44 @@ class HttpIntegrationTest {
         return http.send(request(method,path,token,body==null?null:json.writeValueAsString(body)),HttpResponse.BodyHandlers.ofString());
     }
     JsonNode ok(HttpResponse<String> response) throws Exception { assertEquals(200,response.statusCode()); return json.readTree(response.body()); }
+    @Test void acknowledgedBlobRequiresExistingRegularFileOfDeclaredSize() throws Exception {
+        String name="blob-proof-"+Api.token().substring(0,12);auth.createAdmin(name,"test-password-only");
+        var session=ok(call("POST","/v1/auth/login",null,Map.of("username",name,"password","test-password-only")));
+        String access=session.path("access_token").asText(),owner=session.path("account_id").asText();
+        byte[] bytes="verified immutable blob".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        String hash=Api.digest(bytes);var request=Map.of("hash",hash,"size",bytes.length);
+        db.update("INSERT INTO blobs(owner,hash,size) VALUES(?,?,?)",owner,hash,bytes.length);
+        var path=java.nio.file.Path.of(storage,"blobs",owner,hash);
+        var missing=call("POST","/v1/uploads",access,request);
+        assertEquals(503,missing.statusCode());assertEquals("stored_blob_unavailable",json.readTree(missing.body()).path("error").asText());
+        java.nio.file.Files.createDirectories(path.getParent());java.nio.file.Files.write(path,new byte[]{1});
+        assertEquals(503,call("POST","/v1/uploads",access,request).statusCode());
+        java.nio.file.Files.delete(path);java.nio.file.Files.createDirectory(path);
+        assertEquals(503,call("POST","/v1/uploads",access,request).statusCode());
+        java.nio.file.Files.delete(path);java.nio.file.Files.write(path,bytes);
+        assertTrue(ok(call("POST","/v1/uploads",access,request)).path("complete").asBoolean());
+        assertEquals(1,db.queryForObject("SELECT count(*) FROM blobs WHERE owner=? AND hash=?",Integer.class,owner,hash));
+        assertEquals(0,db.queryForObject("SELECT count(*) FROM uploads WHERE owner=?",Integer.class,owner));
+    }
+    @Test void readingHistoryKindRoundtripsAndRetriesAreIdempotent() throws Exception {
+        String username="reading-"+Api.token().substring(0,12);
+        auth.createAdmin(username,"test-password-only");
+        var session=ok(call("POST","/v1/auth/login",null,Map.of("username",username,"password","test-password-only")));
+        String access=session.path("access_token").asText();
+        var discovery=ok(call("GET","/.well-known/neuink-sync",null,null));
+        assertTrue(discovery.path("capabilities").toString().contains("reading_state_v1"));
+        var library=ok(call("POST","/v1/libraries",access,Map.of("name","Reading integration")));
+        String route="/v1/libraries/"+library.path("id").asText(), epoch=library.path("epoch").asText();
+        var operation=op("reading:paper",null,"checkpoint","reading-operation").put("kind","reading_state");
+        var content=json.readTree("{\"document\":{\"schema_version\":1,\"entity_id\":\"reading:paper\",\"kind\":\"reading_state\",\"payload\":{\"entry_id\":\"paper\",\"state\":{\"version\":1,\"total_active_ms\":12000}},\"resources\":[],\"references\":[\"entry:paper\"]},\"_files\":[]}");
+        ((ObjectNode)operation.path("mutation")).set("content",content);
+        var body=Map.of("epoch",epoch,"operation",operation);
+        var first=ok(call("POST",route+"/operations",access,body));
+        assertEquals(first.path("revision"),ok(call("POST",route+"/operations",access,body)).path("revision"));
+        var changes=ok(call("GET",route+"/changes?epoch="+epoch,access,null)).path("changes");
+        assertEquals(1,changes.size()); assertEquals("reading_state",changes.get(0).path("kind").asText());
+        assertEquals(content,changes.get(0).path("content"));
+    }
     ObjectNode op(String id,Long revision,String text,String operation) {
         var node=json.createObjectNode().put("operation_id",operation).put("object_id",id).put("kind","note");
         if(revision==null) node.putNull("base_revision"); else node.put("base_revision",revision);
@@ -144,11 +184,11 @@ class HttpIntegrationTest {
         }
         ok(call("POST","/v1/libraries/"+id+"/operations",access,Map.of("epoch",epoch,"operation",node)));
         long bytes=db.queryForObject("SELECT octet_length(content::text) FROM objects WHERE library_id=? AND id='large'",Long.class,id);
-        assertEquals(bytes,new StorageUsage(db).metadata(user));
+        assertEquals(bytes,usage.metadata(user));
         node.put("operation_id","large-second").put("base_revision",1);content.put("text","second");
         ok(call("POST","/v1/libraries/"+id+"/operations",access,Map.of("epoch",epoch,"operation",node)));
         long next=db.queryForObject("SELECT octet_length(content::text) FROM objects WHERE library_id=? AND id='large'",Long.class,id);
-        assertEquals(bytes+next,new StorageUsage(db).metadata(user));
+        assertEquals(bytes+next,usage.metadata(user));
         node.put("operation_id","large-missing").put("base_revision",2);files.addObject().put("hash","f".repeat(64)).put("size",1);
         assertEquals(409,call("POST","/v1/libraries/"+id+"/operations",access,Map.of("epoch",epoch,"operation",node)).statusCode());
     }
@@ -200,7 +240,8 @@ class HttpIntegrationTest {
         assertEquals(4,ok(call("POST",route+"/operations",access,Map.of("epoch",epoch,"operation",restore))).path("revision").asLong());
         assertEquals(4,ok(call("GET",route+"/changes?epoch="+epoch,access,null)).path("changes").size());
         assertEquals(409,call("GET",route+"/changes?epoch=old",access,null).statusCode());
-        byte[] content=new byte[BlobService.CHUNK+19]; new Random(1).nextBytes(content); String hash=Api.digest(content);
+        // A typical paper can be larger than the per-request limit; its chunks must still resume correctly.
+        byte[] content=new byte[5*BlobService.CHUNK+19]; new Random(1).nextBytes(content); String hash=Api.digest(content);
         var upload=ok(call("POST","/v1/uploads",access,Map.of("hash",hash,"size",content.length))); String uploadPath="/v1/uploads/"+upload.path("id").asText();
         assertEquals(404,call("GET",uploadPath,other,null).statusCode());
         var chunk=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+uploadPath+"?offset=0")).header("Authorization","Bearer "+access).header("Content-Type","application/octet-stream").PUT(HttpRequest.BodyPublishers.ofByteArray(content,0,BlobService.CHUNK)).build();
@@ -211,13 +252,17 @@ class HttpIntegrationTest {
         assertEquals(upload.path("id").asText(),resumed.path("id").asText());
         assertEquals(BlobService.CHUNK,resumed.path("offset").asInt());
         assertEquals(400,call("POST",uploadPath+"/complete",access,Map.of()).statusCode());
-        var tail=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+uploadPath+"?offset="+BlobService.CHUNK)).header("Authorization","Bearer "+access).header("Content-Type","application/octet-stream").PUT(HttpRequest.BodyPublishers.ofByteArray(content,BlobService.CHUNK,19)).build();
-        assertEquals(200,http.send(tail,HttpResponse.BodyHandlers.discarding()).statusCode());
+        for(int offset=BlobService.CHUNK;offset<content.length;offset+=BlobService.CHUNK) {
+            int count=Math.min(BlobService.CHUNK,content.length-offset);
+            var part=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+uploadPath+"?offset="+offset)).header("Authorization","Bearer "+access).header("Content-Type","application/octet-stream").PUT(HttpRequest.BodyPublishers.ofByteArray(content,offset,count)).build();
+            assertEquals(200,http.send(part,HttpResponse.BodyHandlers.discarding()).statusCode());
+        }
         ok(call("POST",uploadPath+"/complete",access,Map.of())); ok(call("POST",uploadPath+"/complete",access,Map.of()));
         assertTrue(ok(call("POST","/v1/uploads",access,Map.of("hash",hash,"size",content.length))).path("complete").asBoolean());
         assertEquals(404,call("GET","/v1/blobs/"+hash,other,null).statusCode());
-        var download=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+"/v1/blobs/"+hash)).header("Authorization","Bearer "+access).header("Range","bytes="+BlobService.CHUNK+"-").GET().build();
-        var downloaded=http.send(download,HttpResponse.BodyHandlers.ofByteArray()); assertEquals(206,downloaded.statusCode()); assertArrayEquals(Arrays.copyOfRange(content,BlobService.CHUNK,content.length),downloaded.body());
+        int tailOffset=5*BlobService.CHUNK;
+        var download=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+"/v1/blobs/"+hash)).header("Authorization","Bearer "+access).header("Range","bytes="+tailOffset+"-").GET().build();
+        var downloaded=http.send(download,HttpResponse.BodyHandlers.ofByteArray()); assertEquals(206,downloaded.statusCode()); assertArrayEquals(Arrays.copyOfRange(content,tailOffset,content.length),downloaded.body());
         var withFile=op("with-file",null,"document","manifest");
         ((ObjectNode)withFile.path("mutation").path("content")).putArray("_files").addObject().put("hash",hash).put("size",content.length);
         ok(call("POST",route+"/operations",access,Map.of("epoch",epoch,"operation",withFile)));

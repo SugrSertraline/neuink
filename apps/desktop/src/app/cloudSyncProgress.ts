@@ -11,12 +11,12 @@ function bytes(value: number) {
 export function cloudSyncProgress(value: CloudSyncState['task']['progress'] | undefined) {
   const phase = value?.phase || 'observing';
   const labels: Record<string, string> = {
-    observing: '核对本地内容', uploading: '上传附件', exchanging: '交换对象与版本',
+    observing: '核对变更内容', auditing: '完整校验本地内容', uploading: '上传附件', exchanging: '交换对象与版本',
     downloading: '下载附件', applying: '保存到本地', checking: '核对同步结果', finished: '核对完成',
   };
   let message = labels[phase] || '同步进行中';
   let current = 0, total = 0;
-  if (phase === 'observing' || phase === 'checking') {
+  if (phase === 'observing' || phase === 'checking' || phase === 'auditing') {
     current = value?.scanned ?? 0; total = value?.scan_total ?? 0;
     message += total ? ` · 已检查 ${current} / ${total} 个条目` : '…';
   } else if (phase === 'uploading' || phase === 'downloading') {

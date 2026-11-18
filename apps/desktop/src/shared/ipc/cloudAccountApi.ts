@@ -44,7 +44,7 @@ export type AccountRequest =
   | { action: 'sync_merge_note'; root: string; id: string; token: string; markdown: string }
   | { action: 'sync_conflict'; root: string; id: string }
   | { action: 'sync_resolve'; root: string; id: string; token: string; keep_local: boolean }
-  | { action: 'sync_run' | 'sync_cancel' | 'sync_preview' | 'sync_auto' | 'sync_wake'; root: string }
+  | { action: 'sync_run' | 'sync_cancel' | 'sync_preview' | 'sync_auto' | 'sync_wake' | 'sync_watch'; root: string }
   | { action: 'sync_pause'; root: string; paused: boolean }
   | { action: 'sync_cloud_preview'; root: string; library_id: string }
   | { action: 'sync_bind'; root: string; library_id: string; token: string }

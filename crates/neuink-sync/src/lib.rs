@@ -3,6 +3,7 @@ pub mod attachments;
 pub mod failure;
 pub mod progress;
 pub mod replica;
+pub mod revision;
 pub mod synchronize;
 pub mod workspace_sync;
 use failure::SyncFailure;

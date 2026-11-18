@@ -1,7 +1,11 @@
-//! Read-only, versioned export of the first Workspace sync entities.
-//! Does not bind an account, mutate files, recover journals, or send data.
+//! Versioned export without changing user documents, bindings or journals.
+//! The opt-in incremental path may update disposable local fingerprint hints.
 mod entities;
 pub(crate) mod files;
+mod fingerprints;
+pub use fingerprints::{invalidate_incremental_cache, invalidate_incremental_paths};
+#[cfg(test)]
+mod incremental_tests;
 mod folds;
 pub(crate) mod ideation;
 mod metadata;
@@ -137,6 +141,15 @@ pub fn export_entry(root: &Path, entry_id: &str) -> io::Result<ExportBundle> {
     export_entry_locked(root, entry_id)
 }
 
+/// Incremental discovery may reuse resource hashes during a trusted process
+/// session. It only writes a disposable local index; snapshot creation and
+/// incoming overwrites retain their separate content-integrity checks.
+pub fn export_entry_incremental(root: &Path, entry_id: &str) -> io::Result<ExportBundle> {
+    id(entry_id)?;
+    let _guard = crate::tag_transaction::lock_metadata().map_err(io::Error::other)?;
+    export_entry_location_with_mode(root, entry_id, false, true)
+}
+
 pub(crate) fn export_entry_locked(root: &Path, entry_id: &str) -> io::Result<ExportBundle> {
     export_entry_location(root, entry_id, false)
 }
@@ -146,6 +159,15 @@ pub(crate) fn export_trashed_entry_locked(root: &Path, entry_id: &str) -> io::Re
 }
 
 fn export_entry_location(root: &Path, entry_id: &str, trashed: bool) -> io::Result<ExportBundle> {
+    export_entry_location_with_mode(root, entry_id, trashed, false)
+}
+
+fn export_entry_location_with_mode(
+    root: &Path,
+    entry_id: &str,
+    trashed: bool,
+    incremental: bool,
+) -> io::Result<ExportBundle> {
     id(entry_id)?;
     if !trashed && is_source_cache(root, entry_id)? {
         return Err(invalid("来源缓存不参与云同步；请先明确导入为本地副本"));
@@ -154,7 +176,7 @@ fn export_entry_location(root: &Path, entry_id: &str, trashed: bool) -> io::Resu
         files: if trashed {
             Files::for_trashed_entry(root, entry_id)?
         } else {
-            Files::new(root)?
+            Files::with_incremental_resources(root, incremental)?
         },
         manifest: ExportManifest {
             schema_version: 1,

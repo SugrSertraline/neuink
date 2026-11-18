@@ -12,6 +12,7 @@ base64.workspace = true
 chrono.workspace = true
 neuink-config = { path = "../neuink-config" }
 neuink-sync = { path = "../neuink-sync" }
+neuink-sync-protocol = { path = "../neuink-sync-protocol" }
 neuink-domain = { path = "../neuink-domain" }
 neuink-job = { path = "../neuink-job" }
 neuink-parser = { path = "../neuink-parser" }

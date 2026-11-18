@@ -2,20 +2,20 @@ package org.neuink.server;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import java.util.Map;
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.neuink.server.persistence.ProfileControllerMapper;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 /** Optional profile data is separate from login identity and recovery credentials. */
 @RestController
 class ProfileController {
-    private final JdbcTemplate db;
-    ProfileController(JdbcTemplate db) { this.db = db; }
+    private final ProfileControllerMapper db;
+    ProfileController(ProfileControllerMapper db) { this.db = db; }
 
     @GetMapping("/v1/profile") Object read(Authentication principal) {
         String user = AuthController.identity(principal).user();
-        var profile = db.queryForMap("SELECT username,nickname,full_name,email,bio,affiliation,avatar,profile_revision,quota,admin FROM users WHERE id=?", user);
-        profile.put("used_bytes", db.queryForObject("SELECT COALESCE(SUM(size),0)::BIGINT FROM blobs WHERE owner=?", Long.class, user));
+        var profile = db.readProfile(user);
+        profile.put("used_bytes", db.usedBytes(user));
         profile.put("email_verified", false);
         profile.put("avatar_upload_available", true);
         return profile;
@@ -28,8 +28,7 @@ class ProfileController {
         JsonNode revision = request.get("profile_revision");
         if (revision == null || !revision.isIntegralNumber() || !revision.canConvertToLong() || revision.longValue()<0) throw Api.fail(400,"invalid_profile_revision");
         String avatar = request.has("avatar") ? ProfileAvatar.validate(request.get("avatar")) : null;
-        int changed = db.update("UPDATE users SET nickname=?,full_name=?,email=?,bio=?,affiliation=?,avatar=COALESCE(?,avatar),profile_revision=profile_revision+1 WHERE id=? AND profile_revision=?",
-            nickname,name,email,bio,affiliation,avatar,AuthController.identity(principal).user(),revision.longValue());
+        int changed = db.updateProfile(nickname, name, email, bio, affiliation, avatar, AuthController.identity(principal).user(), revision.longValue());
         if (changed != 1) throw Api.fail(409,"profile_changed");
         return Map.of("ok",true,"profile_revision",revision.longValue()+1);
     }

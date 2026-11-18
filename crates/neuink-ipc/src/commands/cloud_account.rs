@@ -4,6 +4,7 @@ mod local_actions;
 use credentials::{authenticated, read, save, store, vault};
 mod execution;
 mod scheduler;
+mod remote_watch;
 mod tasks;
 use neuink_sync::{Session, SyncClient};
 use reqwest::Method;
@@ -63,6 +64,9 @@ pub enum Request {
         keep_local: bool,
     },
     SyncAuto {
+        root: std::path::PathBuf,
+    },
+    SyncWatch {
         root: std::path::PathBuf,
     },
     SyncPause {
@@ -164,6 +168,14 @@ pub async fn cloud_account<R: Runtime>(
         return Err("请先填写并测试同步服务器地址".into());
     }
     let c = SyncClient::new(&a.endpoint)?;
+    if let Request::SyncWatch { root } = &request {
+        if a.account_id.is_none() { return Ok(json!({"delay_ms":60000})); }
+        let root = current_sync_root(&app, root)?;
+        let generation = scheduler::generation(&root)?;
+        let result = remote_watch::run(&app, &a, &c, root.clone(), _guard).await;
+        if result.is_err() { scheduler::remote_changed(&root, generation)?; }
+        return result;
+    }
     if let Request::Register {
         username,
         password,

@@ -15,6 +15,7 @@ neuink-workspace = { path = "../neuink-workspace" }
 rusqlite = { version = "0.37", features = ["bundled"] }
 blake3.workspace = true
 tokio.workspace = true
+notify = { version = "8.2", default-features = false }
 
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["png"] }

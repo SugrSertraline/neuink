@@ -6,7 +6,23 @@ import { getLocalBackgroundJobs } from '@/shared/lib/localBackgroundJobs';
 const mocks = vi.hoisted(() => ({ call: vi.fn(), listener: vi.fn(), stop: vi.fn() }));
 vi.mock('@/shared/ipc/cloudAccountApi', () => ({ cloudAccount: mocks.call }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: mocks.listener }));
-afterEach(() => { cleanup(); delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__; vi.clearAllMocks(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__; vi.clearAllMocks(); });
+it('keeps local checks running while waiting for a remote change and stops both loops on unmount', async () => {
+  vi.useFakeTimers();
+  (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+  mocks.listener.mockResolvedValue(mocks.stop);
+  let finish!: (value: unknown) => void;
+  mocks.call.mockImplementation(request => request.action === 'sync_watch'
+    ? new Promise(resolve => { finish = resolve; }) : Promise.resolve(null));
+  const view = renderHook(() => useCloudSync('current-library', true));
+  await act(async () => { await vi.advanceTimersByTimeAsync(3100); });
+  expect(mocks.call.mock.calls.filter(([r]) => r.action === 'sync_watch')).toHaveLength(1);
+  expect(mocks.call.mock.calls.filter(([r]) => r.action === 'sync_auto').length).toBeGreaterThanOrEqual(3);
+  view.unmount();
+  const count = mocks.call.mock.calls.length;
+  await act(async () => { finish({ delay_ms: 1000 }); await vi.advanceTimersByTimeAsync(61000); });
+  expect(mocks.call).toHaveBeenCalledTimes(count);
+});
 it('keeps task progress independent of the settings window and publishes confirmed completion', async () => {
   (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
   let notify!: (event: unknown) => void;
@@ -25,6 +41,9 @@ it('keeps task progress independent of the settings window and publishes confirm
     progress: { ...task.progress, phase: 'checking', scanned: 2, scan_total: 8 } } } }));
   expect(getLocalBackgroundJobs().find(j => j.id === 'cloud-task:7812')?.message).toBe('核对同步结果 · 已检查 2 / 8 个条目');
   expect(getLocalBackgroundJobs().find(j => j.id === 'cloud-task:7812')?.progress.percent).toBe(25);
+  act(() => notify({ payload: { root: 'test-library', automatic: true, task: { ...task,
+    progress: { ...task.progress, phase: 'auditing', scanned: 2, scan_total: 8 } } } }));
+  expect(getLocalBackgroundJobs().find(j => j.id === 'cloud-task:7812')?.message).toBe('完整校验本地内容 · 已检查 2 / 8 个条目');
   act(() => notify({ payload: { root: 'test-library', automatic: false, task: { ...task, running: false,
     result: { published: 1, received: 0, applied: 0, conflicts: 0, failures: [] } } } }));
   expect(getLocalBackgroundJobs().find(j => j.id === 'cloud-task:7812')?.status).toBe('succeeded');

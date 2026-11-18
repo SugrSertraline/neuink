@@ -1,5 +1,7 @@
 //! Application coordinator; network code stages bytes, Workspace owns publication.
 mod active;
+mod candidates;
+mod local_watch;
 pub mod entry_status;
 pub mod cloud_contents;
 mod children;
@@ -20,6 +22,18 @@ use neuink_sync_protocol::{Binding, Mutation};
 use neuink_workspace::{sync_journal::WorkspaceSyncBinding, Workspace};
 use observe::observe;
 use std::collections::BTreeMap;
+
+/// Local native events plus metadata fallback; never reads PDF content.
+pub fn local_change_stamp(workspace: &Workspace) -> Result<String, String> {
+    local_watch::change_stamp(workspace)
+}
+pub fn local_audit_due(workspace: &Workspace) -> bool { candidates::due(workspace) }
+/// Drop only disposable hints. Persistent sync queues and local content remain intact.
+pub fn invalidate_local_observation(workspace: &Workspace) -> Result<(), String> {
+    candidates::invalidate(workspace);
+    entry_status::invalidate_cache(workspace);
+    neuink_workspace::sync_export::invalidate_incremental_cache(workspace.layout().root()).map_err(|e| e.to_string())
+}
 
 #[derive(Debug, Default, serde::Serialize)]
 pub struct WorkspaceSyncResult {
@@ -51,7 +65,7 @@ pub async fn synchronize_workspace_with_retry(
     explicit_retry: bool,
 ) -> Result<WorkspaceSyncResult, String> {
     let _active = active::acquire(workspace.layout().root())?;
-    client.phase("observing");
+    client.phase(if local_audit_due(workspace) { "auditing" } else { "observing" });
     workspace.recover_pending_sync(binding)?;
     let identity = Binding {
         server_id: binding.server_id.clone(),
@@ -95,10 +109,16 @@ pub async fn synchronize_workspace_with_retry(
         scan.ready.retain(|id| deletions.contains(id));
     }
     let mut uploads = BTreeMap::new();
+    let mut confirmed_resources = std::collections::BTreeSet::new();
     let mut owners: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for operation in replica.pending()? {
         if !scan.ready.contains(&operation.object_id) {
             continue;
+        }
+        if let Some(value) = replica.confirmed_content(&operation.object_id)? {
+            for resource in wire::decode(&value)?.resources {
+                confirmed_resources.insert((resource.hash, resource.size));
+            }
         }
         let value = match operation.mutation {
             Mutation::Put { content } | Mutation::Restore { content } => content,
@@ -127,22 +147,15 @@ pub async fn synchronize_workspace_with_retry(
     let failures = std::sync::Mutex::new(Vec::new());
     transfer::run(uploads.into_values(), |resource| {
         let failures = &failures;
+        let confirmed_resources = &confirmed_resources;
         async move {
             if client.quota_exceeded() {
                 return Ok(());
             }
             let outcome = async {
                 let path = workspace.sync_blob_path(binding, &resource.hash)?;
-                if crate::attachments::fingerprint(&path).await?
-                    != (resource.hash.clone(), resource.size)
-                {
-                    return Err("排队附件校验失败，未占用新的上传配额".into());
-                }
-                let ticket = client.begin_upload(access, &path).await?;
-                if ticket.hash != resource.hash || ticket.size != resource.size {
-                    return Err("排队附件已变化，未发布实体".into());
-                }
-                client.resume_upload(access, &path, &ticket).await
+                client.upload_queued_snapshot(access, &path, &resource.hash, resource.size,
+                    confirmed_resources.contains(&(resource.hash.clone(), resource.size))).await
             }
             .await;
             if let Err(error) = outcome {

@@ -1,7 +1,7 @@
-use super::wire;
+use super::{candidates, wire};
 use crate::replica::Replica;
 use neuink_workspace::{
-    sync_export::{export_entry, export_ideation, export_tags},
+    sync_export::{export_entry_incremental, export_ideation, export_tags, ExportBundle},
     sync_journal::WorkspaceSyncBinding,
     Workspace,
 };
@@ -27,13 +27,15 @@ pub(super) fn observe_with_progress(
 ) -> Result<Observation, String> {
     let mut scan = Observation::default();
     let mut failed = BTreeSet::new();
-    let events = if stage {
-        workspace
-            .pending_content_events()
-            .map_err(|e| e.to_string())?
-    } else {
-        Vec::new()
-    };
+    // Drain external hints before trusting metadata, including changes made
+    // while the network phase was running. Events are acknowledged by ID only
+    // after their observed bytes and replica state have been durably retained.
+    super::local_change_stamp(workspace)?;
+    let audit = candidates::begin(workspace, binding)?;
+    if audit { neuink_workspace::sync_export::invalidate_incremental_cache(workspace.layout().root()).map_err(|e| e.to_string())?; }
+    let events = workspace.pending_content_events().map_err(|e| e.to_string())?;
+    let mut affected = BTreeSet::new();
+    for event in &events { affected.extend(event.affected_entities().map_err(|e| e.to_string())?); }
     let mut documents = BTreeMap::new();
     for tag in export_tags(workspace.layout().root()).map_err(|e| e.to_string())? {
         documents.insert(tag.entity_id.clone(), tag);
@@ -56,32 +58,39 @@ pub(super) fn observe_with_progress(
     let entries = workspace
         .list_entries()
         .map_err(|_| "无法读取本地条目清单")?;
-    let total = entries.len();
-    progress(0, total);
-    for (index, entry) in entries.into_iter().enumerate() {
+    let mut pending = Vec::new();
+    for entry in entries {
         if neuink_workspace::sync_export::is_source_cache(workspace.layout().root(), entry.id.as_str())
             .map_err(|e| e.to_string())? {
             replica.exclude_source_entry(entry.id.as_str())?;
-            progress(index + 1, total);
             continue;
         }
+        let stamp = candidates::stamp(workspace.layout().root(), entry.id.as_str()).map_err(|e| e.to_string());
+        let cached = stamp.as_ref().ok().and_then(|stamp| candidates::get(workspace, entry.id.as_str(), stamp, replica))
+            .filter(|docs| !docs.iter().any(|doc| affected.contains(&doc.entity_id)));
+        if let Some(cached) = cached {
+            for doc in cached {
+                if documents.insert(doc.entity_id.clone(), doc).is_some() { return Err("不同条目包含重复实体标识，未按标题合并".into()); }
+            }
+        } else { pending.push((entry, stamp)); }
+    }
+    let total = pending.len();
+    progress(0, total);
+    for (index, (entry, before)) in pending.into_iter().enumerate() {
         let result = (|| {
-            let bundle = export_entry(workspace.layout().root(), entry.id.as_str())
+            let before = before?;
+            let bundle = export_entry_incremental(workspace.layout().root(), entry.id.as_str())
                 .map_err(|e| e.to_string())?;
-            let mut needs_staging = false;
             for document in &bundle.manifest().documents {
-                let encoded = wire::encode(document)?;
-                needs_staging |= !replica.settled_content(&document.entity_id, Some(&encoded))?;
                 if documents.contains_key(&document.entity_id) {
                     return Err("不同条目包含重复实体标识，未按标题合并".into());
                 }
             }
-            // Settled entities already have confirmed remote resources. Export
-            // still hashes the current files; changed/pending bundles retain the
-            // complete staging verification before publication.
-            if stage && needs_staging {
-                workspace.stage_sync_bundle(binding, &bundle)?;
-            }
+            // This includes the post-network observation: no newly frozen
+            // operation may outlive its exact immutable resource snapshot.
+            stage_changes(workspace, replica, binding, &bundle)?;
+            let after = candidates::stamp(workspace.layout().root(), entry.id.as_str()).map_err(|e| e.to_string())?;
+            if before == after { candidates::put(workspace, entry.id.as_str(), after, bundle.manifest().documents.clone()); }
             for document in &bundle.manifest().documents {
                 documents.insert(document.entity_id.clone(), document.clone());
             }
@@ -152,7 +161,7 @@ pub(super) fn observe_with_progress(
         }
     }
     // Files are staged and observations committed before save-event handoff.
-    for event in events {
+    for event in events.into_iter().filter(|_| stage) {
         let affected = event.affected_entities().map_err(|e| e.to_string())?;
         if !affected.is_empty() && affected.is_subset(&scan.ready) {
             workspace
@@ -162,12 +171,151 @@ pub(super) fn observe_with_progress(
     }
     scan.failures.sort();
     scan.failures.dedup();
+    if audit && scan.failures.is_empty() { candidates::finish_audit(workspace); }
     Ok(scan)
+}
+
+fn stage_changes(workspace: &Workspace, replica: &Replica, binding: &WorkspaceSyncBinding, bundle: &ExportBundle) -> Result<(), String> {
+    let mut changed = BTreeSet::new();
+    let mut confirmed = BTreeSet::new();
+    for document in &bundle.manifest().documents {
+        if !replica.settled_content(&document.entity_id, Some(&wire::encode(document)?))? { changed.insert(document.entity_id.clone()); }
+        if let Some(base) = replica.confirmed_content(&document.entity_id)? {
+            for resource in wire::decode(&base)?.resources { confirmed.insert((resource.hash, resource.size)); }
+        }
+    }
+    if !changed.is_empty() { workspace.stage_sync_bundle_entities_with_confirmed(binding, bundle, &changed, &confirmed)?; }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use neuink_workspace::sync_export::export_entry;
+    mod paper_fixture {
+        include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/fixture.rs"));
+    }
+
+    #[test]
+    fn unchanged_entries_are_not_progress_candidates_and_only_changed_entry_is_exported() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = Workspace::create(dir.path()).unwrap();
+        let binding = super::super::test_support::binding();
+        workspace.bind_sync(&binding).unwrap();
+        let first = workspace.create_entry("First").unwrap();
+        workspace.create_entry("Unchanged").unwrap();
+        let mut replica = super::super::test_support::replica(&workspace, &binding);
+        observe(&workspace, &mut replica, &binding, true).unwrap();
+        for (i, op) in replica.pending().unwrap().iter().enumerate() {
+            replica.acknowledge(&op.operation_id, i as u64 + 1).unwrap();
+        }
+        let progress = std::cell::RefCell::new(Vec::new());
+        let scan = observe_with_progress(&workspace, &mut replica, &binding, true,
+            |current, total| progress.borrow_mut().push((current, total))).unwrap();
+        assert!(scan.failures.is_empty(), "{:?}", scan.failures);
+        assert_eq!(*progress.borrow(), vec![(0, 0)], "unchanged entries must not be exported again");
+        workspace.create_note(&first.id, "Changed note").unwrap();
+        progress.borrow_mut().clear();
+        let scan = observe_with_progress(&workspace, &mut replica, &binding, true,
+            |current, total| progress.borrow_mut().push((current, total))).unwrap();
+        assert!(scan.failures.is_empty(), "{:?}", scan.failures);
+        assert_eq!(*progress.borrow(), vec![(0, 1), (1, 1)]);
+    }
+    fn save_translation(workspace: &Workspace, paper: &paper_fixture::Paper, text: &str) {
+        let value: neuink_workspace::EntryTranslation = serde_json::from_value(serde_json::json!({
+            "schema_version": 1, "entry_id": paper.entry_id, "source_language": "en", "target_language": "zh-CN",
+            "status": "succeeded", "progress": {"total": 1, "translated": 1, "skipped": 0, "failed": 0},
+            "paper_context": null, "model": null, "error": null,
+            "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z",
+            "segments": [{"segment_uid": paper.segment.uid, "page_idx": paper.segment.page_idx,
+                "segment_type": paper.segment.segment_type, "source_hash": "fixture", "source_text": "Figure",
+                "translated_text": text, "status": "translated", "error": null, "updated_at": "2026-01-01T00:00:00Z"}]
+        })).unwrap();
+        workspace.write_entry_translation(&paper.entry_id, &value).unwrap();
+    }
+
+    #[test]
+    fn translation_post_network_freeze_survives_edit_and_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = Workspace::create(dir.path()).unwrap();
+        let binding = super::super::test_support::binding();
+        workspace.bind_sync(&binding).unwrap();
+        let paper = paper_fixture::paper(&workspace);
+        save_translation(&workspace, &paper, "Original translation");
+        let mut replica = super::super::test_support::replica(&workspace, &binding);
+        let scan = observe(&workspace, &mut replica, &binding, false).unwrap();
+        assert!(scan.failures.is_empty(), "{:?}", scan.failures);
+        let frozen = replica.pending().unwrap();
+        let operation = frozen.iter().find(|op| op.object_id == format!("translation:{}", paper.entry_id)).unwrap();
+        let neuink_sync_protocol::Mutation::Put { content } = &operation.mutation else { panic!("expected translation put") };
+        let document = wire::decode(content).unwrap();
+        assert!(document.resources.iter().any(|resource| resource.name == "translation.json"));
+        save_translation(&workspace, &paper, "Newer translation");
+        drop(replica);
+        let mut reopened = super::super::test_support::replica(&workspace, &binding);
+        observe(&workspace, &mut reopened, &binding, true).unwrap();
+        assert_eq!(reopened.pending().unwrap(), frozen);
+        for resource in &document.resources {
+            let bytes = workspace.read_sync_resource(&binding, resource).unwrap();
+            assert_eq!(bytes.len() as u64, resource.size);
+            assert_eq!(blake3::hash(&bytes).to_hex().as_str(), resource.hash);
+            if resource.name == "translation.json" { assert!(String::from_utf8(bytes).unwrap().contains("Original translation")); }
+        }
+        assert_eq!(workspace.read_entry_translation(&paper.entry_id).unwrap().unwrap().segments[0].translated_text.as_deref(), Some("Newer translation"));
+    }
+
+    #[test]
+    fn translation_rebaseline_preserves_latest_when_old_operation_was_or_was_not_accepted() {
+        for accepted in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let workspace = Workspace::create(dir.path()).unwrap();
+            let binding = super::super::test_support::binding();
+            workspace.bind_sync(&binding).unwrap();
+            let paper = paper_fixture::paper(&workspace);
+            save_translation(&workspace, &paper, "Baseline translation");
+            let mut replica = super::super::test_support::replica(&workspace, &binding);
+            assert!(observe(&workspace, &mut replica, &binding, true).unwrap().failures.is_empty());
+            let baseline_ops = replica.pending().unwrap();
+            let mut snapshot = Vec::new();
+            for (index, operation) in baseline_ops.iter().enumerate() {
+                let neuink_sync_protocol::Mutation::Put { content } = &operation.mutation else { panic!("expected put") };
+                snapshot.push(crate::replica::RemoteChange { object_id: operation.object_id.clone(), kind: operation.kind.clone(), content: Some(content.clone()), deleted: false, revision: index as u64 + 1 });
+                replica.acknowledge(&operation.operation_id, index as u64 + 1).unwrap();
+            }
+            save_translation(&workspace, &paper, "Old queued translation");
+            assert!(observe(&workspace, &mut replica, &binding, false).unwrap().failures.is_empty());
+            let queued = replica.pending().unwrap();
+            let id = format!("translation:{}", paper.entry_id);
+            let old = queued.iter().find(|op| op.object_id == id).unwrap();
+            let neuink_sync_protocol::Mutation::Put { content: old_content } = &old.mutation else { panic!("expected put") };
+            for resource in wire::decode(old_content).unwrap().resources {
+                std::fs::remove_file(workspace.sync_blob_path(&binding, &resource.hash).unwrap()).unwrap();
+            }
+            save_translation(&workspace, &paper, "Latest saved translation");
+            assert!(observe(&workspace, &mut replica, &binding, true).unwrap().failures.is_empty());
+            let revision = baseline_ops.len() as u64 + 1;
+            if accepted {
+                let remote = snapshot.iter_mut().find(|change| change.object_id == id).unwrap();
+                remote.content = Some(old_content.clone()); remote.revision = revision;
+            }
+            let preview = replica.preview_rebaseline(&binding.epoch, revision, &snapshot).unwrap();
+            replica.accept_rebaseline(&binding.epoch, revision, &snapshot, &preview.token).unwrap();
+            let archive: String = rusqlite::Connection::open(workspace.sync_replica_path(&binding).unwrap()).unwrap()
+                .query_row("SELECT payload FROM rebaseline_archive WHERE token=?", [&preview.token], |row| row.get(0)).unwrap();
+            assert!(archive.contains(&old.operation_id));
+            assert_eq!(workspace.read_entry_translation(&paper.entry_id).unwrap().unwrap().segments[0].translated_text.as_deref(), Some("Latest saved translation"));
+            if accepted {
+                assert!(replica.conflicts().unwrap().iter().any(|conflict| conflict.object_id == id));
+            } else {
+                let rebuilt = replica.pending().unwrap();
+                let op = rebuilt.iter().find(|op| op.object_id == id).unwrap();
+                assert_ne!(op.operation_id, old.operation_id);
+                let neuink_sync_protocol::Mutation::Put { content } = &op.mutation else { panic!("expected put") };
+                for resource in wire::decode(content).unwrap().resources { assert!(workspace.read_sync_resource(&binding, &resource).is_ok()); }
+            }
+        }
+    }
+
     #[test]
     fn source_cache_is_local_only_even_with_legacy_outbox_and_remote_echo() {
         let dir = tempfile::tempdir().unwrap();
@@ -245,10 +393,10 @@ mod tests {
         assert!(scan.failures.is_empty());
         assert!(!cached.exists(), "settled content must not stage attachments again");
         assert!(replica.pending().unwrap().is_empty());
-        assert_eq!(*progress.borrow(), vec![(0, 1), (1, 1)]);
+        assert_eq!(*progress.borrow(), vec![(0, 0)]);
         workspace.create_note(&entry.id, "New saved content").unwrap();
         observe(&workspace, &mut replica, &binding, true).unwrap();
-        assert!(cached.exists(), "changed bundle must still stage and validate resources");
+        assert!(!cached.exists(), "an unchanged note must not be staged when a different note changes");
         assert!(!replica.pending().unwrap().is_empty());
     }
     #[test]

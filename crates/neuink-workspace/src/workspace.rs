@@ -471,7 +471,14 @@ impl Workspace {
     ) -> Result<(), WorkspaceError> {
         let _guard = self.begin_tag_safe_mutation()?;
         self.read_entry_meta(entry_id)?;
-        atomic_write_json(self.layout.entry_translation_file(entry_id), translation)
+        if &translation.entry_id != entry_id {
+            return Err(WorkspaceError::ContentTransaction("译文所属条目不一致".into()));
+        }
+        let change = self.content_change(
+            crate::content_transaction::ContentTarget::EntryTranslation { entry_id: entry_id.clone() },
+            serde_json::to_vec_pretty(translation)?,
+        )?;
+        self.commit_content_transaction(vec![change])
     }
 
     pub fn write_mineru_output_zip(

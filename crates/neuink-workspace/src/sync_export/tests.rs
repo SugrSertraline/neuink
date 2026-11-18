@@ -6,6 +6,19 @@ mod fixtures;
 use fixtures::{content, write, Fixture};
 
 #[test]
+fn incremental_export_does_not_reread_unchanged_pdf_after_note_edit() {
+    let fixture = Fixture::new();
+    export_entry_incremental(fixture.dir.path(), fixture.entry.id.as_str()).unwrap();
+    files::take_pdf_read_bytes();
+    let note = fixture.path(&format!("notes/{}.md", fixture.note_id));
+    let text = fs::read_to_string(&note).unwrap();
+    fs::write(note, format!("{text}\nA new thought.")).unwrap();
+    let bundle = export_entry_incremental(fixture.dir.path(), fixture.entry.id.as_str()).unwrap();
+    bundle.verify_unchanged().unwrap();
+    assert_eq!(files::take_pdf_read_bytes(), 0, "an unchanged PDF was reread");
+}
+
+#[test]
 fn exports_real_workspace_shapes_with_stable_ids_and_atomic_note_content() {
     let fixture = Fixture::new();
     let bundle = fixture.export();

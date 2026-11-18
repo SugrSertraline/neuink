@@ -34,8 +34,8 @@ impl Workspace {
     }
 }
 
-/// Cheap change detection for debounce. Every remote poll still re-exports and
-/// hashes actual content, including changes made by external editors.
+/// Metadata fallback for the filesystem watcher. Content verification belongs
+/// to candidate export and the bounded audit, never the remote notification poll.
 pub fn change_stamp(root: &Path) -> io::Result<String> {
     let root = root.canonicalize()?;
     let mut stamps = BTreeMap::new();
@@ -110,6 +110,8 @@ fn visit(
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let name = entry.file_name();
+        // Saved reader data remains a candidate when idle remote polls no
+        // longer force a full library export. The scheduler coalesces saves.
         if !all && name.to_string_lossy().starts_with('.') {
             continue;
         }
@@ -139,6 +141,18 @@ fn visit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn saved_reader_snapshot_remains_a_change_candidate() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = Workspace::create(dir.path()).unwrap();
+        let entry = workspace.create_entry("Reading").unwrap();
+        let before = change_stamp(dir.path()).unwrap();
+        let status_before = entry_status_stamp(dir.path(), entry.id.as_str()).unwrap();
+        fs::write(workspace.layout().entry_dir(&entry.id).join("paper.reading-snapshot.json"),
+            br#"{"version":1,"segments_hash":"changed-snapshot"}"#).unwrap();
+        assert_ne!(change_stamp(dir.path()).unwrap(), before);
+        assert_ne!(entry_status_stamp(dir.path(), entry.id.as_str()).unwrap(), status_before);
+    }
     #[test]
     fn pause_survives_reopen_and_cache_writes_do_not_trigger_sync() {
         let dir = tempfile::tempdir().unwrap();

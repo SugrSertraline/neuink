@@ -53,6 +53,9 @@ pub(super) async fn run<R: Runtime>(
         result = async {
             let session = authenticated(account, &client).await?;
             drop(guard);
+            if !automatic || neuink_sync::workspace_sync::local_audit_due(&workspace) {
+                neuink_sync::workspace_sync::invalidate_local_observation(&workspace)?;
+            }
             neuink_sync::workspace_sync::synchronize_workspace_with_retry(&workspace, &client, &binding, &session.access_token, !automatic).await
         } => (result, false),
     };
@@ -64,7 +67,7 @@ pub(super) async fn run<R: Runtime>(
             generation,
             result.is_err()
                 || result.as_ref().is_ok_and(|outcome| {
-                    !outcome.failures.is_empty() && client.retryable_failure()
+                    !outcome.failures.is_empty()
                 }),
             client.retryable_failure(),
         )?;

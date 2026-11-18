@@ -1,7 +1,7 @@
 use super::{error, Result};
 use crate::{
     sync_export::{
-        files::{fingerprint, safe_path},
+        files::{fingerprint, incremental_fingerprint, safe_path},
         ExportBundle,
     },
     Workspace,
@@ -39,9 +39,47 @@ pub(super) fn stage(
     bundle: &ExportBundle,
     resource: &Resource,
 ) -> Result<()> {
+    stage_with_confirmation(workspace, bundle, resource, false)
+}
+
+fn verify_staging_hint(workspace: &Workspace, path: &Path, resource: &Resource) -> Result<()> {
+    let root = workspace.layout().root().canonicalize().map_err(error)?;
+    let actual = incremental_fingerprint(
+        &root,
+        &format!(".neuink-sync/blobs/{}", resource.hash),
+        path,
+    )
+    .map_err(error)?;
+    if actual != (resource.hash.clone(), resource.size) {
+        // A syntactically valid but damaged hint must not block a good blob.
+        return verify(path, &resource.hash, resource.size);
+    }
+    Ok(())
+}
+
+pub(super) fn stage_with_confirmation(
+    workspace: &Workspace,
+    bundle: &ExportBundle,
+    resource: &Resource,
+    confirmed: bool,
+) -> Result<()> {
     let path = blob_path(workspace, &resource.hash)?;
-    if path.is_file() && verify(&path, &resource.hash, resource.size).is_ok() {
-        return Ok(());
+    if path.is_file() {
+        // Only a reference already confirmed by the server can reuse this hint.
+        // Pending/new uploads retain a full check even if the same blob was read
+        // previously. Download, apply and upload verification never use hints.
+        let verified = if confirmed {
+            verify_staging_hint(workspace, &path, resource)
+        } else {
+            verify(&path, &resource.hash, resource.size)
+        };
+        if verified.is_ok() {
+            return if confirmed {
+                Ok(())
+            } else {
+                verify_staging_hint(workspace, &path, resource)
+            };
+        }
     }
     let mut temp =
         tempfile::NamedTempFile::new_in(path.parent().ok_or("附件目录无效")?).map_err(error)?;
@@ -59,7 +97,9 @@ pub(super) fn stage(
     temp.as_file().sync_all().map_err(error)?;
     verify(temp.path(), &resource.hash, resource.size)?;
     temp.persist(&path).map_err(error)?;
-    Ok(())
+    // Seed the observation hint only after the immutable copy passed its full
+    // hash check. A new process or invalidated cache repeats that verification.
+    verify_staging_hint(workspace, &path, resource)
 }
 
 pub(super) fn read(workspace: &Workspace, resource: &Resource) -> Result<Vec<u8>> {

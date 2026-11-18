@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.neuink.server.persistence.SyncServiceMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -14,10 +14,11 @@ class SyncService {
     // Each object can reach 2 MiB. Bound page bytes below the Rust client's
     // 16 MiB response ceiling, including JSON overhead and one look-ahead row.
     private static final int PAGE_SIZE=4;
-    private static final Set<String> KINDS=Set.of("entry","note","annotation","tag","segment_note","card","board","translation","fold","parse_snapshot");
-    private final JdbcTemplate db; private final TransactionTemplate transactions; private final ServerIdentity identity; private final ObjectMapper json; private final FileManifest files;
-    SyncService(JdbcTemplate db,TransactionTemplate transactions,ServerIdentity identity,ObjectMapper json,FileManifest files) {
-        this.db=db; this.transactions=transactions; this.identity=identity; this.json=json; this.files=files;
+    private static final Set<String> KINDS=Set.of("entry","note","annotation","tag","segment_note","card","board","translation","fold","parse_snapshot","reading_state","user_collection");
+    private final StorageUsage usage;
+    private final SyncServiceMapper db; private final TransactionTemplate transactions; private final ServerIdentity identity; private final ObjectMapper json; private final FileManifest files;
+    SyncService(SyncServiceMapper db,TransactionTemplate transactions,ServerIdentity identity,ObjectMapper json,FileManifest files,StorageUsage usage) {
+        this.db=db; this.transactions=transactions; this.identity=identity; this.json=json; this.files=files; this.usage=usage;
     }
     private JsonNode parse(Object value) {
         if(value==null) return json.nullNode();
@@ -25,26 +26,26 @@ class SyncService {
     }
     private String encode(JsonNode value) { return value.toString(); }
     private void owner(String user,String library) {
-        if(!Api.hash(library) || db.queryForList("SELECT id FROM libraries WHERE id=? AND owner=?",library,user).isEmpty()) throw Api.fail(404,"library_missing");
+        if(!Api.hash(library) || db.findLibrary(library, user).isEmpty()) throw Api.fail(404,"library_missing");
     }
-    Object libraries(String user) { return db.queryForList("SELECT id,name,revision FROM libraries WHERE owner=? ORDER BY id",user); }
+    Object libraries(String user) { return db.listLibraries(user); }
     Object defaultLibrary(String user) {
         return transactions.execute(tx->{
-            db.queryForObject("SELECT id FROM users WHERE id=? FOR UPDATE",String.class,user);
-            var rows=db.queryForList("SELECT id,name,revision FROM libraries WHERE owner=? ORDER BY id",user);
+            db.lockOwner(user);
+            var rows=db.listLibraries(user);
             // Preserve legacy libraries and bindings; never silently merge or delete them.
             if(rows.size()>1) throw Api.fail(409,"library_migration_required");
             if(rows.size()==1) {
-                var row=rows.getFirst();db.update("UPDATE libraries SET name=? WHERE id=?","我的资料库",row.get("id"));
+                var row=rows.getFirst();db.renameLibrary("我的资料库", (String)row.get("id"));
                 return Map.of("id",row.get("id"),"name","我的资料库","revision",row.get("revision"),"epoch",identity.epoch);
             }
-            String id=Api.token();db.update("INSERT INTO libraries(id,owner,name) VALUES(?,?,?)",id,user,"我的资料库");
+            String id=Api.token();db.insertLibrary(id, user, "我的资料库");
             return Map.of("id",id,"name","我的资料库","revision",0,"epoch",identity.epoch);
         });
     }
     Object createLibrary(String user,JsonNode request) {
         String name=Api.text(request,"name",240).trim(), id=Api.token();
-        db.update("INSERT INTO libraries(id,owner,name) VALUES(?,?,?)",id,user,name);
+        db.insertLibrary(id, user, name);
         return Map.of("id",id,"epoch",identity.epoch,"revision",0);
     }
     Object changes(String user,String library,String epoch,long revision) {
@@ -52,9 +53,9 @@ class SyncService {
         if(!identity.epoch.equals(epoch)) throw Api.fail(409,"rebaseline_required");
         if(revision<0) throw Api.fail(400,"invalid_cursor");
         return transactions.execute(tx->{
-        long minimum=db.queryForObject("SELECT minimum_revision FROM libraries WHERE id=? FOR SHARE",Long.class,library);
+        long minimum=db.lockMinimumRevision(library);
         if(revision<minimum) throw Api.fail(409,"cursor_expired");
-        var rows=db.queryForList("SELECT revision,object_id,kind,content,deleted FROM changes WHERE library_id=? AND revision>? ORDER BY revision LIMIT ?",library,revision,PAGE_SIZE+1);
+        var rows=db.listChanges(library, revision, PAGE_SIZE+1);
         boolean more=rows.size()>PAGE_SIZE;
         var items=new ArrayList<Map<String,Object>>();
         for(var row:rows.subList(0,Math.min(rows.size(),PAGE_SIZE))) { row.put("content",parse(row.get("content"))); items.add(row); }
@@ -67,11 +68,11 @@ class SyncService {
         if(!identity.epoch.equals(epoch)) throw Api.fail(409,"rebaseline_required");
         if(after.length()>512 || revision < -1) throw Api.fail(400,"invalid_snapshot_cursor");
         return transactions.execute(tx->{
-            var state=db.queryForMap("SELECT revision,minimum_revision FROM libraries WHERE id=? FOR SHARE",library);
+            var state=db.lockLibraryState(library);
             long current=((Number)state.get("revision")).longValue();
             if(revision!=-1 && revision!=current) throw Api.fail(409,"snapshot_changed");
             if(revision==-1 && !after.isEmpty()) throw Api.fail(400,"invalid_snapshot_cursor");
-            var rows=db.queryForList("SELECT id AS object_id,kind,content,revision,deleted FROM objects WHERE library_id=? AND id>? ORDER BY id LIMIT ?",library,after,PAGE_SIZE+1);
+            var rows=db.listSnapshot(library, after, PAGE_SIZE+1);
             boolean more=rows.size()>PAGE_SIZE;
             var items=new ArrayList<Map<String,Object>>();
             for(var row:rows.subList(0,Math.min(rows.size(),PAGE_SIZE))) {row.put("content",parse(row.get("content")));items.add(row);}
@@ -82,7 +83,7 @@ class SyncService {
     Object history(String user,String library,String object,long before) {
         owner(user,library);
         if(object.isEmpty() || object.length()>512 || before<0) throw Api.fail(400,"invalid_history_cursor");
-        var rows=db.queryForList("SELECT revision,object_id,kind,content,deleted FROM changes WHERE library_id=? AND object_id=? AND revision<? ORDER BY revision DESC LIMIT ?",library,object,before,PAGE_SIZE+1);
+        var rows=db.listHistory(library, object, before, PAGE_SIZE+1);
         boolean more=rows.size()>PAGE_SIZE;
         var items=new ArrayList<Map<String,Object>>();
         for(var row:rows.subList(0,Math.min(rows.size(),PAGE_SIZE))) { row.put("content",parse(row.get("content"))); items.add(row); }
@@ -124,16 +125,16 @@ class SyncService {
         if(payload.getBytes(StandardCharsets.UTF_8).length>2*1024*1024) throw Api.fail(413,"object_too_large");
         final Long expected=base;
         return transactions.execute(tx->{
-            long quota=db.queryForObject("SELECT quota FROM users WHERE id=? FOR UPDATE",Long.class,user);
-            var libraries=db.queryForList("SELECT revision FROM libraries WHERE id=? AND owner=? FOR UPDATE",library,user);
+            long quota=db.lockQuota(user);
+            var libraries=db.lockLibrary(library, user);
             if(libraries.isEmpty()) throw Api.fail(404,"library_missing");
-            var replay=db.queryForList("SELECT request_hash,result FROM operations WHERE library_id=? AND id=?",library,operation);
+            var replay=db.findOperation(library, operation);
             String hash=Api.digest(payload);
             if(!replay.isEmpty()) {
                 if(!hash.equals(replay.getFirst().get("request_hash"))) throw Api.fail(409,"operation_reused");
                 return parse(replay.getFirst().get("result"));
             }
-            var previous=db.queryForList("SELECT revision,deleted,kind FROM objects WHERE library_id=? AND id=?",library,object);
+            var previous=db.findObject(library, object);
             Long current=previous.isEmpty()?null:((Number)previous.getFirst().get("revision")).longValue();
             if(!Objects.equals(expected,current)) throw Api.fail(409,"revision_conflict");
             if(previous.isEmpty() && !action.equals("put")) throw Api.fail(400,"invalid_operation");
@@ -150,16 +151,15 @@ class SyncService {
             if(!deleted) files.validate(user,mutation.get("content"));
             String content=deleted?null:encode(mutation.get("content"));
             if(!deleted) {
-                var usage=new StorageUsage(db);
-                long newBytes=db.queryForObject("SELECT octet_length(?::jsonb::text)",Long.class,content);
+                long newBytes=db.contentBytes(content);
                 if(usage.blobs(user)+usage.metadata(user)+usage.reserved(user)+newBytes>quota) throw Api.fail(507,"quota_exceeded");
             }
-            if(current!=null) db.update("UPDATE changes SET created_at=? WHERE library_id=? AND revision=?",Api.now(),library,current);
-            db.update("INSERT INTO objects(library_id,id,kind,content,revision,deleted) VALUES(?,?,?,?::jsonb,?,?) ON CONFLICT(library_id,id) DO UPDATE SET content=EXCLUDED.content,revision=EXCLUDED.revision,deleted=EXCLUDED.deleted",library,object,kind,content,next,deleted);
-            db.update("INSERT INTO changes(library_id,revision,object_id,kind,content,deleted) VALUES(?,?,?,?,?::jsonb,?)",library,next,object,kind,content,deleted);
-            db.update("UPDATE libraries SET revision=? WHERE id=?",next,library);
+            if(current!=null) db.updateHistoryTime(Api.now(), library, current);
+            db.upsertObject(library, object, kind, content, next, deleted);
+            db.insertChange(library, next, object, kind, content, deleted);
+            db.updateRevision(next, library);
             ObjectNode result=json.createObjectNode().put("revision",next).put("object_id",object);
-            db.update("INSERT INTO operations(library_id,id,request_hash,result) VALUES(?,?,?,?::jsonb)",library,operation,hash,result.toString());
+            db.insertOperation(library, operation, hash, result.toString());
             return result;
         });
     }

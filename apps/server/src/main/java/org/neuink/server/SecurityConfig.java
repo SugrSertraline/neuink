@@ -32,6 +32,9 @@ class SecurityConfig {
     static final class BearerFilter extends OncePerRequestFilter {
         private final AuthService auth;
         BearerFilter(AuthService auth) { this.auth=auth; }
+        // Deferred responses re-enter the stateless security chain on async dispatch.
+        // Reauthenticate there too, including revocation/expiry while a watch waited.
+        @Override protected boolean shouldNotFilterAsyncDispatch() { return false; }
         private void admin(HttpServletRequest request,HttpServletResponse response,FilterChain chain) throws ServletException,IOException {
             response.setHeader("Cache-Control","no-store");
             response.setHeader("Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");

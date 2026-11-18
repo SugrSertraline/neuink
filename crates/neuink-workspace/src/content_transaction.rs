@@ -10,6 +10,7 @@ const JOURNAL: &str = "content-operation.journal.json";
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) enum ContentTarget {
     IdeationState,
+    EntryTranslation { entry_id: EntryId },
     SentenceTranslations { entry_id: EntryId },
     ParagraphTranslations { entry_id: EntryId },
     EntryMeta { entry_id: EntryId },
@@ -45,6 +46,10 @@ pub(crate) fn sync_entity_keys(
     let mut keys = BTreeSet::new();
     for change in transaction.changes {
         match change.target {
+            ContentTarget::EntryTranslation { entry_id } => {
+                validate_id(entry_id.as_str())?;
+                keys.insert(format!("translation:{entry_id}"));
+            }
             ContentTarget::IdeationState => {
                 keys.insert("board:ideation".into());
             }
@@ -213,6 +218,10 @@ impl Workspace {
 
     fn content_target_path(&self, target: &ContentTarget) -> Result<PathBuf, WorkspaceError> {
         let path = match target {
+            ContentTarget::EntryTranslation { entry_id } => {
+                validate_id(entry_id.as_str())?;
+                self.layout().entry_translation_file(entry_id)
+            }
             ContentTarget::ParagraphTranslations { entry_id } => {
                 validate_id(entry_id.as_str())?;
                 self.layout()

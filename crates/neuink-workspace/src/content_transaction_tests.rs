@@ -11,6 +11,47 @@ fn binding() -> crate::sync_journal::WorkspaceSyncBinding {
 }
 
 #[test]
+fn translation_save_and_recovery_keep_durable_dirty_events() {
+    let dir = tempfile::tempdir().unwrap();
+    let ws = Workspace::create(dir.path()).unwrap();
+    ws.bind_sync(&binding()).unwrap();
+    let entry = ws.create_entry("translation paper").unwrap();
+    let mut translation: crate::EntryTranslation = serde_json::from_value(serde_json::json!({
+        "schema_version":1,"entry_id":entry.id,"source_language":"en","target_language":"zh-CN",
+        "status":"succeeded","progress":{"total":0,"translated":0,"skipped":0,"failed":0},
+        "segments":[],"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"
+    })).unwrap();
+    ws.write_entry_translation(&entry.id, &translation).unwrap();
+    let first = ws.pending_content_events().unwrap().pop().unwrap();
+    assert!(first.affected_entities().unwrap().contains(&format!("translation:{}", entry.id)));
+    let reopened = Workspace::open_existing(dir.path()).unwrap();
+    assert_eq!(reopened.pending_content_events().unwrap()[0].event_id, first.event_id);
+    translation.model = Some("new-saved-value".into());
+    reopened.write_entry_translation(&entry.id, &translation).unwrap();
+    reopened.acknowledge_content_event(&binding(), &first.event_id).unwrap();
+    let remaining = reopened.pending_content_events().unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert!(remaining[0].sequence > first.sequence);
+    assert_eq!(reopened.read_entry_translation(&entry.id).unwrap().unwrap().model, translation.model);
+}
+
+#[test]
+fn translation_outbox_failure_is_recovered_without_losing_saved_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let ws = Workspace::create(dir.path()).unwrap();
+    ws.bind_sync(&binding()).unwrap();
+    let entry = ws.create_entry("paper").unwrap();
+    let change = ws.content_change(ContentTarget::EntryTranslation { entry_id: entry.id.clone() }, b"{\"saved\":true}".to_vec()).unwrap();
+    fs::write(dir.path().join("sync-outbox"), b"blocked").unwrap();
+    assert!(ws.commit_content_transaction(vec![change]).is_err());
+    assert!(dir.path().join(JOURNAL).exists());
+    fs::remove_file(dir.path().join("sync-outbox")).unwrap();
+    let reopened = Workspace::open_existing(dir.path()).unwrap();
+    assert_eq!(fs::read(reopened.layout().entry_translation_file(&entry.id)).unwrap(), b"{\"saved\":true}");
+    assert_eq!(reopened.pending_content_events().unwrap().len(), 1);
+}
+
+#[test]
 fn bound_note_updates_publish_ordered_events_and_reject_wrong_account_ack() {
     let dir = tempfile::tempdir().unwrap();
     let ws = Workspace::create(dir.path()).unwrap();
