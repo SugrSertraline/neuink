@@ -3,6 +3,8 @@
 
 The deployed runtime has additional parsing/transport modules absent from the
 alpha baseline. Do not replace its full jar with the baseline build.
+This legacy four-class overlay does not support MyBatis runtimes; those need a
+complete, validated package retaining the deployed parsing/transport features.
 """
 import argparse
 import hashlib
@@ -17,6 +19,9 @@ def package(base: Path, candidate: Path, output: Path, expected: str):
         raise ValueError('Refusing to overwrite an existing output')
     classes = {'AuthService.class', 'AdminService.class', 'AdminWeb.class', 'AuthController.class'}
     with zipfile.ZipFile(base) as old, zipfile.ZipFile(candidate) as new:
+        if any(name.startswith('BOOT-INF/classes/org/neuink/server/persistence/') and name.endswith('.class')
+               for archive in (old, new) for name in archive.namelist()):
+            raise ValueError('Legacy admin overlays do not support MyBatis runtimes; use a validated complete server package preserving parsing modules')
         selected = {name for name in new.namelist() if
                     name in {'BOOT-INF/classes/org/neuink/server/' + c for c in classes}
                     or name.startswith('BOOT-INF/classes/static/admin/')

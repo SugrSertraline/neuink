@@ -8,6 +8,7 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.support.TransactionTemplate;
 import static org.junit.jupiter.api.Assertions.*;
 
 @EnabledIfEnvironmentVariable(named="NEUINK_INTEGRATION",matches="true")
@@ -18,6 +19,34 @@ class AdminObservabilityIntegrationTest {
     @Autowired AdminService admin;
     @Autowired JdbcTemplate db;
     @Autowired ObjectMapper json;
+    @Autowired TransactionTemplate transactions;
+
+    @Test void accountCreationAndSessionRevocationJoinTheCallingTransaction() {
+        String name="admin-rollback-"+Api.token().substring(0,12);
+        auth.createAdmin(name,"test-password-only");
+        String actor=db.queryForObject("SELECT id FROM users WHERE username=?",String.class,name);
+        String username="created-rollback-"+Api.token().substring(0,12);
+        transactions.executeWithoutResult(tx -> {
+            var account=auth.createAccount(actor,json.valueToTree(Map.of(
+                "username",username,"password","initial-password-only","quota",123456L)));
+            String subject=(String)account.get("account_id");
+            admin.record(actor,"account_created",subject);
+            assertEquals(123456L,db.queryForObject("SELECT quota FROM users WHERE id=?",Long.class,subject));
+            tx.setRollbackOnly();
+        });
+        assertEquals(0,db.queryForObject("SELECT count(*) FROM users WHERE username=?",Integer.class,username));
+        assertEquals(0,db.queryForObject("SELECT count(*) FROM admin_audit WHERE actor=?",Integer.class,actor));
+
+        var session=auth.login(json.valueToTree(Map.of("username",name,"password","test-password-only")));
+        String sessionId=(String)session.get("session_id");
+        transactions.executeWithoutResult(tx -> {
+            admin.revokeDevice(actor,actor,sessionId);
+            assertTrue(db.queryForObject("SELECT revoked FROM sessions WHERE id=?",Boolean.class,sessionId));
+            tx.setRollbackOnly();
+        });
+        assertEquals(actor,auth.authenticate("Bearer "+session.get("access_token")).user());
+        assertEquals(0,db.queryForObject("SELECT count(*) FROM admin_audit WHERE actor=?",Integer.class,actor));
+    }
 
     @Test void administratorCreatesAccountsAndListsOnlyTheirFiles() throws Exception {
         String name="admin-files-"+Api.token().substring(0,12);
