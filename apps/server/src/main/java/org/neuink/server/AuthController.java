@@ -14,7 +14,9 @@ class AuthController {
     static AuthService.Identity identity(Authentication principal) { return (AuthService.Identity)principal.getPrincipal(); }
     static void admin(Authentication principal) { if(!identity(principal).admin()) throw Api.fail(403,"admin_required"); }
     @PostMapping("/v1/auth/register") Object register(@RequestBody JsonNode request) { return auth.register(request); }
-    @PostMapping("/v1/auth/login") Object login(@RequestBody JsonNode request) { return auth.login(request); }
+    @PostMapping("/v1/auth/login") Object login(@RequestBody JsonNode request,jakarta.servlet.http.HttpServletRequest connection) {
+        return auth.login(request,connection.getRemoteAddr(),connection.getHeader("User-Agent"));
+    }
     @PostMapping("/v1/auth/refresh") Object refresh(@RequestBody JsonNode request) { return rotation.rotate(request); }
     @PostMapping("/v1/auth/reset") Object reset(@RequestBody JsonNode request) { auth.reset(request); return Map.of("ok",true); }
     @GetMapping("/v1/me") Object me(Authentication principal) { return auth.me(identity(principal)); }

@@ -30,8 +30,11 @@ class AdminWeb {
         response.addHeader("Set-Cookie",ResponseCookie.from(COOKIE,value).path("/admin").httpOnly(true)
             .secure(true).sameSite("Strict").maxAge(seconds).build().toString());
     }
-    @PostMapping("/admin/api/login") Object login(@RequestBody JsonNode request,HttpServletResponse response) {
-        var session=auth.login(request);
+    @PostMapping("/admin/api/login") Object login(@RequestBody JsonNode request,HttpServletRequest connection,HttpServletResponse response) {
+        return finishLogin(auth.login(request,connection.getRemoteAddr(),connection.getHeader("User-Agent")),response);
+    }
+    Object login(JsonNode request,HttpServletResponse response) { return finishLogin(auth.login(request),response); }
+    private Object finishLogin(Map<String,Object> session,HttpServletResponse response) {
         String access=(String)session.get("access_token");
         var identity=auth.authenticate("Bearer "+access);
         if(!identity.admin()) { auth.revoke(identity,identity.session()); throw Api.fail(403,"admin_required"); }
@@ -50,6 +53,16 @@ class AdminWeb {
         return Map.of("ok",true);
     }
     @GetMapping("/admin/api/users") Object users(Authentication p,@RequestParam(defaultValue="") String after) { return admin.users(AuthController.identity(p).user(),after); }
+    @org.springframework.transaction.annotation.Transactional
+    @PostMapping("/admin/api/users") Object create(Authentication p,@RequestBody JsonNode request) {
+        AuthController.admin(p); String actor=AuthController.identity(p).user();
+        var account=auth.createAccount(actor,request);
+        admin.record(actor,"account_created",(String)account.get("account_id"));
+        return account;
+    }
+    @GetMapping("/admin/api/users/{id}/files") Object files(Authentication p,@PathVariable String id,@RequestParam(defaultValue="") String after) { return admin.files(AuthController.identity(p).user(),id,after); }
+    @GetMapping("/admin/api/users/{id}/devices") Object devices(Authentication p,@PathVariable String id) { return admin.devices(AuthController.identity(p).user(),id); }
+    @DeleteMapping("/admin/api/users/{id}/devices/{session}") Object revokeDevice(Authentication p,@PathVariable String id,@PathVariable String session) { return admin.revokeDevice(AuthController.identity(p).user(),id,session); }
     @PatchMapping("/admin/api/users/{id}") Object update(Authentication p,@PathVariable String id,@RequestBody JsonNode request) { return admin.update(AuthController.identity(p).user(),id,request); }
     @GetMapping("/admin/api/users/{id}/storage") Object storage(Authentication p,@PathVariable String id) {
         AuthController.admin(p); if(!Api.hash(id)) throw Api.fail(400,"invalid_account"); return usage.details(id);

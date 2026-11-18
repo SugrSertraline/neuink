@@ -23,9 +23,13 @@ class AuthService {
 
     Identity authenticate(String authorization) {
         if (authorization == null || !authorization.startsWith("Bearer ") || authorization.length()>256) throw Api.fail(401,"login_required");
-        var rows=db.queryForList("SELECT s.id,s.user_id,u.admin FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.access_hash=? AND s.access_expires>? AND NOT s.revoked AND NOT u.disabled",Api.digest(authorization.substring(7)),Api.now());
+        var rows=db.queryForList("SELECT s.id,s.user_id,s.last_seen_at,u.admin FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.access_hash=? AND s.access_expires>? AND NOT s.revoked AND NOT u.disabled",Api.digest(authorization.substring(7)),Api.now());
         if(rows.isEmpty()) throw Api.fail(401,"login_required");
         var row=rows.getFirst();
+        long now=Api.now();
+        if(row.get("last_seen_at")==null || ((Number)row.get("last_seen_at")).longValue()<now-60) {
+            db.update("UPDATE sessions SET last_seen_at=? WHERE id=? AND (last_seen_at IS NULL OR last_seen_at<?)",now,row.get("id"),now-60);
+        }
         return new Identity((String)row.get("user_id"),(String)row.get("id"),(boolean)row.get("admin"));
     }
     private <T> T passwordWork(Supplier<T> work) {
@@ -72,7 +76,26 @@ class AuthService {
             return Map.of("account_id",id);
         });
     }
+    Map<String,Object> createAccount(String actor, JsonNode request) {
+        String name=username(request);
+        JsonNode quota=request.get("quota");
+        if(quota!=null && (!quota.isIntegralNumber() || !quota.canConvertToLong() || quota.longValue()<0)) throw Api.fail(400,"invalid_quota");
+        String hash=encode(Api.text(request,"password",1024));
+        return transactions.execute(tx -> {
+            db.queryForList("SELECT id FROM users WHERE admin ORDER BY id FOR UPDATE");
+            if(!Boolean.TRUE.equals(db.queryForObject("SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND admin AND NOT disabled)",Boolean.class,actor))) throw Api.fail(403,"admin_required");
+            int maximum=db.queryForObject("SELECT max_accounts FROM registration_policy WHERE id=1 FOR UPDATE",Integer.class);
+            if(db.queryForObject("SELECT COUNT(*) FROM users WHERE NOT admin",Long.class)>=maximum) throw Api.fail(409,"registration_full");
+            String id=Api.token();
+            try { db.update("INSERT INTO users(id,username,password_hash,quota) VALUES(?,?,?,?)",id,name,hash,quota==null?2147483648L:quota.longValue()); }
+            catch(org.springframework.dao.DuplicateKeyException ignored) { throw Api.fail(409,"username_taken"); }
+            return Map.of("account_id",id,"username",name);
+        });
+    }
     Map<String,Object> login(JsonNode request) {
+        return login(request,null,null);
+    }
+    Map<String,Object> login(JsonNode request,String connectionIp,String userAgent) {
         String name=username(request),password=Api.text(request,"password",1024);
         int attempts=db.queryForObject("INSERT INTO auth_limits(name,attempts,window_start) VALUES(?,1,?) ON CONFLICT(name) DO UPDATE SET attempts=CASE WHEN auth_limits.window_start<EXCLUDED.window_start-300 THEN 1 ELSE auth_limits.attempts+1 END,window_start=CASE WHEN auth_limits.window_start<EXCLUDED.window_start-300 THEN EXCLUDED.window_start ELSE auth_limits.window_start END RETURNING attempts",Integer.class,name,Api.now());
         if(attempts>15) throw Api.fail(429,"try_later");
@@ -88,8 +111,15 @@ class AuthService {
             if(current.isEmpty() || !hash.equals(current.getFirst().get("password_hash"))) throw Api.fail(401,"invalid_credentials");
             String access=Api.token(), refresh=Api.token(),session=Api.token(); long now=Api.now();
             db.update("INSERT INTO sessions(id,user_id,device_name,access_hash,access_expires,refresh_hash,refresh_expires,absolute_expires) VALUES(?,?,?,?,?,?,?,?)",session,id,deviceName,Api.digest(access),now+900,Api.digest(refresh),now+2592000,now+7776000);
+            db.update("UPDATE sessions SET created_at=?,login_ip=?,user_agent=?,last_seen_at=? WHERE id=?",now,metadata(connectionIp,64),metadata(userAgent,512),now,session);
+            db.update("UPDATE users SET last_login_at=? WHERE id=?",now,id);
             return session(id,session,access,refresh);
         });
+    }
+    private static String metadata(String value,int limit) {
+        if(value==null || value.isBlank()) return null;
+        String clean=value.replaceAll("[\\p{Cntrl}]", "").trim();
+        return clean.substring(0,Math.min(clean.length(),limit));
     }
     private Map<String,Object> session(String user,String id,String access,String refresh) {
         return Map.of("account_id",user,"session_id",id,"access_token",access,"refresh_token",refresh,"expires_in",900);
