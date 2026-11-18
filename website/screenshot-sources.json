@@ -1,0 +1,285 @@
+{
+  "description": "User-provided Windows full-window screenshots; originals copied byte-for-byte.",
+  "screenshots": [
+    {
+      "asset": "current-selection-translation.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_oXBdSWdpBp.png",
+      "sha256": "b4adeb64ca5836f4f55d0723516e4e9dff84cbc96062b0b7c32a127e81bd283a",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "整句翻译"
+    },
+    {
+      "asset": "current-translation-parallel.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_cL7v9b52lu.png",
+      "sha256": "407d2d74d448ccd6c357130041ccc9eb52e56aacd1afbc6b9e02175eb7e569cc",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "原文与译文分屏"
+    },
+    {
+      "asset": "current-reflow-bilingual.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_T7QwkrDRRL.png",
+      "sha256": "883b0e1c3682fc4b820f008f9b4df020660d9d1bf27e0ac07fc3ed8083305378",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "整段双语阅读"
+    },
+    {
+      "asset": "current-reflow-sentences.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_Taw021IfFM.png",
+      "sha256": "b989e78d70ce663e95320fe9eaa59a87846c14795918ec466dbc4a183d3f1232",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "逐句中英对照"
+    },
+    {
+      "asset": "current-reflow-translated.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_ky6KNYrWf3.png",
+      "sha256": "a2a65e0dc8be625eb9c368de828413ad6f35a18e306eb5d82e7653e21847ef89",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "纯中文阅读"
+    },
+    {
+      "asset": "current-mineru-source.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_ijyvpQnuTb.png",
+      "sha256": "b7c4bf003ef5699c69be70fc220939fd823456158e2826b0cf4b35d87de5b4b7",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "MinerU 来源资料"
+    },
+    {
+      "asset": "current-zotero-source.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_4U29nu1jDN.png",
+      "sha256": "d257149cf3b0b66eb796bb20e8b44430ab7c3c632c94bf0e2f2e3a413714d3eb",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "Zotero 来源与隐藏视图"
+    },
+    {
+      "asset": "current-textfold.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_p7d3eNcKJH.png",
+      "sha256": "e42494b2d9a635b2158bdb9034c5bf7208a9203936ce1989640668ac233bd2a0",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "TextFold 中英阅读详略"
+    },
+    {
+      "asset": "current-hover-settings.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_YJcPUHa5bU.png",
+      "sha256": "862ec64dfd2c60a2ae25a201a8f22049a7a99d8f4b8a01c9a240f3b777b36810",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "按自己的习惯配置悬停"
+    },
+    {
+      "asset": "current-hover-text.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_5h9YQuteiU.png",
+      "sha256": "ced02f284fe187acb7a87baae00cc152b6bb78f330dae7bd765c23362671d7dd",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "段落双语悬停"
+    },
+    {
+      "asset": "current-hover-citation.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_L3bLsTs6fV.png",
+      "sha256": "654e95672823f326337eae36cd58e6cc324ff88b57966fa73f0e18d19dd76b58",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "参考文献预览"
+    },
+    {
+      "asset": "current-hover-figure.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_GJM1QElyD4.png",
+      "sha256": "6b7c39e9bcb1d76ee13042550ebf17796b345f106f4d33489bbc077c155e5d9c",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "图表与中文图示"
+    },
+    {
+      "asset": "current-pinned-figure.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_fcIQCAgbID.png",
+      "sha256": "78af38bad8fe21daea6a4940fee541ff28f41e966c8da409e63e660e631536f1",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "固定图表进行对照"
+    },
+    {
+      "asset": "current-outline.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_uaO15dbAxB.png",
+      "sha256": "514012aa2fc42b796e72a28a814d5543adfc7f0cd1229aebd31d63de7faafa5e",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "目录与章节导航"
+    },
+    {
+      "asset": "current-reflow-chart.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_JOOwLDFvlI.png",
+      "sha256": "05412df0566e56333607b483a42edac6282a1bdb5e16f0375b58375c905a0dbe",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "结构化图表阅读"
+    },
+    {
+      "asset": "current-annotations.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_u9rONq7HfY.png",
+      "sha256": "16a3d43c244b77a52b4f9ece0a1d086178855d2bc8ab71d807d34b2667cd8800",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "高亮与批注"
+    },
+    {
+      "asset": "current-segment-notes.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_8Nlmx6SC0H.png",
+      "sha256": "148c21913e3e06a205eaed96b69a8c0e615cf6661acb0355d1b7f42cb5e3f095",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "随段落记录片段笔记"
+    },
+    {
+      "asset": "current-pdf-notes.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_m7qIJBHqQy.png",
+      "sha256": "1244e55c8b84af012e253f58acfdeb3a90111bda28540a2695b98b324670508a",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "PDF 与笔记分屏"
+    },
+    {
+      "asset": "current-browser.jpg",
+      "captured": "2026-11-18",
+      "source": "Neuink_EEVRAfYvso.jpg",
+      "sha256": "d27520e5c499085ef12c510d694f06ee57288267b8833b0323e7183f0f5ac0e0",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "PDF 与网页同屏"
+    },
+    {
+      "asset": "current-assistant.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_2xLrbLWisZ.png",
+      "sha256": "9be9e47557365154ddc93c2cf2568d4f180889313ba5b4db4e8362ffa5a1b787",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "带来源的论文问答"
+    },
+    {
+      "asset": "current-local-codex.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_mdXUvc6dHL.png",
+      "sha256": "254cca3a9cad69718806c7d2195e84d28115ffc10aa43f13b11ba70ae8d6f0d5",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "本地 Codex 实际会话"
+    },
+    {
+      "asset": "current-library.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_qqAjNHqM1u.png",
+      "sha256": "098bf7785fd1c2a7232178d7f091ce44df62ca4aeb0a6b3295ca66a40e263718",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "条目表格"
+    },
+    {
+      "asset": "current-library-layout.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_KTp06lplg0.png",
+      "sha256": "a5b3fea7e63117bf46ca16b347da344d5e729f3d07727c6f4e64bcae0ecb0923",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "三种条目库视图"
+    },
+    {
+      "asset": "current-folders.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_bhrvPDYpWU.png",
+      "sha256": "8e7145d9588a12a87953164f37448e3301ef9293e9fa9d03eeaf4a553890143d",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "标签文件夹"
+    },
+    {
+      "asset": "current-properties.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_NHHfn5UTcY.png",
+      "sha256": "be0b5c21979db702b962107bf0169629b70e0d82ac3630bd4d6b9f4fa76c69e0",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "统一管理属性"
+    },
+    {
+      "asset": "current-tags.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_mLUofjFDtI.png",
+      "sha256": "7a34ca9b6e2542729e11f6017be4bde52468514db691964d80dd358f2c7bcb06",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "标签层级管理"
+    },
+    {
+      "asset": "current-graph.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_J7Gsr1BgK7.png",
+      "sha256": "d5c934bda2f331f6ad63995210781291cbf267db339004f7977f59bebb3ffa29",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "论文、标签与笔记的关系图"
+    },
+    {
+      "asset": "current-dashboard.png",
+      "captured": "2026-11-18",
+      "source": "Neuink_2FBlMx3p2C.png",
+      "sha256": "2b7bf182bb957f152581607433ce327fa444f0e4084dd88950850393fff3cd7d",
+      "width": 3840,
+      "height": 2100,
+      "fullWindow": true,
+      "feature": "阅读记录与每日看板"
+    }
+  ]
+}
