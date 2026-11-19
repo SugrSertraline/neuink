@@ -194,6 +194,7 @@ fn export_entry_location_with_mode(
         "child-trash.journal.json",
         "source-note-import.journal.json",
         "sync-apply.journal.json",
+        "account-parse.journal.json",
     ] {
         if export.files.read_optional(journal)?.is_some() {
             return Err(invalid("资料库存在待恢复保存，请在应用中完成恢复后再同步"));

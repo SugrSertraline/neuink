@@ -31,6 +31,9 @@ export type CloudSyncState = {
   };
 };
 export type AccountRequest =
+  | { action: 'parse_availability' }
+  | { action: 'parse_task_submit'; root: string; entry_id: string; request_id: string }
+  | { action: 'parse_task_status' | 'parse_task_cancel'; id: string }
   | { action: 'sync_cloud_contents'; root: string }
   | { action: 'sync_entry_status'; root: string }
   | { action: 'sync_status' }

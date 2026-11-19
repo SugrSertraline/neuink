@@ -1,13 +1,17 @@
+import type { FieldDefinition } from '@/shared/ipc/fieldDefinitionsApi';
 import type { ReactNode } from 'react';
-import { ArrowDown, ArrowUp, ChevronRight, Columns3, FolderTree, ListChecks, RefreshCw } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronRight, FolderTree, ListChecks, RefreshCw, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Input } from '@/components/ui/input';
 import { SearchInput } from '@/components/ui/search-input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { cn } from '@/lib/utils';
-import { ENTRY_LIBRARY_COLUMNS } from './LibraryPaperTable';
+import { fieldColumnId } from './LibraryPaperTable';
 import type { EntryLibraryColumnId } from './useEntryLibraryColumnWidths';
+import { LibraryColumnSettingsDialog } from './LibraryColumnSettingsDialog';
 import { LibraryDisplayControl } from './LibraryDisplayControl';
 import { libraryToolbarControl, libraryToolbarGroup, libraryToolbarGroupItem } from './libraryToolbarStyles';
 import { useAppearance } from '@/shared/components/AppearanceProvider';
@@ -21,7 +25,7 @@ const tagScopes = [
 ] as const;
 
 /** Display controls never change the paper collection or its scope. */
-export function LibraryPaperToolbar({ folderNavigation, tagsOnly, query, sortBy, sortDirection, recentOrderAvailable, scope, visibleColumns, pinnedEdges, tagNavigation, refresh, sourceFilter, selection, selectionActions, onQueryChange, onSortChange, onSortDirectionChange, onScopeChange, onColumnChange, onPinChange }: {
+export function LibraryPaperToolbar({ folderNavigation, tagsOnly, query, sortBy, sortDirection, recentOrderAvailable, scope, visibleColumns, fieldNames = [], fieldDefinitions = [], fieldFilter, workspaceRoot, pinnedEdges, tagNavigation, refresh, sourceFilter, selection, selectionActions, onQueryChange, onSortChange, onSortDirectionChange, onScopeChange, onColumnChange, onPinChange }: {
   folderNavigation?: { path: Array<{ id: string; name: string }>; onNavigate: (id: string | null) => void; folders: number; papers: number; disabled: boolean };
   tagsOnly?: { enabled: boolean; onChange: (enabled: boolean) => void };
   selectionActions?: ReactNode;
@@ -31,6 +35,10 @@ export function LibraryPaperToolbar({ folderNavigation, tagsOnly, query, sortBy,
   sortDirection: LibraryEntrySortDirection;
   recentOrderAvailable: boolean;
   scope: PaperScope | null;
+  workspaceRoot?: string | null;
+  fieldNames?: readonly string[];
+  fieldDefinitions?: readonly FieldDefinition[];
+  fieldFilter?: { name: string; value: string; onChange: (name: string, value: string) => void };
   visibleColumns: ReadonlySet<EntryLibraryColumnId>;
   pinnedEdges: ReadonlySet<'left' | 'right'>;
   tagNavigation: { shown: boolean; disabled: boolean; onShownChange: (shown: boolean) => void };
@@ -46,6 +54,7 @@ export function LibraryPaperToolbar({ folderNavigation, tagsOnly, query, sortBy,
   const { appearance, libraryDisplay } = useAppearance();
   const sourceOptions = ([['all', '全部'], ['local', '本地'], ['zotero', 'Zotero'], ['mineru', 'MinerU']] as const)
     .filter(([value]) => value === 'all' || value === 'local' || ((value === 'zotero' || value === 'mineru') && sourceFilter?.enabledSources[value]));
+  const filterDefinition = fieldDefinitions.find(value => value.name === fieldFilter?.name);
   const activeSourceIndex = sourceOptions.findIndex(([value]) => value === sourceFilter?.value);
   const navigationControl = <DropdownMenu>
     <DropdownMenuTrigger asChild><Button aria-label="标签导航" aria-pressed={tagNavigation.shown || Boolean(tagsOnly?.enabled)} disabled={tagNavigation.disabled && !tagsOnly?.enabled} variant="outline" className="shrink-0 gap-1.5 text-xs"><FolderTree size={14} />标签导航</Button></DropdownMenuTrigger>
@@ -118,6 +127,7 @@ export function LibraryPaperToolbar({ folderNavigation, tagsOnly, query, sortBy,
           <SelectItem value="tags">标签</SelectItem>
           <SelectItem value="file">文件</SelectItem>
           <SelectItem value="updated">更新时间</SelectItem>
+          {fieldNames.map(name => <SelectItem key={name} value={fieldColumnId(name, workspaceRoot)}>{name}</SelectItem>)}
         </SelectContent>
       </Select>
       <Button type="button" size="icon" variant="outline"
@@ -126,19 +136,10 @@ export function LibraryPaperToolbar({ folderNavigation, tagsOnly, query, sortBy,
         onClick={() => onSortDirectionChange(sortDirection === 'asc' ? 'desc' : 'asc')}>
         {sortDirection === 'asc' ? <ArrowUp size={14} aria-hidden="true" /> : <ArrowDown size={14} aria-hidden="true" />}
       </Button>
+      {fieldFilter && fieldNames.length > 0 && <Popover><PopoverTrigger asChild><Button type="button" size="icon" variant="outline" aria-label="筛选属性" title="筛选属性"><Filter size={14} />{fieldFilter.value && <span className="sr-only">已启用</span>}</Button></PopoverTrigger><PopoverContent align="end" className="w-64 space-y-3"><Select value={fieldFilter.name ? `field:${fieldFilter.name}` : '__none__'} onValueChange={value => fieldFilter.onChange(value === '__none__' ? '' : value.slice(6), '')}><SelectTrigger aria-label="筛选属性名称"><SelectValue placeholder="选择属性" /></SelectTrigger><SelectContent><SelectItem value="__none__">不筛选</SelectItem>{fieldNames.map(name => <SelectItem key={name} value={`field:${name}`}>{name}</SelectItem>)}</SelectContent></Select>{filterDefinition && ['select', 'multi_select'].includes(filterDefinition.kind) ? <Select value={fieldFilter.value ? `option:${fieldFilter.value}` : '__all__'} onValueChange={value => fieldFilter.onChange(fieldFilter.name, value === '__all__' ? '' : value.slice(7))}><SelectTrigger aria-label="属性筛选内容"><SelectValue placeholder="选择属性值" /></SelectTrigger><SelectContent><SelectItem value="__all__">全部值</SelectItem>{filterDefinition.options.map(option => <SelectItem key={option} value={`option:${option}`}>{option}</SelectItem>)}</SelectContent></Select> : <Input aria-label="属性筛选内容" placeholder="输入属性值" value={fieldFilter.value} disabled={!fieldFilter.name} onChange={event => fieldFilter.onChange(fieldFilter.name, event.target.value)} />}<Button type="button" size="sm" variant="ghost" onClick={() => fieldFilter.onChange('', '')}>清除筛选</Button></PopoverContent></Popover>}
       <LibraryDisplayControl />
       {navigationControl}
-      {appearance !== 'atelier' || libraryDisplay === 'list' ? <DropdownMenu>
-        <DropdownMenuTrigger asChild><Button aria-label="表头" title="表头" className="text-xs @max-[900px]/library-toolbar:w-8 @max-[900px]/library-toolbar:px-0" size="default" variant="outline"><Columns3 size={14} aria-hidden="true" /><span className="@max-[900px]/library-toolbar:hidden">表头</span></Button></DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-44" viewportAligned>
-          <DropdownMenuLabel>显示的列</DropdownMenuLabel><DropdownMenuSeparator />
-          {ENTRY_LIBRARY_COLUMNS.map(column => <DropdownMenuCheckboxItem key={column.id} checked={visibleColumns.has(column.id)}
-            onCheckedChange={checked => onColumnChange(column.id, checked === true)} onSelect={event => event.preventDefault()}>{column.label}</DropdownMenuCheckboxItem>)}
-          <DropdownMenuSeparator /><DropdownMenuLabel>固定列</DropdownMenuLabel>
-          {(['left', 'right'] as const).map(edge => <DropdownMenuCheckboxItem key={edge} checked={pinnedEdges.has(edge)}
-            onCheckedChange={checked => onPinChange(edge, checked === true)} onSelect={event => event.preventDefault()}>{edge === 'left' ? '固定最左列' : '固定最右列'}</DropdownMenuCheckboxItem>)}
-        </DropdownMenuContent>
-      </DropdownMenu> : null}
+      {appearance !== 'atelier' || libraryDisplay === 'list' ? <LibraryColumnSettingsDialog root={workspaceRoot} fields={fieldNames} visible={visibleColumns} pins={pinnedEdges} onColumnChange={onColumnChange} onPinChange={onPinChange} /> : null}
       {refresh ? <Button size="default" variant="outline" className="text-xs" disabled={refresh.disabled || refresh.busy} onClick={refresh.onRefresh}>
         <RefreshCw className={cn(refresh.busy && 'animate-spin')} size={14} aria-hidden="true" />刷新
       </Button> : null}

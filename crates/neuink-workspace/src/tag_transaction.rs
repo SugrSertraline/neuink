@@ -46,6 +46,7 @@ impl Workspace {
         let guard = lock_metadata()?;
         self.recover_tag_transaction()?;
         self.recover_source_note_import()?;
+        self.recover_account_parse_result()?;
         self.recover_content_transaction()?;
         self.recover_sync_apply()?;
         self.recover_entry_lifecycle()?;

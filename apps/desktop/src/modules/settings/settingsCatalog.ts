@@ -3,7 +3,7 @@ import { ONBOARDING_GUIDE_VISIBLE } from '@/modules/onboarding/availability';
 // Temporary tester-facing surface. Existing runtime configuration stays intact.
 export const ADVANCED_ASSISTANT_SETTINGS_VISIBLE = false;
 const ALL_SETTINGS_CATEGORIES = [
-  { id: 'account', title: '账户', tabs: ['account', 'data'] },
+  { id: 'account', title: '账户与存储', tabs: ['account', 'data'] },
   { id: 'getting-started', title: '入门与教程', tabs: ['getting-started'] },
   { id: 'appearance', title: '外观与界面', tabs: ['appearance'] },
   { id: 'reader', title: '阅读与批注', tabs: ['reader'] },
@@ -39,13 +39,13 @@ const ALL_SETTINGS_CATALOG: SettingDefinition[] = [
   { id: 'data-cloud-sync', tab: 'account', title: '云端同步与问题处理', description: '查看同步失败、依赖未就绪及版本冲突，重试同步。', keywords: '同步 失败 未就绪 冲突 配额' },
   { id: 'data-cloud-account', tab: 'account', title: '个人账户', description: '连接私有服务器，注册登录、管理设备与云端资料库。', keywords: '同步 账号 登录 注册 服务器 云端 设备 局域网' },
   { id: 'parser-zotero', tab: 'parser', title: 'Zotero 本地资料', description: '设置 Zotero 目录，读取论文列表并选择导入。', keywords: 'zotero 文献 论文 导入 数据目录 文件夹 附件' },
-  { id: 'tools-local-agent', tab: 'external-tools', title: '本地 Agent', description: '检测本地 Agent，管理已记住的操作授权。', keywords: 'claudecode Claude Code Codex OpenCode 本地 agent 智能体 工具 检测 权限 授权 以后都允许 撤销 恢复询问' },
+  { id: 'tools-local-agent', tab: 'models', title: '本地 Agent', description: '检测本地 Agent，管理已记住的操作授权。', keywords: 'claudecode Claude Code Codex OpenCode 本地 agent 智能体 工具 检测 权限 授权 以后都允许 撤销 恢复询问' },
   { id:'data-onboarding', tab:'getting-started', title:'新手引导', description:'继续或回放聚焦式任务教程。', keywords:'教程 onboarding 入门 引导 回放 Attention 论文 示例' },
   { id: 'appearance-style', tab: 'appearance', title: '界面风格', description: '标准、拟物和玻璃。', keywords: '主题 theme 外观 皮肤 材质' },
   { id: 'appearance-color', tab: 'appearance', title: '强调色', description: '选中、焦点与主要操作使用的颜色预设。', keywords: '主题 颜色 配色 蓝色 绿色 紫色' },
   { id: 'appearance-scale', tab: 'appearance', title: '界面缩放', description: '调整标题栏、侧栏、阅读区和弹窗的大小。', keywords: '字体太小 字体大小 放大 缩小 DPI 比例' },
   { id: 'appearance-transparency', tab: 'appearance', title: '降低透明度', description: '切换玻璃通透效果与实色显示。', keywords: '主题 玻璃 模糊 透明 辅助 实色 折射 通透' },
-  { id: 'appearance-zodiac', tab: 'appearance', title: '每日推荐', description: '设置用于每日趣味签的星座。', keywords: '星座 运势 每日推荐 生日 趣味签' },
+  { id: 'reader-auto-fold', tab: 'reader', title: '自动生成阅读详略', description: '打开重排版时自动生成尚未处理的阅读详略。', keywords: '阅读详略 重排 自动 生成 助手模型' },
   { id: 'reader-open-pdf', tab: 'reader', title: '有 PDF 时直接打开 PDF', description: '打开条目时优先阅读 PDF；关闭后或没有 PDF 时显示条目概览。', keywords: '默认打开PDF 默认打开 PDF 打开条目 直接阅读 阅读方式 概览 详情' },
   { id: 'reader-preview', tab: 'reader', title: 'PDF 悬停预览', description: '悬停时查看对应片段。', keywords: '阅读 鼠标 预览 浮层 卡片' },
   { id: 'reader-sentence-hover', tab: 'reader', title: 'PDF 悬停显示粒度', description: '在片段预览内容中分别选择原文和译文的整段或逐句显示。', keywords: '阅读 句子 逐句 hover 翻译 联动' },
@@ -64,11 +64,12 @@ const ALL_SETTINGS_CATALOG: SettingDefinition[] = [
   { id: 'translation-auto', tab: 'translation', title: '解析后自动翻译 PDF', description: '解析成功后自动启动英译中。', keywords: 'PDF自动翻译 自动翻译 数据与解析' },
   { id: 'translation-content', tab: 'translation', title: '自动翻译内容范围', description: '选择段落、标题、表格等参与翻译的内容类型。', keywords: '翻译 图片 公式 页眉 页脚 列表' },
   { id: 'parser-auto', tab: 'parser', title: '导入 PDF 后自动解析', description: '默认关闭；开启后使用已配置的解析服务，客户端结果导入不受影响。', keywords: '上传PDF后自动开始解析 导入 解析' },
-  { id: 'parser-service', tab: 'parser', title: 'MinerU 服务连接', description: '配置解析服务地址和可选 API Key。', keywords: 'MinerU URL 密钥 API Key token 凭据 解析 Base URL' },
+  { id: 'parser-account', tab: 'parser', title: '账号解析服务', description: '登录后使用 Neuink 服务器解析论文。', keywords: 'MinerU 账号 局域网 服务器 登录 排队 解析' },
+  { id: 'parser-service', tab: 'parser', title: '自建 MinerU 服务', description: '配置自己的解析服务地址和可选密钥。', keywords: 'MinerU 服务器 自建 URL 密钥 API Key token 凭据 解析 Base URL' },
   { id: 'parser-zip', tab: 'parser', title: '导入 MinerU 客户端结果', description: '使用客户端生成的结果目录、ZIP 或 RAR。', keywords: '离线 解析 导入 目录 ZIP RAR content_list' },
   { id: 'parser-mineru-local', tab: 'parser', title: 'MinerU 本地结果目录', description: '选择或自动查找 MinerU 解析结果所在的文件夹。', keywords: 'MinerU 本地 自动查找 下载 结果目录 导入' },
   { id: 'data-workspace', tab: 'account', title: '数据位置', description: '数据固定保存在程序文件夹内，随程序一起移动。', keywords: '工作区 workspace 位置 路径 目录 data 便携 U盘 USB' },
-  { id: 'models-connections', tab: 'models', title: '模型连接配置', description: '选择公开模型预设，自动填入参数；配置 API Key、接口地址和模型 ID。', keywords: '大模型 大语言模型 密钥 API Key token 凭据 Base URL Provider Ollama OpenAI 模型预设 models.dev OpenRouter 公开目录 自动填充' },
+  { id: 'models-connections', tab: 'models', title: '自定义大模型配置', description: '选择公开模型预设，自动填入参数；配置 API Key、接口地址和模型 ID。', keywords: '大模型 大语言模型 密钥 API Key token 凭据 Base URL Provider Ollama OpenAI 模型预设 models.dev OpenRouter 公开目录 自动填充' },
   { id: 'models-advanced', tab: 'models', title: '模型高级参数', description: '在模型编辑中设置上下文、最大输出、Temperature 和 Top P。', keywords: '采样 温度 token 上下文窗口 参数' },
   { id: 'models-assistant', tab: 'models', title: '助手对话模型', description: '指定对话与资料问答使用的模型。', keywords: '任务模型 助手 对话 AI' },
   { id: 'agent-main', tab: 'main-agent', title: '主助手与执行权限', description: '身份、模型、工具调用和写入提案权限。', keywords: '主Agent 主 Agent 系统提示词 委派 权限 prompt' },
@@ -80,7 +81,7 @@ const ALL_SETTINGS_CATALOG: SettingDefinition[] = [
   { id: 'tools-research', tab: 'external-tools', title: '论文与网页检索', description: '免费免密钥检索、网页读取、确认下载 PDF，以及可选 Tavily 增强。', keywords: 'arXiv Crossref OpenAlex DuckDuckGo Tavily 免费 免配置 论文 下载 PDF 搜索 网页 URL API Key 密钥' },
   { id: 'tools-download-confirmation', tab: 'external-tools', title: '下载论文前确认', description: '控制主动添加论文时的二次确认，模型任务仍需授权。', keywords: '下载 PDF 添加 论文 确认 二次确认 不再确认 防误触' },
   { id: 'tools-deep-research', tab: 'external-tools', title: '深度研究组件', description: '在可选服务中按需安装 Research，查看进度、取消或重试安装。', keywords: 'research DeerFlow 深度研究 可选服务 安装 组件 环境 进度 检查' },
-  { id: 'tools-assistant-debug', tab: 'external-tools', title: '助手调试信息', description: '仅本机显示安全错误类别和状态码，默认关闭。', keywords: '调试 debug 诊断 工具报错 错误详情' },
+  { id: 'tools-assistant-debug', tab: 'models', title: '助手调试信息', description: '仅本机显示安全错误类别和状态码，默认关闭。', keywords: '调试 debug 诊断 工具报错 错误详情' },
   { id: 'tools-mcp', tab: 'external-tools', title: 'MCP 与工具连接', description: '注册工具服务并配置连接参数。', keywords: 'MCP 服务 插件 工具 外部工具' }
 ];
 export const SETTINGS_CATALOG = ALL_SETTINGS_CATALOG.filter(item =>

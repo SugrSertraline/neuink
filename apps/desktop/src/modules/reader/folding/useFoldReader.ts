@@ -1,15 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { readEntryFolds, type FoldRecord } from '@/shared/ipc/foldingApi';
 import type { SourceSegment } from '@/shared/types/domain';
 import { cancelFoldTask, cancelFoldSegments, foldTaskKey, foldTaskRunning, getFoldTaskSnapshot, pauseFoldTask, resumeFoldTask, startFoldTask, subscribeFoldTasks, type FoldTaskSnapshot } from './foldTasks';
 import { buildFoldInputs } from './foldInput';
 import { foldErrorMessage } from './foldErrors';
+import { ToastContext } from '@/shared/hooks/useToast';
 
 // 'off' is an internal suspension for sentence reading, not a selectable detail level.
 export type FoldLevel = 'off' | 'full' | 'brief' | 'key' | 'takeaway' | 'topic';
 
 export function useFoldReader(root: string | null, entryId: string, title: string,
   segments: SourceSegment[], ready: boolean, auto: boolean, visible: boolean, initialLevel: FoldLevel = 'full') {
+  const toast = useContext(ToastContext);
   const [level, setLevel] = useState<FoldLevel>(initialLevel);
   // Apply the stored reading mode only on entry changes, not after a local level choice.
   const resetLevel = useRef(initialLevel);
@@ -56,18 +58,20 @@ export function useFoldReader(root: string | null, entryId: string, title: strin
     if (!root || !ready || loadState !== 'ready' || !selected.length || foldTaskRunning(root, entryId)) return false;
     const inputs = buildFoldInputs(selected);
     if (!inputs.batches.length) {
-      setError(inputs.skipped.some(item => item.reason === 'too_short') ? '所选正文段落较短，暂不生成详略。' : '没有可生成详略的正文段落。');
+      const message = inputs.skipped.some(item => item.reason === 'too_short') ? '所选正文段落较短，暂不生成详略。' : '没有可生成详略的正文段落。';
+      setError(message); toast?.notify({ title: '无法生成阅读详略', description: message, tone: 'danger' });
       return false;
     }
     setError(null);
     const scope = foldTaskKey(root, entryId);
     void startFoldTask(root, entryId, title, selected, { force, documentSegments: segments }).catch(caught => {
-      if (currentScope.current !== scope) return;
       if (caught instanceof Error && caught.name === 'AbortError') return;
-      setError(foldErrorMessage(caught));
+      const message = foldErrorMessage(caught);
+      toast?.notify({ title: '阅读详略生成失败', description: message, tone: 'danger' });
+      if (currentScope.current === scope) setError(message);
     });
     return true;
-  }, [root, ready, loadState, segments, entryId, title]);
+  }, [root, ready, loadState, segments, entryId, title, toast]);
   useEffect(() => {
     if (!auto || !visible || !ready || loadState !== 'ready' || !segments.length || autoAttempt.current
         || !buildFoldInputs(segments).batches.length) return;

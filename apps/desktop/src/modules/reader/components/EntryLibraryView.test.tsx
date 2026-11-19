@@ -822,12 +822,78 @@ describe('EntryLibraryView pinned columns', () => {
     expect(screen.getAllByRole('cell').map((cell) => cell.dataset.pinned)).toEqual(pins);
   });
 
+  it('reorders columns through the table header settings dialog and keeps fixed columns', () => {
+    window.localStorage.setItem('neuink.entryLibraryColumns.v1', JSON.stringify(['title', 'source', 'tags', 'actions']));
+    window.localStorage.setItem('neuink.entryLibrarySourceColumnMigrated.v1', '1');
+    renderLibrary();
+    const table = screen.getByRole('table');
+    expect(within(table).queryByRole('button', { name: /移动.*列/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '表头' }));
+    const dialog = screen.getByRole('dialog', { name: '表头设置' });
+    expect(within(dialog).queryByRole('button', { name: '上移标题列' })).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: '下移操作列' })).toBeNull();
+    // Source is first in the complete list, so move it past all columns before 标签.
+    for (let i = 0; i < 5; i++) fireEvent.click(within(dialog).getByRole('button', { name: '下移来源列' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: '完成' }));
+    expect(within(table).getAllByRole('columnheader').map(cell => cell.getAttribute('aria-label'))).toEqual(['标题', '标签', '来源', '操作']);
+    expect(within(table).getAllByRole('columnheader')[0].dataset.pinned).toBe('left');
+  });
+
+  it('drags columns within the dialog and never moves fixed columns', () => {
+    window.localStorage.setItem('neuink.entryLibraryColumns.v1', JSON.stringify(['title', 'source', 'tags', 'actions']));
+    window.localStorage.setItem('neuink.entryLibrarySourceColumnMigrated.v1', '1');
+    renderLibrary(); const table = screen.getByRole('table');
+    fireEvent.click(screen.getByRole('button', { name: '表头' }));
+    const dialog = screen.getByRole('dialog', { name: '表头设置' });
+    expect(within(dialog).queryByRole('button', { name: '拖动标题列' })).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: '拖动操作列' })).toBeNull();
+    const target = dialog.querySelector<HTMLElement>('[data-column-order-row="source"]')!;
+    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue({ left: 0, right: 500, top: 100, bottom: 140, height: 40 } as DOMRect);
+    const body = dialog.querySelector<HTMLElement>('[data-slot="dialog-body"]')!;
+    vi.spyOn(body, 'getBoundingClientRect').mockReturnValue({ left: 0, right: 500, top: 50, bottom: 500, height: 450 } as DOMRect);
+    fireEvent.pointerDown(within(dialog).getByRole('button', { name: '拖动标签列' }), { button: 0, pointerId: 7, clientX: 30, clientY: 220 });
+    fireEvent.pointerMove(window, { pointerId: 7, clientX: 30, clientY: 105 });
+    fireEvent.pointerUp(window, { pointerId: 7, clientX: 30, clientY: 105 });
+    fireEvent.click(within(dialog).getByRole('button', { name: '完成' }));
+    expect(within(table).getAllByRole('columnheader').map(cell => cell.getAttribute('aria-label'))).toEqual(['标题', '标签', '来源', '操作']);
+    expect(table.querySelector('[draggable="true"]')).toBeNull();
+  });
+  it.each(['pointercancel', 'Escape', 'blur'])('cancels pointer reordering on %s', reason => {
+    window.localStorage.setItem('neuink.entryLibraryColumns.v1', JSON.stringify(['title', 'source', 'tags', 'actions']));
+    window.localStorage.setItem('neuink.entryLibrarySourceColumnMigrated.v1', '1');
+    renderLibrary(); const table = screen.getByRole('table'); fireEvent.click(screen.getByRole('button', { name: '表头' }));
+    const dialog = screen.getByRole('dialog', { name: '表头设置' });
+    const body = dialog.querySelector<HTMLElement>('[data-slot="dialog-body"]')!;
+    const target = dialog.querySelector<HTMLElement>('[data-column-order-row="source"]')!;
+    vi.spyOn(body, 'getBoundingClientRect').mockReturnValue({ left: 0, right: 500, top: 50, bottom: 500, height: 450 } as DOMRect);
+    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue({ left: 0, right: 500, top: 100, bottom: 140, height: 40 } as DOMRect);
+    fireEvent.pointerDown(within(dialog).getByRole('button', { name: '拖动标签列' }), { button: 0, pointerId: 7, clientX: 30, clientY: 220 });
+    fireEvent.pointerMove(window, { pointerId: 7, clientX: 30, clientY: 105 });
+    if (reason === 'pointercancel') fireEvent.pointerCancel(window, { pointerId: 7 });
+    else if (reason === 'Escape') fireEvent.keyDown(window, { key: 'Escape' });
+    else fireEvent.blur(window);
+    fireEvent.pointerUp(window, { pointerId: 7, clientX: 30, clientY: 105 });
+    expect(within(table).getAllByRole('columnheader', { hidden: true }).map(cell => cell.getAttribute('aria-label'))).toEqual(['标题', '来源', '标签', '操作']);
+  });
+
+  it('moves a column to the first and last movable position', () => {
+    window.localStorage.setItem('neuink.entryLibraryColumns.v1', JSON.stringify(['title', 'source', 'tags', 'actions']));
+    window.localStorage.setItem('neuink.entryLibrarySourceColumnMigrated.v1', '1');
+    renderLibrary(); const table = screen.getByRole('table');
+    fireEvent.click(screen.getByRole('button', { name: '表头' }));
+    const dialog = screen.getByRole('dialog', { name: '表头设置' });
+    fireEvent.click(within(dialog).getByRole('button', { name: '标签列移到最前' }));
+    expect(within(table).getAllByRole('columnheader', { hidden: true }).map(cell => cell.getAttribute('aria-label'))).toEqual(['标题', '标签', '来源', '操作']);
+    fireEvent.click(within(dialog).getByRole('button', { name: '标签列移到最后' }));
+    expect(within(table).getAllByRole('columnheader', { hidden: true }).map(cell => cell.getAttribute('aria-label'))).toEqual(['标题', '来源', '标签', '操作']);
+  });
+
   it('lets the user configure and persist the pinned left and right edges', () => {
     renderLibrary();
     const table = screen.getByRole('table');
-    fireEvent.keyDown(screen.getByRole('button', { name: '表头' }), { key: 'Enter' });
-    const pinLeft = screen.getByRole('menuitemcheckbox', { name: '固定最左列' });
-    const pinRight = screen.getByRole('menuitemcheckbox', { name: '固定最右列' });
+    fireEvent.click(screen.getByRole('button', { name: '表头' }));
+    const pinLeft = screen.getByRole('checkbox', { name: '固定最左列' });
+    const pinRight = screen.getByRole('checkbox', { name: '固定最右列' });
     expect(pinLeft.getAttribute('aria-checked')).toBe('true');
     expect(pinRight.getAttribute('aria-checked')).toBe('true');
 

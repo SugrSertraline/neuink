@@ -1,3 +1,4 @@
+import type { FieldDefinition } from '@/shared/ipc/fieldDefinitionsApi';
 import type { EntryReadingState, TagMeta } from '@/shared/types/domain';
 import type { LibraryEntry, LibraryView } from '../../library/components/LibrarySidebar';
 import { isUnparsedPdf } from '../../library/utils/libraryView';
@@ -28,7 +29,7 @@ export function filterEntries(
   sortBy: LibraryEntrySortKey,
   recentReadingEntryIds: string[],
   readingStates: Record<string, EntryReadingState>,
-  sortOptions: { direction?: LibraryEntrySortDirection; sourceKindsByEntry?: LibraryEntrySourceKinds } = {}
+  sortOptions: { direction?: LibraryEntrySortDirection; sourceKindsByEntry?: LibraryEntrySourceKinds; fieldDefinitions?: readonly FieldDefinition[] } = {}
 ) {
   const entriesInView = entries.filter((item) => {
     if (libraryView === 'pdf') {
@@ -71,5 +72,16 @@ export function filterEntries(
     : entriesInTag;
 
   return sortLibraryEntries(filtered, { by: sortBy, direction: sortOptions.direction ?? defaultLibrarySortDirection(sortBy) },
-    readingStates, recentReadingEntryIds, sortOptions.sourceKindsByEntry);
+    readingStates, recentReadingEntryIds, sortOptions.sourceKindsByEntry, sortOptions.fieldDefinitions);
+}
+
+/** Match a single attribute without confusing one multi-select option with a substring of another. */
+export function matchesFieldFilter(raw: string, query: string, kind?: string): boolean {
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle) return true;
+  if (kind === 'select') return raw.toLocaleLowerCase() === needle;
+  if (kind === 'multi_select') {
+    try { const values: unknown = JSON.parse(raw); return Array.isArray(values) && values.some(value => typeof value === 'string' && value.toLocaleLowerCase() === needle); } catch { return false; }
+  }
+  return raw.toLocaleLowerCase().includes(needle);
 }

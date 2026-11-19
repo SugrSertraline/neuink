@@ -8,6 +8,7 @@ export function readAutoParseOnPdfImport() {
 export function persistAutoParseOnPdfImport(enabled: boolean) {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(PARSER_AUTO_PARSE_STORAGE_KEY, enabled ? '1' : '0');
+  window.dispatchEvent(new Event('neuink-parser-auto-changed'));
 }
 
 export function getEffectiveParserEndpoint(parserEndpoint: string) {

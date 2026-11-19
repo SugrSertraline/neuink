@@ -1,3 +1,4 @@
+import { normalizeSourceFields } from './normalizeSourceFields';
 import { useEffect, useState } from 'react';
 import { runLocalBackgroundJob, type LocalJobReporter } from '@/shared/lib/localBackgroundJobs';
 import { getZoteroSettings, importZoteroPaper, onZoteroSettingsChanged, scanZotero } from '@/shared/ipc/zoteroApi';
@@ -78,7 +79,7 @@ export function useLibrarySourceSync(root: string | null, ready: boolean, onEntr
           const changedIds = new Set(snapshot.changed ?? []);
           changes = changes.concat(snapshot.library.papers.filter(paper => changedIds.has(paper.id) && snapshot.existing[paper.id]).map(paper => ({
             source: 'zotero' as const, entryId: snapshot.existing[paper.id], sourceId: paper.id, fingerprint: snapshot.fingerprints?.[paper.id] ?? '', sourceTitle: paper.title,
-            sourceFields: paper.fields, sourceTags: paper.tags,
+            sourceFields: normalizeSourceFields(paper.fields), sourceTags: paper.tags,
             sourcePdfName: paper.attachments.find(file => file.available)?.file_name ?? null,
           })).filter(change => !isAcknowledged(root, change)));
           changedEntryIds = changes.map(change => change.entryId);

@@ -17,10 +17,13 @@ describe('settings discovery', () => {
   it('finds user phrases and old names without indexing values', () => {
     expect(searchSettings('字体太小')[0].id).toBe('appearance-scale');
     expect(searchSettings('默认显示区域')[0].id).toBe('reader-regions');
+    expect(searchSettings('自动生成阅读详略')[0].id).toBe('reader-auto-fold');
     expect(searchSettings('默认打开PDF')[0].id).toBe('reader-open-pdf');
     expect(searchSettings('打开条目 PDF')[0].id).toBe('reader-open-pdf');
     expect(searchSettings(' API KEY ').map(item => item.id)).toContain('models-connections');
     expect(searchSettings('任务模型').map(item => item.id)).toContain('translation-model');
+    expect(searchSettings('账号解析').map(item => item.id)).toContain('parser-account');
+    expect(searchSettings('自建 MinerU').map(item => item.id)).toContain('parser-service');
     expect(searchSettings('不存在的密钥值')).toEqual([]);
     expect(searchSettings('')).toEqual([]);
   });

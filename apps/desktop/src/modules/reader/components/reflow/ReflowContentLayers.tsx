@@ -11,12 +11,12 @@ import { readCachedPdfSegmentSnapshot } from './pdfSourceSnapshot';
 
 /** One segment owns three independent layers. Parsed/translated text can retain its existing reader renderer. */
 export function ReflowContentLayers({ segment, content, relatedImagePath, entryId, workspaceRoot, pdfDocument, pdfError,
-  onRequirePdfDocument, onRetryPdf, translatedText, size, imageDetailEnabled, parsedContent, translationContent, pairedContent, translationEmptyMessage, translationMissingAction }: {
+  onRequirePdfDocument, onRetryPdf, translatedText, size, imageDetailEnabled, parsedContent, translationContent, pairedContent, translationEmptyMessage, translationMissingAction, translationLabel }: {
   segment: SourceSegment; content: ReflowContentPreference; relatedImagePath: string | null; entryId: string;
   workspaceRoot: string | null; pdfDocument: PDFDocumentProxy | null; pdfError?: string | null;
   onRequirePdfDocument: () => void; onRetryPdf?: () => void; translatedText?: string | null;
   size: ReflowVisualSize; imageDetailEnabled: boolean;
-  parsedContent?: ReactNode; translationContent?: ReactNode; pairedContent?: ReactNode; translationEmptyMessage?: string; translationMissingAction?: ReactNode;
+  parsedContent?: ReactNode; translationContent?: ReactNode; pairedContent?: ReactNode; translationEmptyMessage?: string; translationMissingAction?: ReactNode; translationLabel?: string;
 }) {
   const markdown = segment.markdown ?? segment.text;
   const parsed = parsedReflowMarkdown(markdown);
@@ -32,7 +32,7 @@ export function ReflowContentLayers({ segment, content, relatedImagePath, entryI
         onRequirePdfDocument={onRequirePdfDocument} onRetryPdf={onRetryPdf} size={size} imageDetailEnabled={imageDetailEnabled} />
     </section> : null}
     {pairedContent && (content.parsed || content.translation) ? <section aria-label={content.parsed && content.translation ? '片段解析与翻译' : content.parsed ? '片段解析后内容' : '片段翻译'}>
-      {multiple ? <LayerLabel>{content.parsed ? (textParagraph ? '源语言与中文译文' : '解析后内容与翻译') : (textParagraph ? '中文译文' : '翻译')}</LayerLabel> : null}
+      {multiple ? <LayerLabel>{content.parsed ? (textParagraph ? '源语言与中文译文' : '解析后内容与翻译') : (textParagraph ? translationLabel ?? '中文译文' : '翻译')}</LayerLabel> : null}
       {pairedContent}
     </section> : <>
     {content.parsed ? <section aria-label="片段解析后内容">
@@ -40,7 +40,7 @@ export function ReflowContentLayers({ segment, content, relatedImagePath, entryI
       {parsed && !resolveSourceSnapshotAssetUrl(parsed, workspaceRoot, entryId) ? parsedContent ?? preview(parsed) : <Unavailable>此片段没有独立的解析内容。</Unavailable>}
     </section> : null}
     {content.translation ? <section aria-label="片段翻译">
-      {multiple ? <LayerLabel>{textParagraph ? '中文译文' : '翻译'}</LayerLabel> : null}
+      {multiple ? <LayerLabel>{textParagraph ? translationLabel ?? '中文译文' : '翻译'}</LayerLabel> : null}
       {translatedText?.trim() ? translationContent ?? preview(translatedText) : <Unavailable>{translationEmptyMessage ?? '暂无翻译，可通过翻译任务生成。'} {translationMissingAction}</Unavailable>}
     </section> : null}
     </>}

@@ -1,3 +1,5 @@
+import { AssistantDebugSetting } from './AssistantDebugSetting';
+import { LocalAgentSettingsSection } from './LocalAgentSettingsSection';
 import { CheckCircle2, Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -23,7 +25,7 @@ export function ModelSettingsSection({ props }: { props: SettingsPanelLayoutProp
                   <TaskModelSetting props={props} task="assistant" />
                   <Button size="sm" variant="ghost" onClick={() => props.onSetActiveSettingsTab('translation')}>设置选中文字与整体翻译 →</Button>
                 </SettingsGroup>
-                <SettingsGroup id="models-connections" title="模型连接" action={
+                <SettingsGroup id="models-connections" title="自定义大模型配置" action={
                   <Button disabled={props.modelsUnavailable || taskBusy(props)} size="sm" type="button" variant="outline" onClick={() => {
                     onNewProfile();
                     setProfileEditorOpen(true);
@@ -69,6 +71,8 @@ export function ModelSettingsSection({ props }: { props: SettingsPanelLayoutProp
                 </div>
 
                 </SettingsGroup>
+                <LocalAgentSettingsSection active={props.activeSettingsTab === 'models'} workspaceRoot={props.workspaceRoot} />
+                <AssistantDebugSetting />
                 <ModelProfileEditor props={props} open={modelEditor.open} onOpenChange={modelEditor.onOpenChange}
                   recovery={modelEditor.recovery} onSaved={modelEditor.saved} onDiscard={modelEditor.saved} />
                 {modelEditor.dialog}

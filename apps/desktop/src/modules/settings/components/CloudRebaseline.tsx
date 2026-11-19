@@ -29,7 +29,7 @@ export function CloudRebaseline({ root, disabled, onChanged }: { root: string; d
     <Button variant="outline" size="sm" disabled={disabled} onClick={() => void inspect()}>重新核对云端内容</Button>
     <Dialog open={open} onOpenChange={value => { if (!busy) setOpen(value); }}>
       <DialogContent layout="bounded" className="h-auto max-h-[calc(100%-2rem)]">
-        <DialogHeader><DialogTitle>重新核对同步内容</DialogTitle><DialogDescription>用于服务器恢复备份或设备长期离线。预览不会覆盖本地文件；双方都有修改的内容保留为冲突。</DialogDescription></DialogHeader>
+        <DialogHeader><DialogTitle>重新核对同步内容</DialogTitle><DialogDescription>用于服务器恢复、设备长期离线或旧快照缺失。确认后归档旧队列，按当前已保存内容重建同步任务；预览不会覆盖本地文件，双方都有修改的内容保留为冲突。</DialogDescription></DialogHeader>
         <DialogBody className="space-y-2 text-sm">
           {busy && <p role="status">正在读取并比较已保存内容…</p>}
           {preview && <><p>{preview.epoch_changed ? '服务器已恢复或重建，需要确认新的同步基线。' : '已取得当前云端完整快照。'}</p><dl className="grid grid-cols-2 gap-2"><dt>云端对象</dt><dd>{preview.remote_objects}</dd><dt>保留本地修改</dt><dd>{preview.local_retained}</dd><dt>准备接收云端内容</dt><dd>{preview.remote_applied}</dd><dt>双方修改待处理</dt><dd>{preview.conflicts}</dd></dl><p>确认时会再次核对。预览后有新保存或云端更新，将要求重新读取。</p></>}

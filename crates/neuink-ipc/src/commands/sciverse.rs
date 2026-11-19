@@ -79,6 +79,7 @@ pub struct SciversePaperImportPreparation {
     pub pdf_source_url: Option<String>,
     pub degradation_reason: Option<String>,
     pub resource_attempts: Vec<String>,
+    pub additional_fields: std::collections::BTreeMap<String, String>,
 }
 
 #[tauri::command]

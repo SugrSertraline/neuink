@@ -81,7 +81,7 @@ impl Workspace {
             ));
         }
         workspace.ensure_layout()?;
-        drop(workspace.begin_tag_safe_mutation()?);
+        workspace.migrate_imported_field_names()?;
         Ok(workspace)
     }
 
@@ -101,6 +101,8 @@ impl Workspace {
     ) -> Result<EntryMeta, WorkspaceError> {
         let mut entry = EntryMeta::new(title)?;
         let _guard = self.begin_tag_safe_mutation()?;
+        let mut fields = fields;
+        neuink_domain::entry_fields::normalize_entry_fields(&mut fields);
         entry.fields = fields;
         entry.tags = self.normalize_entry_tags(tags)?;
         entry.validate()?;
@@ -429,6 +431,51 @@ impl Workspace {
         Ok(entry)
     }
 
+    /// Apply a network response only while the same account task still owns the entry.
+    pub fn update_account_parse_state_if_current(
+        &self, entry_id: &EntryId, task_id: &str, endpoint: &str,
+        expected: PdfParseStatus, status: PdfParseStatus, message: Option<String>,
+    ) -> Result<EntryMeta, WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
+        let mut entry = self.read_entry_meta(entry_id)?;
+        let pdf = entry.pdf.as_mut().ok_or_else(|| WorkspaceError::PdfMissing(entry_id.to_string()))?;
+        if pdf.parse.status != expected || pdf.parse.task_id.as_deref() != Some(task_id)
+            || pdf.parse.endpoint.as_deref() != Some(endpoint) {
+            return Err(WorkspaceError::InvalidPdfParseTransition("解析任务已变化，请重新读取状态".into()));
+        }
+        // Submission and its acknowledgement form one durable transition; an
+        // intermediate Uploaded state would strand the task after a crash.
+        if expected != status && !PdfParseState::can_transition(expected, status)
+            && !(expected == PdfParseStatus::Uploading && status == PdfParseStatus::Parsing) {
+            return Err(WorkspaceError::InvalidPdfParseTransition(format!("{expected:?} -> {status:?}")));
+        }
+        pdf.parse.status = status;
+        pdf.parse.updated_at = Utc::now();
+        pdf.parse.message = message;
+        entry.updated_at = Utc::now();
+        atomic_write_json(self.layout.entry_meta_file(entry_id), &entry)?;
+        Ok(entry)
+    }
+
+    /// Reserve the request identity before upload, without replacing another task.
+    pub fn reserve_account_parse_task(&self, entry_id: &EntryId, task_id: &str, endpoint: &str) -> Result<EntryMeta, WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
+        let mut entry = self.read_entry_meta(entry_id)?;
+        let pdf = entry.pdf.as_mut().ok_or_else(|| WorkspaceError::PdfMissing(entry_id.to_string()))?;
+        if pdf.parse.status != PdfParseStatus::Uploading
+            || (pdf.parse.task_id.is_some() && (pdf.parse.task_id.as_deref() != Some(task_id) || pdf.parse.endpoint.as_deref() != Some(endpoint)))
+            || (pdf.parse.task_id.is_none() && pdf.parse.endpoint.is_some()) {
+            return Err(WorkspaceError::InvalidPdfParseTransition("解析任务已变化，请重新读取状态".into()));
+        }
+        pdf.parse.task_id = Some(task_id.to_string());
+        pdf.parse.endpoint = Some(endpoint.to_string());
+        pdf.parse.message = Some("准备上传到账号解析服务".into());
+        pdf.parse.updated_at = Utc::now();
+        entry.updated_at = Utc::now();
+        atomic_write_json(self.layout.entry_meta_file(entry_id), &entry)?;
+        Ok(entry)
+    }
+
     pub fn write_segments(
         &self,
         entry_id: &EntryId,
@@ -493,6 +540,25 @@ impl Workspace {
         atomic_write(self.layout.entry_mineru_output_zip(entry_id), zip_bytes)?;
         self.extract_mineru_output_zip(entry_id, zip_bytes)?;
         self.promote_mineru_output_artifacts(entry_id)
+    }
+
+    /// Apply only to the task that still owns this entry. The metadata lock
+    /// prevents a concurrent retry or cancellation from replacing its identity.
+    pub fn apply_account_parse_result(&self, entry_id: &EntryId, task_id: &str, endpoint: &str,
+        zip_bytes: &[u8], segments: &[SourceSegment]) -> Result<EntryMeta, WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
+        let mut entry = self.read_entry_meta(entry_id)?;
+        let pdf = entry.pdf.as_mut().ok_or_else(|| WorkspaceError::PdfMissing(entry_id.to_string()))?;
+        if pdf.parse.status != PdfParseStatus::Parsing || pdf.parse.task_id.as_deref() != Some(task_id)
+            || pdf.parse.endpoint.as_deref() != Some(endpoint) {
+            return Err(WorkspaceError::PdfQueue("解析任务已变化，未覆盖结果".into()));
+        }
+        pdf.parse.status = PdfParseStatus::Succeeded;
+        pdf.parse.updated_at = Utc::now();
+        pdf.parse.message = Some(format!("解析完成：{} 个片段", segments.len()));
+        entry.updated_at = Utc::now();
+        self.commit_account_parse_result(entry_id, zip_bytes, &entry, segments)?;
+        Ok(entry)
     }
 
     pub fn write_mineru_output_response(
@@ -1062,60 +1128,63 @@ impl Workspace {
     }
 
     fn promote_mineru_output_artifacts(&self, entry_id: &EntryId) -> Result<(), WorkspaceError> {
-        let output_dir = self.layout.entry_mineru_output_dir(entry_id);
+        self.promote_mineru_output_directory(&self.layout.entry_mineru_output_dir(entry_id))
+    }
+
+    pub(crate) fn promote_mineru_output_directory(&self, output_dir: &std::path::Path) -> Result<(), WorkspaceError> {
         if !output_dir.exists() {
             return Ok(());
         }
 
         promote_first_matching_file(
-            &output_dir,
+            output_dir,
             &output_dir.join("paper.md"),
             &[".md"],
             &["_layout.pdf", "_span.pdf"],
         )?;
         promote_first_matching_file(
-            &output_dir,
+            output_dir,
             &output_dir.join("paper_middle.json"),
             &["_middle.json"],
             &[],
         )?;
         promote_first_matching_file(
-            &output_dir,
+            output_dir,
             &output_dir.join("paper_model.json"),
             &["_model.json"],
             &[],
         )?;
         promote_first_matching_file(
-            &output_dir,
+            output_dir,
             &output_dir.join("paper_content_list.json"),
             &["_content_list.json"],
             &["_content_list_v2.json"],
         )?;
         promote_first_matching_file(
-            &output_dir,
+            output_dir,
             &output_dir.join("paper_content_list_v2.json"),
             &["_content_list_v2.json"],
             &[],
         )?;
         promote_first_matching_file(
-            &output_dir,
+            output_dir,
             &output_dir.join("paper_layout.pdf"),
             &["_layout.pdf"],
             &[],
         )?;
         promote_first_matching_file(
-            &output_dir,
+            output_dir,
             &output_dir.join("paper_span.pdf"),
             &["_span.pdf"],
             &[],
         )?;
         promote_first_matching_file(
-            &output_dir,
+            output_dir,
             &output_dir.join("paper_origin.pdf"),
             &["_origin.pdf"],
             &[],
         )?;
-        promote_images_to_root(&output_dir)?;
+        promote_images_to_root(output_dir)?;
 
         Ok(())
     }

@@ -1,26 +1,36 @@
 Neuink 将选区、片段和整篇翻译放在同一阅读流程中，但它们的触发范围不同。可统一选择小牛翻译、DeepL、Azure、Qwen-MT 或模型；每个翻译场景也可单独设置来源。
 
-## 按步骤看实际界面
+## 推荐先配置小牛翻译
 
-按下面的步骤找到入口，并检查操作结果；点击图片可放大查看。
+在“设置 → 翻译”展开小牛翻译，填写自己的 API Key，点击“验证并保存”。然后在翻译行为中统一选择小牛，或分别为单词、选区、片段、逐句和整篇设置来源。它是推荐搭配，DeepL、Azure、Qwen-MT 和自定义大模型仍可选择。
 
-### 1. 先配置翻译来源
+Azure 需填写服务区域，DeepL 需匹配账户地址，Qwen-MT 需匹配模型与地域。大模型连接复用“模型与助手”中的配置。各服务的权限、额度和计费由对应服务账户决定。
 
-在设置的“翻译”页，上方“翻译模型与服务”按服务分别折叠；展开小牛、DeepL、Azure 或 Qwen-MT，填写自己的 API Key 并“验证并保存”。可同时配置多家，收起不会丢失未保存输入。下方“翻译行为”分别指定单词、选区、片段、逐句和整篇使用的模型或服务，也可用“统一翻译来源”一起设置。Azure 需按资源填写区域，DeepL 需匹配账户地址，Qwen-MT 需匹配模型与地域。已有大模型连接继续复用。下面截图展示较早版本，实际字段以当前应用为准。
+![较早版本的翻译设置示例；当前支持专用翻译服务与按任务选择来源](../public/screenshots/settings-translation.png)
 
-![Neuink 实机截图：1. 先指定阅读翻译模型](../public/screenshots/settings-translation.png)
+## 从选区开始翻译
 
-### 2. 打开翻译任务面板
+在 PDF 选中文字，点击翻译，查看译文或将其加入高亮批注。一个单词、一句话或局部段落无需先启动全文任务。
 
-从阅读器工具栏进入翻译任务，核对片段总数、翻译范围与当前状态，再决定启动或继续。截图中的演示条目预置了 1 个译文；公开便携包不含这份演示素材。
+![选区翻译：译文、颜色及高亮批注操作](../public/screenshots/current-selection-translation.png)
 
-![Neuink 实机截图：2. 打开翻译任务面板](../public/screenshots/translation-tasks.png)
+## 原文、译文与双语阅读
 
-### 3. 筛选已有译文
+PDF 可以保留原版式阅读译文，也可以把原文与译文放在左右分栏。重排视图则分别控制源语言与中文译文：整段中英对照、逐句配对或隐藏原文只读中文。
 
-切换到“已翻译”查看实际保存的片段。不要把一个片段完成理解成整篇完成；返回重排后再选择双语显示。
+![原文和译文 PDF 分屏对照](../public/screenshots/current-translation-parallel.png)
 
-![Neuink 实机截图：3. 筛选已有译文](../public/screenshots/translation-filter.png)
+![重排逐句中英对照](../public/screenshots/current-reflow-sentences.png)
+
+![重排视图隐藏源语言后的中文阅读](../public/screenshots/current-reflow-translated.png)
+
+## 查看全文翻译任务
+
+从阅读器工具栏进入翻译任务，检查范围、进度与每个片段的状态，可筛选已有译文、暂停、继续或重试失败项。以下保留较早版本的任务面板示例，当前界面布局可能不同。
+
+![较早版本的翻译任务面板：进度和任务操作](../public/screenshots/translation-tasks.png)
+
+![较早版本的任务筛选：查看已翻译片段](../public/screenshots/translation-filter.png)
 
 ## 选择适合的翻译范围
 

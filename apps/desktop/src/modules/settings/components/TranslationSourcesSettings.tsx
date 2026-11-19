@@ -77,9 +77,9 @@ export function TranslationSourcesSettings({ active, profiles, defaultProfileId,
       })}
       {unavailable && <p role="alert" className="text-xs text-warning">模型连接尚未加载，可配置专用翻译服务；模型来源请在连接恢复后核对。</p>}
       <p className="mt-2 text-xs text-muted-foreground">更改后用于新发起的翻译；已有译文不会自动重译，暂停任务继续使用原翻译来源。悬停预览与双语显示读取已保存译文。</p>
-      {(save.dirty || save.saving || save.error) && <div className="mt-2 flex items-center gap-2 text-xs" role={save.error ? 'alert' : 'status'}>
-        <span className={save.error ? 'text-destructive' : 'text-muted-foreground'}>{save.error ? '保存失败，修改已保留。' : save.saving ? '正在保存翻译来源…' : '翻译来源尚未保存。'}</span>
-        {save.error && <Button size="xs" variant="outline" onClick={save.retry}>重试保存翻译来源</Button>}
+      {save.error && <div className="mt-2 flex items-center gap-2 text-xs" role="alert">
+        <span className="text-destructive">保存失败，修改已保留。</span>
+        <Button size="xs" variant="outline" onClick={save.retry}>重试保存翻译来源</Button>
       </div>}
     </fieldset>}
   </SettingsGroup>;

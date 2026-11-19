@@ -30,6 +30,11 @@ struct SavedSession {
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum Request {
+    ParseAvailability,
+    ParseTaskStatus { id: String },
+    ParseTaskCancel { id: String },
+    ParseTaskSubmit { root: std::path::PathBuf, entry_id: neuink_domain::EntryId, request_id: String },
+    ParseTaskRefresh { root: std::path::PathBuf, entry_id: neuink_domain::EntryId },
     Status,
     SyncStatus,
     SyncEntryStatus { root: std::path::PathBuf },
@@ -265,6 +270,74 @@ pub async fn cloud_account<R: Runtime>(
         .await;
     }
     let session = authenticated(&a, &c).await?;
+    if matches!(request, Request::ParseAvailability) {
+        let info = c.discovery().await?;
+        return Ok(json!({"available": info["capabilities"].as_array().is_some_and(|items| items.iter().any(|x| x.as_str() == Some("account_parse_v1")))}));
+    }
+    if let Request::ParseTaskRefresh { root, entry_id } = &request {
+        let root = current_sync_root(&app, root)?;
+        let workspace = neuink_workspace::Workspace::open_existing(&root).map_err(|e| e.to_string())?;
+        let entry = workspace.read_entry(entry_id).map_err(|e| e.to_string())?;
+        let parse = &entry.pdf.as_ref().ok_or("条目没有 PDF")?.parse;
+        let marker = format!("neuink-account:{}:{}", a.server_id, session.account_id);
+        if parse.endpoint.as_deref() != Some(marker.as_str()) { return Err("解析任务属于其他账号或服务器".into()); }
+        let id = parse.task_id.clone().ok_or("解析任务编号缺失")?;
+        if parse.status == neuink_domain::PdfParseStatus::Uploaded {
+            // Older builds could exit between recording upload and parsing.
+            // The recorded id already identifies the accepted server task.
+            workspace.update_account_parse_state_if_current(entry_id, &id, &marker,
+                neuink_domain::PdfParseStatus::Uploaded, neuink_domain::PdfParseStatus::Parsing,
+                Some("等待服务器解析".into())).map_err(|e| e.to_string())?;
+        } else if parse.status != neuink_domain::PdfParseStatus::Parsing {
+            return Err("解析任务状态已变化".into());
+        }
+        let state = c.parse_task_status(&session.access_token, &id).await?;
+        let (status, message) = match state["state"].as_str() {
+            Some("succeeded") => {
+                let zip = c.parse_task_result(&session.access_token, &id).await?;
+                let document = neuink_parser::normalize_mineru_zip(&zip).map_err(|_| "解析结果格式无效")?;
+                current_sync_root(&app, &root)?;
+                let entry = workspace.apply_account_parse_result(entry_id, &id, &marker, &zip, &document.segments).map_err(|e| e.to_string())?;
+                return serde_json::to_value(entry).map_err(|_| "无法返回解析状态".into());
+            }
+            Some("failed") => (neuink_domain::PdfParseStatus::Failed, "解析失败，请检查任务后重试".into()),
+            Some("canceled") => (neuink_domain::PdfParseStatus::Canceled, "解析已取消".into()),
+            Some("uncertain") => (neuink_domain::PdfParseStatus::Parsing, "解析提交状态不明，请联系管理员确认；不会自动重复提交".into()),
+            Some("queued") => (neuink_domain::PdfParseStatus::Parsing, format!("等待服务器解析，队列位置 {}", state["queue_position"].as_u64().unwrap_or(0))),
+            Some("running" | "submitting") => (neuink_domain::PdfParseStatus::Parsing, "服务器正在解析".into()),
+            _ => return Err("服务器返回了无法识别的解析状态".into()),
+        };
+        let entry = workspace.update_account_parse_state_if_current(entry_id, &id, &marker, neuink_domain::PdfParseStatus::Parsing, status, Some(message)).map_err(|e| e.to_string())?;
+        return serde_json::to_value(entry).map_err(|_| "无法返回解析状态".into());
+    }
+    if let Request::ParseTaskSubmit { root, entry_id, request_id } = &request {
+        if request_id.len() != 64 || !request_id.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)) {
+            return Err("解析任务标识无效".into());
+        }
+        let root = current_sync_root(&app, root)?;
+        let workspace = neuink_workspace::Workspace::open_existing(&root).map_err(|e| e.to_string())?;
+        let entry = workspace.read_entry(entry_id).map_err(|e| e.to_string())?;
+        let parse = &entry.pdf.as_ref().ok_or("条目没有 PDF")?.parse;
+        let marker = format!("neuink-account:{}:{}", a.server_id, session.account_id);
+        if parse.status != neuink_domain::PdfParseStatus::Uploading {
+            return Err("解析任务状态已变化，请重新检查队列".into());
+        }
+        if parse.task_id.is_some() && (parse.task_id.as_deref() != Some(request_id.as_str()) || parse.endpoint.as_deref() != Some(marker.as_str())) {
+            return Err("此条目已有其他解析任务，请先核对任务状态".into());
+        }
+        let path = workspace.entry_pdf_path(entry_id).map_err(|e| e.to_string())?;
+        let info = c.discovery().await?;
+        if !info["capabilities"].as_array().is_some_and(|items| items.iter().any(|x| x.as_str() == Some("account_parse_v1"))) {
+            return Err("当前服务器尚未启用账号解析".into());
+        }
+        // Record the idempotency key before any transfer, so an interrupted call
+        // can be retried without overwriting an unrelated parser task.
+        workspace.reserve_account_parse_task(entry_id, request_id, &marker)
+            .map_err(|e| e.to_string())?;
+        let ticket = c.begin_upload(&session.access_token, &path).await?;
+        c.resume_upload(&session.access_token, &path, &ticket).await?;
+        return c.submit_parse_task(&session.access_token, &ticket.hash, request_id).await;
+    }
     if let Request::SyncCloudContents { root } = &request {
         let root = current_sync_root(&app, root)?;
         let workspace = neuink_workspace::Workspace::open_existing(&root).map_err(|e| e.to_string())?;
@@ -354,6 +427,8 @@ pub async fn cloud_account<R: Runtime>(
     }
     let token = Some(session.access_token.as_str());
     match request {
+        Request::ParseTaskStatus { id } => c.parse_task_status(&session.access_token, &id).await,
+        Request::ParseTaskCancel { id } => c.cancel_parse_task(&session.access_token, &id).await,
         Request::Profile => c.request(Method::GET, "/v1/profile", token, None).await,
         Request::SaveProfile { profile } => {
             c.request(Method::PATCH, "/v1/profile", token, Some(&profile))

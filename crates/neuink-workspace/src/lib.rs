@@ -1,3 +1,4 @@
+mod account_parse_transaction;
 pub mod agent_execution;
 pub mod annotation_index;
 pub mod atomic_write;
@@ -10,6 +11,7 @@ pub mod edit_recovery;
 pub mod entertainment;
 pub mod entry_lifecycle;
 pub mod entry_meta;
+pub mod field_definitions;
 pub mod entry_sources;
 pub mod error;
 pub mod export;
@@ -74,3 +76,5 @@ pub use workspace::{
 };
 
 pub mod sentence_translation;
+
+mod field_name_migration;

@@ -6,7 +6,15 @@ import type { usePdfParseQueue } from '@/shared/hooks/usePdfParseQueue';
 import type { EntryMeta } from '@/shared/types/domain';
 afterEach(cleanup);
 const entry = (id: string, status: string) => ({ id, title: id, pdf: { parse: { status, message: '测试状态' } } } as EntryMeta);
-const controller = (): ReturnType<typeof usePdfParseQueue> => ({ queue: { active: [entry('运行中', 'parsing')], waiting: [entry('甲', 'queued'), entry('乙', 'queued')], failed: [] }, busy: false, loading: false, configured: true, error: '', move: vi.fn(), refresh: vi.fn() });
+const controller = (): ReturnType<typeof usePdfParseQueue> => ({ queue: { active: [entry('运行中', 'parsing')], waiting: [entry('甲', 'queued'), entry('乙', 'queued')], failed: [] }, busy: false, loading: false, configured: true, error: '', move: vi.fn(), cancelAccount: vi.fn(), refresh: vi.fn() });
+
+it('offers cancellation for an account task waiting on the server', () => {
+  const c = controller();
+  c.queue.active = [{ id: 'paper', title: 'Paper', pdf: { parse: { status: 'parsing', endpoint: 'neuink-account:server:user', task_id: 'task', message: '等待服务器解析，队列位置 2' } } } as EntryMeta];
+  render(<PdfParseQueuePanel controller={c} onOpen={vi.fn()} onRetry={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '取消等待' }));
+  expect(c.cancelAccount).toHaveBeenCalledWith('task');
+});
 
 it('separates active and waiting jobs and exposes accessible ordering buttons', () => {
   const c = controller(); const open = vi.fn();
@@ -34,7 +42,7 @@ it('shows unconfigured, loading, read-error, and empty states truthfully', () =>
 it('retains failed jobs and displays a retry failure instead of an unhandled rejection', async () => {
   const c = controller(); c.queue.failed = [entry('失败论文', 'failed')];
   render(<PdfParseQueuePanel controller={c} onOpen={vi.fn()} onRetry={vi.fn().mockRejectedValue(new Error('无法入队'))} />);
-  fireEvent.click(screen.getByText('解析失败 · 1'));
+  expect(screen.getByRole('region', { name: '解析失败的任务' }).textContent).toContain('失败论文');
   fireEvent.click(screen.getByRole('button', { name: '重新加入队列' }));
   await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('无法入队'));
   expect(screen.getByRole('button', { name: '重新加入队列' }).hasAttribute('disabled')).toBe(false);

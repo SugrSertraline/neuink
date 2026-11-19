@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import type { FoldRecord } from '@/shared/ipc/foldingApi';
 import { translateFoldLevel } from './translateFoldLevel';
+import { foldDisplayTranslationLanguage } from './foldTranslations';
 
 /** Translate only the visible missing level; leaving the viewport releases its request. */
 export function FoldTranslationButton({ root, entryId, title, record, level }: {
@@ -62,7 +63,7 @@ export function FoldTranslationButton({ root, entryId, title, record, level }: {
   }, [root, entryId, title, record.segment_uid, level, source]);
 
   return <span ref={node} onClick={event => event.stopPropagation()}>
-    {status === 'busy' ? <span role="status">正在生成当前详略的中文译文…</span> :
+    {status === 'busy' ? <span role="status">正在生成当前详略的{foldDisplayTranslationLanguage(record) === 'en' ? '英文' : '中文'}译文…</span> :
       status === 'done' ? <span role="status">译文已生成，正在显示…</span> :
         <Button type="button" size="xs" variant="ghost" disabled={!root} onClick={() => retry.current()}>{status === 'error' ? '重试当前详略译文' : '生成当前详略译文'}</Button>}
     {status === 'error' ? <span role="status"> 翻译失败，请检查模型配置后重试。</span> : null}

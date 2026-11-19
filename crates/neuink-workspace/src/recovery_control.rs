@@ -10,13 +10,14 @@ use crate::{
 use serde::Serialize;
 use serde_json::Value;
 use std::{collections::BTreeSet, fs, path::Path};
-const JOURNALS: [&str; 6] = [
+const JOURNALS: [&str; 7] = [
     "sync-apply.journal.json",
     "content-operation.journal.json",
     "child-trash.journal.json",
     "entry-lifecycle.journal.json",
     "tag-operation.journal.json",
     "source-note-import.journal.json",
+    "account-parse.journal.json",
 ];
 #[derive(Serialize)]
 pub struct RecoveryItem {
@@ -96,6 +97,9 @@ pub fn retry(path: &Path) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 pub fn keep_current(path: &Path, name: &str, token: &str) -> Result<String, String> {
+    if name == "account-parse.journal.json" {
+        return Err("解析结果仍在恢复中，请先重试恢复；暂存和旧结果均已保留".into());
+    }
     let _guard = lock_metadata().map_err(|e| e.to_string())?;
     let root = root(path)?;
     let (bytes, hashes) = record(&root, name)?;

@@ -2,8 +2,9 @@
 pub mod attachments;
 pub mod failure;
 pub mod progress;
-pub mod replica;
 pub mod revision;
+pub mod parse_tasks;
+pub mod replica;
 pub mod synchronize;
 pub mod workspace_sync;
 use failure::SyncFailure;
@@ -31,9 +32,8 @@ pub struct Session {
 
 pub fn normalize_endpoint(value: &str) -> Result<Url, String> {
     let mut url = Url::parse(value.trim()).map_err(|_| "服务器地址无效".to_string())?;
-    let loopback = matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"));
-    if url.scheme() != "https" && !(url.scheme() == "http" && loopback) {
-        return Err("同步服务器必须使用 HTTPS；HTTP 仅允许本机测试".into());
+    if !matches!(url.scheme(), "https" | "http") {
+        return Err("服务器地址必须使用 HTTP 或 HTTPS".into());
     }
     if !url.username().is_empty()
         || url.password().is_some()
@@ -199,9 +199,8 @@ impl SyncClient {
 mod tests {
     use super::*;
     #[test]
-    fn rejects_credentials_and_insecure_remote_endpoints() {
+    fn rejects_credentials_and_invalid_endpoints() {
         for v in [
-            "http://192.168.1.2:8790",
             "https://user:password@example.com",
             "https://example.com?token=a",
             "file:///tmp/test",
@@ -211,8 +210,9 @@ mod tests {
         }
     }
     #[test]
-    fn allows_https_and_explicit_loopback_testing() {
+    fn allows_https_and_explicit_http() {
         assert!(normalize_endpoint("https://sync.example.com").is_ok());
         assert!(normalize_endpoint("http://127.0.0.1:8790").is_ok());
+        assert!(normalize_endpoint("http://192.168.1.2:8790").is_ok());
     }
 }

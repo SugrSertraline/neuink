@@ -1,6 +1,6 @@
 const messages = {
   configuration: '请先在模型设置中配置助手模型。',
-  translation: '原文详略已保存，但中文详略尚未补齐。请检查整段翻译配置后重试；已保存的原文和译文会复用。',
+  translation: '原文详略已保存，但中英文详略尚未补齐。请检查翻译或模型配置后重试；已保存的结果会复用。',
   read: '无法读取已有详略，请检查资料库是否可访问后重试。',
   save: '详略已生成，但保存失败。请检查资料库写入权限和磁盘空间后重试；已有结果保留。',
   timeout: '模型请求超时，请检查模型服务或网络后重试；已有结果保留。',
@@ -19,7 +19,7 @@ const messages = {
   unknown: '详略生成失败，请重试；已有结果保留。',
 };
 export class FoldGenerationError extends Error {
-  constructor(readonly code: keyof typeof messages) { super(messages[code]); this.name = 'FoldGenerationError'; }
+  constructor(readonly code: keyof typeof messages, readonly detail?: string) { super(messages[code]); this.name = 'FoldGenerationError'; }
 }
 
 /** Never display provider bodies, credentials, URLs or arbitrary IPC messages. */
@@ -48,4 +48,4 @@ export function foldErrorCode(error: unknown): FoldErrorCode {
   return code;
 }
 
-export function foldErrorMessage(error: unknown): string { return messages[foldErrorCode(error)]; }
+export function foldErrorMessage(error: unknown): string { return error instanceof FoldGenerationError && error.detail ? error.detail : messages[foldErrorCode(error)]; }

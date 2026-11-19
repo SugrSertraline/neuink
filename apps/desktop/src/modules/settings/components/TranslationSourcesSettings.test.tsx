@@ -49,6 +49,16 @@ it('preserves a failed draft across tab changes and retries without clearing oth
   await waitFor(() => expect(hasUnsavedSegmentEditors('settings')).toBe(false));
   expect(saveTranslationRouting).toHaveBeenLastCalledWith({ ...DEFAULT_TRANSLATION_ROUTING, local_dictionary_first: false });
 });
+it('does not add a transient status row while a change autosaves', async () => {
+  let finish!: (value: typeof DEFAULT_TRANSLATION_ROUTING) => void;
+  vi.mocked(saveTranslationRouting).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  render(<TranslationSourcesSettings {...props} />);
+  fireEvent.click(await screen.findByRole('switch', { name: '单词优先使用本地词库' }));
+  await waitFor(() => expect(saveTranslationRouting).toHaveBeenCalled());
+  expect(screen.queryByText('正在保存翻译来源…')).toBeNull();
+  expect(screen.queryByText('翻译来源尚未保存。')).toBeNull();
+  finish({ ...DEFAULT_TRANSLATION_ROUTING, local_dictionary_first: false });
+});
 it('loads only when active and exposes loading errors without applying defaults', async () => {
   vi.mocked(getTranslationRouting).mockRejectedValueOnce(new Error('failed'));
   const ui = render(<TranslationSourcesSettings {...props} active={false} />);

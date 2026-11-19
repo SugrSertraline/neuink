@@ -126,7 +126,12 @@ export function startFoldTask(root: string, entryId: string, title: string, segm
       lastCompleted = progress.completed;
       publish(key, recordsChanged);
     } });
-    if (outcome.failedSegmentUids.length) throw new FoldGenerationError(outcome.failureCode ?? 'validation');
+    if (outcome.failedSegmentUids.length) {
+      const errors = snapshots.get(key)?.progress.segmentErrors;
+      const reasons = [...new Set(outcome.failedSegmentUids.map(uid => errors?.[uid]).filter((value): value is string => Boolean(value)))];
+      const detail = reasons.length ? `失败 ${outcome.failedSegmentUids.length} 段：${reasons.join('；')} 已保存的结果保留，可在阅读详略任务中重试。` : undefined;
+      throw new FoldGenerationError(outcome.failureCode ?? 'validation', detail);
+    }
   }).then(() => {
     const snapshot = snapshots.get(key);
     if (snapshot) snapshots.set(key, { ...snapshot, status: 'succeeded' });

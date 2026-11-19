@@ -5,7 +5,7 @@ import { translationModelSettings } from './translationModelSettings';
 import { logTranslationFailure } from '@/shared/ipc/translationLogApi';
 
 export async function translateSelectionWithProfile(profile: LlmProfile, input: {
-  sourceText: string; word?: string | null; context?: string | null; entryTitle: string;
+  sourceText: string; word?: string | null; context?: string | null; entryTitle: string; targetLanguage?: 'zh' | 'en';
 }, options?: { signal?: AbortSignal; maxRetries?: number }) {
   const { sourceText, word, context, entryTitle } = input;
   const started = performance.now();
@@ -15,7 +15,7 @@ export async function translateSelectionWithProfile(profile: LlmProfile, input: 
       abortSignal: options?.signal, maxRetries: options?.maxRetries,
       system: word
         ? 'Translate the single English word into concise Simplified Chinese dictionary meanings. Return the meanings only.'
-        : ['You are an academic paper translator.', 'Translate the selected text into Simplified Chinese.',
+        : ['You are an academic paper translator.', input.targetLanguage === 'en' ? 'Translate the selected text into English.' : 'Translate the selected text into Simplified Chinese.',
           'Preserve formulas, citations, numbers, abbreviations, code, and technical symbols.',
           'Return the translation only. Do not return JSON, explanations, labels, or markdown fences.'].join('\n'),
       prompt: word ? word : [`Paper title: ${entryTitle}`, context?.trim() ? `Paragraph context:\n${context}` : null,

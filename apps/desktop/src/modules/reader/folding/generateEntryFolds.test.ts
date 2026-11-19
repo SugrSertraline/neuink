@@ -40,6 +40,21 @@ describe('entry folding generation', () => {
     expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({ translatingSegmentUids: ['a'], completed: 0 }));
   });
 
+  it('generates English levels for a Chinese source', async () => {
+    const chinese = { ...source, text: '这是一段中文论文内容，介绍研究方法和主要发现。'.repeat(8) };
+    await generateEntryFolds({ root: 'root', entryId: 'entry', segments: [chinese] });
+    expect(vi.mocked(translateFoldLevel).mock.calls.map(call => [call[4], call[6]])).toEqual([
+      ['brief', 'en'], ['key', 'en'], ['takeaway', 'en'], ['topic', 'en']
+    ]);
+  });
+
+  it('reports the exact failed validation reason for the affected paragraph', async () => {
+    mocks.generate.mockResolvedValue({ results: [], failedSegmentUids: ['a'], failureReasons: { a: '证据句编号无效。' } });
+    const onProgress = vi.fn();
+    await generateEntryFolds({ root: 'root', entryId: 'entry', segments: [source], onProgress });
+    expect(onProgress).toHaveBeenLastCalledWith(expect.objectContaining({ segmentErrors: { a: '证据句编号无效。' } }));
+  });
+
   it('passes paper and section context without generating unselected paragraphs', async () => {
     const abstract = { ...source, uid: 'abstract', text: 'A synthetic abstract.' };
     const heading: SourceSegment = { ...source, uid: 'h', segment_type: 'heading', text: 'Results' };
@@ -86,7 +101,7 @@ describe('entry folding generation', () => {
     expect(outcome).toMatchObject({ failedSegmentUids: ['a'], failureCode: 'translation' });
     expect(mocks.save).toHaveBeenCalledTimes(2);
     expect(onProgress).toHaveBeenLastCalledWith(expect.objectContaining({ completedSegmentUids: ['b'], failedSegmentUids: ['a'],
-      segmentErrors: { a: expect.stringContaining('中文详略尚未补齐') } }));
+      segmentErrors: { a: expect.stringContaining('中英文详略尚未补齐') } }));
     expect(JSON.stringify(onProgress.mock.calls)).not.toContain('provider secret');
   });
 

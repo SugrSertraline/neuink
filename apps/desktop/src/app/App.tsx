@@ -1,3 +1,4 @@
+import { useParserSource } from './useParserSource';
 import { getLibraryViewTitle } from '@/modules/library/utils/libraryView';
 import { useCloudSync } from './useCloudSync';
 import { sameWorkspacePath } from '@/shared/lib/workspacePath';
@@ -191,9 +192,7 @@ type PendingMarkdownNoteDelete = {
 
 import {
   ACTIVE_PARSE_STATUSES,
-  DEFAULT_MINERU_ENDPOINT,
   EMPTY_SIDE_PANE,
-  LEGACY_MINERU_ENDPOINTS,
   LIBRARY_VIEW_STORAGE_KEY,
   PARSER_API_KEY_STORAGE_KEY,
   PARSER_ENDPOINT_STORAGE_KEY,
@@ -253,15 +252,6 @@ async function localizeSciverseRemoteImages({
     (await saveSciverseNoteImage({ entryId, noteId, root, reference })).markdown_path);
 }
 
-function isHttpEndpoint(value: string) {
-  try {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
 export function App() {
   const duplicateReview = usePdfDuplicateReview();
   const workspace = useWorkspace(duplicateReview.confirm);
@@ -291,16 +281,7 @@ export function App() {
     new Map<string, Promise<SciverseLibraryImportResult>>()
   );
   const [sciverseBackgroundJobs, setSciverseBackgroundJobs] = useState<Job[]>([]);
-  const [mineruEndpoint, setMineruEndpoint] = useState(() => {
-    if (typeof window === 'undefined') {
-      return DEFAULT_MINERU_ENDPOINT;
-    }
-    const saved = window.localStorage.getItem(PARSER_ENDPOINT_STORAGE_KEY)?.trim();
-    if (!saved || LEGACY_MINERU_ENDPOINTS.has(saved) || !isHttpEndpoint(saved)) {
-      return DEFAULT_MINERU_ENDPOINT;
-    }
-    return saved;
-  });
+  const [mineruEndpoint, setMineruEndpoint] = useParserSource();
   const [parserApiKey, setParserApiKey] = useState(() => {
     if (typeof window === 'undefined') {
       return '';
@@ -1278,6 +1259,7 @@ export function App() {
         const parserEndpoint = getEffectiveParserEndpoint(mineruEndpoint);
         const fields = Object.fromEntries(
           Object.entries({
+            ...preparation.additional_fields,
             description: preparation.abstract ?? source.abstract ?? source.quote,
             来源平台: 'Sciverse',
             'PDF 来源': preparation.pdf_source_url,
@@ -1289,7 +1271,7 @@ export function App() {
               : source.authors?.join('; '),
             发表年份:
               preparation.publication_year?.toString() ?? source.publication_year?.toString(),
-            发表载体: preparation.venue ?? source.venue,
+            '期刊／会议名称': preparation.venue ?? source.venue,
             开放获取链接: preparation.access_oa_url ?? source.access_oa_url,
             开放获取许可: preparation.access_license ?? source.access_license
           }).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].trim().length > 0)

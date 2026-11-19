@@ -28,3 +28,13 @@ it('updates the category when a PDF is queued or the last unparsed PDF is remove
   const updated = entries.filter(e => e.status !== 'Canceled').map(e => e.status === 'Not started' ? { ...e, status: 'Queued' as const } : e);
   expect(filterEntries(updated, 'unparsed', null, '', 'title', [], {})).toEqual([]);
 });
+
+
+it('filters text and structured select values without partial option matches', async () => {
+  const { matchesFieldFilter } = await import('./libraryEntryFilters');
+  expect(matchesFieldFilter('Nature Methods', 'nature', 'text')).toBe(true);
+  expect(matchesFieldFilter('AA', 'A', 'select')).toBe(false);
+  expect(matchesFieldFilter('["SCI","EI"]', 'SCI', 'multi_select')).toBe(true);
+  expect(matchesFieldFilter('["SCI","EI"]', 'CI', 'multi_select')).toBe(false);
+  expect(matchesFieldFilter('not-json', 'SCI', 'multi_select')).toBe(false);
+});

@@ -49,7 +49,7 @@ jobs:
 
   deploy:
     needs: test
-    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && contains(fromJSON('["main","beta","alpha"]'), github.ref_name))
+    if: (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v')) || (github.event_name == 'workflow_dispatch' && contains(fromJSON('["main","beta","alpha"]'), github.ref_name))
     runs-on: ubuntu-latest
     timeout-minutes: 60
     concurrency:
