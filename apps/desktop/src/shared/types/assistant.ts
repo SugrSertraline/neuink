@@ -423,6 +423,7 @@ export type AssistantActiveSurfaceSnapshot = {
     | 'source-links'
     | 'paper-cards'
     | 'tag-editor'
+    | 'field-editor'
     | 'tag-details'
     | 'owned-note'
     | 'tag-reading';

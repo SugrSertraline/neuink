@@ -43,6 +43,10 @@
   .settings-mcp-fields { grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) auto; }
 }
 .settings-group { width: 100%; max-width: 720px; padding-block: 16px; }
+.settings-form > header { padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.settings-form > header h2 { font-size: 18px; line-height: 26px; }
+.settings-group > div:first-child h3 { color: var(--foreground); }
+.settings-form > .settings-group[data-setting-id="data-cloud-account"] { padding-top: 0; }
 .settings-form > .settings-group + .settings-group { border-top: 1px solid var(--border); }
 .settings-service { min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
 .settings-service + .settings-service { margin-top: 16px; }

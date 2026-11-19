@@ -26,10 +26,3 @@ it('closes the accent picker and uses fixed colors for material themes without c
   expect(screen.getByRole('button', { name: /^强调色：/ }).textContent).toContain(APP_THEME_PRESETS.find(p => p.id === 'violet')!.label);
   expect(change).not.toHaveBeenCalled();
 });
-it('saves the zodiac in app settings for the daily sidebar', async () => {
-  const props = { themePresets: APP_THEME_PRESETS, themePreset: 'violet', uiScale: 1 } as unknown as SettingsPanelLayoutProps;
-  render(<Tabs value="appearance"><AppearanceSettingsSection props={props} /></Tabs>);
-  fireEvent.keyDown(screen.getByRole('combobox', { name: '我的星座' }), { key: 'ArrowDown' });
-  fireEvent.click(await screen.findByRole('option', { name: '天秤座' }));
-  expect(JSON.parse(localStorage.getItem('neuink.daily.sidebar.v1')!).zodiac).toBe('天秤座');
-});

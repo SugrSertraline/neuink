@@ -24,7 +24,7 @@ export function DataSettingsSection({ props, navigationTarget }: {
     {ONBOARDING_GUIDE_VISIBLE && <SettingsPage tab="getting-started" title="入门与教程" description="按真实任务练习阅读、翻译与整理；可以随时继续或回放。">
       <OnboardingSettings />
     </SettingsPage>}
-    <SettingsPage tab="account" title="账户" description="登录管理云端账户，也可以不登录，直接使用本地阅读。">
+    <SettingsPage tab="account" title="账户与存储" description="管理云端账户、本机资料和存储位置；也可以不登录，直接使用本地阅读。">
       <CloudAccountSettings navigationTarget={navigationTarget} active={props.activeSettingsTab === 'account'} />
 
       <SettingsGroup id="data-workspace" title="本机资料与存储"

@@ -18,5 +18,5 @@ it('offers one explicit local opt-in and is discoverable without exposing config
   fireEvent.click(toggle);
   expect(toggle.getAttribute('aria-checked')).toBe('false');
   expect(searchSettings('调试')[0]?.id).toBe('tools-assistant-debug');
-  expect(searchSettings('debug')[0]?.tab).toBe('external-tools');
+  expect(searchSettings('debug')[0]?.tab).toBe('models');
 });

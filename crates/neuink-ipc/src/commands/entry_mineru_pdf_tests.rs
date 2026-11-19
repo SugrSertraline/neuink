@@ -195,6 +195,8 @@ fn combined_import_checks_duplicates_of_verified_reading_bytes() {
     workspace.import_pdf_bytes(&existing.id, "original.pdf", RESAVED).unwrap();
     let zip_path = write_zip(&root);
     let pdf_path = write_candidate(&root, RESAVED);
+    // Measure import side effects after the workspace's normal opening migrations.
+    Workspace::open_existing(&root).unwrap();
     let before = file_listing(&root);
     let error = create_from_mineru_client_result(request(
         &root, zip_path.clone(), Some(pdf_path.clone()), Some(verification("resaved")),
@@ -219,6 +221,7 @@ fn page_count_mismatch_creates_no_entry_and_writes_nothing() {
     Workspace::create(&root).unwrap();
     let zip_path = write_zip(&root);
     let pdf_path = write_candidate(&root, PAGE_COUNT);
+    Workspace::open_existing(&root).unwrap();
     let before = file_listing(&root);
 
     let error = create_from_mineru_client_result_with(
@@ -250,6 +253,7 @@ fn missing_verification_for_pdf_creates_no_entry() {
     Workspace::create(&root).unwrap();
     let zip_path = write_zip(&root);
     let pdf_path = write_candidate(&root, RESAVED);
+    Workspace::open_existing(&root).unwrap();
     let before = file_listing(&root);
 
     let error = create_from_mineru_client_result_with(
@@ -272,6 +276,7 @@ fn candidate_bytes_changed_after_summary_are_rejected() {
     Workspace::create(&root).unwrap();
     let zip_path = write_zip(&root);
     let pdf_path = write_candidate(&root, PAGE_COUNT);
+    Workspace::open_existing(&root).unwrap();
     let before = file_listing(&root);
 
     let error = create_from_mineru_client_result_with(

@@ -9,6 +9,7 @@ const entry = (fields: Record<string, string> = {}): PaperLibraryEntry => ({ id:
   pdf: { file_name: 'paper.pdf', content_hash: '', imported_at: '', parse: { status: 'not_started', updated_at: '', message: null, task_id: null, endpoint: null } } });
 
 it.each<Record<string, string>>([
+  { '检索文献 ID': 'arxiv:2401.00001v1' }, { DOI: '10.1234/AB.C' }, { '来源链接': 'http://arxiv.org/abs/2401.00001v2' },
   { research_id: 'arxiv:2401.00001v1' }, { arxiv_id: '2401.00001' },
   { source_url: 'http://arxiv.org/abs/2401.00001v2' },
   { pdf_source_url: 'https://export.arxiv.org/pdf/2401.00001v12.pdf?download=1' },

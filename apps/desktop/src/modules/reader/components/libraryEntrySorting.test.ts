@@ -65,3 +65,18 @@ it.each(['title', 'updated', 'reading-progress'] as const)('starts %s ascending 
   expect(descending).toEqual({ by, direction: 'desc' });
   expect(nextLibraryEntrySort(by, descending!)).toBeNull();
 });
+
+
+it('sorts workspace-scoped custom fields and places missing values last', () => {
+  const entries = [entry('b', {fields: {CCF: 'B'}}), entry('empty'), entry('a', {fields: {CCF: 'A'}})];
+  expect(ids(sortLibraryEntries(entries, {by: 'field:D%3A%2Ffirst:CCF', direction: 'asc'}, {}, []))).toEqual(['a', 'b', 'empty']);
+});
+
+
+it.each(['asc', 'desc'] as const)('sorts numeric and date attributes by type and keeps invalid values last (%s)', direction => {
+  const definitions = [{name: '评分', kind: 'number' as const, options: [], hidden: false}, {name: '日期', kind: 'date' as const, options: [], hidden: false}];
+  const entries = [entry('ten', {fields: {'评分': '10', '日期': '2024-02-29'}}), entry('invalid', {fields: {'评分': 'Infinity', '日期': '2023-02-29'}}), entry('negative', {fields: {'评分': '-1.5', '日期': '2023-01-02'}}), entry('empty')];
+  const expected = direction === 'asc' ? ['negative', 'ten', 'invalid', 'empty'] : ['ten', 'negative', 'invalid', 'empty'];
+  expect(ids(sortLibraryEntries(entries, {by: 'field:D%3A%2Ffirst:%E8%AF%84%E5%88%86', direction}, {}, [], undefined, definitions))).toEqual(expected);
+  expect(ids(sortLibraryEntries(entries, {by: 'field:D%3A%2Ffirst:%E6%97%A5%E6%9C%9F', direction}, {}, [], undefined, definitions))).toEqual(expected);
+});

@@ -1,16 +1,16 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { ENTRY_LIBRARY_COLUMNS, LibraryPaperTable } from './LibraryPaperTable';
+import { ENTRY_LIBRARY_COLUMNS, LibraryPaperTable, fieldColumnId } from './LibraryPaperTable';
 import { ENTRY_LIBRARY_COLUMN_WIDTHS_STORAGE_KEY } from './useEntryLibraryColumnWidths';
 
 class TestPointerEvent extends MouseEvent {
   pointerId: number;
   constructor(type: string, init: PointerEventInit = {}) { super(type, init); this.pointerId = init.pointerId ?? 0; }
 }
-beforeEach(() => { window.localStorage.clear(); vi.stubGlobal('PointerEvent', TestPointerEvent); });
+beforeEach(() => { window.localStorage.clear(); HTMLElement.prototype.scrollIntoView = vi.fn(); vi.stubGlobal('PointerEvent', TestPointerEvent); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 function showTable(overrides: Partial<ComponentProps<typeof LibraryPaperTable>> = {}) {
@@ -203,4 +203,113 @@ it('keeps the fixed action cell opaque while its more menu is open', () => {
   expect(row.className).toContain('has-aria-expanded:bg-muted');
   expect(row.className).not.toContain('has-aria-expanded:bg-muted/50');
   expect(row.querySelector('td[data-pinned="right"]')?.className).toContain('bg-inherit');
+});
+
+
+it('renders selected custom attributes as columns without mixing them with tags', () => {
+  const id = fieldColumnId('CCF 等级');
+  showTable({ visibleColumns: new Set(['title', id, 'actions']), entries: [{ id: 'paper', title: '论文', contents: [], tags: [], tagIds: [], fields: { 'CCF 等级': 'A' }, createdAt: '', updatedAt: '', pdfFileName: null, parseEndpoint: null, parseMessage: null, status: 'No PDF', progress: 0 }] });
+  expect(screen.getByRole('columnheader', { name: 'CCF 等级' })).toBeTruthy();
+  expect(screen.getByText('A')).toBeTruthy();
+  expect(screen.queryByRole('columnheader', { name: '标签' })).toBeNull();
+});
+
+
+it('formats multi-select attributes and hides columns unavailable in the current library', () => {
+  const id = fieldColumnId('收录');
+  const missing = fieldColumnId('其他资料库字段');
+  showTable({ visibleColumns: new Set(['title', id, missing]), fieldNames: ['收录'], fieldDefinitions: [{name: '收录', kind: 'multi_select', options: ['SCI', 'EI'], hidden: false}], entries: [{ id: 'paper', title: '论文', contents: [], tags: [], tagIds: [], fields: { '收录': '["SCI","EI"]' }, createdAt: '', updatedAt: '', pdfFileName: null, parseEndpoint: null, parseMessage: null, status: 'No PDF', progress: 0 }] });
+  expect(screen.getByText('SCI、EI')).toBeTruthy();
+  expect(screen.queryByRole('columnheader', { name: '其他资料库字段' })).toBeNull();
+});
+
+
+it('does not expose another workspace attribute column preference with the same name', () => {
+  const id = fieldColumnId('CCF', 'D:/first');
+  showTable({ workspaceRoot: 'D:/second', visibleColumns: new Set(['title', id]), fieldNames: ['CCF'] });
+  expect(screen.queryByRole('columnheader', {name: 'CCF'})).toBeNull();
+  expect(fieldColumnId('CCF', 'D:/second')).not.toBe(id);
+});
+
+describe('library column order', () => {
+  it('uses the saved order without adding drag controls to headers', () => {
+    window.localStorage.setItem('neuink.entryLibraryColumnOrder.v1:library-a', JSON.stringify(['tags', 'source', 'file']));
+    const { table, resize } = showTable({ visibleColumns: new Set(['title', 'source', 'tags', 'file', 'actions']), workspaceRoot: 'library-a' });
+    resize(900);
+    expect(screen.getAllByRole('columnheader').map(cell => cell.getAttribute('aria-label'))).toEqual(['标题', '标签', '来源', '文件', '操作']);
+    expect(table.querySelector('[draggable="true"]')).toBeNull();
+    expect(screen.getByRole('columnheader', { name: '标题' }).dataset.pinned).toBe('left');
+    expect(screen.getByRole('columnheader', { name: '操作' }).dataset.pinned).toBe('right');
+  });
+});
+
+
+it('opens an editable property without opening the entry and saves the selected value', async () => {
+  const onEditField = vi.fn().mockResolvedValue(undefined);
+  const onOpen = vi.fn();
+  const definition = { name: 'CCF 等级', kind: 'select' as const, options: ['A', 'B', 'C'], hidden: false };
+  showTable({ workspaceRoot: 'root', visibleColumns: new Set(['title', fieldColumnId(definition.name, 'root'), 'actions']),
+    fieldNames: [definition.name], fieldDefinitions: [definition], onEditField, onOpen });
+  fireEvent.click(screen.getByRole('button', { name: '编辑A long paper title的CCF 等级' }));
+  expect(screen.queryByRole('button', { name: '保存' })).toBeNull();
+  expect(screen.getByRole('button', { name: '留空' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'A' }));
+  await waitFor(() => expect(onEditField).toHaveBeenCalledWith(expect.objectContaining({ id: 'paper' }), definition, null, 'A'));
+  expect(onOpen).not.toHaveBeenCalled();
+});
+
+
+it('keeps the editor open and displays a save conflict', async () => {
+  const onEditField = vi.fn().mockRejectedValue('该属性已在其他位置修改，请关闭编辑并重新打开');
+  const definition = { name: '评价来源', kind: 'text' as const, options: [], hidden: false };
+  showTable({ workspaceRoot: 'root', visibleColumns: new Set(['title', fieldColumnId(definition.name, 'root'), 'actions']),
+    fieldNames: [definition.name], fieldDefinitions: [definition], onEditField });
+  fireEvent.click(screen.getByRole('button', { name: '编辑A long paper title的评价来源' }));
+  fireEvent.change(screen.getByPlaceholderText('属性值'), { target: { value: '来源' } });
+  fireEvent.keyDown(screen.getByPlaceholderText('属性值'), { key: 'Enter' });
+  expect((await screen.findByRole('alert')).textContent).toContain('其他位置修改');
+  expect((screen.getByPlaceholderText('属性值') as HTMLInputElement).value).toBe('来源');
+});
+
+it('clears a choice immediately when selecting 留空', async () => {
+  const onEditField = vi.fn().mockResolvedValue(undefined);
+  const definition = { name: 'CCF 等级', kind: 'select' as const, options: ['A', 'B'], hidden: false };
+  const paper = { id: 'paper', title: 'Paper', contents: [], tags: [], tagIds: [], fields: { 'CCF 等级': 'A' }, createdAt: '', updatedAt: '', pdfFileName: null, parseEndpoint: null, parseMessage: null, status: 'Parsed' as const, progress: 100 };
+  showTable({ entries: [paper], workspaceRoot: 'root', visibleColumns: new Set(['title', fieldColumnId(definition.name, 'root'), 'actions']), fieldNames: [definition.name], fieldDefinitions: [definition], onEditField });
+  fireEvent.click(screen.getByRole('button', { name: '编辑Paper的CCF 等级' }));
+  fireEvent.click(screen.getByRole('button', { name: '留空' }));
+  await waitFor(() => expect(onEditField).toHaveBeenCalledWith(expect.objectContaining({ id: 'paper' }), definition, 'A', null));
+});
+
+
+it('saves a multi-select change immediately without a save button', async () => {
+  const onEditField = vi.fn().mockResolvedValue(undefined);
+  const definition = { name: '收录情况', kind: 'multi_select' as const, options: ['SCI', 'EI'], hidden: false };
+  showTable({ workspaceRoot: 'root', visibleColumns: new Set(['title', fieldColumnId(definition.name, 'root'), 'actions']), fieldNames: [definition.name], fieldDefinitions: [definition], onEditField });
+  fireEvent.click(screen.getByRole('button', { name: '编辑A long paper title的收录情况' }));
+  expect(screen.queryByRole('button', { name: '保存' })).toBeNull();
+  fireEvent.click(screen.getByRole('checkbox', { name: 'SCI' }));
+  await waitFor(() => expect(onEditField).toHaveBeenCalledWith(expect.objectContaining({ id: 'paper' }), definition, null, '["SCI"]'));
+});
+
+it('saves typed values when leaving the editor', async () => {
+  const onEditField = vi.fn().mockResolvedValue(undefined);
+  const definition = { name: '评价来源', kind: 'text' as const, options: [], hidden: false };
+  showTable({ workspaceRoot: 'root', visibleColumns: new Set(['title', fieldColumnId(definition.name, 'root'), 'actions']), fieldNames: [definition.name], fieldDefinitions: [definition], onEditField });
+  fireEvent.click(screen.getByRole('button', { name: '编辑A long paper title的评价来源' }));
+  fireEvent.change(screen.getByPlaceholderText('属性值'), { target: { value: '人工核对' } });
+  fireEvent.blur(screen.getByPlaceholderText('属性值'), { relatedTarget: document.body });
+  await waitFor(() => expect(onEditField).toHaveBeenCalledWith(expect.objectContaining({ id: 'paper' }), definition, null, '人工核对'));
+});
+
+
+it('discards an unsaved text edit on Escape', async () => {
+  const onEditField = vi.fn().mockResolvedValue(undefined);
+  const definition = { name: '评价来源', kind: 'text' as const, options: [], hidden: false };
+  showTable({ workspaceRoot: 'root', visibleColumns: new Set(['title', fieldColumnId(definition.name, 'root'), 'actions']), fieldNames: [definition.name], fieldDefinitions: [definition], onEditField });
+  fireEvent.click(screen.getByRole('button', { name: '编辑A long paper title的评价来源' }));
+  fireEvent.change(screen.getByPlaceholderText('属性值'), { target: { value: '不保存' } });
+  fireEvent.keyDown(screen.getByPlaceholderText('属性值'), { key: 'Escape' });
+  await waitFor(() => expect(screen.queryByPlaceholderText('属性值')).toBeNull());
+  expect(onEditField).not.toHaveBeenCalled();
 });

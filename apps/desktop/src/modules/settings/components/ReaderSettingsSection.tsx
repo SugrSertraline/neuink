@@ -1,3 +1,4 @@
+import { AutoParseOnImportSetting } from './ParserSettingsSection';
 import type { ReaderPreferences } from '@/shared/lib/readerPreferences';
 import type { SettingsPanelLayoutProps } from './SettingsPanelLayout';
 import { SettingsPage, SettingsGroup, SettingSelect, SettingSwitch, SettingCheckbox } from './SettingsPrimitives';
@@ -12,21 +13,21 @@ export function ReaderSettingsSection({ props }: { props: SettingsPanelLayoutPro
   const update = (patch: Partial<ReaderPreferences>) => props.onReaderPreferencesChange({ ...p, ...patch });
   const previewDisabled = !p.hoverPreviewEnabled && !p.reflowHoverSourceEnabled;
   return <SettingsPage tab="reader" title="阅读与批注" description="设置打开论文、悬停预览和片段操作的方式。">
+    <SettingsGroup title="导入与打开论文">
+      <AutoParseOnImportSetting id="reader-auto-parse" />
+      <SettingSwitch id="reader-open-pdf" label="有 PDF 时直接打开 PDF" description="打开条目时优先阅读 PDF；关闭后或没有 PDF 时显示条目概览。" checked={p.openEntryPdfByDefault ?? true} onCheckedChange={openEntryPdfByDefault => update({ openEntryPdfByDefault })} />
+    </SettingsGroup>
     <SettingsGroup title="阅读详略">
       <SettingSwitch id="reader-auto-fold" label="打开重排版时自动生成阅读详略" description="默认关闭；仅处理尚未生成或原文已变化的正文段落。使用助手模型，正文会发送至所配置的模型服务。关闭后不再自动启动新任务。" checked={p.autoGenerateFolds ?? false} onCheckedChange={autoGenerateFolds => update({ autoGenerateFolds })} />
     </SettingsGroup>
-    <SettingsGroup title="打开条目">
-      <SettingSwitch id="reader-open-pdf" label="有 PDF 时直接打开 PDF" description="打开条目时优先阅读 PDF；关闭后或没有 PDF 时显示条目概览。" checked={p.openEntryPdfByDefault ?? true} onCheckedChange={openEntryPdfByDefault => update({ openEntryPdfByDefault })} />
-    </SettingsGroup>
-    <SettingsGroup title="PDF 片段预览">
+    <SettingsGroup title="悬停预览">
       <SettingSwitch id="reader-preview" label="PDF 片段悬停" description="悬停在 PDF 片段上时显示整段内容、笔记和批注。" checked={p.hoverPreviewEnabled} onCheckedChange={hoverPreviewEnabled => update({ hoverPreviewEnabled })} />
-    </SettingsGroup>
-    <SettingsGroup title="其他悬停">
       <SettingSwitch id="reader-reflow-preview" label="重排悬停预览" description="鼠标悬停在重排内容上时显示对应片段。" checked={p.reflowHoverSourceEnabled} onCheckedChange={reflowHoverSourceEnabled => update({ reflowHoverSourceEnabled })} />
       <SettingSwitch id="reader-inline-annotation-hover" label="行内批注" description="悬停在 PDF 的选区批注高亮上时，只预览该处原文和批注；可独立于片段悬停预览使用。" checked={p.inlineAnnotationHoverEnabled} onCheckedChange={inlineAnnotationHoverEnabled => update({ inlineAnnotationHoverEnabled })} />
       <SettingSwitch id="reader-paper-reference-hover" label="文内引用悬停" description="悬停参考文献、图表引用时预览目标；关闭后仍可点击定位。" checked={p.paperReferenceHoverEnabled} onCheckedChange={paperReferenceHoverEnabled => update({ paperReferenceHoverEnabled })} />
-    </SettingsGroup>
-    <SettingsGroup id="reader-preview-content" title="片段预览内容" description={previewDisabled ? '开启 PDF 片段或重排悬停预览后生效；当前选择会保留。' : 'PDF 片段与重排预览共用以下内容选择。'}>
+      <section className="settings-subsection" data-setting-id="reader-preview-content" tabIndex={-1}>
+        <h4 className="settings-subheading">片段预览内容</h4>
+        <p className="text-xs leading-5 text-muted-foreground">{previewDisabled ? '开启 PDF 片段或重排悬停预览后生效；当前选择会保留。' : 'PDF 片段与重排预览共用以下内容选择。'}</p>
       <div data-setting-id="reader-sentence-hover" tabIndex={-1}>{PREVIEW_CONTENT.map(([key, label]) => <div key={key}>
         <SettingCheckbox label={label} checked={p[key]} disabled={previewDisabled} onCheckedChange={checked => update({ [key]: checked })} />
         {(key === 'hoverPreviewShowOriginal' || key === 'hoverPreviewShowTranslation') && p[key] && <div className="settings-dependent">
@@ -38,6 +39,7 @@ export function ReaderSettingsSection({ props }: { props: SettingsPanelLayoutPro
       </div>)}</div>
       <p className="text-xs text-muted-foreground">PDF 原文和译文可分别选择整段或逐句；逐句不可用时自动显示整段并提示。重排预览沿用片段内容。</p>
       <SettingCheckbox label="PDF 预览时高亮对应区域" checked={p.hoverPreviewShowRegion} disabled={!p.hoverPreviewEnabled} onCheckedChange={hoverPreviewShowRegion => update({ hoverPreviewShowRegion })} />
+      </section>
     </SettingsGroup>
     <SettingsGroup title="分段与片段记录">
       <SettingSwitch id="reader-regions" label="默认显示 PDF 分段框" description="显示 PDF 上解析得到的分段区域框。" checked={p.showRegions} onCheckedChange={showRegions => update({ showRegions })} />

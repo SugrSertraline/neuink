@@ -5,6 +5,8 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum WorkspaceError {
     #[error("{0}")]
+    FieldDefinitions(String),
+    #[error("{0}")]
     ContentTransaction(String),
     #[error("{0}")]
     LocalCopy(String),

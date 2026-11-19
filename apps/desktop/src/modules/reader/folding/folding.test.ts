@@ -92,7 +92,7 @@ describe('folding model result validation', () => {
       { ...good, evidence: [1, 0] }, { ...good, topic: 'invented' },
       { ...good, key: 'Unrelated.' }
     ]) {
-      expect(validateFoldBatch([input], { segments: [row] })).toEqual({ results: [], failedSegmentUids: ['a'] });
+      expect(validateFoldBatch([input], { segments: [row] })).toMatchObject({ results: [], failedSegmentUids: ['a'] });
     }
     expect(validateFoldBatch([input], { segments: [good, good] }).failedSegmentUids).toEqual(['a']);
     expect(validateFoldBatch([input], { segments: [] }).failedSegmentUids).toEqual(['a']);

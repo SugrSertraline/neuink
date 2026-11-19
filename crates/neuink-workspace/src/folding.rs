@@ -35,7 +35,7 @@ pub struct FoldTranslation {
 }
 
 fn level_text(record: &FoldRecord, level: &str) -> Option<String> {
-    match level {
+    match level.strip_prefix("en:").unwrap_or(level) {
         "brief" => Some(record.brief.join(" ")),
         "key" => Some(record.key.clone()),
         "takeaway" => Some(record.takeaway.clone()),
@@ -292,6 +292,12 @@ mod tests {
                 translation.clone(),
             )
             .unwrap();
+        workspace
+            .save_fold_translation(&entry.id, &record.segment_uid, "en:takeaway", translation.clone())
+            .unwrap();
+        assert!(workspace
+            .read_entry_folds(&entry.id).unwrap()[&record.segment_uid]
+            .translations.contains_key("en:takeaway"));
         assert!(workspace
             .save_fold_translation(&entry.id, &record.segment_uid, "key", translation.clone())
             .is_err());

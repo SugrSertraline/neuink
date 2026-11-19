@@ -424,6 +424,7 @@ export function useWorkspace(confirmPdfDuplicate?: ConfirmPdfDuplicate) {
         const parse = entry.pdf?.parse;
         return (
           parse?.task_id &&
+          !(parse.endpoint?.startsWith('neuink-account:') && parse.status === 'uploading') &&
           ['queued', 'uploading', 'uploaded', 'parsing'].includes(parse.status)
         );
       });

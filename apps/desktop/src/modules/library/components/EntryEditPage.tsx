@@ -11,12 +11,13 @@ import { EntryContentHeader } from '@/modules/reader/components/EntryContentHead
 import { ReaderSurfaceBody } from '@/modules/reader/components/ReaderSurfacePrimitives';
 import { ReaderSurfaceFrame } from '@/modules/reader/components/ReaderSurfaceFrame';
 import { registerSegmentEditorCloseHandler, setSegmentEditorDirty } from '@/modules/reader/components/segmentEditorDirtyRegistry';
-import { EntryFieldsEditor, fieldsFromRecord, fieldsToRecord } from './EntryFieldsEditor';
+import { EntryDefinedFieldValues, fieldsFromRecord, fieldsToRecord } from './EntryFieldsEditor';
+import { useFieldDefinitions } from './FieldDefinitionsDialog';
+import { EntryMetadataLookup, fillEmptyPaperFields } from './EntryMetadataLookup';
 import { TagQuickPicker } from './TagQuickPicker';
 import { parseTagInput } from '../utils/tagSelection';
 import type { LibraryEntry } from './LibrarySidebar';
 import { ZoteroOrganizationInfo } from './ZoteroOrganizationInfo';
-import { useFormRecovery } from '@/shared/hooks/useFormRecovery';
 
 export type EntryUpdate = { fields: Record<string, string>; tagPaths: string[]; title: string };
 function draftFrom(entry: LibraryEntry) {
@@ -37,6 +38,7 @@ export function EntryEditPage({ entry, tags, workspaceRoot, scopeKey, onUpdateEn
   onUpdateEntry: (entryId: string, request: EntryUpdate) => Promise<unknown> | unknown; onBack: () => void;
 }) {
   const { notify } = useToast();
+  const { definitions, loading: definitionsLoading, error: definitionsError } = useFieldDefinitions(workspaceRoot);
   const id = useId(), owner = `entry-metadata:${id}`;
   const [draft, setDraft] = useState(() => draftFrom(entry));
   const [baseline, setBaseline] = useState(() => draftFrom(entry));
@@ -45,12 +47,6 @@ export function EntryEditPage({ entry, tags, workspaceRoot, scopeKey, onUpdateEn
   const live = useRef(true), pending = useRef<Promise<boolean> | null>(null);
   const latest = useRef({ entry, draft, baseline }); latest.current = { entry, draft, baseline };
   const dirty = JSON.stringify(draft) !== JSON.stringify(baseline);
-  const recovery = useFormRecovery({ kind: 'entry', id: scopeKey, ownerId: entry.id, targetId: 'metadata', scope: scopeKey,
-    root: workspaceRoot, label: `条目信息 · ${entry.title}`, dirty, value: { draft, baseline, version: baseVersion.current },
-    restore: value => { if (!value.draft || typeof value.draft.title !== 'string') throw new Error('无效草稿');
-      baseVersion.current = value.version; latest.current.draft = value.draft; latest.current.baseline = value.baseline; setDraft(value.draft); setBaseline(value.baseline); },
-    reveal: () => document.getElementById(`${id}-title`)?.focus() });
-  const recoveryRef = useRef(recovery); recoveryRef.current = recovery;
   const selectedPaths = parseTagInput(draft.tagInput);
   const update = (patch: Partial<Draft>) => {
     const next = { ...latest.current.draft, ...patch }; latest.current.draft = next; setDraft(next);
@@ -63,14 +59,15 @@ export function EntryEditPage({ entry, tags, workspaceRoot, scopeKey, onUpdateEn
     latest.current.draft = next; latest.current.baseline = next; setDraft(next); setBaseline(next);
   }, [entry]);
   const discard = () => {
-    recoveryRef.current.discard();
     const next = draftFrom(latest.current.entry); latest.current.draft = next; latest.current.baseline = next;
-    baseVersion.current = fingerprint(latest.current.entry); setDraft(next); setBaseline(next); setError(null);
+    baseVersion.current = fingerprint(latest.current.entry); setDraft(next); setBaseline(next); setSegmentEditorDirty(scopeKey, owner, false); setError(null);
   };
   const save = (): Promise<boolean> => {
     if (pending.current) return pending.current;
     const before = latest.current.draft;
     if (!before.title.trim()) { setError('请输入条目标题。'); return Promise.resolve(false); }
+    const names = before.fields.filter(field => field.key.trim() && field.value.trim()).map(field => field.key.trim());
+    if (new Set(names).size !== names.length) { setError('属性名称重复，请先合并或更名，避免覆盖已有值。'); return Promise.resolve(false); }
     if (fingerprint(latest.current.entry) !== baseVersion.current) {
       setError('条目已在其他位置更新。请返回概览后重新编辑，以免覆盖新内容。'); return Promise.resolve(false);
     }
@@ -90,7 +87,7 @@ export function EntryEditPage({ entry, tags, workspaceRoot, scopeKey, onUpdateEn
   const handlers = useRef({ save, discard }); handlers.current = { save, discard };
   useEffect(() => {
     const unregister = registerSegmentEditorCloseHandler(scopeKey, owner, {
-      ...recovery.handlers, isBusy: () => Boolean(pending.current),
+      label: () => '论文信息', reveal: () => document.getElementById(`${id}-title`)?.focus(), isBusy: () => Boolean(pending.current),
       save: () => handlers.current.save(), discard: () => handlers.current.discard(),
       isDirty: () => JSON.stringify(latest.current.draft) !== JSON.stringify(latest.current.baseline),
     });
@@ -109,13 +106,19 @@ export function EntryEditPage({ entry, tags, workspaceRoot, scopeKey, onUpdateEn
   }}>
     <ReaderSurfaceFrame className="bg-card" toolbar={<EntryContentHeader contentTitle="编辑条目" entryTitle={entry.title}>
       <span className="mr-2 text-xs text-muted-foreground" role="status">{saving ? '保存中…' : dirty ? '未保存' : '未修改'}</span>
+      <EntryMetadataLookup root={workspaceRoot} title={draft.title} disabled={saving || definitionsLoading || Boolean(definitionsError)} onApply={paper => {
+        const before = latest.current.draft.fields;
+        const after = fillEmptyPaperFields(before, definitions, paper);
+        const count = after.filter(field => field.value.trim() && !before.some(previous => previous.key === field.key && previous.value.trim())).length;
+        if (count) update({ fields: after });
+        return count;
+      }} />
       <Button size="sm" variant="ghost" disabled={saving} onClick={back}><ArrowLeft size={14} />返回概览</Button>
       <Button size="sm" disabled={saving || !dirty || !draft.title.trim()} onClick={saveAndBack}>{saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}保存修改</Button>
     </EntryContentHeader>}>
       <ReaderSurfaceBody width="reading">
-        {recovery.notice}
         {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
-        <fieldset disabled={saving || recovery.blocked} className="grid min-w-0 gap-5">
+        <fieldset disabled={saving} className="grid min-w-0 gap-5">
           <div className="grid gap-2"><Label htmlFor={`${id}-title`}>标题</Label><Input autoFocus id={`${id}-title`} value={draft.title} onChange={event => update({ title: event.target.value })} /></div>
           <div className="grid gap-2"><Label htmlFor={`${id}-description`}>描述</Label><Textarea id={`${id}-description`} className="min-h-28 resize-y leading-6" value={draft.description} onChange={event => update({ description: event.target.value })} /></div>
           {entry.sourceInfo?.zotero_organization?.length ? <ZoteroOrganizationInfo draft organization={entry.sourceInfo.zotero_organization} tags={tags} tagPaths={selectedPaths}
@@ -125,7 +128,7 @@ export function EntryEditPage({ entry, tags, workspaceRoot, scopeKey, onUpdateEn
             {selectedPaths.length ? <div className="flex flex-wrap gap-1.5">{selectedPaths.map(path => <Button key={path} variant="secondary" size="xs" title={path} aria-label={`移除标签 ${path}`} onClick={() => update({ tagInput: selectedPaths.filter(item => item !== path).join(', ') })}><span className="max-w-64 truncate">{path}</span><X size={12} /></Button>)}</div> : null}
             <TagQuickPicker allowMultiple disabled={saving} selectedPaths={selectedPaths} tags={tags} onTogglePath={path => update({ tagInput: (selectedPaths.includes(path) ? selectedPaths.filter(item => item !== path) : [...selectedPaths, path]).join(', ') })} />
           </div>
-          <EntryFieldsEditor fields={draft.fields} disabled={saving} onFieldsChange={fields => update({ fields })} />
+          <EntryDefinedFieldValues workspaceRoot={workspaceRoot} fields={draft.fields} disabled={saving} onFieldsChange={fields => update({ fields })} />
         </fieldset>
       </ReaderSurfaceBody>
     </ReaderSurfaceFrame>

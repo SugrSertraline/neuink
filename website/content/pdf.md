@@ -1,20 +1,34 @@
 PDF 阅读器保留原文的版式。精读时用它核对图表、公式、页码与排版；需要更连续的文字体验时，再切到重排视图。
 
-## 按步骤看实际界面
+## 原文、译文与笔记放在一起
 
-按下面的步骤找到入口，并检查操作结果；点击图片可放大查看。
+从条目打开 PDF，使用工具栏切换原文/译文、缩放、翻页、搜索和翻译任务。将笔记放到另一分栏，一边读原文，一边留下来源。
 
-### 1. 打开原始 PDF
+![PDF 与文档笔记同屏，来源引用连接笔记和原文](../public/screenshots/current-pdf-notes.png)
 
-从条目详情选择 PDF。上方工具栏管理原文／译文、导出、翻译任务和缩放；页码与片段导航在其下方。
+原文与译文也可以左右对照。工作区分屏是两份内容的布局，与 PDF 的单页/双页排列分别设置。
 
-![Neuink 实机截图：1. 打开原始 PDF](../public/screenshots/pdf-reader.png)
+![PDF 原文与译文分屏阅读](../public/screenshots/current-translation-parallel.png)
 
-### 2. 把文档笔记放到另一侧
+## 从目录找到章节
 
-使用笔记旁的分屏入口，左边保留 PDF，右边查看或编辑笔记。两个阅读区各自滚动，分屏不是 PDF 的双页模式。
+打开详细目录后选择章节，或使用页码和片段导航定位当前内容。
 
-![Neuink 实机截图：2. 把文档笔记放到另一侧](../public/screenshots/pdf-note-workspace.png)
+![详细目录与当前 PDF 同屏](../public/screenshots/current-outline.png)
+
+## 悬停查看片段、引用和图表
+
+解析后，悬停可查看段落原文及译文，文内引用可展示对应参考文献；图表预览可组合原图、解析图示与译文。
+
+![段落悬停：原文和中文译文](../public/screenshots/current-hover-text.png)
+
+![文内引用悬停：参考文献预览与定位入口](../public/screenshots/current-hover-citation.png)
+
+![图表悬停：原图、解析图示和中文内容](../public/screenshots/current-hover-figure.png)
+
+需要持续对照的图表可以固定在阅读区，继续滚动其他内容；浮窗提供定位、取消固定和大小调整操作。
+
+![固定图表与正文阅读](../public/screenshots/current-pinned-figure.png)
 
 ## 连续、书页与单页双页
 

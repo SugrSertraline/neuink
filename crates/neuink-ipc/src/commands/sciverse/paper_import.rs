@@ -42,6 +42,7 @@ pub(super) async fn prepare_paper_import(
         pdf_source_url: None,
         degradation_reason: None,
         resource_attempts: Vec::new(),
+        additional_fields: Default::default(),
     };
     if preparation.title.is_empty() {
         return Err("论文标题不能为空。".to_string());
@@ -242,6 +243,24 @@ fn apply_paper_metadata(preparation: &mut SciversePaperImportPreparation, value:
     preparation.access_license = metadata_strings(&value["access_license"])
         .into_iter()
         .next();
+    for (source, target) in [("lang", "语言"), ("primary_topic", "研究主题"), ("primary_topic_domain", "研究领域")] {
+        if let Some(text) = value.get(source).and_then(Value::as_str).and_then(clean_text) {
+            preparation.additional_fields.insert(target.into(), text.chars().take(2000).collect());
+        }
+    }
+    for (source, target) in [("citation_count", "引用次数"), ("influential_citation_count", "高影响力引用次数")] {
+        if let Some(count) = value.get(source).and_then(Value::as_u64) { preparation.additional_fields.insert(target.into(), count.to_string()); }
+    }
+    if let Some(oa) = value.get("access_is_oa").and_then(Value::as_bool) {
+        preparation.additional_fields.insert("开放获取".into(), if oa { "是" } else { "否" }.into());
+    }
+    if let Some(date) = value.get("publication_published_date").and_then(Value::as_str) {
+        if chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_ok() { preparation.additional_fields.insert("发表日期".into(), date.into()); }
+    }
+    if let Some(kind) = value.get("publication_venue_type").and_then(Value::as_str) {
+        let translated = match kind.to_ascii_lowercase().as_str() { "journal" | "journal-article" => Some("期刊"), "conference" | "proceedings-article" => Some("会议"), "preprint" => Some("预印本"), "dissertation" | "thesis" => Some("学位论文"), _ => None };
+        if let Some(kind) = translated { preparation.additional_fields.insert("出版类型".into(), kind.into()); }
+    }
     preparation.authors = value
         .get("author")
         .and_then(Value::as_array)
@@ -339,9 +358,13 @@ mod tests {
         assert!(result.degradation_reason.is_some());
         apply_paper_metadata(
             &mut result,
-            &json!({"publication_published_year":2014.0,"access_oa_url":["http://www.bis.org/publ/work395.pdf"],"access_license":["cc-by"],"author":[{"name":"Claudio Borio"}]}),
+            &json!({"publication_published_year":2014.0,"access_oa_url":["http://www.bis.org/publ/work395.pdf"],"access_license":["cc-by"],"author":[{"name":"Claudio Borio"}],"lang":"en","citation_count":42,"access_is_oa":true,"publication_published_date":"2014-03-01","publication_venue_type":"journal"}),
         );
         assert_eq!(result.publication_year, Some(2014));
+        assert_eq!(result.additional_fields.get("语言").map(String::as_str), Some("en"));
+        assert_eq!(result.additional_fields.get("引用次数").map(String::as_str), Some("42"));
+        assert_eq!(result.additional_fields.get("出版类型").map(String::as_str), Some("期刊"));
+        assert_eq!(result.additional_fields.get("发表日期").map(String::as_str), Some("2014-03-01"));
         assert_eq!(result.access_license.as_deref(), Some("cc-by"));
         assert_eq!(
             result.access_oa_url.as_deref(),

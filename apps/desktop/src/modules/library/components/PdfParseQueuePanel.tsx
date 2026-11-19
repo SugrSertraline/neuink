@@ -18,6 +18,7 @@ export function PdfParseQueuePanel({ controller, onOpen, onRetry }: {
     {error && <p className="break-words px-1 py-1 text-destructive" role="alert">{error}</p>}
     {queue.active.map(entry => <div key={entry.id} className="border-b border-border/50 px-1 py-2">
       <button className="w-full truncate text-left text-sm hover:text-primary focus-visible:outline-ring" title={entry.title} onClick={() => onOpen(entry.id)}>{entry.title}</button>
+      {entry.pdf?.parse.endpoint?.startsWith('neuink-account:') && entry.pdf.parse.task_id && entry.pdf.parse.status === 'parsing' && entry.pdf.parse.message?.startsWith('等待服务器解析') && <Button size="xs" variant="ghost" onClick={() => void controller.cancelAccount(entry.pdf!.parse.task_id!)}>取消等待</Button>}
       <p className="text-muted-foreground">{entry.pdf?.parse.status === 'uploading' ? '正在上传' : entry.pdf?.parse.message?.startsWith('queued') ? '解析服务排队中' : '正在解析'}</p>
       {entry.pdf?.parse.message && <p className="break-words text-muted-foreground">{entry.pdf.parse.message}</p>}
     </div>)}
@@ -35,9 +36,9 @@ export function PdfParseQueuePanel({ controller, onOpen, onRetry }: {
       </li>)}
     </ol>
     {!loading && !error && !queue.waiting.length && !queue.active.length && <p className="px-1 py-2 text-muted-foreground">没有等待或正在解析的任务</p>}
-    {queue.failed.length > 0 && <details className="px-1 py-2"><summary className="cursor-pointer text-destructive">解析失败 · {queue.failed.length}</summary>
+    {queue.failed.length > 0 && <section className="px-1 py-2" aria-label="解析失败的任务"><p className="text-destructive">解析失败 · {queue.failed.length}</p>
       {queue.failed.map(entry => <FailedRow key={entry.id} entry={entry} configured={configured} onOpen={onOpen} onRetry={onRetry} />)}
-    </details>}
+    </section>}
   </div>;
 }
 

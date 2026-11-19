@@ -17,7 +17,7 @@ import { useDailySidebarPreferences } from './useDailySidebarPreferences';
 
 const DailyCalendar = lazy(() => import('./DailyCalendar'));
 
-export function DailySidebar({ active = false, entries = [], status = 'ready', onOpenEntry, onOpenRecommendations, onReflect, onSettings }: {
+export function DailySidebar({ active = false, entries = [], status = 'ready', onOpenEntry, onOpenRecommendations, onReflect }: {
   active?: boolean; entries?: LibraryEntry[]; status?: 'ready' | 'loading' | 'error';
   onOpenEntry?: (id: string) => void; onOpenRecommendations?: () => void;
   onReflect?: (entry: LibraryEntry) => void; onSettings?: () => void;
@@ -85,7 +85,7 @@ export function DailySidebar({ active = false, entries = [], status = 'ready', o
           {active && <DailyCalendar date={daily.today} />}
         </Suspense>;
         if (section === 'meal') return <DailyFoodPicker key={section} active={active} date={daily.today} preferences={preferences} update={update} onSettings={() => setMenuOpen(true)} />;
-        if (section === 'horoscope') return <DailyHoroscope key={section} active={active} date={daily.today} preferences={preferences} onSettings={onSettings} />;
+        if (section === 'horoscope') return <DailyHoroscope key={section} active={active} date={daily.today} preferences={preferences} onSettings={() => setSettingsOpen(true)} />;
         return <div key={section}>{readingAdvice}</div>;
       })}
       {preferences.hidden.length === preferences.order.length && <p className="mt-4 text-xs text-muted-foreground">当前没有显示内容，可在右上角设置中开启。</p>}
@@ -100,7 +100,7 @@ function DailyHoroscope({ active, date, preferences, onSettings }: {
   const fortune = useDailyHoroscope(active, date, preferences.zodiac);
   return <section aria-label="星座运势" className="space-y-2 border-b border-border py-3 text-xs">
     <div className="flex items-center justify-between gap-2"><h3 className="font-medium">星座运势</h3><span className="text-[10px] text-muted-foreground">{preferences.zodiac || '联网查询'}</span></div>
-    {!preferences.zodiac ? <p className="text-muted-foreground">在设置中选好星座后，查看每天的联网运势。</p>
+    {!preferences.zodiac ? <p className="text-muted-foreground">在每日推荐显示设置中选好星座后，查看每天的联网运势。</p>
       : fortune.phase === 'ready' && fortune.data ? <div className="space-y-1.5 break-words leading-relaxed">
         <p>{fortune.data.summary}</p>
         <p><span className="text-muted-foreground">学习工作：</span>{fortune.data.work}</p>

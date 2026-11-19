@@ -269,7 +269,7 @@ export function ModelProfileEditor({ props, open, onOpenChange, recovery, onSave
                             onClick={async () => { if (recovery?.blocked) return; setSaveError(false); if (await onCreateProfile()) (onSaved ?? (() => onOpenChange(false)))(); else setSaveError(true); }}
                           >
                             <Plus />
-                            创建配置
+                            保存配置
                           </Button>
                         )}
                   </DialogFooter>

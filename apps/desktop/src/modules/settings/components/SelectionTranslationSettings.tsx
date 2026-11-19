@@ -19,7 +19,7 @@ export function SelectionTranslationSettings({ active, modelConnections }: { act
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [active, services, attempt]);
-  return <SettingsGroup id="translation-service" title="翻译模型与服务" description="展开一项填写配置，可同时配置多个来源。保存后，在下方为每种翻译行为选择使用的模型或服务。">
+  return <SettingsGroup id="translation-service" title="翻译模型与服务" description="展开一项填写配置，可同时配置多个来源。保存后，可在上方为每种翻译行为选择使用的模型或服务。">
       {!services && (loading ? <p role="status" className="text-xs">正在读取翻译服务…</p> : <>
         {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
         <Button size="sm" variant="outline" onClick={() => setAttempt(n => n + 1)}>重新读取配置</Button>

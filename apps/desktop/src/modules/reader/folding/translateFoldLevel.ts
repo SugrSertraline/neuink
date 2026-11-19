@@ -6,6 +6,7 @@ import { runLocalBackgroundJob } from '@/shared/lib/localBackgroundJobs';
 import { translateSelectionWithProfile } from '../translation/modelSelectionTranslation';
 import { translationSourceProfile } from '../translation/translationSource';
 import { notifyFoldUpdated } from './foldTasks';
+import { foldDisplayTranslationLanguage, foldTranslationKey, type FoldTranslationLanguage } from './foldTranslations';
 
 type Level = 'brief' | 'key' | 'takeaway' | 'topic';
 type TranslationTask = {
@@ -33,10 +34,10 @@ function drain() {
 }
 
 /** Each subscriber can leave independently; the last one cancels queued or in-flight work. */
-export function translateFoldLevel(root: string, entryId: string, title: string, record: FoldRecord, level: Level, signal?: AbortSignal): Promise<void> {
+export function translateFoldLevel(root: string, entryId: string, title: string, record: FoldRecord, level: Level, signal?: AbortSignal, language: FoldTranslationLanguage = foldDisplayTranslationLanguage(record)): Promise<void> {
   if (signal?.aborted) return Promise.reject(abortError());
   const source = level === 'brief' ? record.brief.join(' ') : record[level];
-  const key = JSON.stringify([root, entryId, record.segment_uid, level, source]);
+  const key = JSON.stringify([root, entryId, record.segment_uid, level, language, source]);
   let task = active.get(key);
   if (!task) {
     let resolve!: () => void, reject!: (error: unknown) => void;
@@ -51,19 +52,21 @@ export function translateFoldLevel(root: string, entryId: string, title: string,
         if (taskSignal.aborted) throw abortError();
         const origin = resolvedTranslationSource(routing, 'paragraph');
         let translated: string | null = null, model = '';
-        if (origin.kind === 'service' || origin.kind === 'selection_service') {
+        if (language === 'zh' && (origin.kind === 'service' || origin.kind === 'selection_service')) {
           translated = await translateSelectionService(source, origin.kind === 'service' ? origin.provider : undefined, taskSignal);
           model = origin.kind === 'service' ? origin.provider : 'translation-service';
           if (origin.kind === 'service' && translated === null) throw new Error('翻译服务未返回译文。');
         }
         if (translated === null) {
           const settings = await getLlmSettings();
-          const profile = translationSourceProfile(settings, origin.kind === 'selection_service' ? { kind: 'default_model' } : origin);
+          const profile = language === 'en' && (origin.kind === 'service' || origin.kind === 'selection_service')
+            ? settings.translation_profile ?? settings.assistant_profile ?? translationSourceProfile(settings, { kind: 'default_model' })
+            : translationSourceProfile(settings, origin.kind === 'selection_service' ? { kind: 'default_model' } : origin);
           model = profile.model;
-          translated = await translateSelectionWithProfile(profile, { sourceText: source, entryTitle: title }, { signal: taskSignal });
+          translated = await translateSelectionWithProfile(profile, { sourceText: source, entryTitle: title, ...(language === 'en' ? { targetLanguage: 'en' as const } : {}) }, { signal: taskSignal });
         }
         if (taskSignal.aborted) throw abortError();
-        await saveFoldTranslation(root, entryId, record.segment_uid, level, {
+        await saveFoldTranslation(root, entryId, record.segment_uid, foldTranslationKey(level, language), {
           source_text: source, translated_text: translated, model, generated_at: new Date().toISOString()
         });
         notifyFoldUpdated(root, entryId);

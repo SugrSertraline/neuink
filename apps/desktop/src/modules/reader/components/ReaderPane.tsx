@@ -1,3 +1,6 @@
+import { readFieldDefinitions, type FieldDefinition } from '@/shared/ipc/fieldDefinitionsApi';
+import { Button } from '@/components/ui/button';
+import { FieldDefinitionsPage } from '@/modules/library/components/FieldDefinitionsPage';
 import { ReaderLoading } from './pdf-reader/ReaderLoading';
 import { OtherSourceImportPage } from '@/modules/import/OtherSourceImportPage';
 import type { LibrarySourceSync } from '@/modules/import/useLibrarySourceSync';
@@ -676,6 +679,7 @@ export function ReaderPane({
         onSelectView={onLibraryViewChange}
         onClearFilters={onClearLibraryFilters}
         onManageTags={() => onOpenSurface({ kind: 'tag-editor' })}
+        onManageFields={() => onOpenSurface({ kind: 'field-editor' })}
         filterResetKey={libraryFilterResetKey}
         recentReadingEntryIds={recentReadingEntryIds}
         selectedEntryId={selectedEntryId}
@@ -690,6 +694,7 @@ export function ReaderPane({
         onPurgeEntry={onPurgeEntry}
         onPurgeTrashItem={onPurgeTrashItem}
         onRefreshParseStatus={onRefreshParseStatus}
+        onRefreshEntries={onRefreshEntries}
         onReparseEntry={onRetryPdfParse}
         onRestoreEntry={onRestoreEntry}
         onRestoreTrashItem={onRestoreTrashItem}
@@ -1156,6 +1161,8 @@ export function ReaderPane({
       case 'mineru-client-guide':
         return <div data-guide="mineru-tutorial" role="region" aria-label="MinerU 客户端导入教程" tabIndex={0}
           className="h-full min-h-0 overflow-y-auto overscroll-contain"><MineruClientImportGuide /></div>;
+      case 'field-editor':
+        return <FieldEditorSurface key={workspaceRoot} root={workspaceRoot} />;
       case 'tag-editor':
         return <TagEditorPage standalone workspaceRoot={workspaceRoot} onOpenTrash={onOpenTrash} onRestoreTagArchive={onRestoreTagArchive} activeTag={activeTag} entries={entries} tags={tags} onCreateTagPath={onCreateTagPath} onDeleteTag={onDeleteTag} onRenameTag={onRenameTag} onSelectTag={(id) => { if (id) onOpenTagLibrary(id); else onSelectTag(null); }} />;
       default:
@@ -1252,4 +1259,22 @@ function parseEntryContentTab(tabId: string) {
     contentId: raw.slice(separatorIndex + 1),
     entryId: raw.slice(0, separatorIndex)
   };
+}
+
+function FieldEditorSurface({ root }: { root: string | null }) {
+  const [state, setState] = useState<{ definitions: FieldDefinition[]; error: string; loading: boolean }>({ definitions: [], error: '', loading: true });
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    if (!root) return;
+    let active = true;
+    setState({ definitions: [], error: '', loading: true });
+    void readFieldDefinitions(root).then(definitions => { if (active) setState({ definitions, error: '', loading: false }); }).catch(() => { if (active) setState({ definitions: [], error: '无法读取属性定义，请重试。', loading: false }); });
+    return () => { active = false; };
+  }, [root, attempt]);
+  const { definitions, error, loading } = state;
+  const retry = () => setAttempt(value => value + 1);
+  if (!root) return <p className="p-4 text-sm text-muted-foreground">请先打开资料库。</p>;
+  if (loading) return <p className="p-4 text-sm text-muted-foreground">正在读取属性…</p>;
+  if (error) return <div className="p-4 text-sm" role="alert">{error} <Button size="sm" variant="outline" onClick={retry}>重试</Button></div>;
+  return <FieldDefinitionsPage root={root} definitions={definitions} />;
 }

@@ -1,3 +1,4 @@
+import { foldDisplayTranslationLanguage, foldTranslationKey } from '../../folding/foldTranslations';
 import { InteractiveListContent, ListItemInteractionProvider } from './InteractiveListContent';
 import { findSourceSegment, listItemAddress, requiresListItemChoice } from '@/shared/lib/listItemSegments';
 import { isPdfBlockDragControl, usePdfBlockDrag } from '../pdf-reader/usePdfBlockDrag';
@@ -171,7 +172,7 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
   const foldedContent = foldAvailable && foldRecord && foldLevel !== 'off'
     ? <FoldedParagraph record={foldRecord} source={segmentGroup.body.text.trim()} level={foldLevel} views={foldViews} globalLevel={fold?.level} /> : undefined;
   const candidateTranslation = foldRecord && foldLevel !== 'off' && foldLevel !== 'full'
-    ? foldRecord.translations?.[foldLevel] : undefined;
+    ? foldRecord.translations?.[foldTranslationKey(foldLevel, foldDisplayTranslationLanguage(foldRecord))] : undefined;
   const foldTranslation = candidateTranslation && foldLevel !== 'off' && foldLevel !== 'full'
     && candidateTranslation.source_text === foldViews?.[foldLevel].text ? candidateTranslation : undefined;
   const componentTextScale = reflowGroupTextScale(segmentGroup, componentPreferences);
@@ -369,7 +370,7 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
               : { translationView: view })} />}
           {foldActive && segmentGroup.body.segment_type === 'paragraph' && <SegmentFoldControls
             value={fold?.overrides[segmentGroup.body.uid] ?? 'inherit'} globalLevel={fold?.level ?? 'off'}
-            eligible={foldEligible || foldAvailable} available={foldAvailable} onChange={value => fold?.setOverride(segmentGroup.body.uid, value)}
+            eligible={foldEligible || foldAvailable} available={foldAvailable} generating={fold?.running || !fold?.root || fold?.loadState !== 'ready'} onGenerate={() => { fold?.start([segmentGroup.body]); }} onChange={value => fold?.setOverride(segmentGroup.body.uid, value)}
             onInteraction={() => onPreviewChange(null)} />}
           <div className="ml-auto flex shrink-0 items-center gap-1.5" data-reflow-metadata-trailing>
           {hasNote ? (
@@ -421,6 +422,7 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
             globalFoldLevel={fold?.level}
             foldedTranslationMissing={Boolean(foldAvailable && foldLevel !== 'full')}
             foldedTranslation={foldTranslation?.translated_text}
+            foldedTranslationLabel={foldRecord && foldDisplayTranslationLanguage(foldRecord) === 'en' ? '英文译文' : '中文译文'}
             foldTranslationAction={foldAvailable && foldRecord && foldLevel !== 'off' && foldLevel !== 'full' && fold ?
               <FoldTranslationButton key={`${segmentGroup.body.uid}:${foldLevel}`} root={workspaceRoot} entryId={entryId} title={fold.title} record={foldRecord} level={foldLevel} /> : undefined}
           />
@@ -430,7 +432,7 @@ export const ReflowSegmentGroupView = memo(function ReflowSegmentGroupView({
             <div className="mt-1 space-y-1">{foldRecord.brief.map((sentence, index) =>
               <div key={foldRecord.evidence[index]} className="whitespace-pre-wrap" data-reading-selection-source={segmentGroup.body.uid}>{sentence}</div>)}</div>
             {foldEligible ? <button type="button" className="mt-1 text-primary underline" disabled={fold?.running} onClick={event => { event.stopPropagation(); fold?.start([segmentGroup.body], true); }}>重新生成本段</button> : null}
-          </details> : foldActive && foldLevel !== 'full' && segmentGroup.body.segment_type === 'paragraph' && !foldAvailable ? <p className="mt-1 text-xs text-muted-foreground">{foldEligible ? '此段暂无详略，显示完整原文。' : foldTooShort ? '此段较短，保留原文。' : '此段不适合折叠，保留原文。'} {foldEligible ? <button type="button" className="text-primary underline" disabled={fold?.running} onClick={event => { event.stopPropagation(); fold?.start([segmentGroup.body]); }}>生成本段</button> : null}</p> : null}
+          </details> : null}
       </div>
       {menuPosition ? (
         <SegmentActionMenu
@@ -492,6 +494,7 @@ function ReflowGroupContent({
   globalFoldLevel,
   foldedTranslationMissing,
   foldedTranslation,
+  foldedTranslationLabel,
   foldTranslationAction,
 }: {
   content: ReflowContentPreference;
@@ -515,6 +518,7 @@ function ReflowGroupContent({
   globalFoldLevel?: FoldLevel;
   foldedTranslationMissing?: boolean;
   foldedTranslation?: string;
+  foldedTranslationLabel?: string;
   foldTranslationAction?: React.ReactNode;
 }) {
   const componentPreferences = useReflowComponentPreferences();
@@ -548,7 +552,7 @@ function ReflowGroupContent({
           reflowTranslationMode="source" relatedImagePath={null}
           segment={{ ...segmentGroup.body, markdown: parsedReflowMarkdown(segmentGroup.body.markdown ?? segmentGroup.body.text) }}
           translatedText={null} workspaceRoot={workspaceRoot} />)}
-        translationContent={foldedTranslationMissing && foldedTranslation && !/[*_`]|\]\(|<[^>]+>/.test(foldedTranslation) ? <FoldTranslatedParagraph text={foldedTranslation} globalLevel={globalFoldLevel} /> : isVisualReflowComponent(reflowComponentKeyForGroup(segmentGroup)) ? undefined : <TextReflowContent
+        translationContent={foldedTranslationMissing && foldedTranslation && !/[*_`]|\]\(|<[^>]+>/.test(foldedTranslation) ? <FoldTranslatedParagraph text={foldedTranslation} globalLevel={globalFoldLevel} label={foldedTranslationLabel} /> : isVisualReflowComponent(reflowComponentKeyForGroup(segmentGroup)) ? undefined : <TextReflowContent
           entryId={entryId} hoverPreviewEnabled={hoverPreviewEnabled} onPreviewChange={onPreviewChange} pdfDocument={pdfDocument}
           reflowTranslationMode="translation" relatedImagePath={null} segment={segmentGroup.body}
           translatedText={foldedTranslationMissing ? foldedTranslation ?? null : savedTranslation ?? null} workspaceRoot={workspaceRoot} />}
@@ -558,6 +562,7 @@ function ReflowGroupContent({
         translatedText={
           foldedTranslationMissing ? foldedTranslation ?? null : savedTranslation ?? null
         }
+        translationLabel={foldedTranslationMissing ? foldedTranslationLabel : undefined}
         translationEmptyMessage={foldedTranslationMissing ? '当前详略暂无对应译文。' : undefined}
         translationMissingAction={foldedTranslationMissing ? foldTranslationAction : undefined}
         workspaceRoot={workspaceRoot}

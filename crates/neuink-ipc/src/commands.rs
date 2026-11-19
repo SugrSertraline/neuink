@@ -11,6 +11,7 @@ pub mod edit_recovery;
 pub mod embedding;
 pub mod embedding_resources;
 pub mod entry;
+pub mod field_definitions;
 #[cfg(test)]
 mod entry_mineru_pdf_tests;
 pub mod export;

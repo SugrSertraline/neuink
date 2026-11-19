@@ -51,14 +51,15 @@ it('reorders the sidebar sections and keeps the order locally', () => {
 
 it('shows the saved sign without asking again and opens its settings page', () => {
   localStorage.setItem('neuink.daily.sidebar.v1', JSON.stringify({ zodiac: '天秤座' }));
-  const openSettings = vi.fn();
-  render(<DailySidebar active onSettings={openSettings} />);
+  render(<DailySidebar active />);
   expect(screen.getByText('今日联网概览')).toBeTruthy();
   expect(screen.getByText('天秤座')).toBeTruthy();
   expect(screen.queryByRole('combobox', { name: '选择星座' })).toBeNull();
   expect(screen.getByText('来源：爱云 API · 仅供娱乐参考。')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '更改星座' }));
-  expect(openSettings).toHaveBeenCalledOnce();
+  fireEvent.keyDown(screen.getByRole('combobox', { name: '我的星座' }), { key: 'ArrowDown' });
+  fireEvent.click(screen.getByRole('option', { name: '白羊座' }));
+  expect(JSON.parse(localStorage.getItem('neuink.daily.sidebar.v1')!).zodiac).toBe('白羊座');
 });
 it('shows loading and retry states for online horoscope', () => {
   localStorage.setItem('neuink.daily.sidebar.v1', JSON.stringify({ zodiac: '天秤座' }));

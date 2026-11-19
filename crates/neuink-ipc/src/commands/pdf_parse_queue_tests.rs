@@ -1,6 +1,6 @@
 use super::{
     entry::{submit_queued_pdf_parse, SubmitQueuedPdfParseRequest},
-    pdf_parse_queue::{process_pdf_parse_queue, DispatchRequest},
+    pdf_parse_queue::{process_pdf_parse_queue_impl, DispatchRequest},
 };
 use neuink_domain::PdfParseStatus;
 use neuink_workspace::Workspace;
@@ -10,6 +10,12 @@ use std::{
     net::TcpListener,
     time::{Duration, Instant},
 };
+
+async fn process_pdf_parse_queue(request: DispatchRequest) -> Result<(), String> {
+    process_pdf_parse_queue_impl(request, |_| async {
+        Err("self-hosted parsing must not submit an account task".into())
+    }).await
+}
 
 fn server(status: &str, body: &str) -> (String, std::thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();

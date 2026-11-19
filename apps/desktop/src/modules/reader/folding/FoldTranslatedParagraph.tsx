@@ -4,7 +4,7 @@ import { captureFoldMotion, playFoldMotion, type FoldMotionSnapshot } from './fo
 import type { FoldLevel } from './useFoldReader';
 
 type Token = FoldToken & { key: string };
-type Props = { text: string; globalLevel?: FoldLevel };
+type Props = { text: string; globalLevel?: FoldLevel; label?: string };
 type State = { text: string; tokens: Token[]; nextId: number; globalLevel?: FoldLevel };
 
 /** Align cached Chinese levels against each other without treating them as source evidence. */
@@ -52,6 +52,6 @@ export class FoldTranslatedParagraph extends Component<Props, State, FoldMotionS
       cursor = token.end;
     }
     parts.push(this.state.text.slice(cursor));
-    return <div ref={this.root} className="whitespace-pre-wrap break-words" aria-label="中文译文">{parts}</div>;
+    return <div ref={this.root} className="whitespace-pre-wrap break-words" aria-label={this.props.label ?? "中文译文"}>{parts}</div>;
   }
 }

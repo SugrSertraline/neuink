@@ -1,3 +1,4 @@
+import { foldSourceLanguage } from '../../folding/foldTranslations';
 import { workspaceStorageIdentity } from '@/shared/lib/workspaceStorageIdentity';
 import { findSourceSegment } from '@/shared/lib/listItemSegments';
 import type { ComponentProps } from 'react';
@@ -599,6 +600,7 @@ function ReflowEntryReaderBody({
           onChange={onReaderPreferencesChange}
         />}
         translationMode={segments.length > 0 ? <ReflowLanguageControls original={displayOptions.original} translation={displayOptions.translation}
+          translationLabel={foldSourceLanguage(segments.find(segment => segment.segment_type === 'paragraph')?.text ?? '') === 'zh' ? '译文' : '中文译文'}
           onOriginalChange={value => {
             fold.setLevel(foldLevelAfterOriginalChange(fold.level, value));
             onReaderPreferencesChange(withReflowDisplayOptions(readerPreferences, value, displayOptions.translation));

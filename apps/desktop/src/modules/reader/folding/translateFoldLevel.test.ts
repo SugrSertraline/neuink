@@ -84,3 +84,13 @@ it('follows the default service for detail translations', async () => {
   expect(m.service).toHaveBeenCalledWith('A result.', 'niutrans', expect.any(AbortSignal));
   expect(m.settings).not.toHaveBeenCalled();
 });
+
+it('generates and stores English for Chinese source text even when Chinese translation uses a service', async () => {
+  m.routing.mockResolvedValue({ paragraph: { kind: 'service', provider: 'niutrans' } });
+  m.translate.mockResolvedValue('A result.');
+  const chinese = { ...record, source: '这是中文论文原文，用于验证中英文详略。', takeaway: '这是研究结果。' };
+  await translateFoldLevel('root', 'chinese-entry', 'Title', chinese, 'takeaway');
+  expect(m.service).not.toHaveBeenCalled();
+  expect(m.translate).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ targetLanguage: 'en', sourceText: '这是研究结果。' }), expect.anything());
+  expect(m.save).toHaveBeenCalledWith('root', 'chinese-entry', 'p', 'en:takeaway', expect.objectContaining({ translated_text: 'A result.' }));
+});

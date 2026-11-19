@@ -8,13 +8,13 @@
 
 点击左侧标签阅读入口，查看标签、论文和标签笔记三个分组。展开论文可继续进入相应阅读内容。
 
-![Neuink 实机截图：1. 打开标签阅读侧栏](../public/screenshots/tag-reading.png)
+![较早版本示例：Neuink 实机截图：1. 打开标签阅读侧栏](../public/screenshots/tag-reading.png)
 
 ### 2. 选择一个研究主题
 
 点击“混合检索”标签后，论文列表缩小到该标签的 3 篇成员。中间原阅读对象仍保留，说明主题范围与当前页面分别管理。
 
-![Neuink 实机截图：2. 选择一个研究主题](../public/screenshots/tag-scope.png)
+![较早版本示例：Neuink 实机截图：2. 选择一个研究主题](../public/screenshots/tag-scope.png)
 
 ## 建立主题范围
 

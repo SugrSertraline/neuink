@@ -137,9 +137,9 @@ fn existing(w: &neuink_workspace::Workspace, p: &Paper) -> Result<Option<String>
     let found = entries
         .iter()
         .find(|e| {
-            e.fields.get("research_id") == Some(&p.id)
+            e.fields.get("检索文献 ID").or_else(|| e.fields.get("research_id")) == Some(&p.id)
                 || (!p.doi.is_empty()
-                    && e.fields.get("doi").is_some_and(|d| {
+                    && e.fields.get("DOI").or_else(|| e.fields.get("doi")).is_some_and(|d| {
                         d.trim_start_matches("https://doi.org/")
                             .eq_ignore_ascii_case(&p.doi)
                     }))

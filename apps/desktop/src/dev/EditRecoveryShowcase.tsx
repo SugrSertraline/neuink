@@ -58,7 +58,7 @@ function Preview() {
         showCloseButton={false} onClose={() => {}} onModeChange={() => {}} onNoteTextChange={setText} onSave={() => { setSaved(text); return true; }} />}
     <UnsavedWindowDialog targets={targets} busy={false} error={params.has('error') ? '本地草稿备份失败，修改仍保留在编辑器中，请勿强制关闭。' : null}
       onEdit={target => { setStatus(`已定位：${target.handler?.label?.()}`); setTargets(null); }} onCancel={() => setTargets(null)}
-      onKeep={() => { setStatus('示例：本地备份成功后退出'); setTargets(null); }} onSave={() => { setStatus('示例：正式保存完成后退出'); setTargets(null); }} />
+      onDiscard={() => { setStatus('示例：不保存退出'); setTargets(null); }} onKeep={() => { setStatus('示例：本地备份成功后退出'); setTargets(null); }} onSave={() => { setStatus('示例：正式保存完成后退出'); setTargets(null); }} />
     {recovery.dialog}
   </main>;
 }

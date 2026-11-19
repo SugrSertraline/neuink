@@ -123,7 +123,7 @@ pub(super) fn is_normalized(
     };
     matches(&bytes, &segments)
 }
-pub(super) fn invalidate(workspace: &Workspace, entry: &EntryId) -> Result<(), WorkspaceError> {
+pub(crate) fn invalidate(workspace: &Workspace, entry: &EntryId) -> Result<(), WorkspaceError> {
     match fs::remove_file(
         workspace
             .layout

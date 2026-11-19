@@ -68,6 +68,7 @@ export type SciversePaperImportPreparation = {
   pdf_source_url?: string | null;
   degradation_reason?: string | null;
   resource_attempts: string[];
+  additional_fields?: Record<string, string>;
 };
 
 export type SciverseAgenticSearchResponse = {
