@@ -120,7 +120,7 @@ export function hydrateSummary(snapshot: AssistantContextSnapshot) {
       ? `${snapshot.pinned_segments.length} pinned segment${snapshot.pinned_segments.length === 1 ? '' : 's'}`
       : null
   ].filter((part): part is string => Boolean(part));
-  const base = parts.length > 0
+  const base = snapshot.metadata_only ? 'Resolved workspace metadata; document and note bodies have not been read.' : parts.length > 0
     ? `Hydrated ${parts.join(', ')}.`
     : 'No explicit chat context was hydrated.';
   return snapshot.warnings.length > 0

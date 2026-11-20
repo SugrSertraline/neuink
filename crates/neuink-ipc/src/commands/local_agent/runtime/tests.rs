@@ -214,7 +214,7 @@ async fn real_claude_mcp_and_resume_smoke() {
     let suffix = blake3::hash(cwd.path().to_string_lossy().as_bytes()).to_hex();
     let session_id = format!("550e8400-e29b-41d4-a716-{}", &suffix[..12]);
     let mut request = Request {provider:super::super::Provider::Claude,run_id:"550e8400-e29b-41d4-a716-446655449975".into(),root:cwd.path().into(),conversation_id:"fixture".into(),session_id,
-        resume:false, prompt:"Call the neuink read_fixture MCP tool exactly once. Return only the word returned by that tool. This is an isolated integration test.".into(),
+        resume:false, seed_policy:true, prompt:"Call the neuink read_fixture MCP tool exactly once. Return only the word returned by that tool. This is an isolated integration test.".into(),
         tools:vec![Tool{name:"read_fixture".into(),description:"Read the integration-test word. Takes no arguments.".into(),input_schema:json!({"type":"object","properties":{}})},
             Tool{name:"approve_tool".into(),description:"Host approval callback".into(),input_schema:json!({"type":"object","properties":{"tool_name":{"type":"string"},"input":{"type":"object"}},"required":["tool_name","input"]})}]};
     let replies: Replies = Arc::new(Mutex::new(HashMap::new()));

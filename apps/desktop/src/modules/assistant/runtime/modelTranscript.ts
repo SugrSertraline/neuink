@@ -26,13 +26,14 @@ export function modelTranscript(message: ConversationMessage): AssistantModelTra
   const part = message.parts?.find(part => part.type === 'model-transcript');
   if (part?.type !== 'model-transcript') return;
   const value = part.transcript;
-  if (!value || value.version !== 1 || typeof value.runId !== 'string'
+  if (!value || ![1, 2].includes(value.version) || typeof value.runId !== 'string'
     || typeof value.capturedAt !== 'string' || typeof value.profileId !== 'string'
     || typeof value.model !== 'string' || typeof value.protocol !== 'string'
     || (value.outcome !== undefined && !['running', 'completed', 'failed', 'cancelled'].includes(value.outcome))
     || (value.displaySourceMarkers !== undefined && (!Array.isArray(value.displaySourceMarkers)
       || value.displaySourceMarkers.some(marker => !Number.isSafeInteger(marker) || marker < 1)))
     || !Array.isArray(value.messages) || !Array.isArray(value.sources)
+    || (value.version === 2 && (!Array.isArray(value.inputMessages) || value.inputMessages.some(message => !validMessage(message))))
     || value.messages.some(message => !validMessage(message))
     || value.sources.some(pair => !Array.isArray(pair) || pair.length !== 2
       || !Number.isSafeInteger(pair[0]) || pair[0] < 1 || !validSource(pair[1]))) {
@@ -50,7 +51,8 @@ export function snapshotModelTranscript(value: AssistantModelTranscript): Assist
 export function replayModelTranscript(
   transcript: AssistantModelTranscript, namespace: string, model?: TranscriptModel
 ): ModelMessage[] {
-  const messages = snapshotModelTranscript(transcript).messages;
+  const saved = snapshotModelTranscript(transcript);
+  const messages = [...(transcript.version === 2 ? saved.inputMessages ?? [] : []), ...saved.messages];
   const compatible = !model || (model.profileId === transcript.profileId
     && model.model === transcript.model && model.protocol === transcript.protocol);
   const turns: ModelMessage[] = [];
@@ -70,7 +72,7 @@ export function replayModelTranscript(
         part.type === 'tool-result' && part.toolCallId === call.toolCallId && part.toolName === call.toolName);
       return matching.length === 1 && calls.filter(other => other.toolCallId === call.toolCallId).length === 1;
     }).map(call => call.toolCallId));
-    const ids = new Map([...validIds].map(id => [id, namespace + '_' + sequence++]));
+    const ids = new Map([...validIds].map(id => [id, transcript.version === 2 ? id : namespace + '_' + sequence++]));
     if (calls.length !== validIds.size) incomplete = true;
     const content = message.content.filter(part =>
       (part.type !== 'tool-call' || validIds.has(part.toolCallId))
@@ -89,9 +91,11 @@ export function replayModelTranscript(
   if (transcript.outcome && transcript.outcome !== 'completed') turns.push({ role: 'user', content:
     `Historical task ${transcript.outcome}. Any draft response above was not delivered as a verified successful answer. Only completed tool results establish completed operations; no pending proposal was applied by this transcript.` });
   return compatible ? turns : turns.map(message => {
-    const { providerOptions: _options, ...rest } = message;
-    if (typeof rest.content === 'string') return rest;
-    return { ...rest, content: rest.content.map(part =>
+    const { providerOptions, ...rest } = message;
+    // Host context markers are protocol-independent; retain them for state folding after a model switch.
+    const neutral = providerOptions?.neuink ? { providerOptions: { neuink: providerOptions.neuink } } : {};
+    if (typeof rest.content === 'string') return { ...rest, ...neutral };
+    return { ...rest, ...neutral, content: rest.content.map(part =>
       Object.fromEntries(Object.entries(part).filter(([key]) => key !== 'providerOptions')))
     } as ModelMessage;
   });

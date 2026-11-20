@@ -10,6 +10,7 @@ export function createTranscriptRecorder(options: {
   execution?: DurableExecution;
   model: TranscriptModel;
   initialMessageCount: number;
+  inputMessages?: ModelMessage[];
   sources: ReadonlyMap<number, ConversationSourceLink>;
   firstNewMarker: number;
   onTranscript?: (transcript: AssistantModelTranscript) => void | Promise<void>;
@@ -25,6 +26,9 @@ export function createTranscriptRecorder(options: {
   const identity = execution?.get<{ runId: string; capturedAt: string }>('transcriptIdentity:main')
     ?? { runId: execution?.record.id ?? crypto.randomUUID(), capturedAt: new Date().toISOString() };
   execution?.set('transcriptIdentity:main', identity);
+  const originalInput = execution?.get<ModelMessage[]>('transcriptInput:main') ?? options.inputMessages;
+  const inputMessages = originalInput ? JSON.parse(JSON.stringify(originalInput)) as ModelMessage[] : undefined;
+  if (inputMessages) execution?.set('transcriptInput:main', inputMessages);
   let current: AssistantModelTranscript | undefined;
   return {
     startIndex,
@@ -38,8 +42,9 @@ export function createTranscriptRecorder(options: {
       // conversation writes; the execution checkpoint still records every attempt separately.
       if (current?.messages.length === checkpoint.messages.length - startIndex
         && current.sources.length === sources.length && current.outcome === outcome) return;
-      current = snapshotModelTranscript({ version: 1, ...identity, ...options.model, outcome,
-        messages: checkpoint.messages.slice(startIndex), sources, contextUsage: options.contextUsage?.() });
+      current = snapshotModelTranscript({ version: inputMessages ? 2 : 1, ...identity, ...options.model, outcome,
+        ...(inputMessages ? { inputMessages } : {}), messages: checkpoint.messages.slice(startIndex), sources,
+        contextUsage: options.contextUsage?.() });
       await options.onTranscript?.(current);
     },
     async finish(displaySources: readonly ConversationSourceLink[]) {

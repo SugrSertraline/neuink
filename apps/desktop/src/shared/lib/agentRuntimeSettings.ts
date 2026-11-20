@@ -20,6 +20,7 @@ const DEFAULT_MAIN_DESCRIPTION = 'Neuink 全局主助手，负责直接响应用
 const DEFAULT_MAIN_PROMPT = 'You are Neuink Main Assistant. Stay grounded in workspace evidence and create user-confirmable proposals for note or Entry metadata writes.';
 
 const DEFAULT_MAIN_TOOL_IDS: AgentToolId[] = [
+  'read_context_reference',
   'read_pdf_pages', 'search_pdf_text',
   'search_papers', 'arxiv_search', 'search_web', 'read_webpage', 'import_papers',
   'read_browser_tab',
@@ -101,7 +102,7 @@ function createSubagent(
 }
 
 export const DEFAULT_AGENT_RUNTIME_SETTINGS: AgentRuntimeSettings = {
-  capabilityRevision: 4,
+  capabilityRevision: 5,
   mainAssistant: createMainAssistant({}),
   mcpServers: [],
   subagents: [
@@ -148,7 +149,7 @@ export function normalizeAgentRuntimeSettings(
     return DEFAULT_AGENT_RUNTIME_SETTINGS;
   }
   return {
-    capabilityRevision: 4,
+    capabilityRevision: 5,
     mainAssistant: normalizeMainAssistant(settings.mainAssistant, settings.capabilityRevision ?? 0),
     mcpServers: normalizeMcpServers(settings.mcpServers),
     subagents: normalizeSubagents(settings.subagents),
@@ -157,7 +158,7 @@ export function normalizeAgentRuntimeSettings(
   };
 }
 
-function normalizeMainAssistant(value: unknown, revision = 4) {
+function normalizeMainAssistant(value: unknown, revision = 5) {
   if (!value || typeof value !== 'object') {
     return DEFAULT_AGENT_RUNTIME_SETTINGS.mainAssistant;
   }
@@ -166,13 +167,15 @@ function normalizeMainAssistant(value: unknown, revision = 4) {
   // Native descriptors still require the user to opt in to the external service in Settings.
   const research = ['search_papers', 'search_web', 'read_webpage', 'import_papers'] as AgentToolId[];
   const pdf = ['read_pdf_pages', 'search_pdf_text'] as AgentToolId[];
-  const previousDefaults = DEFAULT_MAIN_TOOL_IDS.filter(id => id !== 'arxiv_search');
+  const previousDefaults = DEFAULT_MAIN_TOOL_IDS.filter(id => id !== 'arxiv_search' && id !== 'read_context_reference');
   const hadStandardTools = previousDefaults.filter(id => !research.includes(id) && !pdf.includes(id) && id !== 'read_browser_tab').every(id => normalized.enabledToolIds.includes(id));
   const migratedTools = [...new Set([...normalized.enabledToolIds,
     ...(revision < 1 && hadStandardTools ? research : []), ...(revision < 2 && hadStandardTools ? pdf : [])])];
   const hadCompletePreviousGrant = previousDefaults.filter(id => id !== 'read_browser_tab').every(id => migratedTools.includes(id));
   if (revision < 3 && hadCompletePreviousGrant && normalized.permissions.canInvokeTools) migratedTools.push('read_browser_tab');
   if (revision < 4 && previousDefaults.every(id => migratedTools.includes(id)) && normalized.permissions.canInvokeTools) migratedTools.push('arxiv_search');
+  if (revision < 5 && DEFAULT_MAIN_TOOL_IDS.filter(id => id !== 'read_context_reference')
+    .every(id => migratedTools.includes(id)) && normalized.permissions.canInvokeTools) migratedTools.push('read_context_reference');
   return {
     ...normalized,
     allowedSubagentIds: normalized.allowedSubagentIds.filter((id) => id !== 'patch-planner-agent'),
@@ -409,6 +412,7 @@ function unique<T>(value: T, index: number, array: T[]) {
 function normalizeToolIds(ids: readonly string[]): AgentToolId[] {
   return [...new Set(ids.map(canonicalAssistantToolId))].filter(isActiveTool) as AgentToolId[];
 }
+
 
 function isActiveTool(id: string) {
   return id.startsWith('mcp.') || DEFAULT_MAIN_TOOL_IDS.includes(id as AgentToolId) ||

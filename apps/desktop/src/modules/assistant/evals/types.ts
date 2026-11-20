@@ -153,7 +153,6 @@ export type ScenarioSetup = {
   currentNote?: AssistantActiveNote | null;
   currentEntry?: { id: string; title: string } | null;
   availableEntries?: AssistantEntryMetaTarget[];
-  harnessBrief?: string;
   /** Host approval answer for tools with `needsApproval`; omitted means unavailable. */
   approval?: 'approve' | 'deny';
   applicationActions?: ApplicationActions;

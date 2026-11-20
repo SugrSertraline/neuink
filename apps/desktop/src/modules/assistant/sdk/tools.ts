@@ -4,6 +4,7 @@ import { jsonSchema, tool, type JSONSchema7, type ToolSet } from 'ai';
 import { AgentLocalLimitError, AgentStoppedError } from '../agent-core/agent';
 import { createAgentToolFailure, isAgentToolFailure } from '../agent-core/toolFailure';
 import { createBrowserTabTool } from './browserTabTool';
+import { createContextReferenceTool } from './contextReferenceTool';
 import { buildDiagramArtifact } from './diagramArtifact';
 import { PDF_TOOL_NAMES } from './pdfTools';
 import { assertResearchRetry } from './researchRecovery';
@@ -95,6 +96,7 @@ import {
 import { resolveModelProfile } from './modelTasks';
 
 const SUPPORTED_TOOL_NAMES = new Set([
+  'read_context_reference',
   ...PDF_TOOL_NAMES,
   'search_papers', 'arxiv_search', 'search_web', 'read_webpage', 'import_papers',
   'search_segments',
@@ -165,6 +167,7 @@ type CreateAssistantToolsOptions = {
   browserTabTarget?: BrowserTabTarget | null;
   contextBudget?: number;
   conversationHistory?: ConversationMessage[];
+  tagMentionScopes?: Record<string, ScopeSnapshot>;
   currentEntry?: {
     id: string;
     title: string;
@@ -237,6 +240,7 @@ export async function createAssistantTools({
   browserTabTarget,
   contextBudget = assistantContextCharBudget(null),
   conversationHistory = [],
+  tagMentionScopes = {},
   currentEntry,
   currentNote,
   executionDepth = 0,
@@ -309,10 +313,19 @@ export async function createAssistantTools({
   );
   const enabledToolIds = new Set<AgentToolId>(permissionAudit.allowedToolIds);
 
-  if (browserTabTarget && enabledToolIds.has('read_browser_tab') &&
+  if (enabledToolIds.has('read_context_reference')) {
+    tools.read_context_reference = createContextReferenceTool({ assistantContext, history: conversationHistory,
+      scopes: [scope, ...Object.values(tagMentionScopes)],
+      signal: abortSignal, addSource, emit, observe: output => {
+        observations.push({ output, toolName: 'read_context_reference' });
+        loopGuard?.recordSuccess(output);
+      } });
+  }
+
+  if (enabledToolIds.has('read_browser_tab') &&
       activeExecution?.agent.kind === 'main_assistant' && executionDepth === 0) {
     tools.read_browser_tab = createBrowserTabTool({
-      target: browserTabTarget, contextBudget, abortSignal, loopGuard, emit,
+      target: browserTabTarget ?? null, contextBudget, abortSignal, loopGuard, emit,
       observe: output => observations.push({ output, toolName: 'read_browser_tab' })
     });
   }

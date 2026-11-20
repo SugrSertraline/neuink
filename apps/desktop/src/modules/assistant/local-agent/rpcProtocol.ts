@@ -6,7 +6,7 @@ import { ASSISTANT_READ_FAILURES } from '@/shared/lib/assistantReadFailure';
 import { ReasoningBlocks } from './reasoningBlocks';
 
 export type AgentStreamCallbacks = {text:(delta:string)=>void; reset:()=>void; reasoning:(delta:string)=>void;
-  tool:(event:AssistantToolTraceEvent)=>void; initialized:(sessionId?:string)=>void};
+  tool:(event:AssistantToolTraceEvent)=>void; initialized:(sessionId?:string)=>void; compacted?:()=>void};
 
 /** App Server and ACP notifications are scoped by the backend to this turn, excluding replay. */
 export class RpcAgentStream {
@@ -24,6 +24,7 @@ export class RpcAgentStream {
     }
     const params=object(value.params);
     if (this.provider === 'codex') {
+      if (value.method === 'thread/compacted') this.callbacks.compacted?.();
       if (value.method === 'item/agentMessage/delta' && typeof params.delta === 'string') {
         this.startMessage(String(params.itemId)); this.messageText+=params.delta; this.callbacks.text(params.delta);
       }
@@ -36,6 +37,7 @@ export class RpcAgentStream {
       }
       if (value.method === 'item/started' || value.method === 'item/completed') {
         const item=object(params.item), id=String(item.id ?? '');
+        if (item.type === 'contextCompaction' && value.method === 'item/completed') this.callbacks.compacted?.();
         if (item.type === 'agentMessage' && value.method === 'item/completed' && typeof item.text === 'string') {
           this.startMessage(id);
           if (item.text !== this.messageText) { this.messageText=item.text; this.callbacks.reset(); this.callbacks.text(item.text); }

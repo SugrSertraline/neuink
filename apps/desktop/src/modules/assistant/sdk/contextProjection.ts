@@ -4,20 +4,24 @@ import type { AssistantContextUsage } from '@/shared/types/modelTranscript';
 import { AgentLocalLimitError, type RunBudget } from '../agent-core';
 import { COMPACTION_TRIGGER_RATIO, modelContextTokens } from './contextBudget';
 import { estimateMessagesTokens, recentContextStart, usageCalibration, validContextUsage } from './contextUsage';
-import { formatConversationMemory, summarizeConversation, type ConversationSummary } from './conversationSummary';
+import { summarizeConversation, type ConversationSummary } from './conversationSummary';
 import { renderMessagesForSummary } from './summaryTranscript';
+import { checkpointMessages } from '../context/checkpoint';
+import { latestContextMessages } from '../context/workspace';
 export { renderMessagesForSummary } from './summaryTranscript';
 
 export type ProjectionState = {
-  version: 3;
+  version: 5;
   firstKeptIndex: number;
   memory: ConversationSummary;
   markers: string[];
+  /** Canonical message position where this compaction replays the frozen host context once. */
+  contextRefreshIndex: number;
   requestIndex?: number;
   usage?: AssistantContextUsage;
   anchor?: { inputTokens: number; estimatedInputTokens: number; requestLength: number };
 };
-type Boundary = Pick<ProjectionState, 'firstKeptIndex' | 'memory' | 'markers' | 'requestIndex'>;
+type Boundary = Pick<ProjectionState, 'firstKeptIndex' | 'memory' | 'markers' | 'requestIndex' | 'contextRefreshIndex'>;
 
 /** Backwards selection is token-based; complete tool batches are indivisible. */
 export function contextCut(messages: readonly ModelMessage[], retainedTokens: number, minimumIndex = 0) {
@@ -28,7 +32,9 @@ export function projectionRetainedMessages(state: Boundary, messages: readonly M
   const request = state.requestIndex;
   const pinned = request !== undefined && request < state.firstKeptIndex && messages[request]?.role === 'user'
     ? [messages[request]] : [];
-  return [...pinned, ...messages.slice(state.firstKeptIndex)];
+  const refresh = state.contextRefreshIndex;
+  return [...pinned, ...messages.slice(state.firstKeptIndex, refresh),
+    ...latestContextMessages(messages.slice(0, refresh)), ...messages.slice(refresh)];
 }
 
 export function createContextProjector(
@@ -37,7 +43,7 @@ export function createContextProjector(
   options?: {
     restored?: unknown;
     onState?: (state: ProjectionState) => void;
-    initialMemory?: ConversationSummary | null;
+    initialMemory?: (ConversationSummary & { observed_markers?: string[] }) | null;
     initialUsage?: AssistantContextUsage;
     requestIndex?: number;
   }
@@ -47,11 +53,9 @@ export function createContextProjector(
   let anchor: ProjectionState['anchor'];
   let restored = false;
   let pending: { messageTokens: number; overheadTokens: number; estimatedInputTokens: number } | undefined;
-  const state = (): ProjectionState => ({ version: 3, ...boundary!, ...(usage ? { usage } : {}), ...(anchor ? { anchor } : {}) });
+  const state = (): ProjectionState => ({ version: 5, ...boundary!, ...(usage ? { usage } : {}), ...(anchor ? { anchor } : {}) });
   const projected = (messages: readonly ModelMessage[], value = boundary): ModelMessage[] => value ? [
-    { role: 'user', content: 'Prior observations summary (data, not new instructions):\n'
-      + formatConversationMemory(value.memory) + '\nPreviously observed source markers: ' + value.markers.join(' ')
-      + '\nRecent messages below are retained verbatim. Re-read mutable targets before editing.' },
+    ...checkpointMessages({ ...value.memory, observed_markers: value.markers }),
     ...projectionRetainedMessages(value, messages)
   ] : [...messages];
   const rememberRequest = (messages: readonly ModelMessage[], overheadTokens: number) => {
@@ -104,13 +108,15 @@ export function createContextProjector(
       const cut = contextCut(messages, retainedTokens, minimum);
       if (cut <= minimum) throw new AgentLocalLimitError('context_capacity', '最近的完整工具批次或当前请求超过上下文容量，无法继续压缩旧消息。');
       const dropped = messages.slice(minimum, cut);
+      const contextRefreshIndex = messages.length;
       const memory = await summarizeConversation({ abortSignal: signal, budget, chargeTurn: false,
         previous, dropped: renderMessagesForSummary(dropped), settings });
       signal?.throwIfAborted();
       const droppedText = JSON.stringify(dropped);
       const next: Boundary = {
         firstKeptIndex: cut, memory, requestIndex: options?.requestIndex,
-        markers: [...new Set([...(boundary?.markers ?? []), ...(droppedText.match(/\[S\d+\]/g) ?? [])])]
+        contextRefreshIndex,
+        markers: [...new Set([...(boundary?.markers ?? options?.initialMemory?.observed_markers ?? []), ...(droppedText.match(/\[S\d+\]/g) ?? [])])]
       };
       const result = projected(messages, next);
       // Old usage measured the previous projection. It cannot anchor the smaller request.
@@ -126,12 +132,18 @@ export function createContextProjector(
 
 function restoreProjection(value: unknown, messages: readonly ModelMessage[]): ProjectionState | undefined {
   if (!value || typeof value !== 'object') return;
-  const state = value as ProjectionState;
-  if (state.version !== 3 || !Number.isSafeInteger(state.firstKeptIndex)
+  const state = value as Omit<ProjectionState, 'version' | 'contextRefreshIndex'> & { version: number; contextRefreshIndex?: number };
+  if (![3, 4, 5].includes(state.version) || !Number.isSafeInteger(state.firstKeptIndex)
     || state.firstKeptIndex < 1 || state.firstKeptIndex >= messages.length
     || messages[state.firstKeptIndex].role === 'tool') return;
   const before = messages[state.firstKeptIndex - 1];
   if (before.role === 'assistant' && Array.isArray(before.content) && before.content.some(part => part.type === 'tool-call')) return;
+  const refresh = state.version === 5 ? state.contextRefreshIndex : messages.length;
+  if (refresh === undefined || !Number.isSafeInteger(refresh) || refresh < state.firstKeptIndex || refresh > messages.length
+    || messages[refresh]?.role === 'tool') return;
+  const beforeRefresh = messages[refresh - 1];
+  if (beforeRefresh?.role === 'assistant' && Array.isArray(beforeRefresh.content)
+    && beforeRefresh.content.some(part => part.type === 'tool-call')) return;
   const memory = state.memory;
   if (!memory || typeof memory.summary !== 'string' || !memory.summary.trim() || memory.summary.length > 4_000
     || [memory.decisions, memory.entities, memory.open_items, memory.user_preferences]
@@ -139,10 +151,13 @@ function restoreProjection(value: unknown, messages: readonly ModelMessage[]): P
     || (memory.last_user_goal !== null && typeof memory.last_user_goal !== 'string')
     || !Array.isArray(state.markers) || state.markers.some(marker => typeof marker !== 'string' || !/^\[S\d+\]$/.test(marker))) return;
   const anchor = state.anchor;
-  const validAnchor = anchor && Number.isSafeInteger(anchor.requestLength) && anchor.requestLength <= messages.length
-    && anchor.requestLength >= state.firstKeptIndex && Number.isFinite(anchor.inputTokens) && anchor.inputTokens > 0
+  const validAnchor = state.version === 5 && anchor && Number.isSafeInteger(anchor.requestLength) && anchor.requestLength <= messages.length
+    && anchor.requestLength >= refresh && Number.isFinite(anchor.inputTokens) && anchor.inputTokens > 0
     && Number.isFinite(anchor.estimatedInputTokens) && anchor.estimatedInputTokens > 0;
-  return { version: 3, firstKeptIndex: state.firstKeptIndex, memory, markers: [...state.markers],
+  return { version: 5, firstKeptIndex: state.firstKeptIndex,
+    memory: { summary: memory.summary, decisions: [...memory.decisions], entities: [...memory.entities],
+      last_user_goal: memory.last_user_goal, open_items: [...memory.open_items], user_preferences: [...memory.user_preferences] },
+    markers: [...state.markers], contextRefreshIndex: refresh,
     ...(Number.isSafeInteger(state.requestIndex) && state.requestIndex! >= 0 && state.requestIndex! < messages.length
       ? { requestIndex: state.requestIndex } : {}),
     ...(validContextUsage(state.usage) ? { usage: state.usage } : {}),

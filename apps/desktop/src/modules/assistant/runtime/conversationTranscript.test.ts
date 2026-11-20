@@ -31,13 +31,14 @@ describe('conversation transcript', () => {
       { role: 'assistant', content: 'Second' }
     ]);
   });
-  it('merges consecutive turns of the same role', () => {
+  it('preserves consecutive message boundaries instead of rewriting the earlier turn', () => {
     expect(renderConversationTranscript([
       message('user', 'First'),
       message('user', 'Second'),
       message('assistant', 'Answer')
     ])).toEqual([
-      { role: 'user', content: 'First\n\nSecond' },
+      { role: 'user', content: 'First' },
+      { role: 'user', content: 'Second' },
       { role: 'assistant', content: 'Answer' }
     ]);
   });

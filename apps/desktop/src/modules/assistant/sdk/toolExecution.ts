@@ -23,6 +23,7 @@ import { isPdfTool, runPdfTool } from './pdfTools';
 import { researchImportResult } from './researchImportResult';
 import { researchOutput } from './researchOutput';
 import { arxivSearchContext } from '../research/arxivSearchContext';
+import { PAPER_PRESENTATION_INSTRUCTIONS } from '../research/paperPresentation';
 import { arxivGateStatus, arxivGateMessage } from '@/shared/lib/arxivGateStatus';
 import { createAgentToolFailure } from '../agent-core/toolFailure';
 import { formatSciverseSearchOutput } from './sciverseOutput';
@@ -78,7 +79,9 @@ export async function executeTool(
     const native = result as { errors?: Array<{gate?:unknown}>; source_errors?: {arxiv?:unknown} };
     const gate = arxivGateStatus(native?.source_errors?.arxiv ?? (Array.isArray(native?.errors) ? native.errors.find(row => row.gate)?.gate : undefined));
     const projected = researchOutput(result, contextBudget);
-    const modelOutput = gate && projected && typeof projected === 'object' ? { ...projected, arxivGate: gate } : projected;
+    const modelOutput = projected && typeof projected === 'object' ? { ...projected,
+      ...(['search_papers', 'arxiv_search'].includes(toolName) ? { presentation_contract: PAPER_PRESENTATION_INSTRUCTIONS } : {}),
+      ...(gate ? { arxivGate: gate } : {}) } : projected;
     return { modelOutput, sources: [], researchPapers: ['search_papers', 'arxiv_search'].includes(toolName) ? researchPapersFromResult(result) : undefined,
       researchCacheSource: toolName === 'arxiv_search' ? 'arxiv_search' as const : toolName === 'search_papers' ? 'research' as const : undefined,
       researchSearch: toolName === 'arxiv_search' ? arxivSearchContext(result) : undefined,

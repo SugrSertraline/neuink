@@ -6,6 +6,7 @@ import type { RequestRoute } from './requestRouter';
 // An explicit allowlist: unknown MCP effects and delegated agents cannot acquire
 // write access through a read-only planning turn.
 export const PLANNING_READ_TOOLS: ReadonlySet<string> = new Set([
+  'read_context_reference',
   'read_pdf_pages', 'search_pdf_text',
   'search_papers', 'arxiv_search', 'search_web', 'read_webpage', 'read_browser_tab',
   'read_current_note', 'read_note', 'read_entry_assistant_context', 'read_segment_content',

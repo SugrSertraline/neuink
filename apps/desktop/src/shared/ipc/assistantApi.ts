@@ -172,9 +172,10 @@ export type AssistantToolTraceEvent = {
 };
 
 export type AssistantConversationMemory = {
+  observed_markers?: string[];
   /** Automatic compaction summarizes a prefix and keeps this complete recent suffix verbatim. */
   retained_context?: {
-    version: 1;
+    version: 1 | 2;
     messages: import('ai').ModelMessage[];
     profileId: string;
     model: string;
@@ -194,7 +195,8 @@ export type AssistantConversationMemory = {
 
 export type AssistantMessagePart =
   | { type: 'model-transcript'; transcript: import('../types/modelTranscript').AssistantModelTranscript }
-  | { type: 'local-agent'; provider: 'claude' | 'codex' | 'opencode'; sessionId: string; initialized: boolean }
+  | { type: 'local-agent'; provider: 'claude' | 'codex' | 'opencode'; sessionId: string; initialized: boolean;
+      contextState?: import('../types/modelContext').NativeContextState }
   | { type: 'text'; markdown: string }
   | { type: 'reasoning'; text: string }
   | { type: 'context'; items: AssistantContextItem[] }
@@ -334,6 +336,7 @@ export type AssistantContextSnapshotPinnedSegment = {
 };
 
 export type AssistantEntrySnapshot = {
+  revision?: string;
   entry_id: EntryId;
   entry_title: string;
   has_pdf: boolean;
@@ -341,6 +344,8 @@ export type AssistantEntrySnapshot = {
 };
 
 export type AssistantNoteSnapshot = {
+  body_loaded?: boolean;
+  revision?: string;
   entry_id: EntryId;
   entry_title: string;
   note_id: NoteId;
@@ -371,6 +376,7 @@ export type AssistantPinnedSegmentSnapshot = {
 };
 
 export type AssistantContextSnapshot = {
+  metadata_only?: boolean;
   active_entry: AssistantEntrySnapshot | null;
   active_note: AssistantNoteSnapshot | null;
   document: AssistantDocumentSnapshot | null;
@@ -641,6 +647,7 @@ export async function analyzeEntryTags(args: {
 }
 
 export async function getAssistantContextSnapshot(args: {
+  metadataOnly?: boolean;
   activeEntryId?: EntryId | null;
   activeNote?: { entryId: EntryId; noteId: NoteId } | null;
   documentCharBudget?: number;
@@ -651,6 +658,7 @@ export async function getAssistantContextSnapshot(args: {
   return invoke<AssistantContextSnapshot>('get_assistant_context_snapshot', {
     request: {
       root: args.root,
+      metadata_only: args.metadataOnly ?? false,
       active_entry_id: args.activeEntryId ?? null,
       active_note: args.activeNote
         ? {

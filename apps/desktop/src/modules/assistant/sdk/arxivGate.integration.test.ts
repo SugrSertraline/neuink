@@ -12,7 +12,7 @@ import { buildAssistantMessageParts } from '../components/assistantPanelState';
 vi.mock('./provider',()=>({createNeuinkModel:vi.fn(),generationSettings:()=>({})}));
 vi.mock('@/shared/ipc/researchApi',async original=>({...await original<typeof import('@/shared/ipc/researchApi')>(),runResearchTool:vi.fn()}));
 vi.mock('@/shared/ipc/assistantApi',async original=>({...await original<typeof import('@/shared/ipc/assistantApi')>(),listTools:vi.fn(),
-  loadPrompt:vi.fn(async name=>name==='qna_user'?'{{question}} {{tool_notes}}':'')}));
+  loadPrompt:vi.fn(async ()=>'')}));
 const scope={entry_ids:[],entry_titles:[],tag_ids:[],tag_names:[]};
 const detail={code:'rate_limited',phase:'cooldown',attempts_started:1,http_status:429,retry_after_seconds:150,cooldown_until:'2030-01-01T00:00:00Z'};
 beforeEach(()=>{vi.clearAllMocks();vi.mocked(listTools).mockResolvedValue([{name:'arxiv_search',description:'Search arXiv',

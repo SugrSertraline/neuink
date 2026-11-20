@@ -30,6 +30,7 @@ export type LocalAgentEvent = { type: 'message'; value: Record<string, unknown> 
 export type LocalAgentRequest = {
   runId: string; root: string; conversationId: string; prompt: string;
   sessionId: string; resume: boolean;
+  seedPolicy?: boolean;
   provider?: LocalAgentProvider;
   tools: Array<{ name: string; description: string; inputSchema: unknown }>;
 };

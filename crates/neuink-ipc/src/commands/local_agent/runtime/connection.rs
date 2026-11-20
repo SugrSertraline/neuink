@@ -56,7 +56,7 @@ async fn probe(
         let expected = token.clone();
         let request = Request {
             provider, run_id: run_id.clone(), root: directory.path().into(),
-            conversation_id: format!("connection-{run_id}"), session_id: run_id, resume: false,
+            conversation_id: format!("connection-{run_id}"), session_id: run_id, resume: false, seed_policy: true,
             prompt: "This is an isolated connection test with no user documents. Locate and call the neuink connection_probe MCP tool exactly once with {}. If tools are deferred, first use ToolSearch with query select:mcp__neuink__connection_probe to load it. Reply only with the exact token returned by connection_probe. Do not read files, use shell, browse, change anything, or call other content tools.".into(),
             tools: vec![
                 Tool { name: "connection_probe".into(), description: "Return the synthetic connection test token.".into(),

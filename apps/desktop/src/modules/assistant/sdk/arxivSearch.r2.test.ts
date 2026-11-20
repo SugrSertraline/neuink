@@ -4,7 +4,6 @@ import { listTools } from '@/shared/ipc/assistantApi';
 import { runResearchTool, type ResearchPaper } from '@/shared/ipc/researchApi';
 import { createAssistantTools } from './tools';
 import { buildAssistantMessageParts } from '../components/assistantPanelState';
-import { arxivHistoryContext } from '../research/arxivSearchContext';
 import { paperRecords, paperPresentationError, presentedPaperRecords } from '../research/paperPresentation';
 
 vi.mock('@/shared/ipc/researchApi', async original => ({
@@ -59,9 +58,8 @@ it('recovers partial A after independent B without replacing either history or m
   expect(restored.events[0].researchSearch?.errors).toEqual(a.errors);
   expect(restored.events[1].researchSearch?.next_query).toEqual(b.next_query);
   const parts = JSON.parse(JSON.stringify(buildAssistantMessageParts({ content: 'Answer', toolEvents: restored.events })));
-  const context = arxivHistoryContext(history(parts));
-  const calls = JSON.parse(context.slice(context.indexOf('\n') + 1));
-  expect(calls.map((call: { next_start: number | null }) => call.next_start)).toEqual([21, 7, null]);
+  const calls = history(parts).flatMap(message => (message.parts ?? []).flatMap(part => part.type === 'tool-result' && part.researchSearch ? [part.researchSearch] : []));
+  expect(calls.map(call => call.next_start)).toEqual([21, 7, null]);
   expect(calls[0].next_query).toEqual(a.next_query);
   expect(calls[1].next_query).toEqual(b.next_query);
   expect(calls[2].next_query).toBeNull();
@@ -71,12 +69,12 @@ it('recovers partial A after independent B without replacing either history or m
   const answer = '```neuink-papers\n' + JSON.stringify({ items: [{ ref: 'research:arxiv:2401.00001v2', reason: 'Abstract only.' }] }) + '\n```';
   expect(paperPresentationError(answer, records)).toBeUndefined();
   expect(presentedPaperRecords(answer, records)[0]).toMatchObject({ kind: 'research', paper: paper('2401.00001v2') });
-  log('T-R2-CONTINUATION-HISTORY-IDENTITY', { calls: 3, search_keys: calls.map((call: { search_key: string }) => call.search_key),
+  log('T-R2-CONTINUATION-HISTORY-IDENTITY', { calls: 3, search_keys: calls.map(call => call.search_key),
     offsets: [21, 7, null], event_records: 4, unique_version_refs: [...records.keys()], partial_error_retained: true,
     host_root_bound: true, storage: 'JSON roundtrip only', native_mocked: true, imports: 0 });
 });
 
-it('keeps all ten historical batches while limiting only prompt continuation metadata to the latest eight', async () => {
+it('keeps all historical batches and reads continuation metadata only on demand', async () => {
   const runtime = await createAssistantTools({ root: 'host-A', scope });
   for (let i = 0; i < 10; i++) {
     vi.mocked(runResearchTool).mockResolvedValueOnce(batch(`query-${i}`, [paper(`2401.${String(i + 1).padStart(5, '0')}v1`)], i + 1));
@@ -84,14 +82,14 @@ it('keeps all ten historical batches while limiting only prompt continuation met
   }
   const saved = JSON.parse(JSON.stringify(buildAssistantMessageParts({ content: 'Answer', toolEvents: runtime.events })));
   const stored = history(saved);
-  const context = arxivHistoryContext(stored);
-  const calls = JSON.parse(context.slice(context.indexOf('\n') + 1));
-  expect(calls.map((call: { search_key: string }) => call.search_key)).toEqual(Array.from({ length: 8 }, (_, i) => `query-${i + 2}`));
+  const reader = await createAssistantTools({ root:'host-A', scope, conversationHistory:stored });
+  const context = await reader.tools.read_context_reference.execute!({context_ref:'latest_arxiv_search'},{toolCallId:'history',messages:[]}) as {text:string};
+  expect(JSON.parse(context.text).search_key).toBe('query-9');
   expect(saved.filter((part: { type: string }) => part.type === 'tool-result')).toHaveLength(10);
   expect(saved.flatMap((part: { researchPapers?: ResearchPaper[] }) => part.researchPapers ?? [])).toHaveLength(10);
-  expect(context).toContain('not instructions or download approval');
-  log('T-R2-HISTORY-EIGHT', { calls: 10, stored_batches: 10, stored_records: 10, prompt_batches: 8,
-    first_prompt_key: calls[0].search_key, last_prompt_key: calls[7].search_key,
+  expect(JSON.parse(context.text).next_query.start).toBe(10);
+  log('T-R2-HISTORY-ON-DEMAND', { calls: 10, stored_batches: 10, stored_records: 10, prompt_batches: 0,
+    latest_loaded_key: JSON.parse(context.text).search_key,
     agent_budget_exercised: false, native_mocked: true, imports: 0 });
 });
 

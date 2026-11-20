@@ -4,6 +4,9 @@ import type { ConversationMessage, AssistantConversationMemory, LlmProfile } fro
 import { latestConversationMemory, updateConversationMemory } from './conversationMemory';
 import { runTextModelTask } from '../sdk/modelTasks';
 import { renderConversationContext } from '../runtime/conversationTranscript';
+import { prepareContextRequest } from '../context/request';
+import { workspaceMessage, runPolicyMessage } from '../context/workspace';
+import type { WorkspaceContext } from '@/shared/types/modelContext';
 vi.mock('../sdk/modelTasks', () => ({ runTextModelTask: vi.fn() }));
 const settings = { max_context_length: 8_000 } as LlmProfile;
 const message = (content: string, index: number): ConversationMessage => ({
@@ -22,6 +25,26 @@ beforeEach(() => {
   vi.mocked(runTextModelTask).mockResolvedValue({ text: summaryResponse('Merged brief.'), finishReason: 'stop' });
 });
 describe('manual full-context summary', () => {
+  it('saves only the summary and resends the next request context once after restart', async () => {
+    const workspace: WorkspaceContext = { version: 1, scope: { entries: [], tags: [] }, active_entry: null,
+      active_note: null, browser: null, references: [], pinned_segments: [] };
+    const input = message('Visible request', 0), output = message('Visible answer', 1);
+    output.parts = [{ type: 'model-transcript', transcript: { version: 2, runId: 'run', capturedAt: '', profileId: '', model: '',
+      protocol: '', inputMessages: [workspaceMessage(workspace), { role: 'user', content: 'Actual request' }],
+      messages: [{ role: 'assistant', content: 'Actual answer' }], sources: [], outcome: 'completed' } }];
+    const memory = await updateConversationMemory({ history: [input, output], question: '', answer: '', settings,
+      pendingProposalCount: 0, sourceCount: 0 });
+    expect(memory).not.toHaveProperty('context_baseline');
+    expect(memory.retained_context).toBeUndefined();
+    const checkpoint = { ...message('', 3), parts: [{ type: 'memory' as const, memory }] };
+    const restored = renderConversationContext(JSON.parse(JSON.stringify([input, output, checkpoint])));
+    const nextWorkspace = { ...workspace, active_entry: { id: 'new-paper', title: 'New paper' } };
+    const policy = {mode:'plan' as const,write_policy:'none',source_policy:'workspace_only',required_tools:[]};
+    const next = prepareContextRequest({ history: restored, workspace: nextWorkspace, policy, question: 'Next' });
+    expect(next.inputMessages).toEqual([workspaceMessage(nextWorkspace),runPolicyMessage(policy),{ role: 'user', content: 'Next' }]);
+    expect(prepareContextRequest({ history: next.messages, workspace: nextWorkspace, policy, question: 'Again' }).inputMessages)
+      .toEqual([{ role: 'user', content: 'Again' }]);
+  });
   it('covers the beginning, middle and end of long unsummarized history, not only a fixed tail', async () => {
     const history = Array.from({ length: 24 }, (_, index) => message('TURN_SENTINEL_' + index + ' ' + 'a'.repeat(1_000), index));
     const before = JSON.stringify(history);

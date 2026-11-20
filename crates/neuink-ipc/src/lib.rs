@@ -161,7 +161,7 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
             commands::assistant::read_agent_run,
             commands::assistant::delete_agent_run,
             commands::assistant::prune_agent_runs,
-            commands::assistant::get_assistant_context_snapshot,
+            commands::assistant::workspace_context::get_assistant_context_snapshot,
             commands::assistant::read_entry_assistant_context,
             commands::assistant::read_segment_content,
             commands::conversation::list_conversations,

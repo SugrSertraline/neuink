@@ -29,6 +29,14 @@ const batch: ModelMessage[] = [
 ];
 
 describe('persisted model transcript replay', () => {
+  it('replays v2 inputs and native IDs verbatim and does not duplicate UI user messages', () => {
+    const inputMessages: ModelMessage[] = [{ role: 'user', content: 'Actual submitted request' }];
+    const saved = record(batch, { version: 2, inputMessages, outcome: 'completed' });
+    const replay = replayModelTranscript(saved, 'unused');
+    expect(replay).toEqual([...inputMessages, ...batch]);
+    const history = [chat('user', 'Visible submitted request'), chat('assistant', 'Visible answer', saved)];
+    expect(renderConversationTranscript(history)).toEqual([...inputMessages, ...batch]);
+  });
   it('round-trips full outputs, errors, call ordering and matching IDs without mutating storage', () => {
     const saved = JSON.parse(JSON.stringify(record(batch)));
     const before = JSON.stringify(saved);

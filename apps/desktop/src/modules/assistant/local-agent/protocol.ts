@@ -29,10 +29,11 @@ export class ClaudeStream {
   readonly pdfReading = new PdfReadingAudit(id => this.callbacks.tool({id, toolName:'claude.mcp__neuink__read_pdf_pages',
     status:'error', recovered:true, summary:'读取请求已调整，后续调用已覆盖原请求页码。'}));
   constructor(private callbacks: { text: (delta: string) => void; reset: () => void;
-    reasoning: (delta: string) => void; tool: (event: AssistantToolTraceEvent) => void; initialized: () => void }) {}
+    reasoning: (delta: string) => void; tool: (event: AssistantToolTraceEvent) => void; initialized: () => void; compacted?: () => void }) {}
   consume(value: Record<string, unknown>) {
     // Subagent text is not a second main answer.
     if (value.parent_tool_use_id) return;
+    if (value.type === 'system' && value.subtype === 'compact_boundary') this.callbacks.compacted?.();
     if (value.type === 'system' && value.subtype === 'init') {
       const servers = Array.isArray(value.mcp_servers) ? value.mcp_servers.map(object) : [];
       if (!servers.some(server => server.name === 'neuink' && server.status === 'connected')) throw new Error('NeuInk 工具连接失败，请重试。');

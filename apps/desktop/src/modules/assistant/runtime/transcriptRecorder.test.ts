@@ -10,6 +10,16 @@ const initial: ModelMessage[] = [
   { role: 'user', content: 'OLD_HISTORY_MUST_NOT_BE_SAVED_AGAIN' }, { role: 'user', content: 'Current request' }
 ];
 describe('per-run transcript recording', () => {
+  it('persists the exact input suffix before model output and reuses it on recovery', async () => {
+    const onTranscript = vi.fn();
+    const inputMessages: ModelMessage[] = [{ role: 'user', content: 'WORKSPACE' }, { role: 'user', content: 'QUESTION' }];
+    const recorder = createTranscriptRecorder({ model, initialMessageCount: 3, inputMessages, sources: new Map(), firstNewMarker: 1, onTranscript });
+    await recorder.save({ messages: [{ role: 'user', content: 'OLD_HISTORY' }, ...inputMessages], turns: 1 });
+    expect(onTranscript.mock.calls[0][0]).toMatchObject({ version: 2, inputMessages, messages: [] });
+    expect(JSON.stringify(recorder.current)).not.toContain('OLD_HISTORY');
+    inputMessages[0] = { role: 'user', content: 'LATE_MUTATION' };
+    expect(JSON.stringify(recorder.current)).not.toContain('LATE_MUTATION');
+  });
   it('persists a stable start on resume and captures only new messages', async () => {
     const record: AgentExecutionRecord = { id: 'execution-test', conversationId: 'conv', revision: 0,
       status: 'running', updatedAt: '', payload: {} };

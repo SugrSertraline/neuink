@@ -3,6 +3,15 @@ import { DEFAULT_AGENT_RUNTIME_SETTINGS, auditAgentToolPermissions, configuredAg
 import type { SubagentProfile } from '@/shared/types/agentRuntime';
 
 describe('agent capability policy', () => {
+  it('migrates the complete previous grant once while preserving later context-reader revocation', () => {
+    const old = structuredClone(DEFAULT_AGENT_RUNTIME_SETTINGS);
+    old.capabilityRevision = 4;
+    old.mainAssistant.enabledToolIds = old.mainAssistant.enabledToolIds.filter(id => id !== 'read_context_reference');
+    const migrated = normalizeAgentRuntimeSettings(old);
+    expect(migrated.mainAssistant.enabledToolIds).toContain('read_context_reference');
+    migrated.mainAssistant.enabledToolIds = migrated.mainAssistant.enabledToolIds.filter(id => id !== 'read_context_reference');
+    expect(normalizeAgentRuntimeSettings(migrated).mainAssistant.enabledToolIds).not.toContain('read_context_reference');
+  });
   it('migrates old tool IDs without restoring revoked tools or changing external routes', () => {
     const settings = structuredClone(DEFAULT_AGENT_RUNTIME_SETTINGS);
     const raw = {
@@ -35,7 +44,7 @@ describe('agent capability policy', () => {
     const old = structuredClone(DEFAULT_AGENT_RUNTIME_SETTINGS); old.capabilityRevision = 2;
     old.mainAssistant.enabledToolIds = old.mainAssistant.enabledToolIds.filter(id => id !== 'read_browser_tab');
     const migrated = normalizeAgentRuntimeSettings(old);
-    expect(migrated.capabilityRevision).toBe(4);
+    expect(migrated.capabilityRevision).toBe(5);
     expect(migrated.mainAssistant.enabledToolIds).toContain('read_browser_tab');
     migrated.mainAssistant.enabledToolIds = migrated.mainAssistant.enabledToolIds.filter(id => id !== 'read_browser_tab');
     expect(normalizeAgentRuntimeSettings(migrated).mainAssistant.enabledToolIds).not.toContain('read_browser_tab');

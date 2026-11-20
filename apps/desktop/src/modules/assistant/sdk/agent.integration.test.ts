@@ -181,7 +181,8 @@ describe('production agent wiring', () => {
     const agent = new Agent({ driver: createAgentDriver({ settings: profile, system: '', tools }), tools: agentExecutors(tools), messages: [{ role: 'user' as const, content: 'Search ACL papers' }], budget: new RunBudget(), maxTurns: 2 });
     expect(await agent.run()).toContain('Partial');
     expect(execute).toHaveBeenCalledOnce();
-    expect(model.doStreamCalls[1].tools).toBeUndefined();
+    expect(model.doStreamCalls[1].tools).toEqual(model.doStreamCalls[0].tools);
+    expect(model.doStreamCalls[1].toolChoice).toEqual({ type: 'none' });
     expect(JSON.stringify(model.doStreamCalls[1].prompt)).toContain('Give the final answer now');
   });
   it('reserves a correction turn and never streams a textual tool envelope as the answer', async () => {
@@ -200,12 +201,13 @@ describe('production agent wiring', () => {
       verify: text => text ? undefined : '请根据已经取得的资料回答。' });
     expect(await agent.run()).toBe('已根据读到的资料给出结论。');
     expect(execute).toHaveBeenCalledTimes(9);
-    expect(model.doStreamCalls[9].tools).toBeUndefined();
+    expect(model.doStreamCalls[9].tools).toEqual(model.doStreamCalls[0].tools);
+    expect(model.doStreamCalls[9].toolChoice).toEqual({ type: 'none' });
     expect(JSON.stringify(model.doStreamCalls[10].prompt)).toContain('请根据已经取得的资料回答');
     expect(onDelta.mock.calls.flat().join('')).not.toContain('<tool_call>');
     expect(JSON.stringify(agent.messages)).not.toContain('<tool_call>');
   });
-  it('removes search tools after six searches and rejects a provider that still calls them', async () => {
+  it('keeps declarations stable after six searches and rejects further calls before execution', async () => {
     const model = fakeModel([
       ...Array.from({ length: 7 }, (_, i) => ({ call: { name: 'search_web', args: { query: `ACL variant ${i}` } } })),
       { text: 'Summary with incomplete coverage.' }
@@ -217,7 +219,7 @@ describe('production agent wiring', () => {
       messages: [{ role: 'user' as const, content: 'Search ACL papers' }], budget: new RunBudget() });
     expect(await agent.run()).toContain('incomplete');
     expect(execute).toHaveBeenCalledTimes(6);
-    expect(model.doStreamCalls[6].tools).toBeUndefined();
+    expect(model.doStreamCalls[6].tools).toEqual(model.doStreamCalls[0].tools);
     expect(JSON.stringify(model.doStreamCalls[7].prompt)).toContain('TOOL_NOT_AVAILABLE');
   });
   it('never executes a provider tool call during forced final synthesis', async () => {

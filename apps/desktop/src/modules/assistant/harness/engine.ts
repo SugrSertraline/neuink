@@ -35,7 +35,6 @@ import {
   selectAgentExecution
 } from '@/shared/lib/agentRuntimeSettings';
 
-import { assistantContextCharBudget, assistantNoteCharBudget } from '../sdk/contextBudget';
 import { answerWithGroundedAgent, type GroundedAnswer } from '../sdk/qna';
 import { registerEvidence } from '../runtime/evidenceLedger';
 import { createCompiledTaskState, transitionTaskState } from '../runtime/taskState';
@@ -182,13 +181,12 @@ async function executeAssistantHarness(options: RunAssistantHarnessOptions): Pro
       (route.path === 'lightweight_chat'
         ? { active_entry: null, active_note: null, document: null, pinned_segments: [], warnings: [] }
         : await getAssistantContextSnapshot({
-      activeEntryId: observed.activeEntryId,
-      activeNote: observed.activeNote,
-      documentCharBudget: assistantContextCharBudget(settings.max_context_length),
-      noteCharBudget: assistantNoteCharBudget(settings.max_context_length),
-      pinnedSegments: observed.pinnedSegments,
-      root
-    }));
+          metadataOnly: true,
+          activeEntryId: observed.activeEntryId,
+          activeNote: observed.activeNote,
+          pinnedSegments: observed.pinnedSegments,
+          root
+        }));
     options.execution?.set('contextSnapshot', snapshot);
     recordNode(agentRun, onToolEvent, {
       id: `${runId}-hydrate`,
@@ -255,19 +253,13 @@ async function executeAssistantHarness(options: RunAssistantHarnessOptions): Pro
       contextSnapshot: snapshot,
       browserTabTarget: currentSurface?.kind === 'browser' ? currentSurface.browserTab : null,
       conversationHistory,
+      composerSnapshot,
+      tagMentionScopes,
       conversationMemory: latestConversationMemory(conversationHistory),
       currentEntry: snapshot.active_entry
         ? { id: snapshot.active_entry.entry_id, title: snapshot.active_entry.entry_title }
         : currentEntry,
       currentNote: activeNote(snapshot) ?? currentNote,
-      harnessBrief: modelDrivenBrief({
-        composerSnapshot,
-        contextPlan,
-        currentSurface,
-        history: conversationHistory,
-        mentionScope: mentionScope ?? scope,
-        tagMentionScopes
-      }),
       invocationPlan,
       onAnswerReset: onAnswerReset
         ? () => {
@@ -389,84 +381,6 @@ async function executeAssistantHarness(options: RunAssistantHarnessOptions): Pro
       : undefined;
     throw new AssistantHarnessError(message, agentRun, error, failedTask);
   }
-}
-
-export function modelDrivenBrief({
-  composerSnapshot,
-  contextPlan,
-  currentSurface,
-  history,
-  mentionScope,
-  tagMentionScopes
-}: {
-  composerSnapshot?: AssistantComposerSnapshot | null;
-  contextPlan?: AssistantContextPlan | null;
-  currentSurface?: AssistantActiveSurfaceSnapshot | null;
-  history: ConversationMessage[];
-  mentionScope: ScopeSnapshot;
-  tagMentionScopes?: Record<string, ScopeSnapshot>;
-}) {
-  // The conversation itself is replayed as real model turns, not as a truncated
-  // string here; only the parts that must be re-derived live in this brief.
-  const lastDiagram = [...history].reverse().flatMap(message => [...(message.parts ?? [])].reverse())
-    .find(part => part.type === 'tool-result' && part.diagram);
-  const previousDiagram = lastDiagram?.type === 'tool-result' && lastDiagram.diagram
-    ? `Previous host-rendered diagram (${lastDiagram.diagram.kind}, ${JSON.stringify(lastDiagram.diagram.title)}):\n\`\`\`mermaid\n${lastDiagram.diagram.code.slice(0, 12000)}\n\`\`\`\nThis is a prior output artifact, not evidence. When the user asks to append that diagram, reuse its exact code and first read the selected destination note before proposing a change.`
-    : '';
-  const mentionMap = formatMentionMap(composerSnapshot, mentionScope, tagMentionScopes);
-  const historicalMentionMaps = history
-    .filter((message) => message.role === 'user')
-    .flatMap((message) => (message.parts ?? []).flatMap((part) =>
-      part.type === 'context-snapshot' && part.composer?.mentions.length
-        ? [{ content: message.content, snapshot: part.composer }]
-        : []
-    ))
-    .slice(-4)
-    .map(({ content, snapshot }) =>
-      `For prior user request ${JSON.stringify(content)}:\n${formatMentionMap(snapshot, mentionScope)}`
-    )
-    .join('\n\n');
-  const latestTask = [...history]
-    .reverse()
-    .flatMap((message) => [...(message.parts ?? [])].reverse())
-    .find((part) => part.type === 'task-state');
-  const taskObservation = latestTask?.type === 'task-state'
-    ? `Previous task state: status=${latestTask.task.status}, goal=${JSON.stringify(latestTask.task.goal.normalizedGoal)}, proposals=${latestTask.task.proposalIds.length}. A later natural-language request may continue, correct, or replace it; decide from the conversation.`
-    : '';
-  // The conversation memory checkpoint is not part of this brief: it is sent as the first
-  // conversation turn by `answerWithGroundedAgent`, ahead of the replayed transcript.
-  return [
-    'Use a model-driven Agent loop. Interpret all user replies as natural language; never require fixed phrases, regex slots, or magic retry wording.',
-    'Answer directly when no external observation or side effect is needed. Naming, summarization, wording, planning, and deciding whether to ask are model-native cognition, not tools.',
-    'Call tools only for workspace observation, deterministic computation, or an authorized side effect. For "name and create", choose the name internally and call create_entry once. For title suggestions only, answer without tools.',
-    'For note and metadata writes, create reviewable proposals. For paper-grounded content, read evidence and include source_markers in the proposal. In Markdown notes, also put [S#] inline beside each supported claim or list item (inside inserted/replacement text for patches). Never collect markers at the end; source_markers is metadata, not citation placement.',
-    'Every state-changing action requires explicit confirmation in the application UI. Proposal creation is NOT application. create_entry, app_set_appearance and external MCP calls pause for user confirmation before execution. Never claim success before a successful tool result, never infer confirmation from conversation text, and never bypass or repeat a rejected action.',
-    'Resolve every [C<number>] token through the Typed Mention Map below. Never search for literal C1/C2 marker text. A TagScope is already expanded into the frozen read scope. When the user asks to place, organize, or save output into an Entry/Overall reference, call note_propose_create with that reference entry_id; an Entry/Overall is a destination container, not an existing selected note.',
-    'For requests to read or summarize the papers under a TagScope, treat the resolved Entry list as exhaustive: call read_entry_assistant_context for each relevant Entry. A zero-result keyword/semantic search does not prove that scoped Entries have no parsed content.',
-    'PDF parsing is not required for basic reading. For unparsed Entries use read_pdf_pages or search_pdf_text (read_entry_assistant_context also falls back automatically). Preserve actual page citations, read further pages when necessary, and disclose OCR, layout or partial-coverage limits. Never mark a PDF as fully parsed or read based on this fallback.',
-    mentionMap ? `Current Typed Mention Map:\n${mentionMap}` : 'Current Typed Mention Map: none',
-    currentSurface?.kind === 'browser' && currentSurface.browserTab
-      ? 'The submitted browser tab is the current reading target. Historical paper mentions below describe prior requests, not an instruction to include those papers in this webpage task. Current explicit paper, tag and excerpt attachments still apply. If the user actually continues an earlier paper task, read and cite its evidence again.'
-      : '',
-    historicalMentionMaps ? `Historical Typed Mention Maps available for continuation:\n${historicalMentionMaps}` : '',
-    taskObservation,
-    contextPlan?.summary ? `UI context summary (informational only; the Agent decides semantic roles): ${contextPlan.summary}` : '',
-    previousDiagram
-  ].filter(Boolean).join('\n\n');
-}
-
-function formatMentionMap(
-  composerSnapshot: AssistantComposerSnapshot | null | undefined,
-  mentionScope: ScopeSnapshot,
-  tagMentionScopes?: Record<string, ScopeSnapshot>
-) {
-  return (composerSnapshot?.mentions ?? []).map((mention) => {
-    if (mention.kind === 'tag') {
-      const resolvedScope = mention.tagId ? tagMentionScopes?.[mention.tagId] : undefined;
-      return `${mention.marker} = TagScope { tag_id: ${mention.tagId ?? 'unknown'}, tag_name: ${JSON.stringify(mention.tagName ?? mention.label)}, resolved_entry_ids: ${JSON.stringify((resolvedScope ?? mentionScope).entry_ids)} }`;
-    }
-    return `${mention.marker} = ContextReference { kind: ${mention.kind}, entry_id: ${mention.entryId}, entry_title: ${JSON.stringify(mention.entryTitle)}, content_id: ${mention.contentId ?? 'none'}, content_title: ${JSON.stringify(mention.contentTitle ?? '')} }`;
-  }).join('\n');
 }
 
 function activeNote(snapshot: AssistantContextSnapshot): AssistantActiveNote | null {

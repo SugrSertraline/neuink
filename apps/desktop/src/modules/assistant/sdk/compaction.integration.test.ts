@@ -34,6 +34,7 @@ it('keeps the automatic suffix across a completed run, persisted conversation an
   vi.mocked(createNeuinkModel).mockReturnValue(scriptedModel([{ text: 'NEW_FINAL_ANSWER_SENTINEL' }]));
   const result = await answerWithGroundedAgent({ question: 'CURRENT_REQUEST_SENTINEL', root: 'fixture', scope, settings, conversationHistory: history });
   const memory = result.conversationMemory!;
+  expect(memory).not.toHaveProperty('context_baseline');
   const retained = JSON.stringify(memory.retained_context);
   expect(retained).toContain('LAST_HISTORY_SENTINEL');
   expect(retained).toContain('CURRENT_REQUEST_SENTINEL');
@@ -55,6 +56,38 @@ it('keeps the automatic suffix across a completed run, persisted conversation an
   expect(request).toContain('LAST_HISTORY_SENTINEL');
   expect(request).toContain('NEW_FINAL_ANSWER_SENTINEL');
   expect(request).not.toContain('HISTORY_0 ');
+  expect(generateText).toHaveBeenCalledTimes(summaries);
+});
+it('keeps a compacted request prefix fixed through a tool step, restart and another user turn', async () => {
+  const currentEntry = {id:'paper-A',title:'Paper A'};
+  vi.mocked(generateText).mockImplementation(async () => {
+    // The live reading target changes while the submitted request is being compacted.
+    currentEntry.id = 'paper-B'; currentEntry.title = 'Paper B';
+    return {text:summaryResponse('Earlier discussion.'),finishReason:'stop',usage:{inputTokens:500,outputTokens:50}} as never;
+  });
+  const history = Array.from({length:40},(_,index)=>chat(index%2?'assistant':'user','HISTORY '+ 'a'.repeat(1000),index));
+  history[history.length-1].parts = [{type:'tool-result',id:'diagram',toolName:'present_diagram',summary:'Previous diagram',
+    diagram:{kind:'mindmap',title:'Previous',code:'mindmap\n  root[Topic]',sourceMarkers:[]}}];
+  const model = scriptedModel([{call:{name:'read_context_reference',args:{context_ref:'latest_diagram'}}},
+    {text:'已取回之前的图表代码。'}]);
+  vi.mocked(createNeuinkModel).mockReturnValue(model);
+  const result = await answerWithGroundedAgent({question:'取回之前的图表代码',root:'fixture',scope,settings,conversationHistory:history,currentEntry});
+  const first = model.doStreamCalls[0].prompt, second = model.doStreamCalls[1].prompt;
+  expect(second.slice(0,first.length)).toEqual(first);
+  expect(JSON.stringify(second)).toContain('paper-A');
+  expect(JSON.stringify(second)).not.toContain('paper-B');
+  expect(JSON.stringify(second).match(/<workspace_context>/g)?.length)
+    .toBe(JSON.stringify(first).match(/<workspace_context>/g)?.length);
+  const completed = chat('assistant',result.answer,42);
+  completed.parts = [{type:'memory',memory:result.conversationMemory!},{type:'model-transcript',transcript:result.modelTranscript!}];
+  const disk: ConversationMessage[] = JSON.parse(JSON.stringify([...history,chat('user','取回之前的图表代码',41),completed]));
+  const next = scriptedModel([{text:'继续。'}]);
+  vi.mocked(createNeuinkModel).mockReturnValue(next);
+  const summaries = vi.mocked(generateText).mock.calls.length;
+  const again = await answerWithGroundedAgent({question:'继续',root:'fixture',scope,settings,conversationHistory:disk,
+    currentEntry:{id:'paper-A',title:'Paper A'}});
+  expect(next.doStreamCalls[0].prompt.slice(0,second.length)).toEqual(second);
+  expect(again.modelTranscript?.inputMessages).toEqual([{role:'user',content:'继续'}]);
   expect(generateText).toHaveBeenCalledTimes(summaries);
 });
 it('does not advance a checkpoint or call the main model when automatic summarization fails', async () => {

@@ -64,6 +64,8 @@ export type AgentToolCall = {
 };
 export type AgentTurn<M> = { text: string; messages: M[]; calls: AgentToolCall[] };
 export type AgentDriver<M> = {
+  /** Append host control observations before the request is durably saved and sent. */
+  prepare?(messages: readonly M[], options: { finalTurn: boolean }): readonly M[] | Promise<readonly M[]>;
   turn(messages: readonly M[], signal?: AbortSignal, options?: { finalTurn: boolean }): Promise<AgentTurn<M>>;
   result(call: AgentToolCall, output: unknown, failed: boolean): M;
   instruction(text: string): M;
@@ -306,12 +308,13 @@ export class Agent<M> {
           o.budget.turn();
           this.turns++;
           o.beforeTurn?.();
-          await this.save(); // Reserve the attempt before network I/O, including interrupted requests.
-          await this.emit({ type: 'turn_start' });
           const localMaxTurns = o.maxTurns ?? 12;
           const synthesisTurn = Math.max(1, localMaxTurns - (o.synthesisReserveTurns ?? 0));
           const finalTurn = this.turns >= synthesisTurn || o.budget.turns >= o.budget.maxTurns - (o.reserveParentTurn ? 1 : 0)
             || o.budget.toolCalls >= o.budget.maxToolCalls;
+          this.messages.push(...await o.driver.prepare?.(this.messages, { finalTurn }) ?? []);
+          await this.save(); // Include host updates before network I/O, including interrupted requests.
+          await this.emit({ type: 'turn_start' });
           const response = await abortable(o.driver.turn(this.messages, o.signal, { finalTurn }), o.signal);
           o.signal?.throwIfAborted();
           if (finalTurn && response.calls.length) {
