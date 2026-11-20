@@ -111,28 +111,6 @@ describe('automatic prefix compaction', () => {
     expect((await projector.project(grown,0)).slice(0,second.length)).toEqual(second);
   });
 
-  it.each([3,4])('restores v%s without using legacy baseline or its old usage anchor', async version => {
-    const messages: ModelMessage[] = [workspaceMessage(workspace('paper-A')),runPolicyMessage(policy),...history];
-    const first = createContextProjector(settings);
-    await first.project(messages,0);
-    const saved = first.snapshot()!;
-    const legacy = {...saved, version, contextRefreshIndex:undefined,
-      baseline:{version:1,workspace:workspace('LEGACY_STATE_MUST_NOT_BE_USED')},
-      memory:{...saved.memory,context_baseline:{version:1,workspace:workspace('ALSO_IGNORED')}},
-      anchor:{inputTokens:7300,estimatedInputTokens:1000,requestLength:messages.length}};
-    const before = JSON.stringify(legacy);
-    const count = vi.mocked(runTextModelTask).mock.calls.length;
-    const restored = createContextProjector(settings,undefined,{restored:JSON.parse(before)});
-    const result = await restored.project(messages,0,undefined,false);
-    expect(result.slice(-2)).toEqual([workspaceMessage(workspace('paper-A')),runPolicyMessage(policy)]);
-    expect(JSON.stringify(result)).not.toMatch(/LEGACY_STATE_MUST_NOT_BE_USED|ALSO_IGNORED/);
-    expect(restored.snapshot()).toMatchObject({version:5,contextRefreshIndex:messages.length});
-    expect(restored.snapshot()).not.toHaveProperty('anchor');
-    expect(JSON.stringify(restored.snapshot())).not.toMatch(/baseline|context_baseline/);
-    expect(JSON.stringify(legacy)).toBe(before);
-    expect(runTextModelTask).toHaveBeenCalledTimes(count);
-  });
-
   it('ignores invalid v5 refresh positions, including positions splitting a tool batch', async () => {
     const messages: ModelMessage[] = [workspaceMessage(workspace('paper-A')),...history,...readBatch('last')];
     const first = createContextProjector(settings);
@@ -256,8 +234,8 @@ describe('automatic prefix compaction', () => {
       .rejects.toMatchObject({ reason: 'context_capacity' });
     expect(runTextModelTask).not.toHaveBeenCalled();
   });
-  it('discards retired projection formats and recomputes from the canonical transcript', async () => {
-    const projector = createContextProjector(settings, undefined, { restored: { version: 2, firstKeptIndex: 3, memory: memory('OLD_BROKEN_STATE') } });
+  it.each([1, 2, 3, 4])('discards retired v%s projections and recomputes from current messages', async version => {
+    const projector = createContextProjector(settings, undefined, { restored: { version, firstKeptIndex: 3, memory: memory('OLD_BROKEN_STATE') } });
     const result = await projector.project(tools, 5_000);
     expect(projector.snapshot()?.version).toBe(5);
     expect(JSON.stringify(result)).not.toContain('OLD_BROKEN_STATE');

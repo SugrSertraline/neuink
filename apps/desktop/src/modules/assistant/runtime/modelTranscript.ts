@@ -26,14 +26,14 @@ export function modelTranscript(message: ConversationMessage): AssistantModelTra
   const part = message.parts?.find(part => part.type === 'model-transcript');
   if (part?.type !== 'model-transcript') return;
   const value = part.transcript;
-  if (!value || ![1, 2].includes(value.version) || typeof value.runId !== 'string'
+  if (!value || value.version !== 2 || typeof value.runId !== 'string'
     || typeof value.capturedAt !== 'string' || typeof value.profileId !== 'string'
     || typeof value.model !== 'string' || typeof value.protocol !== 'string'
     || (value.outcome !== undefined && !['running', 'completed', 'failed', 'cancelled'].includes(value.outcome))
     || (value.displaySourceMarkers !== undefined && (!Array.isArray(value.displaySourceMarkers)
       || value.displaySourceMarkers.some(marker => !Number.isSafeInteger(marker) || marker < 1)))
     || !Array.isArray(value.messages) || !Array.isArray(value.sources)
-    || (value.version === 2 && (!Array.isArray(value.inputMessages) || value.inputMessages.some(message => !validMessage(message))))
+    || !Array.isArray(value.inputMessages) || value.inputMessages.some(message => !validMessage(message))
     || value.messages.some(message => !validMessage(message))
     || value.sources.some(pair => !Array.isArray(pair) || pair.length !== 2
       || !Number.isSafeInteger(pair[0]) || pair[0] < 1 || !validSource(pair[1]))) {
@@ -49,15 +49,14 @@ export function snapshotModelTranscript(value: AssistantModelTranscript): Assist
 
 /** Keep complete call/result batches; interrupted attempts remain in storage, not as fake results. */
 export function replayModelTranscript(
-  transcript: AssistantModelTranscript, namespace: string, model?: TranscriptModel
+  transcript: AssistantModelTranscript, model?: TranscriptModel
 ): ModelMessage[] {
   const saved = snapshotModelTranscript(transcript);
-  const messages = [...(transcript.version === 2 ? saved.inputMessages ?? [] : []), ...saved.messages];
+  const messages = [...saved.inputMessages, ...saved.messages];
   const compatible = !model || (model.profileId === transcript.profileId
     && model.model === transcript.model && model.protocol === transcript.protocol);
   const turns: ModelMessage[] = [];
   let incomplete = false;
-  let sequence = 0;
   for (let index = 0; index < messages.length; index++) {
     const message = messages[index];
     if (message.role === 'tool') { incomplete = true; continue; }
@@ -72,18 +71,15 @@ export function replayModelTranscript(
         part.type === 'tool-result' && part.toolCallId === call.toolCallId && part.toolName === call.toolName);
       return matching.length === 1 && calls.filter(other => other.toolCallId === call.toolCallId).length === 1;
     }).map(call => call.toolCallId));
-    const ids = new Map([...validIds].map(id => [id, transcript.version === 2 ? id : namespace + '_' + sequence++]));
     if (calls.length !== validIds.size) incomplete = true;
     const content = message.content.filter(part =>
       (part.type !== 'tool-call' || validIds.has(part.toolCallId))
-      && (compatible || part.type !== 'reasoning')).map(part =>
-      part.type === 'tool-call' ? { ...part, toolCallId: ids.get(part.toolCallId)! } : part);
+      && (compatible || part.type !== 'reasoning'));
     if (content.some(part => part.type !== 'reasoning')) turns.push({ ...message, content });
     for (const result of results) {
       const kept = result.content.filter(part => part.type === 'tool-result' && validIds.has(part.toolCallId));
       if (kept.length !== result.content.length) incomplete = true;
-      if (kept.length) turns.push({ ...result, content: kept.map(part =>
-        part.type === 'tool-result' ? { ...part, toolCallId: ids.get(part.toolCallId)! } : part) });
+      if (kept.length) turns.push({ ...result, content: kept });
     }
   }
   if (incomplete) turns.push({ role: 'user', content:
@@ -118,10 +114,10 @@ export function conversationTranscriptSources(history: readonly ConversationMess
 /** Citation metadata only. Never feed these observations into current tool prerequisites or grants. */
 export function transcriptObservations(history: readonly ConversationMessage[]) {
   const observations: Array<{ toolName: string; output: unknown }> = [];
-  for (const [index, message] of history.entries()) {
+  for (const message of history) {
     const transcript = modelTranscript(message);
     if (!transcript) continue;
-    for (const turn of replayModelTranscript(transcript, 'history_' + index)) {
+    for (const turn of replayModelTranscript(transcript)) {
       if (turn.role !== 'tool') continue;
       for (const part of turn.content) {
         if (part.type !== 'tool-result' || part.output.type !== 'json') continue;

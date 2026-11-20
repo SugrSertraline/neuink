@@ -5,6 +5,7 @@ import type {
   LlmProfile
 } from '@/shared/ipc/assistantApi';
 import { analyzeConversationLength, conversationContextWindow } from './assistantPanelState';
+import { recordedTurn } from '../sdk/testHelpers/conversation';
 
 const profile = { max_context_length: 128_000 } as LlmProfile;
 const memory: AssistantConversationMemory = {
@@ -22,8 +23,8 @@ const checkpoint = message('assistant', '', [{ memory, type: 'memory' }]);
 describe('conversation usage estimate', () => {
   it('calibrates the displayed window with real usage from the selected model', () => {
     const selected = { ...profile, id: 'profile', model: 'model' } as LlmProfile;
-    const history = [message('user', '中'.repeat(1_000)), message('assistant', 'Answer', [{ type: 'model-transcript', transcript: {
-      version: 1, runId: 'run', capturedAt: '', profileId: 'profile', model: 'model', protocol: 'openai_compatible', sources: [],
+    const history = [message('user', '中'.repeat(1_000)), message('assistant', 'Answer', [{ type: 'model-transcript', transcript: { inputMessages: [{ role: 'user', content: '中'.repeat(1_000) }],
+      version: 2, runId: 'run', capturedAt: '', profileId: 'profile', model: 'model', protocol: 'openai_compatible', sources: [],
       messages: [{ role: 'assistant', content: 'Answer' }],
       contextUsage: { version: 1, inputTokens: 1_000, estimatedInputTokens: 2_000, overheadTokens: 100, messageTokens: 1_900 }
     } }])];
@@ -37,8 +38,8 @@ describe('conversation usage estimate', () => {
     const decorated = structuredClone(prose);
     decorated[1].parts = [{ type: 'task-state', task: { evidenceLedger: { evidence: [{ quote: '中'.repeat(80_000) }] } } } as never];
     expect(analyzeConversationLength(decorated, profile).estimatedTokens).toBe(analyzeConversationLength(prose, profile).estimatedTokens);
-    decorated[1].parts.push({ type: 'model-transcript', transcript: {
-      version: 1, runId: 'run', capturedAt: '', profileId: '', model: '', protocol: '', sources: [], messages: [
+    decorated[1].parts.push({ type: 'model-transcript', transcript: { inputMessages: [],
+      version: 2, runId: 'run', capturedAt: '', profileId: '', model: '', protocol: '', sources: [], messages: [
         { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'c', toolName: 'read', input: {} }] },
         { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'c', toolName: 'read', output: { type: 'text', value: '中'.repeat(1_000) } }] },
         { role: 'assistant', content: 'Answer' }
@@ -50,14 +51,14 @@ describe('conversation usage estimate', () => {
   });
   it('counts Chinese text at the provider rate instead of a quarter of it', () => {
     // 1000 ideographs are roughly 1500 tokens; chars / 4 would report 250 and never warn.
-    const usage = analyzeConversationLength([message('user', '中'.repeat(1_000))], profile);
+    const usage = analyzeConversationLength(recordedTurn('中'.repeat(1_000), '', 0), profile);
     expect(usage.estimatedTokens).toBe(1_504);
     expect(usage.modelKiloTokens).toBe(128);
     expect(usage.nearingAutoCompaction).toBe(false);
   });
 
   it('marks the automatic compaction point at 90% of the window', () => {
-    const usage = analyzeConversationLength([message('user', '中'.repeat(80_000))], profile);
+    const usage = analyzeConversationLength(recordedTurn('中'.repeat(80_000), '', 0), profile);
     expect(usage.usageRatio).toBeGreaterThan(0.9);
     expect(usage.nearingAutoCompaction).toBe(true);
     expect(usage.isLong).toBe(true);

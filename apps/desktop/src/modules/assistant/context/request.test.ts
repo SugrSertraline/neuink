@@ -56,11 +56,11 @@ describe('append-only context requests', () => {
     expect(next.inputMessages).toHaveLength(2);
   });
 
-  it('ignores legacy summary state and sends current context after manual compaction', () => {
-    const old = workspace('old'), current = workspace('new');
-    const legacy = { summary: 'Earlier work', decisions: [], entities: [], last_user_goal: null,
-      open_items: [], user_preferences: [], context_baseline: { version: 1, workspace: old } };
-    const checkpoint = checkpointMessages(legacy);
+  it('sends current context after manual compaction', () => {
+    const current = workspace('new');
+    const summary = { summary: 'Earlier work', decisions: [], entities: [], last_user_goal: null,
+      open_items: [], user_preferences: [] };
+    const checkpoint = checkpointMessages(summary);
     expect(checkpoint).toHaveLength(1);
     expect(latestContextState(checkpoint)).toEqual({});
     const next = prepareContextRequest({ history: checkpoint, workspace: current, question: 'Continue' });

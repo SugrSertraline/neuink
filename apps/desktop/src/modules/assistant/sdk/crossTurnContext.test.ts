@@ -138,7 +138,7 @@ describe('cross-turn context through the real provider driver', () => {
         output: { type: 'error-text', value: 'TOOL_LIMIT_REACHED：没有新信息' } }] }
     );
     const transcript: AssistantModelTranscript = {
-      version: 1, runId: 'old-run', capturedAt: '', profileId: settings.id, model: settings.model,
+      version: 2, inputMessages: [{ role: 'user', content: 'Old search' }], runId: 'old-run', capturedAt: '', profileId: settings.id, model: settings.model,
       protocol: 'openai_compatible', messages, sources: [], outcome: 'failed'
     };
     const model = scriptedModel([
@@ -156,7 +156,7 @@ describe('cross-turn context through the real provider driver', () => {
 
   it('does not let a historical note read satisfy the current write precondition', async () => {
     const transcript: AssistantModelTranscript = {
-      version: 1, runId: 'old-note', capturedAt: '', profileId: settings.id, model: settings.model,
+      version: 2, inputMessages: [{ role: 'user', content: 'Read note' }], runId: 'old-note', capturedAt: '', profileId: settings.id, model: settings.model,
       protocol: 'openai_compatible', sources: [], messages: [
         { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'note', toolName: 'read_note',
           input: { entry_id: 'entry', note_id: 'note' } }] },

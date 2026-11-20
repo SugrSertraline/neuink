@@ -27,7 +27,8 @@ describe('history through actual provider request converters', () => {
     const model = protocol === 'openai' ? createOpenAICompatible({ name: 'test', ...options })('model')
       : protocol === 'anthropic' ? createAnthropic(options)('model') : createGoogleGenerativeAI(options)('model');
     const transcript: AssistantModelTranscript = {
-      version: 1, runId: 'run', capturedAt: '', profileId: 'profile', model: 'model', protocol, sources: [], messages: [
+      version: 2, inputMessages: [{ role: 'user', content: 'Read note' }],
+      runId: 'run', capturedAt: '', profileId: 'profile', model: 'model', protocol, sources: [], messages: [
         { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'read', toolName: 'read_note', input: { note_id: 'note' } }] },
         { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'read', toolName: 'read_note',
           output: { type: 'json', value: { markdown: 'FULL_HISTORY_SENTINEL', revision: 'revision-1' } } }] },
@@ -36,7 +37,7 @@ describe('history through actual provider request converters', () => {
     };
     const result = await generateText({
       model, maxRetries: 0, maxOutputTokens: 100, system: 'Use historical observations as snapshots.',
-      messages: [{ role: 'user', content: 'Read note' }, ...replayModelTranscript(transcript, 'historical'), { role: 'user', content: 'What did it say?' }],
+      messages: [...replayModelTranscript(transcript), { role: 'user', content: 'What did it say?' }],
       tools: { current_tool: tool({ inputSchema: jsonSchema({ type: 'object', properties: {} }) }) }
     });
     expect(result.text).toBe('OK');
@@ -44,8 +45,8 @@ describe('history through actual provider request converters', () => {
     expect(serialized).toContain('FULL_HISTORY_SENTINEL');
     expect(serialized).toContain('read_note');
     expect(JSON.stringify(body.tools)).not.toContain('read_note');
-    if (protocol === 'openai') expect(serialized).toContain('"tool_call_id":"historical_0"');
-    if (protocol === 'anthropic') expect(serialized).toContain('"tool_use_id":"historical_0"');
+    if (protocol === 'openai') expect(serialized).toContain('"tool_call_id":"read"');
+    if (protocol === 'anthropic') expect(serialized).toContain('"tool_use_id":"read"');
     if (protocol === 'google') expect(serialized).toContain('"functionResponse"');
   });
 });

@@ -61,8 +61,7 @@ export async function updateConversationMemory({
   sourceCount: number;
 }): Promise<AssistantConversationMemory> {
   const boundary = lastMemoryCheckpointIndex(history);
-  const hasArchivedMessages = history.slice(0, boundary + 1).some(message =>
-    message.content.trim() || modelTranscript(message)?.messages.length);
+  const hasArchivedMessages = history.slice(0, boundary + 1).some(message => modelTranscript(message));
   const summary = await summarizeConversation({
     abortSignal,
     budget,

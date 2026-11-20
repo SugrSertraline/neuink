@@ -132,14 +132,14 @@ export function createContextProjector(
 
 function restoreProjection(value: unknown, messages: readonly ModelMessage[]): ProjectionState | undefined {
   if (!value || typeof value !== 'object') return;
-  const state = value as Omit<ProjectionState, 'version' | 'contextRefreshIndex'> & { version: number; contextRefreshIndex?: number };
-  if (![3, 4, 5].includes(state.version) || !Number.isSafeInteger(state.firstKeptIndex)
+  const state = value as ProjectionState;
+  if (state.version !== 5 || !Number.isSafeInteger(state.firstKeptIndex)
     || state.firstKeptIndex < 1 || state.firstKeptIndex >= messages.length
     || messages[state.firstKeptIndex].role === 'tool') return;
   const before = messages[state.firstKeptIndex - 1];
   if (before.role === 'assistant' && Array.isArray(before.content) && before.content.some(part => part.type === 'tool-call')) return;
-  const refresh = state.version === 5 ? state.contextRefreshIndex : messages.length;
-  if (refresh === undefined || !Number.isSafeInteger(refresh) || refresh < state.firstKeptIndex || refresh > messages.length
+  const refresh = state.contextRefreshIndex;
+  if (!Number.isSafeInteger(refresh) || refresh < state.firstKeptIndex || refresh > messages.length
     || messages[refresh]?.role === 'tool') return;
   const beforeRefresh = messages[refresh - 1];
   if (beforeRefresh?.role === 'assistant' && Array.isArray(beforeRefresh.content)
@@ -151,7 +151,7 @@ function restoreProjection(value: unknown, messages: readonly ModelMessage[]): P
     || (memory.last_user_goal !== null && typeof memory.last_user_goal !== 'string')
     || !Array.isArray(state.markers) || state.markers.some(marker => typeof marker !== 'string' || !/^\[S\d+\]$/.test(marker))) return;
   const anchor = state.anchor;
-  const validAnchor = state.version === 5 && anchor && Number.isSafeInteger(anchor.requestLength) && anchor.requestLength <= messages.length
+  const validAnchor = anchor && Number.isSafeInteger(anchor.requestLength) && anchor.requestLength <= messages.length
     && anchor.requestLength >= refresh && Number.isFinite(anchor.inputTokens) && anchor.inputTokens > 0
     && Number.isFinite(anchor.estimatedInputTokens) && anchor.estimatedInputTokens > 0;
   return { version: 5, firstKeptIndex: state.firstKeptIndex,

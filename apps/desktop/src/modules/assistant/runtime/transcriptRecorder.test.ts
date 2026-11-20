@@ -25,21 +25,23 @@ describe('per-run transcript recording', () => {
       status: 'running', updatedAt: '', payload: {} };
     const sources = new Map([[1, { entry_id: 'entry', entry_title: 'Paper', segment_uid: 's', page_idx: 0, quote: 'New evidence' }]]);
     const execution = new DurableExecution('fixture', record, new RunBudget());
-    const first = createTranscriptRecorder({ execution, model, initialMessageCount: 2, sources, firstNewMarker: 1 });
+    const first = createTranscriptRecorder({ execution, model, initialMessageCount: 2, inputMessages: initial.slice(1), sources, firstNewMarker: 1 });
     const messages: ModelMessage[] = [...initial, { role: 'assistant', content: 'Result' }];
     execution.set('actor:main', { messages, turns: 1 });
     const restored = new DurableExecution('fixture', JSON.parse(JSON.stringify(record)), new RunBudget());
-    const next = createTranscriptRecorder({ execution: restored, model, initialMessageCount: 999, sources, firstNewMarker: 1 });
+    const next = createTranscriptRecorder({ execution: restored, model, initialMessageCount: 999,
+      inputMessages: [{ role: 'user', content: 'LATER_REQUEST_MUST_NOT_REPLACE_FROZEN_INPUT' }], sources, firstNewMarker: 1 });
     expect(next.startIndex).toBe(first.startIndex);
     await next.save({ messages, turns: 1 });
     expect(next.current?.runId).toBe('execution-test');
     expect(next.current?.messages).toEqual([{ role: 'assistant', content: 'Result' }]);
+    expect(next.current?.inputMessages).toEqual(initial.slice(1));
     expect(JSON.stringify(next.current)).not.toContain('OLD_HISTORY');
   });
 
   it('keeps draft callbacks unverified until final delivery and does not duplicate unchanged writes', async () => {
     const onTranscript = vi.fn();
-    const recorder = createTranscriptRecorder({ model, initialMessageCount: 2, sources: new Map(), firstNewMarker: 1, onTranscript });
+    const recorder = createTranscriptRecorder({ model, initialMessageCount: 2, inputMessages: initial.slice(1), sources: new Map(), firstNewMarker: 1, onTranscript });
     const checkpoint = { messages: [...initial, { role: 'assistant' as const, content: 'Answer' }], turns: 1, answer: 'Answer' };
     await recorder.save(checkpoint);
     await recorder.save({ ...checkpoint, turns: 2 });
@@ -54,7 +56,7 @@ describe('per-run transcript recording', () => {
     const old = { entry_id: 'entry', entry_title: 'Paper', segment_uid: 's0', page_idx: 0, quote: 'Old' };
     const fresh = { ...old, segment_uid: 's1', quote: 'Fresh' };
     const sources = new Map([[1, old], [2, fresh]]);
-    const recorder = createTranscriptRecorder({ model, initialMessageCount: 2, sources, firstNewMarker: 2 });
+    const recorder = createTranscriptRecorder({ model, initialMessageCount: 2, inputMessages: initial.slice(1), sources, firstNewMarker: 2 });
     const messages: ModelMessage[] = [...initial, { role: 'assistant', content: 'Read [S2]' }];
     await recorder.save({ messages, turns: 1 });
     fresh.quote = 'late change';
@@ -66,7 +68,7 @@ describe('per-run transcript recording', () => {
   it('refuses a corrupt saved start rather than including or dropping unrelated history', () => {
     const record: AgentExecutionRecord = { id: 'execution-test', conversationId: 'conv', revision: 0,
       status: 'running', updatedAt: '', payload: { 'transcriptStart:main': -1 } };
-    expect(() => createTranscriptRecorder({ model, initialMessageCount: 2, sources: new Map(), firstNewMarker: 1,
+    expect(() => createTranscriptRecorder({ model, initialMessageCount: 2, inputMessages: initial.slice(1), sources: new Map(), firstNewMarker: 1,
       execution: new DurableExecution('fixture', record, new RunBudget()) })).toThrow('上下文起点无效');
   });
 });
