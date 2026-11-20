@@ -8,7 +8,7 @@
 
 打开左侧搜索并输入 attention，选择 Hybrid 或 Keyword。结果同时标明字段、条目、PDF 片段与页面，点击前先看出处；上方可检查模型和索引状态。
 
-![Neuink 实机截图：1. 输入术语并检查结果类型](../public/screenshots/search-results.png)
+![较早版本示例：Neuink 实机截图：1. 输入术语并检查结果类型](../public/screenshots/search-results.png)
 
 ## 三种搜索模式
 

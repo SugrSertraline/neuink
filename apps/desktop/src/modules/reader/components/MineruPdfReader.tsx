@@ -1,3 +1,4 @@
+import { ReaderLoading } from './pdf-reader/ReaderLoading';
 import { workspaceStorageIdentity } from '@/shared/lib/workspaceStorageIdentity';
 import { PaperReferencesProvider } from './navigation/PaperReferences';
 import type { ComponentProps } from 'react';
@@ -7,7 +8,6 @@ import { usePdfReadingNavigation } from './navigation/usePdfReadingNavigation';
 import { readingAssistantContext } from './readingAssistantContext';
 import { buildSegmentNoteLookup } from './pdf-reader/segmentNoteLookup';
 import { useReadingSession } from '../parallel-reading/ReadingSessionContext';
-import { Loader2 } from "lucide-react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -1013,11 +1013,7 @@ function MineruPdfReaderBody({
 
   if (loadState.status === "loading" || loadState.status === "idle") {
     return (
-      <ReaderMessage
-        icon={<Loader2 className="animate-spin" size={22} aria-hidden="true" />}
-        title="正在加载 PDF"
-        description="正在加载本地 PDF、MinerU 原文片段和片段笔记。"
-      />
+      <ReaderLoading />
     );
   }
 

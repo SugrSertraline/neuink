@@ -219,7 +219,6 @@ export function LibrarySidebar({
             aria-label={isEntrySourceHidden(selectedEntry.sourceInfo) ? '恢复显示当前来源论文' : '从条目库隐藏当前来源论文'}>
             {hiddenActionEntryId === selectedEntry.id ? '正在保存…' : isEntrySourceHidden(selectedEntry.sourceInfo) ? '恢复显示' : '隐藏'}
           </Button> : null}
-          {(zoteroEnabled || mineruEnabled) && entryExplorerOpen ? <Button size="icon-sm" variant="ghost" aria-label={`查看已隐藏论文 ${hiddenSourceCount}`} title="查看已隐藏的来源论文" onClick={() => onSelectView('hidden')}><EyeOff size={15} aria-hidden="true" /></Button> : null}
         </div>
         {!entryExplorerOpen ? (
           <div className="flex items-center gap-1">

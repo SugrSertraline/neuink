@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { createElement, type ReactNode } from 'react';
+import { ToastContext } from '@/shared/hooks/useToast';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { SourceSegment } from '@/shared/types/domain';
@@ -96,4 +98,14 @@ it('keeps full document context available when the user selects a single paragra
   await waitFor(() => expect(result.current.loadState).toBe('ready'));
   act(() => { result.current.start([segment]); });
   expect(mocked.start).toHaveBeenCalledWith('root', 'paper', 'Paper', [segment], { force: false, documentSegments: document });
+});
+
+it('notifies the user when generation fails', async () => {
+  const notify = vi.fn(() => 'toast');
+  mocked.start.mockRejectedValueOnce(new FoldGenerationError('save'));
+  const wrapper = ({ children }: { children: ReactNode }) => createElement(ToastContext.Provider, { value: { notify, dismiss: vi.fn() } }, children);
+  const { result } = renderHook(() => useFoldReader('root', 'paper', 'Paper', [segment], true, false, true), { wrapper });
+  await waitFor(() => expect(result.current.loadState).toBe('ready'));
+  act(() => { result.current.start(); });
+  await waitFor(() => expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: '阅读详略生成失败', tone: 'danger', description: expect.stringContaining('保存失败') })));
 });

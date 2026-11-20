@@ -84,7 +84,7 @@ test('Tauri dev/build/bundle include licenses; missing licenses cannot silently 
     source: path.join(root, 'missing-onboarding'), modelSource,
     manifestPath: path.join(root, 'onboarding-availability.json'),
     config: { bundle: { resources: ['resources/embedding-models/default/**/*'] } },
-    browserReader: { platform: 'darwin' }, log: () => {},
+    browserReader: { platform: 'darwin' }, research: { platform: 'darwin' }, log: () => {},
   };
   for (const command of ['dev', 'build', 'bundle']) {
     const args = allResourceArguments([command, '--', '--locked'], options);

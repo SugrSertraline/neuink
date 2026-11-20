@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const BUCKET = 'sugrsertraline';
 const REGION = 'z2';
 const DOMAIN = 'https://cdn.sugrsertraline.top';
+const RELEASE_PREFIX = 'neuink/releases';
 
 function publicUrl(key) {
   if (!/^[A-Za-z0-9._/-]+$/.test(key) || key.split('/').some(part => !part || part === '.' || part === '..')) throw new Error('Invalid publication key');
@@ -55,12 +56,12 @@ function createStorage(env = process.env) {
     },
     async expireTransferObject(key) {
       publicUrl(key);
-      if (!key.startsWith('releases/_transfers/')) throw new Error('Only transfer staging objects may expire');
+      if (!key.startsWith(`${RELEASE_PREFIX}/_transfers/`)) throw new Error('Only transfer staging objects may expire');
       await sdkResult(manager.deleteAfterDays(BUCKET, key, 1), `Expire transfer ${key}`, true);
     },
     async expireCheckObject(key) {
       publicUrl(key);
-      if (!key.startsWith('releases/_checks/') || !key.endsWith('.txt')) throw new Error('Only connection-check objects may expire');
+      if (!key.startsWith(`${RELEASE_PREFIX}/_checks/`) || !key.endsWith('.txt')) throw new Error('Only connection-check objects may expire');
       await sdkResult(manager.deleteAfterDays(BUCKET, key, 1), `Expire connection check ${key}`);
     },
     async refresh(keys) {
@@ -134,7 +135,7 @@ async function fetchChecked(storage, key, file) {
   const before = await storage.stat(key);
   if (sameObject(before, file)) return;
   if (before) throw new Error(`Published version already contains different bytes: ${key}`);
-  const temporary = `releases/_transfers/${crypto.randomUUID()}/${file.name}`;
+  const temporary = `${RELEASE_PREFIX}/_transfers/${crypto.randomUUID()}/${file.name}`;
   try {
     await storage.fetchRelease(url.href, temporary);
     if (!sameObject(await storage.stat(temporary), file)) throw new Error(`Fetched file verification failed: ${file.name}`);
@@ -147,4 +148,4 @@ async function fetchChecked(storage, key, file) {
   }
 }
 
-module.exports = { BUCKET, REGION, DOMAIN, createStorage, publicUrl, sameObject, verifyPublic, uploadChecked, copyChecked, fetchChecked };
+module.exports = { BUCKET, REGION, DOMAIN, RELEASE_PREFIX, createStorage, publicUrl, sameObject, verifyPublic, uploadChecked, copyChecked, fetchChecked };

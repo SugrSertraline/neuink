@@ -135,33 +135,23 @@ describe('settings information architecture and navigation', () => {
     expect(screen.getByRole('switch', { name: '选中文字后自动翻译' })).toBeTruthy();
   });
 
-  it('defaults to the client import tab, keeps service settings separate, and opens the illustrated guide', async () => {
+  it('shows parsing options and client import instructions without changing the selected service', async () => {
     render(<Harness target={{ id: 'parser-zip', nonce: 1 }} />);
     const tutorial = await screen.findByRole('button', { name: '查看客户端导入图文教程' });
-    expect(screen.getByRole('tab', { name: 'MinerU 客户端（推荐）' }).getAttribute('aria-selected')).toBe('true');
-    expect(screen.queryByRole('textbox', { name: 'MinerU URL' })).toBeNull();
-    fireEvent.mouseDown(screen.getByRole('tab', { name: '自建 MinerU 服务' }), { button: 0 });
-    expect(screen.getByRole('textbox', { name: 'MinerU URL' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: '查看客户端导入图文教程' })).toBeNull();
-    fireEvent.mouseDown(screen.getByRole('tab', { name: 'MinerU 客户端（推荐）' }), { button: 0 });
+    expect(screen.getByRole('radio', { name: '账号解析服务' })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: '自建 MinerU 服务' })).toBeTruthy();
     fireEvent.click(tutorial);
     expect(openMineruClientGuide).toHaveBeenCalledOnce();
   });
-  it('reveals the service tab before focusing search and tutorial navigation targets', async () => {
+  it('focuses service, client import, and shared auto-parse search targets', async () => {
     const view = render(<Harness target={{ id: 'parser-service', nonce: 1 }} />);
     const endpoint = await screen.findByRole('textbox', { name: 'MinerU URL' });
     await waitFor(() => expect(document.activeElement).toBe(endpoint));
-    expect(screen.getByRole('tab', { name: '自建 MinerU 服务' }).getAttribute('aria-selected')).toBe('true');
-    fireEvent.mouseDown(screen.getByRole('tab', { name: 'MinerU 客户端（推荐）' }), { button: 0 });
-    view.rerender(<Harness target={{ id: 'parser-service', nonce: 2 }} />);
-    await waitFor(() => expect(document.activeElement).toBe(endpoint));
-    expect(screen.getByRole('tab', { name: '自建 MinerU 服务' }).getAttribute('aria-selected')).toBe('true');
     view.rerender(<Harness target={{ id: 'parser-zip', nonce: 3 }} />);
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: '查看客户端导入图文教程' })));
     fireEvent.change(screen.getByRole('textbox', { name: '搜索设置' }), { target: { value: '导入 PDF 后自动解析' } });
     fireEvent.click(screen.getByRole('button', { name: /导入 PDF 后自动解析/ }));
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('switch', { name: '导入 PDF 后自动解析' })));
-    expect(screen.getByRole('tab', { name: '自建 MinerU 服务' }).getAttribute('aria-selected')).toBe('true');
+    await waitFor(() => expect(document.activeElement).toBe(view.container.querySelector('[data-setting-id="parser-auto"] [role="switch"]')));
   });
   it('opens new configurations without focusing inputs or opening suggestions, including after reopening', async () => {
     render(<Harness target={{ id: 'models-connections', nonce: 1 }} />);
@@ -189,7 +179,7 @@ describe('settings information architecture and navigation', () => {
     await screen.findByRole('button', { name: '编辑' });
     const page = screen.getByRole('heading', { level: 2, name: '模型与助手' }).closest('.settings-form')!;
     expect(page).toBeTruthy();
-    expect(within(page as HTMLElement).getAllByRole('heading', { level: 3 }).map(heading => heading.textContent)).toEqual(['默认模型', '模型连接']);
+    expect(within(page as HTMLElement).getAllByRole('heading', { level: 3 }).map(heading => heading.textContent)).toEqual(['默认模型', '自定义大模型配置', '本地 Agent', '诊断']);
     expect(screen.queryByRole('heading', { name: '模型高级参数' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '设置选中文字与整体翻译 →' }));
     expect(await screen.findByRole('combobox', { name: '默认翻译来源' })).toBeTruthy();
@@ -199,7 +189,7 @@ describe('settings information architecture and navigation', () => {
     expect(wholeGroup.contains(screen.getByRole('switch', { name: '解析后自动翻译 PDF' }))).toBe(true);
     const behaviors = screen.getByRole('heading', { name: '翻译行为' });
     const configuration = screen.getByRole('heading', { name: '翻译模型与服务' });
-    expect(configuration.compareDocumentPosition(behaviors) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(behaviors.compareDocumentPosition(configuration) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     view.rerender(<Harness target={{ id: 'tools-services', nonce: 2 }} />);
     const service = view.container.querySelector<HTMLElement>('[data-setting-id="tools-services"]')!;
     await waitFor(() => expect(service.contains(document.activeElement) || service === document.activeElement).toBe(true));
@@ -276,7 +266,7 @@ describe('settings information architecture and navigation', () => {
       expect(container.querySelector(`[data-setting-id="${id}"]`)).toBeNull();
     }
     rerender(<Harness target={{ id: 'agent-main', nonce: 2 }} />);
-    expect(screen.getByRole('heading', { name: '模型连接' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '自定义大模型配置' })).toBeTruthy();
     expect(mocks.loadAgentRuntimeSettings).not.toHaveBeenCalled();
     expect(mocks.saveAgentRuntimeSettings).not.toHaveBeenCalled();
   });
@@ -400,4 +390,17 @@ describe('settings information architecture and navigation', () => {
     expect(vi.mocked(loadPublicModelCatalog).mock.calls[0][0]?.aborted).toBe(true);
     expect(mocks.saveLlmSettings).not.toHaveBeenCalled();
   });
+});
+
+it('merges storage into account and opens reset only through the full command result', async () => {
+  const { ADMIN_PASSWORD_RESET_COMMAND } = await import('../settingsCatalog');
+  render(<Harness />);
+  expect(screen.queryByRole('button', { name: '资料与存储' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '账户与存储' }));
+  expect(screen.getByText('本机资料与存储')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '使用管理员重置凭据' })).toBeNull();
+  fireEvent.change(screen.getByRole('textbox', { name: '搜索设置' }), { target: { value: ADMIN_PASSWORD_RESET_COMMAND } });
+  expect(screen.queryByRole('dialog', { name: '重置当前管理员密码' })).toBeNull();
+  fireEvent.click(await screen.findByRole('button', { name: /重置当前管理员密码/ }));
+  expect(await screen.findByRole('dialog', { name: '重置当前管理员密码' })).toBeTruthy();
 });

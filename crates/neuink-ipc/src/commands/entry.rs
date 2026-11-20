@@ -98,6 +98,8 @@ pub struct EntryDeletionImpact {
     pub note_count: usize,
     pub annotation_count: usize,
     pub incoming_source_link_count: usize,
+    pub ideation_card_count: usize,
+    pub ideation_link_count: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -415,6 +417,21 @@ pub fn list_trashed_entries(request: ListTrashedEntriesRequest) -> Result<Vec<En
         .map_err(|error| error.to_string())
 }
 
+#[derive(Debug, Deserialize)]
+pub struct UpdateEntryFieldRequest {
+    pub root: PathBuf,
+    pub entry_id: EntryId,
+    pub definition: neuink_workspace::field_definitions::FieldDefinition,
+    pub expected: Option<String>,
+    pub value: Option<String>,
+}
+
+#[tauri::command]
+pub fn update_entry_field(request: UpdateEntryFieldRequest) -> Result<EntryMeta, String> {
+    let workspace = neuink_workspace::Workspace::open_existing(request.root).map_err(|error| error.to_string())?;
+    workspace.update_entry_field(&request.entry_id, &request.definition, request.expected.as_deref(), request.value.as_deref()).map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 pub fn update_entry_meta(request: UpdateEntryMetaRequest) -> Result<EntryMeta, String> {
     let workspace =
@@ -562,6 +579,7 @@ pub fn get_entry_deletion_impact(
         }
     }
 
+    let ideation = workspace.read_ideation().map_err(|error| error.to_string())?;
     Ok(EntryDeletionImpact {
         has_pdf: entry.pdf.is_some(),
         parsed_block_count: workspace
@@ -578,6 +596,8 @@ pub fn get_entry_deletion_impact(
             .map_err(|error| error.to_string())?
             .len(),
         incoming_source_link_count,
+        ideation_card_count: ideation.state.cards.iter().filter(|card| card.entry_id == request.entry_id.as_str()).count(),
+        ideation_link_count: ideation.state.links.iter().filter(|link| link.entry_id.as_deref() == Some(request.entry_id.as_str())).count(),
     })
 }
 
@@ -1493,6 +1513,13 @@ pub async fn refresh_parse_status<R: Runtime>(
         .ok_or_else(|| "selected entry has no PDF".to_string())?
         .parse
         .clone();
+    if parse.endpoint.as_deref().is_some_and(|endpoint| endpoint.starts_with("neuink-account:")) {
+        let result = super::cloud_account::cloud_account(app.clone(), super::cloud_account::Request::ParseTaskRefresh {
+            root: request.root.clone(), entry_id: request.entry_id.clone(),
+        }).await?;
+        let entry: EntryMeta = serde_json::from_value(result).map_err(|_| "无法读取解析结果")?;
+        return Ok(RefreshParseStatusResponse { entry, segment_count: None });
+    }
     let task_id = parse
         .task_id
         .clone()

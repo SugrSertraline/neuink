@@ -1,5 +1,6 @@
 pub mod annotation;
 pub mod entry;
+pub mod entry_fields;
 pub mod error;
 pub mod ids;
 pub mod list_item;

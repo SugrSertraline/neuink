@@ -20,6 +20,13 @@ export function useRecoveryCenter(root: string | null, onOpen: (draft: EditRecov
   const state = root && recoveryAvailable() ? recoveryState(root) : null;
   const drafts = state ? [...state.drafts.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) : [];
   const current = drafts.find(item => item.key === selected) ?? drafts[0];
+  useEffect(() => {
+    if (!root || !state?.loaded) return;
+    const obsolete = [...state.drafts.values()].filter(item => item.kind === 'entry' && (item.targetId === 'field-definitions' || item.targetId === 'metadata'));
+    if (!obsolete.length) return;
+    for (const item of obsolete) forgetEditRecovery(root, item.key);
+    void flushEditRecovery(root).catch(() => {});
+  }, [root, state?.loaded, editRecoveryVersion()]);
   const show = () => { if (noticeId.current) dismiss(noticeId.current); setOpen(true); };
   useEffect(() => {
     setOpen(false); setConfirm(null); setSelected(null);
@@ -41,8 +48,11 @@ export function useRecoveryCenter(root: string | null, onOpen: (draft: EditRecov
     finally { setBusy(false); }
   };
   const preview = current ? String(current.payload.markdown ?? current.payload.text ?? current.payload.content ?? JSON.stringify(current.payload.value ?? current.payload, null, 2)) : '';
-  const button = drafts.length || state?.error || state?.unreadable ? <Button variant="ghost" size="sm" onClick={show}>
-    本地草稿 {drafts.length || ''}</Button> : null;
+  // Checkpoints for an editor that is still open are not recovery candidates.
+  // Showing them here makes the title bar jump on every autosaved change.
+  const restorableCount = state?.restorable.size ?? 0;
+  const button = restorableCount || state?.error || state?.unreadable ? <Button variant="ghost" size="sm" onClick={show}>
+    本地草稿 {restorableCount || ''}</Button> : null;
   const dialog = <Dialog open={open} onOpenChange={value => { if (!busy) setOpen(value); }}>
     <DialogContent layout="bounded" className="h-auto max-h-[calc(100%-2rem)]" showCloseButton={!busy}>
       <DialogHeader><DialogTitle>本地恢复草稿</DialogTitle><DialogDescription>查看备份内容和记录时间，打开对应页面后恢复并保存。系统强制结束时，可恢复到最近一次成功写入的备份。</DialogDescription></DialogHeader>

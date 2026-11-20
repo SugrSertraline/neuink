@@ -1,3 +1,7 @@
+import { useParserSource } from './useParserSource';
+import { getLibraryViewTitle } from '@/modules/library/utils/libraryView';
+import { useCloudSync } from './useCloudSync';
+import { sameWorkspacePath } from '@/shared/lib/workspacePath';
 import { SidebarBoundaryControl } from './SidebarBoundaryControl';
 import { useLibrarySourceSync } from '@/modules/import/useLibrarySourceSync';
 import { LibrarySourceReviewDialog } from '@/modules/import/LibrarySourceReviewDialog';
@@ -188,9 +192,7 @@ type PendingMarkdownNoteDelete = {
 
 import {
   ACTIVE_PARSE_STATUSES,
-  DEFAULT_MINERU_ENDPOINT,
   EMPTY_SIDE_PANE,
-  LEGACY_MINERU_ENDPOINTS,
   LIBRARY_VIEW_STORAGE_KEY,
   PARSER_API_KEY_STORAGE_KEY,
   PARSER_ENDPOINT_STORAGE_KEY,
@@ -250,18 +252,10 @@ async function localizeSciverseRemoteImages({
     (await saveSciverseNoteImage({ entryId, noteId, root, reference })).markdown_path);
 }
 
-function isHttpEndpoint(value: string) {
-  try {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
 export function App() {
   const duplicateReview = usePdfDuplicateReview();
   const workspace = useWorkspace(duplicateReview.confirm);
+  useCloudSync(workspace.root, workspace.status === 'ready', root => openSyncIssues(root));
   const librarySourceSync = useLibrarySourceSync(workspace.root, workspace.status === 'ready', workspace.refreshEntries);
   const librarySourceCatalog = useLibrarySourceCatalog(workspace.root, workspace.entries);
   const [hiddenActionEntryId, setHiddenActionEntryId] = useState<string | null>(null);
@@ -287,16 +281,7 @@ export function App() {
     new Map<string, Promise<SciverseLibraryImportResult>>()
   );
   const [sciverseBackgroundJobs, setSciverseBackgroundJobs] = useState<Job[]>([]);
-  const [mineruEndpoint, setMineruEndpoint] = useState(() => {
-    if (typeof window === 'undefined') {
-      return DEFAULT_MINERU_ENDPOINT;
-    }
-    const saved = window.localStorage.getItem(PARSER_ENDPOINT_STORAGE_KEY)?.trim();
-    if (!saved || LEGACY_MINERU_ENDPOINTS.has(saved) || !isHttpEndpoint(saved)) {
-      return DEFAULT_MINERU_ENDPOINT;
-    }
-    return saved;
-  });
+  const [mineruEndpoint, setMineruEndpoint] = useParserSource();
   const [parserApiKey, setParserApiKey] = useState(() => {
     if (typeof window === 'undefined') {
       return '';
@@ -746,6 +731,13 @@ export function App() {
   const settingsNavigationNonce = useRef(0);
   const openSetting = (id: string) => {
     dispatchSurface({ type: 'open', surface: { kind: 'settings', target: { id, nonce: ++settingsNavigationNonce.current } } });
+  };
+  const openSyncIssues = (root: string) => {
+    if (!workspace.root || !sameWorkspacePath(root, workspace.root)) {
+      notify({ title: '请先切换到对应资料库', description: '这条同步记录属于其他资料库，未自动切换当前资料。' });
+      return;
+    }
+    openSetting('data-cloud-sync');
   };
   const pdfParseAction: PdfParseAction = {
     configured: Boolean(mineruEndpoint.trim()),
@@ -1267,6 +1259,7 @@ export function App() {
         const parserEndpoint = getEffectiveParserEndpoint(mineruEndpoint);
         const fields = Object.fromEntries(
           Object.entries({
+            ...preparation.additional_fields,
             description: preparation.abstract ?? source.abstract ?? source.quote,
             来源平台: 'Sciverse',
             'PDF 来源': preparation.pdf_source_url,
@@ -1278,7 +1271,7 @@ export function App() {
               : source.authors?.join('; '),
             发表年份:
               preparation.publication_year?.toString() ?? source.publication_year?.toString(),
-            发表载体: preparation.venue ?? source.venue,
+            '期刊／会议名称': preparation.venue ?? source.venue,
             开放获取链接: preparation.access_oa_url ?? source.access_oa_url,
             开放获取许可: preparation.access_license ?? source.access_license
           }).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].trim().length > 0)
@@ -1959,6 +1952,7 @@ export function App() {
         style={shellStyle}
       >
         <WorkspaceTabsBar
+          libraryNavigation={{ view: libraryView, title: activeTag ? (workspace.tags.find(tag => tag.id === activeTag)?.name ?? getLibraryViewTitle(libraryView)) : getLibraryViewTitle(libraryView), onSwitch: selectLibraryView }}
           readingLinkMode={readerPreferences.readingLinkMode}
           onReadingLinkModeChange={(readingLinkMode) => updateReaderPreferences({ ...readerPreferences, readingLinkMode })}
           onNewTab={() => dispatchSurface({ type: 'open', surface: { kind: 'new-tab', id: crypto.randomUUID() } })}
@@ -2405,7 +2399,9 @@ export function App() {
             if (taskId) researchModel.select(taskId);
             setResearchOpenRequest(value => value + 1); showAssistantTasks();
           }} onStopAssistantTask={id => { if (id === RESEARCH_DOCK_ID) void researchModel.command({ kind: 'cancel' }); else assistantTaskDock.stopTask(id); }}
+          onOpenNotification={item => { if (item.navigation?.kind === 'cloud-sync') openSyncIssues(item.navigation.root); }}
           onOpenJob={job => {
+            if (job.id.startsWith('cloud-task:') && job.scope) { openSyncIssues(job.scope.root); return; }
             const scope = job.scope;
             if (scope?.root !== workspace.root || scope.kind !== 'entry') return;
             const entry = workspace.entries.find(item => item.id === scope.entry_id);

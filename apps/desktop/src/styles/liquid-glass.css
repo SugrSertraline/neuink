@@ -11,7 +11,7 @@
 }
 /* One backdrop per navigation group. Child controls transmit that material without blurring it again.
    Keep these owners aligned with materialContainers in useGlassMaterial. */
-:root[data-appearance="liquid-glass"] :is(.titlebar, .app-sidebar, .tabsbar, .statusbar, [data-material="workspace-heading"], [data-material="workspace-toolbar"], [data-material="reader-toolbar"], [data-material="reader-popover"], [data-slot="dialog-content"], [data-slot="popover-content"], [data-slot="hover-card-content"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="context-menu-content"], [data-slot="context-menu-sub-content"], [data-slot="select-content"], .reflow-toolbar > .entry-content-header, .reflow-toolbar > [data-reader-compact-toolbar]) {
+:root[data-appearance="liquid-glass"] :is(.titlebar, .app-sidebar, .tabsbar, .statusbar, [data-material="workspace-heading"], [data-material="workspace-toolbar"], [data-material="reader-toolbar"], [data-material="reader-popover"], [data-slot="dialog-content"], [data-slot="popover-content"], [data-slot="hover-card-content"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="context-menu-content"], [data-slot="context-menu-sub-content"], [data-slot="menubar-content"], [data-slot="menubar-sub-content"], [data-slot="select-content"], .reflow-toolbar > .entry-content-header, .reflow-toolbar > [data-reader-compact-toolbar]) {
   --glass-control-filter: none;
   --muted-foreground: var(--glass-muted-foreground);
 }
@@ -81,7 +81,7 @@
 /* Reflective edges follow the pointer without moving hit targets or replacing component children. */
 :root[data-appearance="liquid-glass"] [data-glass-positioned] { position: relative; }
 :root[data-appearance="liquid-glass"] :is([data-ui="button"], [data-ui="toggle"], [data-ui="toggle-group-item"], [data-slot="tabs-trigger"], [data-slot="select-trigger"], [data-slot="switch"], .title-search, .activitybar button, .workspace-surface-tab)[data-glass-light="active"]::after,
-:root[data-appearance="liquid-glass"] :is([data-slot="dialog-content"], [data-slot="popover-content"], [data-slot="hover-card-content"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="context-menu-content"], [data-slot="context-menu-sub-content"], [data-slot="select-content"], [data-material="reader-toolbar"], [data-material="reader-popover"])::after {
+:root[data-appearance="liquid-glass"] :is([data-slot="dialog-content"], [data-slot="popover-content"], [data-slot="hover-card-content"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="context-menu-content"], [data-slot="context-menu-sub-content"], [data-slot="menubar-content"], [data-slot="menubar-sub-content"], [data-slot="select-content"], [data-material="reader-toolbar"], [data-material="reader-popover"])::after {
   content: ''; position: absolute; inset: 0; padding: 1px; border-radius: inherit; pointer-events: none;
   background: conic-gradient(from var(--glass-light-angle, 135deg), var(--glass-prism-colors)); opacity: .5;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
@@ -98,14 +98,21 @@
 :root[data-appearance="liquid-glass"] [data-slot="dialog-overlay"] {
   background: var(--glass-overlay); -webkit-backdrop-filter: none; backdrop-filter: none;
 }
-:root[data-appearance="liquid-glass"] :is([data-slot="dialog-content"], [data-slot="popover-content"], [data-slot="hover-card-content"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="context-menu-content"], [data-slot="context-menu-sub-content"], [data-slot="select-content"]) {
+:root[data-appearance="liquid-glass"] :is([data-slot="dialog-content"], [data-slot="popover-content"], [data-slot="hover-card-content"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="context-menu-content"], [data-slot="context-menu-sub-content"], [data-slot="menubar-content"], [data-slot="menubar-sub-content"], [data-slot="select-content"]) {
   background: var(--glass-face), var(--glass-popup); border-color: var(--glass-edge);
   border-radius: var(--glass-panel-radius);
   -webkit-backdrop-filter: var(--glass-popup-filter) var(--glass-lens, blur(0px)); backdrop-filter: var(--glass-popup-filter) var(--glass-lens, blur(0px));
   box-shadow: var(--glass-popup-shadow);
   animation-duration: var(--glass-motion); animation-timing-function: var(--glass-ease);
 }
-:root[data-appearance="liquid-glass"] :is([data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="context-menu-content"], [data-slot="context-menu-sub-content"], [data-slot="select-content"]) { padding: 6px; border-radius: calc(var(--glass-panel-radius) - 6px); }
+:root[data-appearance="liquid-glass"] :is([data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="context-menu-content"], [data-slot="context-menu-sub-content"], [data-slot="menubar-content"], [data-slot="menubar-sub-content"], [data-slot="select-content"]) { padding: 6px; border-radius: calc(var(--glass-panel-radius) - 6px); }
+@media (forced-colors: active) {
+  :root[data-appearance="liquid-glass"] :is([data-slot="dialog-content"], [data-slot="popover-content"], [data-slot="hover-card-content"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="context-menu-content"], [data-slot="context-menu-sub-content"], [data-slot="menubar-content"], [data-slot="menubar-sub-content"], [data-slot="select-content"]) {
+    background: Canvas; color: CanvasText; border: 1px solid CanvasText;
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
+  :root[data-appearance="liquid-glass"] :is([data-slot="dialog-content"], [data-slot="popover-content"], [data-slot="hover-card-content"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="context-menu-content"], [data-slot="context-menu-sub-content"], [data-slot="menubar-content"], [data-slot="menubar-sub-content"], [data-slot="select-content"])::after { display: none; }
+}
 :root[data-appearance="liquid-glass"] [data-slot="dialog-content"] [data-slot="command"] { background: transparent; }
 :root[data-appearance="liquid-glass"] [data-slot="tooltip-content"] { background: var(--foreground); color: var(--card); }
 :root[data-appearance="liquid-glass"] :is(.workspace-pane, .entry-overview, .entry-library-table-shell, .markdown-note-scroll) { background: var(--card); }

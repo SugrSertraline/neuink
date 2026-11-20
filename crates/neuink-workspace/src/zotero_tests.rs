@@ -174,7 +174,7 @@ fn imports_complete_entry_and_repeated_import_preserves_user_edits() {
     assert_eq!(first.status, "imported");
     let entry = ws.read_entry(&first.entry_id).unwrap();
     assert_eq!(entry.pdf.as_ref().unwrap().file_name, "论文.pdf");
-    assert_eq!(entry.fields["doi"], "10.1/test");
+    assert_eq!(entry.fields["DOI"], "10.1/test");
     assert!(ws.list_tags().unwrap().is_empty());
     assert!(entry.tags.is_empty());
     assert_eq!(ws.zotero_sources(&entry.id).unwrap()[0].tags, ["literal/slash"]);

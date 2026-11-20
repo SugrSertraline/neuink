@@ -4,6 +4,7 @@ mod prepare;
 mod preview;
 pub mod reading;
 mod resources;
+pub(crate) use resources::{html_fragment, image_references};
 mod structure;
 #[cfg(test)]
 mod tests;

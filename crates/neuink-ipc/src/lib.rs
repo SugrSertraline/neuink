@@ -9,6 +9,8 @@ pub fn initialize_arxiv_gate<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     let handler: Box<dyn Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync> =
         Box::new(tauri::generate_handler![
+            commands::cloud_account::cloud_account,
+            commands::field_definitions::field_definitions,
             commands::zotero::zotero,
             commands::mineru::mineru,
             commands::import_preview::read_import_preview,
@@ -115,6 +117,7 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
             commands::entry::submit_queued_pdf_parse,
             commands::entry::update_note,
             commands::entry::update_entry_meta,
+            commands::entry::update_entry_field,
             commands::entry::apply_entry_tag_paths,
             commands::annotation::list_annotations,
             commands::annotation::create_annotation,

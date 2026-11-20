@@ -53,8 +53,8 @@ export function indexLibraryPapers(entries: readonly PaperLibraryEntry[]) {
   };
   for (const entry of entries) {
     const fields = entry.fields;
-    const identifiers = identity(fields.research_id ?? '', fields.doi ?? '',
-      ['arxiv_id', 'url', 'source_url', 'pdf_source_url'].map(key => fields[key] ?? ''));
+    const identifiers = identity(fields['检索文献 ID'] ?? fields.research_id ?? '', fields.DOI ?? fields.doi ?? '',
+      ['arxiv_id', 'url', 'source_url', 'pdf_source_url', '来源链接', 'PDF 来源'].map(key => fields[key] ?? ''));
     identities.set(entry.id, identifiers);
     for (const key of new Set(identifiers.keys)) add(byIdentity, key, entry);
     add(byTitle, titleKey(entry.title), entry);

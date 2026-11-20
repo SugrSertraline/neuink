@@ -1,9 +1,10 @@
+import type { FieldDefinition } from '@/shared/ipc/fieldDefinitionsApi';
 import type { EntryReadingState } from '@/shared/types/domain';
 import type { LibraryEntry, LibraryEntryStatus } from '../../library/components/LibrarySidebar';
 import type { EntryLibraryColumnId } from './useEntryLibraryColumnWidths';
 import { getReadingProgress } from './libraryReading';
 
-export type LibraryEntrySortKey = Exclude<EntryLibraryColumnId, 'actions'> | 'created' | 'recent';
+export type LibraryEntrySortKey = Exclude<EntryLibraryColumnId, 'actions' | 'cloud'> | 'created' | 'recent';
 export type LibraryEntrySortDirection = 'asc' | 'desc';
 export type LibraryEntrySort = { by: LibraryEntrySortKey; direction: LibraryEntrySortDirection };
 export type LibraryEntrySourceKinds = Record<string, ('zotero' | 'mineru')[]>;
@@ -14,7 +15,7 @@ const parserOrder: Record<LibraryEntryStatus, number> = {
 };
 
 export function defaultLibrarySortDirection(by: LibraryEntrySortKey): LibraryEntrySortDirection {
-  return ['title', 'source', 'tags', 'file', 'parser'].includes(by) ? 'asc' : 'desc';
+  return by.startsWith('field:') || ['title', 'source', 'tags', 'file', 'parser'].includes(by) ? 'asc' : 'desc';
 }
 
 export function nextLibraryEntrySort(by: LibraryEntrySortKey, current?: LibraryEntrySort): LibraryEntrySort | null {
@@ -36,11 +37,31 @@ export function sortLibraryEntries(
   sort: LibraryEntrySort,
   readingStates: Record<string, EntryReadingState>,
   recentReadingEntryIds: readonly string[],
-  sourceKindsByEntry?: LibraryEntrySourceKinds
+  sourceKindsByEntry?: LibraryEntrySourceKinds,
+  fieldDefinitions: readonly FieldDefinition[] = []
 ) {
   const recentOrder = new Map(recentReadingEntryIds.map((id, index) => [id, -index]));
   const value = (entry: LibraryEntry): string | number | null => {
     const state = readingStates[entry.id];
+    if (sort.by.startsWith('field:')) {
+      try {
+        const encoded = sort.by.slice(6); const separator = encoded.indexOf(':');
+        const name = decodeURIComponent(separator < 0 ? encoded : encoded.slice(separator + 1));
+        const raw = entry.fields[name]?.trim();
+        if (!raw) return null;
+        const kind = fieldDefinitions.find(field => field.name === name)?.kind;
+        if (kind === 'number') {
+          if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(raw)) return null;
+          const number = Number(raw); return Number.isFinite(number) ? number : null;
+        }
+        if (kind === 'date') {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+          const time = Date.parse(`${raw}T00:00:00Z`);
+          return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === raw ? time : null;
+        }
+        return raw;
+      } catch { return null; }
+    }
     switch (sort.by) {
       case 'title': return entry.title.trim() || null;
       case 'source': return libraryEntrySourceLabel(sourceKindsByEntry?.[entry.id] ?? entry.sourceInfo?.kinds);
@@ -53,6 +74,7 @@ export function sortLibraryEntries(
       case 'created': return timestamp(entry.createdAt);
       case 'updated': return timestamp(entry.updatedAt);
       case 'recent': return recentOrder.get(entry.id) ?? null;
+      default: return null;
     }
   };
   // Calculate display values once; keep missing values last in either direction.

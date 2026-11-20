@@ -11,3 +11,8 @@ export function sameWorkspacePath(left: string, right: string): boolean {
   };
   return key(left) === key(right);
 }
+
+/** Display only: preserve native paths for storage and IPC. */
+export function displayWorkspacePath(value: string): string {
+  return value.replace(/^\\\\\?\\UNC\\/i, '\\\\').replace(/^\\\\\?\\/, '');
+}

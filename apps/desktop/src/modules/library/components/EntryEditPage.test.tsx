@@ -4,7 +4,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ToastContext } from '@/shared/hooks/useToast';
 import { hasUnsavedEntrySegmentEditors, hasUnsavedSegmentEditors, saveSegmentEditorsBeforeClose } from '@/modules/reader/components/segmentEditorDirtyRegistry';
 import { EntryEditPage } from './EntryEditPage';
+import { readFieldDefinitions } from '@/shared/ipc/fieldDefinitionsApi';
+import { runResearchTool } from '@/shared/ipc/researchApi';
+vi.mock('@/shared/ipc/researchApi', async importOriginal => ({ ...(await importOriginal<typeof import('@/shared/ipc/researchApi')>()), runResearchTool: vi.fn() }));
 import type { LibraryEntry } from './LibrarySidebar';
+vi.mock('@/shared/ipc/fieldDefinitionsApi', () => ({ readFieldDefinitions: vi.fn(async () => []), saveFieldDefinitions: vi.fn() }));
 
 afterEach(cleanup);
 const entry: LibraryEntry = { id: 'edit-test', title: '原论文', tags: ['研究'], tagIds: [], fields: { 描述: '原描述', DOI: '10.123/example' },
@@ -16,6 +20,23 @@ function page(props: Partial<React.ComponentProps<typeof EntryEditPage>> = {}) {
 }
 
 describe('entry page editing', () => {
+  it('puts verified lookup results into the draft without overwriting and saves only on request', async () => {
+    vi.mocked(readFieldDefinitions).mockResolvedValue([
+      { name: 'DOI', kind: 'text', hidden: false, options: [] },
+      { name: '发表年份', kind: 'date', date_precision: 'year', hidden: false, options: [] },
+    ]);
+    vi.mocked(runResearchTool).mockResolvedValue({ papers: [{ id: 'x', title: '原论文', authors: ['作者'], year: '2024', doi: '10.2222/other', url: 'https://doi.org/10.2222/other', provider: 'crossref', abstract_text: '', evidence_level: 'metadata' }] });
+    const onUpdateEntry = vi.fn().mockResolvedValue(undefined), view = render(page({ onUpdateEntry }));
+    await waitFor(() => expect((view.getByRole('button', { name: '在线查找属性' }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(view.getByRole('button', { name: '在线查找属性' }));
+    fireEvent.click(view.getByRole('button', { name: '查找' }));
+    fireEvent.click(await view.findByRole('button', { name: '填充空白' }));
+    expect(onUpdateEntry).not.toHaveBeenCalled();
+    fireEvent.click(view.getByRole('button', { name: '关闭' }));
+    fireEvent.keyDown(view.getByLabelText('标题'), { key: 's', ctrlKey: true });
+    await waitFor(() => expect(onUpdateEntry).toHaveBeenCalledWith(entry.id, expect.objectContaining({ fields: expect.objectContaining({ DOI: '10.123/example', 发表年份: '2024' }) })));
+    vi.mocked(readFieldDefinitions).mockReset().mockResolvedValue([]); vi.mocked(runResearchTool).mockReset();
+  });
   it('copies source information into the local draft without losing other edits or saving early', async () => {
     const onUpdateEntry = vi.fn().mockResolvedValue(undefined);
     const view = render(page({ onUpdateEntry, entry: { ...entry, sourceInfo: { kinds: ['zotero'], zotero_hidden: false,
@@ -76,6 +97,15 @@ describe('entry page editing', () => {
     fireEvent.click(view.getByRole('button', { name: '保存修改' }));
     expect(view.getByRole('alert').textContent).toContain('已在其他位置更新');
     expect(onUpdateEntry).not.toHaveBeenCalled();
+  });
+
+  it('does not let a single entry change the library attribute definitions and preserves legacy fields', async () => {
+    const onUpdateEntry = vi.fn().mockResolvedValue(undefined); const view = render(page({ onUpdateEntry }));
+    expect(view.queryByRole('button', { name: '添加属性' })).toBeNull();
+    expect(view.queryByRole('button', { name: '属性管理' })).toBeNull();
+    fireEvent.change(view.getByLabelText('标题'), { target: { value: '新标题' } });
+    fireEvent.click(view.getByRole('button', { name: '保存修改' }));
+    await waitFor(() => expect(onUpdateEntry).toHaveBeenCalledWith(entry.id, expect.objectContaining({ fields: expect.objectContaining({ DOI: '10.123/example' }) })));
   });
 
   it('rejects an empty title and unregisters draft safety after unmount', async () => {

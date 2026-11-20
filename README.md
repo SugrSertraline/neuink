@@ -1,440 +1,126 @@
 <p align="center">
-  <img src="apps/desktop/src-tauri/logo_assets/neuink_logo_transparent_1024.png" width="108" alt="Neuink logo">
+  <img src="apps/desktop/src-tauri/logo_assets/neuink_logo_transparent_1024.png" alt="Neuink" width="108">
 </p>
 
 <h1 align="center">Neuink</h1>
-
-## 开发与发布分支
-
-`alpha → beta → main`：最新功能先在 alpha 完成，确认需要保留的功能与数据兼容后交付 beta；beta 验证稳定性和实际使用效果，用户确认后再合入 main。
-
-| 分支 | 职责 |
-| --- | --- |
-| [alpha](https://github.com/SugrSertraline/neuink/tree/alpha) | 最新功能开发与集成；包含研究卡片和构思探索，实验能力仍需验收。 |
-| [beta](https://github.com/SugrSertraline/neuink/tree/beta) | 已确认功能候选的稳定性测试与修复。 |
-| [main](https://github.com/SugrSertraline/neuink/tree/main) | 已批准的正式发布来源；安装包和官网从这里发布。 |
-
-alpha/beta 自动校验不发布安装包，也不自动晋级。交付时核对功能、入口变化、已有数据和已知限制；beta/main 修复及时回流 alpha。具体要求见[工程规范](docs/development/engineering-guidelines.md#分支与交付)，每次交付证据记录在[开发计划](docs/development/dev-plan.md)。
-
-## 从 Zotero 资料库，继续深入阅读
-
-Neuink 是本地优先的文献阅读与证据笔记工作台：接入已有论文，在 PDF／重排视图中阅读和翻译，整理带来源的笔记，再用自己的模型辅助检索与归纳。
-
-**2026-11-07 · beta 已集成以下更新。** 官网正式下载包仍以 [Releases](https://github.com/SugrSertraline/neuink/releases) 为准；本文不会把 beta 源码能力等同于已发布安装包。
-
-| 工作环节 | 当前 beta 能做什么 |
-| --- | --- |
-| 沿用 Zotero | 连接本机数据目录，浏览来源条目、检查变化，按需导入独立本地副本。 |
-| 整理来源笔记 | 选择导入 Zotero 笔记，比较原文与本地修改；只保存本地或明确确认写回。 |
-| 阅读与翻译 | PDF／重排、逐段详略、双语对照；翻译服务和大模型按行为配置。 |
-| 论文卡片 | 在论文阅读内容中手动生成、核对、编辑卡片，保留方法抽象、原文实例和来源。 |
-| 助手长对话 | 上下文占用、手动／自动 compact、跨轮工具结果及按顺序展示的执行过程。 |
-| 查找新论文 | arXiv 结构化检索、候选分页与来源核对，用户确认后才下载导入。 |
-| MinerU 阅读修复 | 导入解析结果时配对原始 PDF；已有条目可校验后替换阅读 PDF，保留解析及阅读成果。 |
-
-### Zotero：从接入到确认写回
-
-1. 在设置中选择 **Zotero 本机数据目录**并启用来源。已有资料可以继续保留在 Zotero 中。
-2. 在条目库浏览来源条目；需要独立管理时选择导入本地副本。普通本地编辑不会自动改写 Zotero。
-3. 选择导入需要的 Zotero 笔记，在 Neuink 中阅读与整理，保留来源关联。
-4. 保存菜单中核对来源原文、本地内容和差异，选择只保存本地，或明确确认替换来源笔记。
-5. 来源版本变化、权限不足或写回失败时，根据提示重新核对；本地保存与 Zotero 写回分别报告结果。
-
-本地保存不要求 Zotero 运行。写回目前要求 **Zotero 10 及以上运行并允许本机访问**；含图片的笔记暂不支持直接写回。关闭来源只隐藏来源内容，不删除原件或独立副本。这是本机接入与受控写回，**不是 Zotero 云同步或完整富文本双向同步**。
-
-[Zotero 完整操作指南](https://sugrsertraline.github.io/neuink/zotero.html) · [beta 更新与使用边界](https://sugrsertraline.github.io/neuink/updates.html)
-
-### 实验功能入口
-
-论文卡片正常显示；研究构思不占用常驻导航。需要试用时，在搜索框输入 `/inspiration` 并回车，按背景、问题和方法步骤组织卡片。推荐需要用户加入，报告确认后才保存到条目；不自动执行实验。旧构思数据保留。
-
-### 已知边界
-
-- MinerU 替换阅读 PDF 有普通失败回滚，但尚无断电／进程崩溃恢复事务；用户已接受该 beta 限制。
-- 生成内容需核对来源；外部模型与检索服务按配置联网。此次合并未完成真实模型和原生桌面视觉验收。
-- 合并版验证：4,182 项前端测试、670 项后端测试通过；部分显式验收测试默认跳过，类型检查与前端生产构建通过。
-
+<p align="center"><strong>让每一次阅读，都留下可追溯的理解。</strong></p>
+<p align="center">翻译、阅读、笔记与 AI，放在同一个本地工作台。</p>
 <p align="center">
-  <strong><a href="https://sugrsertraline.github.io/neuink/">访问 Neuink 官网 · 完整功能介绍 →</a></strong><br>
-  通过实机截图、核心概念和分步教程，了解 Neuink 并开始第一次阅读。<br>
-  <a href="https://sugrsertraline.github.io/neuink/start.html">开始阅读</a> · <a href="https://sugrsertraline.github.io/neuink/screenshots.html">查看实机界面</a> · <a href="https://cdn.sugrsertraline.top/Neuink-windows-x64-portable.zip">下载 Windows 便携版</a>
+  <a href="https://sugrsertraline.github.io/neuink/">官网与使用手册</a> ·
+  <a href="https://cdn.sugrsertraline.top/neuink/releases/current/Neuink-windows-x64-portable.zip">下载 Windows 便携版</a> ·
+  <a href="https://github.com/SugrSertraline/neuink/releases/tag/build-20261118.234832">GitHub 发行版本</a> ·
+  <a href="README_EN.md">English</a>
 </p>
-
 <p align="center">
-  <strong>简体中文</strong> · <a href="README_EN.md">English</a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/SugrSertraline/neuink">GitHub Repository</a>
-</p>
-
-<p align="center">
-  <strong>让每一次阅读，都留下可追溯的理解。</strong><br>
-  本地优先的文献阅读、证据笔记与 AI 研究工作台。
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/desktop-Windows%20%7C%20macOS-1f2937?style=flat-square" alt="Desktop platforms: Windows and macOS">
-  <img src="https://img.shields.io/badge/Tauri-2-24c8db?style=flat-square" alt="Tauri 2">
-  <img src="https://img.shields.io/badge/React-18-61dafb?style=flat-square" alt="React 18">
-  <img src="https://img.shields.io/badge/license-Apache--2.0-2563eb?style=flat-square" alt="Apache-2.0 license">
+  <img src="https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-2563eb?style=flat-square" alt="Windows 10 / 11 x64">
+  <a href="https://github.com/opendatalab/MinerU"><img src="https://img.shields.io/badge/MinerU-1F66A0?style=flat-square" alt="MinerU"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2563eb?style=flat-square" alt="Apache-2.0"></a>
   <a href="https://linux.do"><img src="https://img.shields.io/badge/LINUX-DO-FFB003.svg?logo=data:image/svg%2bxml;base64,DQo8c3ZnIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgd2lkdGg9IjEwMCIgaGVpZ2h0PSIxMDAiPjxwYXRoIGQ9Ik00Ni44Mi0uMDU1aDYuMjVxMjMuOTY5IDIuMDYyIDM4IDIxLjQyNmM1LjI1OCA3LjY3NiA4LjIxNSAxNi4xNTYgOC44NzUgMjUuNDV2Ni4yNXEtMi4wNjQgMjMuOTY4LTIxLjQzIDM4LTExLjUxMiA3Ljg4NS0yNS40NDUgOC44NzRoLTYuMjVxLTIzLjk3LTIuMDY0LTM4LjAwNC0yMS40M1EuOTcxIDY3LjA1Ni0uMDU0IDUzLjE4di02LjQ3M0MxLjM2MiAzMC43ODEgOC41MDMgMTguMTQ4IDIxLjM3IDguODE3IDI5LjA0NyAzLjU2MiAzNy41MjcuNjA0IDQ2LjgyMS0uMDU2IiBzdHlsZT0ic3Ryb2tlOm5vbmU7ZmlsbC1ydWxlOmV2ZW5vZGQ7ZmlsbDojZWNlY2VjO2ZpbGwtb3BhY2l0eToxIi8+PHBhdGggZD0iTTQ3LjI2NiAyLjk1N3EyMi41My0uNjUgMzcuNzc3IDE1LjczOGE0OS43IDQ5LjcgMCAwIDEgNi44NjcgMTAuMTU3cS00MS45NjQuMjIyLTgzLjkzIDAgOS43NS0xOC42MTYgMzAuMDI0LTI0LjM4N2E2MSA2MSAwIDAgMSA5LjI2Mi0xLjUwOCIgc3R5bGU9InN0cm9rZTpub25lO2ZpbGwtcnVsZTpldmVub2RkO2ZpbGw6IzE5MTkxOTtmaWxsLW9wYWNpdHk6MSIvPjxwYXRoIGQ9Ik03Ljk4IDcwLjkyNmMyNy45NzctLjAzNSA1NS45NTQgMCA4My45My4xMTNRODMuNDI2IDg3LjQ3MyA2Ni4xMyA5NC4wODZxLTE4LjgxIDYuNTQ0LTM2LjgzMi0xLjg5OC0xNC4yMDMtNy4wOS0yMS4zMTctMjEuMjYyIiBzdHlsZT0ic3Ryb2tlOm5vbmU7ZmlsbC1ydWxlOmV2ZW5vZGQ7ZmlsbDojZjlhZjAwO2ZpbGwtb3BhY2l0eToxIi8+PC9zdmc+" alt="LINUX DO"></a>
 </p>
 
-> **Neuink** 面向论文、报告、标准和书籍章节，把资料整理、PDF 与网页阅读、跨篇对照、来源笔记、检索和 AI 研究放进同一个本地工作区。阅读成果可以回到原文证据，也可以导出为独立文件。
+![Neuink 功能总览：翻译与双语、MinerU 与 Zotero 接入、阅读与来源笔记、自选大模型与 Codex、本地保存及可选同步](docs/assets/neuink-feature-overview.png)
 
-**整理资料 → 阅读与对照 → 记录并连接证据 → 检索与研究 → 导出分享**
+Neuink 是一款本地优先的文献阅读与知识工作台。从读懂一篇论文开始，把原文、译文、图表和笔记放在一起，再用自己选择的大模型辅助理解与整理。
 
-[产品官网](https://sugrsertraline.github.io/neuink/) · [作者主页](https://sugrsertraline.github.io/homepage/) · [核心功能](#核心功能) · [阅读详略](#阅读详略操作指南) · [来源与副本](#来源资料与本地副本) · [开始使用](#开始使用) · [常见问题](#开发版常见问题) · [开发与构建](#开发与构建) · [项目文档](#项目文档)
+你可以接入已有的 MinerU 解析结果和 Zotero 资料，也可以直接打开 PDF。基础阅读与笔记无需登录，解析、翻译、模型与云端同步按需配置。
 
-## 0.1.3 预览版更新
+## 翻译：从一个单词，到整篇论文
 
-- **退出更可靠**：关闭时先让助手任务收尾，并结束应用启动的本地子进程；Codex 断线后可重新连接。
-- **网页引用更完整**：助手可接受已验证的方括号网页引用标记。
+读到术语时查词，选中句子时翻译，精读时查看段落或全文译文。在 PDF 原始版式与重排视图之间切换，也可以把原文和译文并排放置，随时核对。
 
-本版只包含稳定分支中已验证的修复，不包含研究记忆试验功能。查看[发行说明](CHANGELOG.md)。
+- **划词、片段与全文翻译**：按当前需要选择范围，全文任务支持暂停、继续和失败重试。
+- **原文、译文与双语对照**：支持左右对照、段落中英对照和逐句阅读，也可专注阅读中文。
+- **多种翻译来源**：小牛翻译、DeepL、Azure、Qwen-MT 与自配大模型可以按需选择。
+- **不同场景分别设置**：单词、选区、片段、逐句和全文可统一使用同一来源，也可以各自配置。
 
-## 0.1.2 预览版更新
+![原文与译文分屏阅读，随时对照论文细节](website/public/screenshots/current-translation-parallel.png)
 
-- **数据随程序移动**：Windows 默认把论文、笔记、聊天、设置和阅读状态保存在程序旁的 `data`。退出后复制整个程序文件夹，即可随 U 盘携带。
-- **自动整理旧资料**：启动时检查程序目录旁和所在磁盘根目录的 `neuink_data`，补入缺少的文件；冲突保留当前数据，校验成功后旧目录进入回收站。
-- **查看 Agent 思考内容**：Claude Code、Codex、OpenCode 返回思考文本或摘要时，在对话中显示实时预览，展开可查看已返回全文并随消息保存。
+[了解翻译与双语阅读](https://sugrsertraline.github.io/neuink/translation.html)
 
-实验中的全局记忆和局域网共享不在本版范围内。查看[发行说明与验证边界](CHANGELOG.md)。
+## 接入 MinerU 与 Zotero，继续使用已有资料
 
-## 0.1.1 阅读体验更新
+**MinerU** 将论文解析成段落、公式、表格和图片，为重排阅读、翻译和来源笔记提供结构化内容。Neuink 可以读取完整的解析结果目录，或导入结果 ZIP／RAR；也支持连接兼容的自建 MinerU 服务，以及自部署 Neuink 后端的账号解析队列。
 
-- **阅读与引用**：改善 PDF 选字边缘与悬停冲突；按住 Ctrl 拖动一个片段到聊天输入框，拖入时显示遮罩。草稿和已发送消息中的引用都可悬停预览、点击回到原文，未发送引用可删除并撤销。
-- **准确选择列表项**：参考文献、编号列表与项目列表按单项添加上下文、笔记和批注；整段列表仍可显式选择。
-- **继续上次阅读**：恢复资料库中的标签页、分屏和支持的阅读位置；新对话沿用上次选择的模型或本地 Agent。
-- **本地 Agent**：可启用已安装的 Claude Code；另提供 Codex、OpenCode 接入。授权可按次确认或记住，之后可在设置中撤销。各客户端的真实验证范围见[发行说明](CHANGELOG.md)。
-- **补齐材料与笔记体验**：无 PDF 的条目可在详情页“获取 PDF”；改进 SciVerse PDF 与图片保存、笔记图片缩放和公式显示。翻译可选择小牛翻译、DeepL、Azure、Qwen-MT 或大模型，支持独立保存服务密钥。
+**Zotero** 中已有的论文和笔记可以直接浏览，按需要导入 Neuink。来源缓存与独立本地副本分开管理，只有你明确选择“导入”的条目才成为 Neuink 本地资料。
 
-查看[本版改动与验证范围](CHANGELOG.md)，或阅读[助手与引用教程](https://sugrsertraline.github.io/neuink/assistant.html)。
+![读取 MinerU 解析结果目录，选择需要的论文导入本地](website/public/screenshots/current-mineru-source.png)
 
-## Windows 便携版下载
+### 推荐的上手搭配
 
-**[下载 Neuink Windows x64 便携版（ZIP，CDN 直链）](https://cdn.sugrsertraline.top/Neuink-windows-x64-portable.zip)**
-
-完整解压后双击 `Neuink.exe`，保留随包资源目录，不要在压缩包内直接运行。运行成品不需要安装 Node.js 或 Rust，系统需有 WebView2 Runtime。更新前关闭程序并备份整个 `data`；将新程序文件与原 `data` 放在一起，不要用新包的空 `data` 覆盖个人数据。旧版 `neuink_data` 的自动整理范围见[数据说明](https://sugrsertraline.github.io/neuink/data.html)。
-
-## macOS 预览构建
-
-macOS 暂提供 Apple Silicon 和 Intel 预览构建，可从[自动构建页面](https://github.com/SugrSertraline/neuink/actions/workflows/windows-portable.yml)查看成功任务的下载产物。解压后将 `Neuink.app` 移到“应用程序”。
-
-预览版尚未完成 Apple 公证与 Mac 实机验收，系统可能阻止运行；内嵌网页及视频字幕读取尚未移植。下载与平台说明见[打包与发行](docs/deployment/packaging-and-distribution.md)。
-
-## 完整功能介绍与使用手册
-
-README 提供概览，详细用法收录于 [22 篇专题手册](website/README.md)。现已发布到 GitHub Pages，可通过 **[Neuink 产品与使用指南](https://sugrsertraline.github.io/neuink/)** 阅读，含功能导航、章节全文搜索、手机目录和完整研究流程。
-
-| 想了解什么 | 对应说明 |
+| 步骤 | 怎么做 |
 | --- | --- |
-| 先看实际界面 | [实机界面图解](website/content/screenshots.md)：阅读、翻译、分屏笔记和助手 |
-| 安装、资料库、侧栏与分屏 | [第一次使用](website/content/start.md) · [认识工作台](website/content/workspace.md) |
-| 条目、标签、属性与解析 | [资料整理](website/content/library.md) · [MinerU 导入](website/content/import.md) |
-| PDF、书页模式、重排、翻译与多篇对照 | [PDF](website/content/pdf.md) · [重排](website/content/reflow.md) · [翻译](website/content/translation.md) · [标签阅读](website/content/parallel.md) |
-| 笔记、批注、收藏、来源与关系图 | [记录方式](website/content/notes.md) · [来源追溯](website/content/sources.md) · [关系图](website/content/graph.md) |
-| 本地搜索、AI、在线文献和网页 | [搜索](website/content/search.md) · [助手](website/content/assistant.md) · [在线研究](website/content/research.md) · [网页与字幕](website/content/browser.md) |
-| 分享、设置、迁移与问题排查 | [导出](website/content/export.md) · [设置](website/content/settings.md) · [数据](website/content/data.md) · [研究流程](website/content/workflows.md) · [常见问题](website/content/faq.md) |
+| 1. 准备 MinerU | 下载并使用 MinerU 客户端，把要读的论文导入其中，等待解析完成。 |
+| 2. 导入 Neuink | 在 Neuink 读取 MinerU 的完整结果目录，选择论文并导入本地资料库。 |
+| 3. 配置小牛翻译 | 在“设置 → 翻译”填写自己的小牛 API Key，验证连接后选择翻译来源。 |
+| 4. 按需选择大模型 | 需要论文问答、辅助笔记或 TextFold 时，再配置自己选择的模型。 |
 
-## 核心概念
+这是我们推荐的组合，解析方式和翻译服务都可以按自己的习惯选择。已有 Zotero 资料也可以从 Zotero 入口开始整理。
 
-![Neuink 内容层级：资料库、条目、标签和笔记](website/public/diagrams/concept-hierarchy.png)
+[PDF 导入与 MinerU](https://sugrsertraline.github.io/neuink/import.html) · [Zotero 接入](https://sugrsertraline.github.io/neuink/zotero.html) · [第一次使用](https://sugrsertraline.github.io/neuink/start.html)
 
-[查看概念关系与实例](https://sugrsertraline.github.io/neuink/concepts.html) · [按流程开始使用](https://sugrsertraline.github.io/neuink/start.html)
+## 多种阅读方式，把理解留在笔记里
 
-| 概念 | 它是什么 | 什么时候用 |
-| --- | --- | --- |
-| 资料库（Workspace） | 保存在本地的一组文献与阅读成果。 | 按长期研究方向管理自己的资料。 |
-| 条目（Entry） | 一篇文献的管理单位，包含标题、PDF、解析结果及相关笔记。 | 导入论文、补充属性、管理文件。 |
-| 标签（Tag） | 可有父子层级的主题分类，一篇文献可属于多个标签。 | 汇集同一主题的论文，进行跨篇阅读。 |
-| 片段（Segment） | 解析得到的段落、表格、公式或图片等内容单元。 | 定位证据、翻译某段、记录局部想法。 |
-| 笔记（Note） | 文档笔记整理单篇论文，标签综合笔记整理跨篇主题。 | 把阅读转化成自己的理解。 |
-| 来源链接（Source Link） | 将笔记连接到文献、页码、片段及引用快照。 | 检查某个结论的依据，返回原文核对。 |
+原文阅读保留论文版式；重排阅读将段落、公式与图表连续呈现。用多标签与左右分屏安排工作区，让论文、译文、笔记和助手各在合适的位置。
 
-## 核心功能
-
-### 1. 资料库：按研究主题组织文献
-
-- 创建条目、导入或批量拖入 PDF，维护标题、描述、层级标签和自定义属性；使用列表或书架浏览资料。
-- 从 MinerU 客户端导入解析结果 ZIP，或连接自建 MinerU 兼容服务；解析队列展示等待、进行中和失败状态，并支持重试。
-- 按标签及其后代组织阅读范围，查看阅读进度、页码和笔记；条目、笔记及标签的删除与恢复使用相应回收站入口。
-- 在关系图中查看标签层级、论文归属、笔记归属和来源引用，搜索、筛选并打开关联内容。图中的关系来自已有数据，不代表自动发现的学术引用网络。
-
-### 2. 阅读工作台：原文、重排与多篇对照
-
-- **PDF 原文**：保留原始版式，支持目录、缩放、片段定位、悬停预览、批注和片段笔记。未解析的 PDF 也可直接阅读。
-- **Reflow 重排**：阅读解析后的段落、列表、公式、表格和图片，在原图与解析内容之间按需切换。
-- **翻译与对照**：配置翻译服务或模型后，可翻译选区、片段或全文，查看原文与译文；全文任务支持暂停、继续、取消和失败重试。
-- **标签平行阅读**：从同一主题的论文列表打开当前论文与右侧对照；两侧独立阅读，配合文档笔记或标签综合笔记整理多篇材料。
-- **多标签与分屏**：PDF、重排、笔记、助手完整回复和网页可在工作区中切换；支持标签排序、固定和左右分屏。实时任务面板集中显示解析、翻译、论文添加和助手任务。
-
-### 3. 证据笔记：让结论能回到出处
-
-- 使用 Markdown 编辑器编写文档笔记和标签综合笔记，支持目录、表格、图片、代码、数学公式及 Mermaid 图表。
-- 将阅读中的想法保存为片段笔记或批注，使用 Source Link 连接条目、页码、片段和文本快照。
-- 在笔记中预览来源、跳回原文、查看反向引用；文档笔记的 Markdown 导出保留可读来源脚注。
-- 保存、关闭、跨分屏移动与切换资料库均接入未保存内容保护；已有内容变化时检查冲突。
-- 退出时自动定位有修改的页面，并列出待处理项目，可选择“去处理”“保存并退出”或“保留草稿并退出”。文档笔记（含标签／日记笔记）、片段笔记、批注、条目信息、创建条目表单、标签描述、待办、看板和平行阅读的未保存修改，以及模型连接、翻译服务、解析、检索等设置，均接入本地恢复；普通内容保存到当前资料库的 `.neuink-recovery`，记录目标、内容和时间，与正式内容分开。编辑使用 250ms 有界备份队列，保留草稿退出前再次采集当前内容并等待写入成功；保存中的任务需先完成。
-- 密钥草稿与普通内容分开，使用本机系统凭据库保存，普通恢复文件只有引用，不包含明文密钥，预览也不显示密钥；只有点击“恢复到编辑器”才读取。安全存储不可用、草稿过大或写入失败时保留修改并阻止“保留草稿并退出”，不退回明文保存。密钥恢复依赖原电脑、原系统账户及原资料库位置，不能仅复制草稿文件到另一台电脑恢复凭据。
-- 下次打开通过标题栏“本地草稿”查看时间、复制普通内容并打开对应页面，明确恢复到编辑器后再保存。恢复后的自动保存设置需点击“应用恢复设置”，模型与翻译服务仍需检查后保存，恢复本身不测试连接或启用服务。模型弹窗关闭有未保存保护，明确取消会放弃本次编辑。正式文档及已更新的条目／标签内容不会被静默覆盖。强制结束进程或断电只能恢复最近一次成功落盘的内容，不能保证最后一个按键；运行中的网络请求、导入操作和助手待发送队列不是可恢复的编辑事务。明确放弃修改或成功保存后清理对应草稿及安全凭据。
-
-### 4. 检索与 AI 研究：从资料中找答案，继续寻找文献
-
-- **本地搜索**：关键词搜索覆盖条目、标签、字段、文档笔记、片段笔记、PDF 页面和解析片段；配置本地 embedding 资源后可使用语义与混合搜索。模型缺失或不可用时明确提示降级。
-- **带上下文的助手**：关联当前阅读对象，用 `@` 附加 PDF 或文档笔记，通过“选择元素”附加条目和标签，或 Ctrl 拖入片段；也可取消内容关联。对话保留来源、工具过程和提案状态。
-- **可审查的修改**：助手修改文档笔记、标签或元数据时先提出 Proposal，展示修改预览，经你确认后应用。标签综合笔记的通用 Agent 写入仍未接通。
-- **在线研究**：内置论文搜索、网页搜索和正文读取；按配置使用 arXiv、Crossref、OpenAlex，以及可选 Tavily、Sciverse。候选论文由用户确认后添加，明确区分 PDF 入库和仅元数据结果。
-- **模型配置**：支持 OpenAI-compatible、Anthropic 和 Google 协议，可为助手与翻译分别指定模型。
-
-### 5. 网页阅读：把外部材料带入当前研究
-
-Windows 原生应用支持内嵌网页标签、地址栏、前进后退、独立缩放和分屏，最多同时打开 8 个网页。将网页关联为当前阅读对象后，可以让助手按需读取正文或选区，整理为待确认的文档笔记。
-
-| 内容 | 当前读取范围 |
-| :--- | :--- |
-| 普通网页 | 提取已加载页面的正文；非文章页面回退到有界可见文字。 |
-| 公开 PDF | 提取文字，默认前 8 页，可指定每次 1–20 页；显示实际覆盖范围，不自动 OCR 或导入资料库。 |
-| YouTube／哔哩哔哩具体视频 | 读取公开简介和可用中英文字幕；无字幕或受限时明确说明，不代表已分析画面和声音。 |
-
-打开网页不会自动把正文发送给模型。公开 PDF／视频读取可能重新请求资源，不携带浏览器 cookies。内嵌网页和视频运行时存在平台限制，详见下方说明。
-
-### 6. 导出分享：把阅读成果带出工作区
-
-| 导出对象 | 已支持格式与范围 |
-| :--- | :--- |
-| 解析全文、中文译稿、双语稿 | DOCX、TXT、含图片的 Markdown ZIP；支持内容检查及缺失项预览。 |
-| 当前论文的文档笔记、片段笔记、批注、译文片段 | 选择项目后合并为 DOCX／TXT，或逐项打包为 DOCX／TXT ZIP。 |
-| 文档笔记 Markdown | 另存为本地 MD，保留可读来源脚注。 |
-
-导出读取已保存的完整数据，不受阅读界面折叠或虚拟滚动范围影响。未译、失效译文或缺图会列出，允许确认后导出带说明的草稿。Word 输出保留内容结构，不承诺复刻 PDF 原始排版；中文 PDF、带批注 PDF 和 PPTX 仍不是当前导出能力。
-
-## 阅读详略操作指南
-
-阅读详略用于在重排正文中先快速浏览，再逐段展开核对。它不修改 PDF 文件或作者原文，也不要求把整篇论文一次性发送给模型。当前实现作用于 **Reflow 重排视图的正文段落**；PDF 原版面继续保持原样，标题、公式、表格、图片等不直接压缩。
-
-### 五种详略分别表示什么
-
-| 层级 | 内容来源 | 适合的阅读方式 |
-| --- | --- | --- |
-| 原文 | 完整的解析原文，不调用模型生成替代文本 | 精读、核对表述、检查方法与证据。 |
-| 精简 | 根据已校验的证据句编号提取作者原句，并保持原句顺序 | 减少阅读量，同时尽量保留作者措辞。 |
-| 要点 | 模型生成的结论与简短原因 | 快速理解这一段的主要内容与依据。 |
-| 结论 | 模型生成的简短核心陈述 | 扫读段落结论，决定是否展开。 |
-| 主题 | 从结论中校验、截取的简短主题词组 | 快速浏览文章涉及的话题。 |
-
-默认层级为“原文”，不另设“关闭详略”。“原文”在这里表示**内容完整程度**，与下面的“源语言是否显示”是两项独立设置。模型结果可能遗漏细节；需要引用具体结论时，应切回原文核对。
-
-### 手动生成与任务管理
-
-1. 导入 PDF，并准备好对应的解析结果，然后打开该条目的重排视图。
-2. 在系统模型设置中指定助手模型。详略生成复用该模型的连接、采样、最大输出与上下文配置。
-3. 点击顶部“生成详略”，先打开任务窗口。打开窗口本身不会立即开始生成。
-4. 按需选择单个或多个段落，也可以全选当前列表、选择尚未生成的内容。结合状态、页码和正文搜索缩小范围。
-5. 确认选择后开始生成，查看准备、生成、保存等阶段，以及已完成、失败、取消和复用缓存的段落数量。
-6. 对失败或取消的条目单独处理；无需为了某一段重新生成整篇论文。悬停、聚焦或点击小眼睛，可查看完整原文、匹配的已保存结果和失败原因。
-
-| 操作 | 实际行为 |
+| 能力 | 适合怎样使用 |
 | --- | --- |
-| 暂停 | 停止派发新的段落；已发出的请求和保存可以收尾，本次队列保留。 |
-| 继续 | 从尚未处理的任务继续派发。 |
-| 停止 | 中止本次执行；已经保存的结果仍可阅读。 |
-| 单项或批量取消 | 取消所选条目的本次处理，不删除此前保存的有效结果。 |
-| 重试 | 重新处理选择的条目，保留其他段落已完成的结果。 |
-| 关闭任务窗口 | 只关闭窗口，不停止后台任务；之后可通过进度入口重新查看。 |
-| 筛选后全选 | 选择当前可见列表，保留筛选范围之外已经选中的项目，并显示相应数量。 |
+| PDF 与重排阅读 | 在原始页面和结构化正文间切换，按目录、页码或片段定位内容。 |
+| 分屏与平行阅读 | 一边读论文一边记笔记，或同时对照同一主题下的不同论文。 |
+| 悬停预览 | 就近查看图表、文字或来源引用，再决定是否跳转到原文。 |
+| TextFold 阅读详略 | 在原文、精简、要点、结论和主题之间切换；生成中英对应结果，也可逐段调整。 |
+| 带来源的笔记 | 用文档笔记、标签综合笔记、片段笔记和批注记录理解，保留可返回原文的来源链接。 |
+| 阅读成果导出 | 将支持的笔记、解析内容或译稿导出为 Word、TXT 或 Markdown，继续整理与分享。 |
 
-队列采用**最多 3 路并发请求**，每个请求负责一个段落，逐段校验并保存。某段输出不完整或不符合格式时可单独失败；服务配置、网络或保存等公共故障会停止继续派发，并显示原因。任务进度按实际处理与保存结果更新，不是固定时间模拟的进度条。
+![论文原文与带来源链接的笔记同屏，边读边整理](website/public/screenshots/current-pdf-notes.png)
 
-### 哪些段落会生成，怎样控制调用量
+条目库提供**纯表格、纯标签文件夹、标签与表格**三种视图。用层级标签整理研究主题，用可自定义的属性记录年份、期刊、会议或 CCF 等级，并在表格中直接修改属性值。
 
-- 新任务的最低长度是 **20 个词或 40 个中文字符**。中英混排按一个词折合两个字符计算，空格与标点不计入长度。
-- 只处理可独立定位的正文段落；标题、非正文内容、跨页续接组、含行内公式或复杂富内容的段落，以及空内容、重复标识和超过当前长度上限的段落会跳过。
-- 当前单段输入上限为 7,500 个字符。任务窗口中的可处理范围以实际解析结果与筛选规则为准。
-- 原文未变化且已有有效结果时优先使用缓存；原文变化后，旧结果不再用于该段正文。
-- **切换已有详略级别不调用大模型**。调用发生在生成或重试详略、按需生成对应译文等操作中。
-- 阅读设置中的“打开重排版时自动生成阅读详略”默认关闭。主动开启后，只处理尚未生成或原文已变化的适用段落；关闭后不再自动启动新的生成任务。
+[阅读与分屏](https://sugrsertraline.github.io/neuink/parallel.html) · [TextFold 阅读详略](https://sugrsertraline.github.io/neuink/reflow.html) · [笔记与来源](https://sugrsertraline.github.io/neuink/sources.html) · [条目与属性](https://sugrsertraline.github.io/neuink/library.html)
 
-生成携带经过长度限制的文章标题、摘要和章节背景，以帮助模型理解段落。上下文长度表示模型可容纳的请求容量，**不是最大输出 Token 数**。系统会估算输入并预留输出空间；未填写最大输出时遵循共享模型适配器的默认规则，不再另设详略专用的 8,192 Token 输出上限。实际额度仍受模型服务约束。
+## 接入大模型，也能使用本地 Codex
 
-### 全局切换与单段切换
+把自己习惯的模型带进阅读工作台。围绕当前论文提问，附加其他材料进行比较，或结合笔记整理思路；回答中的来源入口帮助你回到原文核对。
 
-| 入口 | 影响范围 | 交互表现 |
-| --- | --- | --- |
-| 顶部阅读详略选择器 | 全局阅读级别，沿用已有单段覆盖规则 | 原文与中文译文直接更新，不播放整篇切换动画。 |
-| 段落顶部的详略按钮 | 当前段落 | 使用展开／收缩和文字过渡，其他段落不随之切换。 |
-| 鼠标位于段落正文，按住 Ctrl 滚轮 | 当前有有效结果的段落 | 上滚更详细，下滚更简略，到达边界后不循环。 |
-| 段落聚焦后 Ctrl + ↑／↓ | 当前段落 | 提供与滚轮相同的键盘操作。 |
+- **选择自己的模型服务**：支持 OpenAI-compatible、Anthropic 和 Google 接口，可为助手与翻译选择相应模型。
+- **接入本地 Agent**：使用本机已安装并登录的 Codex、Claude Code 或 OpenCode，在 Neuink 内继续会话。
+- **给助手明确的上下文**：选择论文和笔记，使用 `@` 添加材料，或把原文片段加入对话。
+- **审阅后再应用修改**：助手提出笔记或元数据修改时，先查看提案，再决定是否应用。
+- **继续寻找资料**：使用本地关键词、语义或混合检索，也可以在线搜索论文与网页，核对后导入。
 
-没有有效生成结果时，段落仍显示原文，粒度标签使用中性色，悬停提示如何生成；选择一个较短层级不意味着系统已经生成了该结果。普通滚动、选字和 Ctrl 拖入助手引用沿用原交互。段落工具保留固定位置，避免出现额外标签导致滚轮操作时按钮移位。
+![在 Neuink 阅读工作台中使用本机 Codex，结合论文进行问答](website/public/screenshots/current-local-codex.png)
 
-重排页眉保持“标题与导航／外观操作 + 阅读工具”的两行结构。长标题截断后可悬停查看全文；工具按实际剩余宽度逐项显示，空间不足时收入菜单，宽度恢复后重新显示。
+模型与服务由你选择、配置；本地 Agent 也可能连接远程模型。Neuink 保留原文和来源，方便你检查生成内容。
 
-### 全局翻译服务与 API Key
+[模型与助手使用指南](https://sugrsertraline.github.io/neuink/assistant.html)
 
-在 **设置 → 翻译** 中，所有翻译场景均可使用专用服务，无需为了全文翻译另外配置大模型。
+## 本地优先，云端同步由你决定
 
-1. 页面上方是“翻译模型与服务”：小牛、DeepL、Azure、Qwen-MT 各占一条折叠行，点击名称展开配置表单，可同时配置多个来源。行尾显示配置、未保存或处理状态；收起不会丢失输入。填写自己的 API Key；默认地址已预填，DeepL 按账户选择 Free / Pro，Azure 按资源填写区域，Qwen-MT 核对模型与地域。列表最后是独立的“大模型连接”折叠项，展开查看已有连接或进入“配置大模型连接”；下方提示到“翻译行为”选择使用。连接和 API Key 复用“模型与助手”中的配置。
-2. 点击“验证并保存”。系统只发送固定英文示例，使用少量服务额度；成功后保存配置，失败保留输入供修改。已有密钥不回显，留空可沿用。
-3. 页面下方是“翻译行为”：为单词、选区、单片段、段落逐句和整篇批量分别选择来源，或选择“跟随默认来源”。“默认翻译来源”可直接选择小牛、DeepL、Azure、Qwen-MT 或已保存的大模型连接；修改默认值仅影响跟随默认的行为，已有独立来源保持不变。旧设置保留原有选择；自动翻译开关与范围继续放在行为配置之后，需要显式开启。
+论文、笔记和阅读成果默认保存在本机。Windows 便携版使用程序旁的 `data` 文件夹，不登录也可以完成本地阅读、整理和记录。
 
-| 服务 | 必填信息 | 官方说明 |
-| --- | --- | --- |
-| 小牛翻译 / NiuTrans | API Key | [文本自动识别接口](https://niutrans.com/documents/contents/trans_detection) |
-| DeepL API | API Key、与账户匹配的请求地址 | [API 认证](https://developers.deepl.com/docs/getting-started/auth) |
-| Microsoft Azure Translator | API Key；区域按资源要求填写 | [认证与区域](https://learn.microsoft.com/azure/ai-services/translator/text-translation/reference/authentication) |
-| 通义 Qwen-MT | 百炼 API Key、模型和匹配地域的地址 | [机器翻译文档](https://help.aliyun.com/zh/model-studio/machine-translation) |
+云端同步是可选功能。我们提供配套后端源码，你可以自行部署、连接并开启同步，也可以一直保持纯本地使用。启用后可查看条目的云端状态和待处理任务，下载、解析、翻译等任务集中在右下角。
 
-四家配置分别保存，切换来源不会覆盖其他服务的密钥；密钥保存在本机系统凭据库，换电脑需要重新填写。当前统一译为简体中文，费用和可用性以服务账户为准。服务报错不会自动换另一家或调用大模型。
+备份时先退出 Neuink，再复制整个 `data`；更新程序时保留自己的数据目录。远程解析、翻译与模型服务只在相应功能使用时处理提交给它们的内容。
 
-专用服务沿用全文任务进度、暂停、继续、取消和失败重试。长文本分块处理，逐片段保存；公式、代码、链接与结构标记保留，表格按文字单元处理，代码围栏中的图示暂保留原样。普通正文以 MinerU segment 为单位整体翻译，换行和句号不会触发逐句请求；超长正文按预算和安全标点边界分块，保留原 segment 身份。已完成子块在本地缓存，失败重试可复用。逐句对照只对已保存译文做本地切分／对齐，无法可靠配对时显示句组或整段，不另行生成逐句译文。专用服务提交正文前保护公式及格式标记，服务改动标记时拒绝保存。无需向大模型请求论文背景或术语表；已有译文可复用，更换来源不自动重译。
+[数据与备份](https://sugrsertraline.github.io/neuink/data.html) · [可选云端同步](https://sugrsertraline.github.io/neuink/sync.html) · [后端源码与部署说明](deploy/server)
 
-暂停任务继续使用原服务配置；更改其地址、模型或区域后，需恢复配置或取消原任务后新建。旧选区配置与已有密钥自动沿用。阅读详略的中文译文也使用段落来源，**生成详略本身仍需助手模型**。
+## 下载与开始使用
 
-### 中文翻译与逐句模式
+当前支持 **Windows 10 / Windows 11 x64**。
 
-重排阅读有三组独立含义的控制：
+**[下载 Windows 便携版](https://cdn.sugrsertraline.top/neuink/releases/current/Neuink-windows-x64-portable.zip)** · [下载校验文件](https://cdn.sugrsertraline.top/neuink/releases/current/SHA256SUMS.txt) · [GitHub 发行版本](https://github.com/SugrSertraline/neuink/releases/tag/build-20261118.234832)
 
-| 控制 | 决定什么 |
-| --- | --- |
-| 阅读详略 | 原文、精简、要点、结论或主题。 |
-| 源语言 | 以整段或逐句显示源语言，或隐藏源语言。 |
-| 中文译文 | 是否显示对应的中文翻译。 |
+当前便携包约 593 MB，版本为 `0.1.4-beta.3`，构建标识 `20261118.234832`（2026 年 11 月 19 日打包）。CDN 与上方 GitHub 发行入口提供同一构建；GitHub 使用独立构建标签，保留历史发行版本。
 
-详略文本支持对应的中文翻译，使用系统的**段落翻译路由**，并按原段落、详略级别和对应文本保存结果。详略生成与翻译是不同任务；已有普通全文译文不等于每种压缩文本都已经翻译。
+1. 完整解压到可写文件夹，双击 `Neuink.exe`。
+2. 按上方推荐搭配导入已解析的论文，或直接导入 PDF／接入 Zotero。
+3. 配置需要的翻译服务，开始阅读；模型与同步可以之后再设置。
 
-**逐句对照与段落详略互斥**：逐句模式需要稳定的句子对应关系，段落压缩会改变这一关系。进入逐句模式时暂时停用段落详略；切回整段，或选择详略级别恢复段落阅读时，已有缓存与单段选择仍保留。这是模式切换，不是永久关闭功能或清除生成结果。
+便携版无需安装 Node.js 或 Rust；Windows 需要 WebView2 Runtime。更新前退出程序并备份 `data`，替换程序时保留原有数据。
 
-## 来源资料与本地副本
+## 交流与反馈
 
-Neuink 区分直接管理的本地条目，以及从 Zotero／MinerU 目录识别出的来源条目。来源接入便于沿用已有资料；需要独立整理与编辑时，再显式导入为本地副本。
+欢迎在 [GitHub Issues](https://github.com/SugrSertraline/neuink/issues) 反馈问题与建议，也欢迎来 [LINUX DO](https://linux.do) 交流。
 
-### Zotero 与 MinerU 来源
+Neuink 使用 [Apache-2.0](LICENSE) 开源协议。更多功能、操作示例与截图见[官网使用手册](https://sugrsertraline.github.io/neuink/)。
 
-1. 在设置中配置 Zotero 数据目录或 MinerU 本地结果目录，并启用对应来源。
-2. 打开资料库时检查可用来源，查看来源论文、读取问题和检查进度。
-3. 来源内容变化时，在“来源更新”中逐篇核对标题、字段、文件名等信息；按需采用更新，或确认已经核对。
-4. 同一来源版本被确认后不反复提醒；来源再次变化时重新提示。扫描范围受限或读取失败会单独说明。
-
-关闭某个来源开关只隐藏对应的来源条目，不删除来源文件，也不删除已经独立保存的本地副本。此能力是本机资料接入与核对，不等同于 Zotero 云端账号同步或团队云协作。
-
-### 导入独立副本
-
-来源条目提供“导入到本地”“打开本地副本”和“另建一份”等操作。已有对应本地内容时优先打开已有副本；明确选择另建才创建新的独立条目。副本保留来源记录，之后按本地条目管理；普通编辑不会自动改写外部来源。
-
-复制过程中会处理可用 PDF、解析内容与相关阅读成果，并校验引用和来源归属。正在解析的来源需等解析结束后再复制；复制未完成时不把半成品作为成功条目显示。相同内容的 PDF 导入会给出重复提示与核对入口，避免仅因文件名不同产生重复材料。
-
-### Zotero 笔记
-
-- 可选择导入来源条目的 Zotero 笔记，保存独立的 Neuink 笔记并保留来源关联。
-- 保存时可查看来源原文、本地内容和差异，选择只保存到 Neuink，或显式确认替换 Zotero 原笔记。
-- 本地保存不要求 Zotero 在线；写回路径要求支持本机访问的 Zotero 版本运行并授予权限，当前界面要求 Zotero 10 及以上。
-- 写回前重新读取来源版本并备份原文，版本冲突时要求重新核对；本地保存成功但写回失败会分别报告，保留本地草稿。
-- 含图片的笔记不支持直接写回；部分导入内容会转换为文本，图片需要回到 Zotero 查看，不能将其视为完整富文本双向同步。
-
-## 条目库与标签管理
-
-条目库支持点击支持排序的表头切换排序，表头居中，标题按可用宽度截断并通过气泡展示全文。行内操作使用平铺图标，悬停显示用途；单选、多选和批量操作共用明确的选择状态。
-
-标签管理提供层级树、展开／收起、画布平移、放大／缩小、复位与右键菜单，便于整理较大的主题结构。标签归属、来源属性和本地编辑权限分别处理；来源条目的受限操作不会伪装成已经成功写入。
-
-## 开发版常见问题
-
-| 现象 | 原因与处理方式 |
-| --- | --- |
-| 下载包里没有本文的某个功能 | 源码能力与正式下载包分别标明；alpha 新功能先经确认进入 beta，再经稳定性验收进入 main 并重新发布。仅切换或更新源码分支不会更新下载包。 |
-| PDF 可以看，但没有可用的重排正文 | PDF 原版面不依赖结构化解析。先导入匹配的 MinerU 结果或完成配置服务的解析，再使用重排。 |
-| 很多段落没有出现在生成范围内 | 检查是否为正文、是否达到 20 词／40 中文字符，以及是否含公式、复杂内容、跨页续接或超长文本。跳过这些内容是当前适配规则。 |
-| 选了“要点”却还是原文 | 该段可能还没有有效缓存。查看粒度提示或任务窗口，而不是反复切换级别。 |
-| 提示模型输出达到长度上限 | 检查助手模型的最大输出设置与服务实际限制，再对失败段落重试。增加上下文长度并不等于增加输出额度。 |
-| 任务显示暂停但仍有段落完成 | 暂停阻止新派发；此前已经发出的请求或保存仍可收尾。需要结束执行时使用停止。 |
-| 开启逐句翻译后不能调段落详略 | 两种阅读方式互斥。切回整段或重新选择详略级别即可恢复，缓存不会因此被删除。 |
-| 切换中文详略后缺少译文 | 普通段落译文与详略译文分别保存；先生成当前层级的对应译文，并检查段落翻译路由。 |
-| 隐藏来源后本地副本仍然存在 | 本地副本独立维护；关闭来源不是删除文件或回收本地条目。 |
-| Zotero 替换失败但本地笔记已保存 | 检查 Zotero 运行、访问授权和版本冲突，刷新差异后再处理；本地保存与来源写回是分别报告的结果。 |
-
-本次开发涉及的界面已包含浏览器演示和自动化回归；**原生 Tauri 视觉验收、真实长文性能和真实模型端到端行为仍需单独验证**。隔离演示不能替代这些验收，测试范围持续记录在开发计划中。
-
-## 界面示例
-
-通过[图文使用指南](https://sugrsertraline.github.io/neuink/screenshots.html)了解系统概念、功能入口和完整操作流程。下图展示 PDF 与来源笔记的分屏工作台。
-
-![Neuink：PDF 与带来源的演示笔记分屏](website/public/screenshots/pdf-note-workspace.png)
-
-
-## 开始使用
-
-### 已有 Windows 便携包
-
-完整解压后双击 `Neuink.exe`，保留随包资源目录。无需安装 Node.js 或 Rust，系统需有 Microsoft Edge WebView2 Runtime。Windows 便携版默认将数据保存在程序旁的 `data`；迁移时先关闭程序，再连同该目录一起复制。更新程序时保留原有数据，具体位置可在资料库与数据设置中核对。
-
-当前项目版本为 **0.1.3**。Windows 提供便携包构建流程；签名、应用内自动更新及原生发行验收仍有待完成。自动构建、下载方式和各平台验收状态见[打包与发行](docs/deployment/packaging-and-distribution.md)。
-
-### 第一次整理一篇论文
-
-1. **创建或打开资料库**：在设置的“资料库与数据”中选择本地 Workspace；新手引导可带你熟悉主要入口，离线演示取决于安装包是否包含演示素材。
-2. **导入材料**：直接导入 PDF 即可阅读。需要结构化内容时，在“导入与解析”中查看 MinerU 客户端图文教程：先解析，再导出完整结果并压缩为 ZIP，最后导入 Neuink。
-3. **整理与阅读**：添加主题标签，打开 PDF 或 Reflow；需要对照时，从同标签论文列表打开另一篇。
-4. **记录证据**：新建文档笔记或标签综合笔记，插入来源链接并保存。
-5. **按需启用 AI**：在模型设置中建立连接，为助手和翻译指定模型；选择阅读范围后提问，审阅修改提案。
-6. **导出成果**：从 PDF／Reflow 的导出入口生成全文或译稿，从文档笔记或条目概览导出所选阅读成果。
-
-需要解析、重排或翻译时，可按[PDF 导入与解析教程](https://sugrsertraline.github.io/neuink/import.html)操作。普通 PDF 阅读无需先配置解析服务。
-
-## 本地与在线能力
-
-| 能力 | 依赖与数据范围 |
-| :--- | :--- |
-| 资料管理、PDF／已解析内容阅读、笔记、关键词搜索、已保存成果导出 | 本地完成，不依赖 LLM 或在线解析服务。 |
-| 语义／混合搜索 | 需要本地 embedding 资源；不在运行时静默下载模型。 |
-| PDF 结构化解析 | 导入已有 MinerU ZIP，或把 PDF 发给自己配置的兼容解析服务。 |
-| AI 对话与翻译 | 对话使用自行配置的模型；翻译可使用专用服务或模型，仅向所选来源发送待处理内容。 |
-| 阅读详略生成与详略译文 | 分别使用助手模型与段落翻译路由；所选正文及有长度限制的背景发送至对应服务，已有结果切换使用本地缓存。 |
-| 在线论文／网页研究 | 需要网络；可选服务还受凭据、权限和配额限制。 |
-| 内嵌网页／视频字幕读取 | 原生网页目前在 Windows 启用；视频运行时当前随 Windows x64 包提供。 |
-
-Workspace 是普通本地文件夹，保存 PDF、笔记、批注、标签、译文和会话；搜索等缓存可重建。API Key 不属于 Workspace 或分享包。迁移资料库会复制、验证并保留原目录。
-
-**当前边界**：本地关系图展示已有关系；自动研究方向图、证据对比表、跨原生窗口拖出和团队云协作不在本文已实现能力之列。具体完成度与后续工作统一见[开发计划](docs/development/dev-plan.md)。
-
-## 开发与构建
-
-从源码运行需要 Node.js、npm、Rust stable 和 [Tauri 2 平台依赖](https://v2.tauri.app/start/prerequisites/)。
-
-```powershell
-npm install
-npm run desktop:dev
-```
-
-在已有检出目录中先确认当前分支；不要带着未处理的工作区修改直接切换。只查看前端交互可运行 `npm --workspace apps/desktop run dev:frontend`，但普通浏览器不提供完整 Tauri 文件与原生能力。
-
-| 命令 | 用途 |
-| --- | --- |
-| `npm --workspace apps/desktop run dev:d-data` | 本机开发入口，默认使用仓库内 `portable/data`；先关闭使用同一份数据的便携程序。 |
-| `npm --workspace apps/desktop exec tsc -- --noEmit` | TypeScript 类型检查。 |
-| `npm --workspace apps/desktop run test:frontend` | 前端自动化测试。 |
-| `cargo test --workspace` | Rust 工作区测试；网络夹具相关场景可按工程规范串行执行。 |
-| `npm run desktop:build` | 前端生产构建，不等同于生成已发布桌面安装包。 |
-
-开发演示入口包括 `fold-task-showcase.html`、`fold-gesture-showcase.html` 和 `tag-editor-showcase.html`。阅读详略演示使用合成资料或缓存，适合验证筛选、交互与布局，不读取真实论文或调用模型。卡片演示 `ideation-showcase.html` 属于 alpha 分支。
-
-仓库结构按职责划分：`apps/desktop` 是桌面前端与 Tauri 入口，`crates` 是 Rust 服务和持久化模块，`packages` 放共享代码，`website` 是产品手册与网站，`docs` 保存工程、产品和部署文档。用户资料与构建产物不是需要推送的源码。
-
-基础阅读和笔记不需要配置模型服务。模型资源、网页读取组件和发行打包见[打包与发行](docs/deployment/packaging-and-distribution.md)，开发约定和检查命令见[工程规范](docs/development/engineering-guidelines.md)。
-
-## 项目文档
-
-- [文档索引](docs/README.md)：查找长期维护文档。
-- [产品需求](docs/product/01-prd.md)：产品定位与需求边界。
-- [系统架构](docs/architecture/system-architecture.md)：当前模块、数据与写盘约束。
-- [开发计划](docs/development/dev-plan.md)：已实现内容、待验收项与后续路线。
-- [工程规范](docs/development/engineering-guidelines.md) · [UI 设计与交互规范](docs/development/ui-design-system.md) · [系统测试用例](docs/development/system-test-cases.md)。
-
-## 许可证
-
-Neuink 采用 [Apache License 2.0](LICENSE)。第三方组件保留各自的许可证，详见 [第三方组件与许可证](docs/deployment/third-party-components.md) 和 [NOTICE](NOTICE)。
-
-阅读详略移植并调整了 [TextFold](https://github.com/chenxiachan/textfold) 的段落提示词与组装、原文词语对齐和受限过渡算法，固定上游版本为 `5fc941dc4560ee2809c0f278da28457292c7f739`（Copyright 2026 Xia Chen，Apache-2.0）。适配改为使用 Neuink 的模型配置、片段标识、任务队列、持久化与滚动容器；保留上游中英文长度规则，不生成章节摘要。上游 [LICENSE](apps/desktop/public/licenses/TextFold-LICENSE.txt)、[NOTICE](apps/desktop/public/licenses/TextFold-NOTICE.txt) 和修改说明均随项目保留。使用步骤、生成规则与模型边界见[阅读详略操作指南](#阅读详略操作指南)。
-
-翻译容错：PDF 选区请求会先清理视觉换行，英文保留词间空格；小牛等服务的 HTML 上标、公式与代码标记在本地保留。逐项调用失败不会终止后续翻译，已有结果保留，失败项可在任务列表中重试。PDF 悬停原文与译文各自支持整段／逐句，逐句不可用时回退整段并提示。条目库表头按升序 → 降序 → 当前视图默认顺序循环。
+[作者主页](https://sugrsertraline.top/) · [开发指南](docs/development/engineering-guidelines.md)

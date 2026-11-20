@@ -8,8 +8,8 @@ import { sameWorkspacePath } from '@/shared/lib/workspacePath';
 export function workspaceTaskProjection(root: string | null, jobs: Job[], queue: PdfParseQueue, parserConfigured: boolean,
   vectorBuild?: SearchIndexBuildStatus | null,
   pdfDrop?: { id: string; root: string; startedAt: number; completed: number; total: number } | null): Job[] {
-  if (!root) return [];
-  const scopedJobs = jobs.filter(job => job.scope && sameWorkspacePath(job.scope.root, root));
+  if (!root) return recentBackgroundJobs(jobs.filter(job => !job.scope));
+  const scopedJobs = jobs.filter(job => !job.scope || sameWorkspacePath(job.scope.root, root));
   const trackedParserEntries = new Set(scopedJobs.filter(job => job.kind === 'parser' && isUnfinishedJob(job))
     .flatMap(job => job.scope?.kind === 'entry' ? [job.scope.entry_id] : []));
   const projected: Job[] = [];

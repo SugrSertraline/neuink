@@ -6,9 +6,9 @@ function validateSource({ testBuild, root, env = process.env }) {
   if (testBuild) return 'local-preview';
   if (env.GITHUB_ACTIONS === 'true') return validateReleaseSource(root, env);
   const branch = execFileSync('git', ['branch', '--show-current'], { cwd: root, encoding: 'utf8', windowsHide: true }).trim();
-  if (branch !== 'main') throw new Error('正式安装包必须从 main 构建；beta 可用 installer:test 生成隔离的本地预览版。');
-  if (spawnSync('git', ['diff', '--quiet', 'HEAD'], { cwd: root, windowsHide: true }).status !== 0) throw new Error('正式安装包要求 main 没有未提交的修改。');
-  return 'main';
+  if (!['main', 'beta', 'alpha'].includes(branch)) throw new Error('请从产品分支或使用 installer:test 构建。');
+  if (spawnSync('git', ['diff', '--quiet', 'HEAD'], { cwd: root, windowsHide: true }).status !== 0) throw new Error('正式安装包要求来源提交没有未提交的修改。');
+  return branch;
 }
 function main() {
   if (process.platform !== 'win32') throw new Error('请在 Windows 上构建安装包。');

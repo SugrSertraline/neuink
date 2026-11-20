@@ -4,9 +4,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import type { ReflowOriginalDisplay } from '@/shared/lib/readerPreferences';
 
 /** Language visibility stays independent of the amount of paragraph content. */
-export function ReflowLanguageControls({ original, translation, onOriginalChange, onTranslationChange }: {
+export function ReflowLanguageControls({ original, translation, onOriginalChange, onTranslationChange, translationLabel = '中文译文' }: {
   original: ReflowOriginalDisplay;
   translation: boolean;
+  translationLabel?: string;
   onOriginalChange: (value: ReflowOriginalDisplay) => void;
   onTranslationChange: (value: boolean) => void;
 }) {
@@ -25,8 +26,8 @@ export function ReflowLanguageControls({ original, translation, onOriginalChange
       </Select>
     </div>
     <label className="flex shrink-0 items-center gap-1.5 text-xs text-foreground">
-      <Switch aria-label="显示中文译文" checked={translation} onCheckedChange={onTranslationChange} />
-      <span>中文译文</span>
+      <Switch aria-label={`显示${translationLabel}`} checked={translation} onCheckedChange={onTranslationChange} />
+      <span>{translationLabel}</span>
     </label>
   </div>;
 }

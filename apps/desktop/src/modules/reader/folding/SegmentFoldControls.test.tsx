@@ -20,7 +20,7 @@ function setup(options: { level?: 'key' | 'off' | 'full'; paragraph?: boolean; e
     segment_type: options.paragraph === false ? 'heading' : 'paragraph', ...(options.eligible === false ? { continuation_group_id: 'continued' } : {}) };
   const records = options.cached ? { [segment.uid]: { segment_uid: segment.uid, source: segment.text, evidence: [0], brief: [segment.text],
     key: segment.text, takeaway: segment.text, topic: options.short ? 'short' : 'Original source', model: 'test', generated_at: '2026-01-01' } } : {};
-  const fold = { level: options.level ?? 'key', overrides: {}, records, setOverride: vi.fn(), setLevel: vi.fn(), running: false } as unknown as FoldReader;
+  const fold = { level: options.level ?? 'key', overrides: {}, records, setOverride: vi.fn(), setLevel: vi.fn(), running: false, root: 'test', loadState: 'ready', start: vi.fn() } as unknown as FoldReader;
   const activate = vi.fn();
   const view = render(<TooltipProvider><ToastContext.Provider value={{ notify: () => 'toast', dismiss: vi.fn() }}>
     <FoldReaderProvider value={fold}><ReflowSegmentGroupView active={false} flashed={false} entryId="e" workspaceRoot={null}
@@ -37,7 +37,7 @@ function setup(options: { level?: 'key' | 'off' | 'full'; paragraph?: boolean; e
 it('keeps direct controls in the paragraph metadata row without triggering navigation', () => {
   const { fold, activate, section } = setup();
   const tabs = screen.getByRole('radiogroup', { name: '本段阅读详略' });
-  expect(tabs.parentElement?.classList.contains('reflow-segment-fold-tabs')).toBe(true);
+  expect(tabs.closest('.reflow-segment-fold-tabs')).toBeTruthy();
   expect(tabs.closest('.reflow-segment-metadata')?.textContent).toContain('第 1 页');
   expect(tabs.closest('section')).toBe(section);
   expect(screen.queryByRole('menu')).toBeNull();
@@ -45,8 +45,10 @@ it('keeps direct controls in the paragraph metadata row without triggering navig
   expect(screen.getByRole('radio', { name: '跟随全局' }).getAttribute('aria-checked')).toBe('true');
   fireEvent.pointerMove(screen.getByRole('radio', { name: '结论' }), { pointerType: 'mouse' });
   expect(screen.getByRole('tooltip').textContent).toContain('本段尚未生成阅读详略，当前显示原文');
-  fireEvent.click(screen.getByRole('radio', { name: '主题' }));
-  expect(fold.setOverride).toHaveBeenLastCalledWith('paragraph-1', 'topic');
+  expect((screen.getByRole('radio', { name: '主题' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '生成详略' }));
+  expect(fold.start).toHaveBeenCalledWith([expect.objectContaining({ uid: 'paragraph-1' })]);
+  expect(screen.queryByText('此段暂无详略，显示完整原文。')).toBeNull();
   fireEvent.click(screen.getByRole('radio', { name: '原文' }));
   expect(fold.setOverride).toHaveBeenLastCalledWith('paragraph-1', 'full');
   expect(fold.setLevel).not.toHaveBeenCalled();
@@ -57,7 +59,7 @@ it('supports keyboard navigation and Escape back to the paragraph without activa
   const { section, activate } = setup();
   const inherit = screen.getByRole('radio', { name: '跟随全局' });
   act(() => inherit.focus());
-  expect(screen.getByRole('tooltip').textContent).toContain('选择本段后生成');
+  expect(screen.getByRole('tooltip').textContent).toContain('旁边的“生成详略”');
   fireEvent.keyDown(inherit, { key: 'ArrowRight' });
   await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('radio', { name: '原文' })));
   fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
@@ -117,7 +119,7 @@ it('preserves unsupported paragraphs and leaves only full text and inheritance a
 
 it('keeps short paragraphs unchanged unless an earlier result already exists', () => {
   const first = setup({ short: true });
-  expect(screen.getByText('此段较短，保留原文。')).toBeTruthy();
+  expect(screen.queryByText('此段较短，保留原文。')).toBeNull();
   expect((screen.getByRole('radio', { name: '精简' }) as HTMLButtonElement).disabled).toBe(true);
   first.unmount();
   setup({ short: true, cached: true });

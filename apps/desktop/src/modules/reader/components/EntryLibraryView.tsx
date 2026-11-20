@@ -1,5 +1,6 @@
 import {
   CalendarDays,
+  Settings2,
   EyeOff,
   FilePlus2,
   Network,
@@ -9,10 +10,12 @@ import {
 import {
   useEffect,
   useMemo,
+  useRef,
   useState
 } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { readFieldDefinitions, updateEntryField, type FieldDefinition } from '@/shared/ipc/fieldDefinitionsApi';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import type { NoteTarget, TagMeta, TrashItem } from '@/shared/types/domain';
@@ -43,7 +46,7 @@ import { LibraryPaperToolbar, type PaperSource } from './LibraryPaperToolbar';
 import { PointerPreview } from '@/components/ui/pointer-preview';
 import { useBookOpening } from './book/BookOpeningProvider';
 import { useLibraryEntryDrag } from './useLibraryEntryDrag';
-import { buildTagBreadcrumb, filterEntries } from './libraryEntryFilters';
+import { buildTagBreadcrumb, filterEntries, matchesFieldFilter } from './libraryEntryFilters';
 import { useAppearance } from '@/shared/components/AppearanceProvider';
 import type { LibrarySourceCatalog } from '@/modules/library/useLibrarySourceCatalog';
 import type { LibrarySourceSync } from '@/modules/import/useLibrarySourceSync';
@@ -75,6 +78,7 @@ type EntryLibraryViewProps = {
   onSelectView: (view: LibraryView) => void;
   onClearFilters: () => void;
   onManageTags: () => void;
+  onManageFields?: () => void;
   filterResetKey: number;
   recentReadingEntryIds: string[];
   selectedEntryId: string | null;
@@ -88,6 +92,7 @@ type EntryLibraryViewProps = {
   onPurgeEntry: (entryId: string) => Promise<void> | void;
   onPurgeTrashItem: (entryId: string, trashId: string) => Promise<void> | void;
   onRefreshParseStatus: () => Promise<void> | void;
+  onRefreshEntries?: () => Promise<void>;
   onReparseEntry: (entryId: string) => Promise<void> | void;
   onRestoreEntry: (entryId: string) => Promise<void> | void;
   onRestoreTrashItem: (entryId: string, trashId: string) => Promise<void> | void;
@@ -105,6 +110,7 @@ type EntryLibraryPinnedEdge = 'left' | 'right';
 const ENTRY_LIBRARY_TAG_NAVIGATION_STORAGE_KEY = 'neuink.entryLibraryShowTagNavigation';
 const ENTRY_LIBRARY_TAG_SCOPE_STORAGE_KEY = 'neuink.entryLibraryTagScope';
 const ENTRY_LIBRARY_COLUMNS_STORAGE_KEY = 'neuink.entryLibraryColumns.v1';
+const EMPTY_FIELD_DEFINITIONS: FieldDefinition[] = [];
 export const ENTRY_LIBRARY_PINNED_EDGES_STORAGE_KEY = 'neuink.entryLibraryPinnedEdges.v1';
 export function EntryLibraryView({
   onApplyEntryTagPaths,
@@ -121,7 +127,7 @@ export function EntryLibraryView({
   trashItems,
   isRefreshingParseStatus,
   libraryView,
-  onSelectView, onClearFilters, onManageTags,
+  onSelectView, onClearFilters, onManageTags, onManageFields,
   filterResetKey,
   recentReadingEntryIds,
   selectedEntryId,
@@ -134,7 +140,7 @@ export function EntryLibraryView({
   onOpenEntryInSidePane,
   onPurgeEntry,
   onPurgeTrashItem,
-  onRefreshParseStatus,
+  onRefreshParseStatus, onRefreshEntries,
   onReparseEntry,
   onRestoreEntry,
   onRestoreTrashItem,
@@ -161,10 +167,19 @@ export function EntryLibraryView({
   const [hidingEntryId, setHidingEntryId] = useState<string | null>(null);
   const sourceAvailable = libraryView !== 'trash' && status === 'ready' && Boolean(workspaceRoot);
   const isHiddenView = libraryView === 'hidden';
+  const visibleView = useRef<{ root: string | null; view: LibraryView }>({ root: workspaceRoot, view: 'all' });
+  useEffect(() => {
+    if (visibleView.current.root !== workspaceRoot) visibleView.current = { root: workspaceRoot, view: 'all' };
+    if (libraryView !== 'hidden' && libraryView !== 'trash') visibleView.current.view = libraryView;
+  }, [workspaceRoot, libraryView]);
+  const toggleHiddenView = () => onSelectView(isHiddenView
+    ? visibleView.current.root === workspaceRoot ? visibleView.current.view : 'all'
+    : 'hidden');
   useEffect(() => setSourceFilter('all'), [workspaceRoot, filterResetKey]);
   useEffect(() => {
     if ((sourceFilter === 'zotero' && !enabledSources.zotero) || (sourceFilter === 'mineru' && !enabledSources.mineru)) setSourceFilter('all');
   }, [sourceFilter, enabledSources.zotero, enabledSources.mineru]);
+  const [tagsOnly, setTagsOnly] = useState(() => typeof window !== 'undefined' && window.localStorage.getItem('neuink.entryLibraryTagsOnly') === 'true');
   const [showTagNavigation, setShowTagNavigation] = useState(readStoredShowTagNavigation);
   const [tagScope, setTagScope] = useState<EntryLibraryTagScope>(readStoredEntryLibraryTagScope);
   const [visibleColumns, setVisibleColumns] = useState<Set<EntryLibraryColumnId>>(readStoredEntryLibraryColumns);
@@ -182,6 +197,22 @@ export function EntryLibraryView({
     setSort(null);
   }, [filterResetKey]);
   const visibleEntries = isTrashView ? trashedEntries : entries;
+  const [fieldFilter, setFieldFilter] = useState<{root: string | null; name: string; value: string}>({root: workspaceRoot, name: '', value: ''});
+  const activeFieldFilter = fieldFilter.root === workspaceRoot ? fieldFilter : {root: workspaceRoot, name: '', value: ''};
+  const [fieldDefinitions, setFieldDefinitions] = useState<{root: string; values: FieldDefinition[]} | null>(null);
+  useEffect(() => {
+    if (!workspaceRoot) { setFieldDefinitions(null); return; }
+    let closed = false; let generation = 0;
+    const load = () => { const version = ++generation; void readFieldDefinitions(workspaceRoot).then(values => { if (!closed && version === generation) setFieldDefinitions({root: workspaceRoot, values}); }).catch(() => { if (!closed && version === generation) setFieldDefinitions({root: workspaceRoot, values: []}); }); };
+    const changed = (event: Event) => { if ((event as CustomEvent<{root: string}>).detail?.root === workspaceRoot) load(); };
+    load(); window.addEventListener('neuink-field-definitions-changed', changed);
+    return () => { closed = true; window.removeEventListener('neuink-field-definitions-changed', changed); };
+  }, [workspaceRoot]);
+  const definitions = fieldDefinitions?.root === workspaceRoot ? fieldDefinitions.values : EMPTY_FIELD_DEFINITIONS;
+  const fieldNames = useMemo(() => {
+    const hidden = new Set(definitions.filter(value => value.hidden).map(value => value.name));
+    return [...new Set([...definitions.filter(value => !value.hidden).map(value => value.name), ...entries.flatMap(entry => Object.keys(entry.fields ?? {}))])].filter(name => name !== 'description' && !hidden.has(name)).sort((a, b) => a.localeCompare(b, 'zh-CN'));
+  }, [entries, definitions]);
   const activeTagIds = useMemo(
     () => (activeTag ? tagScope === 'descendants' ? collectDescendantTagIds(tags, activeTag) : new Set([activeTag]) : null),
     [activeTag, tagScope, tags]
@@ -197,13 +228,19 @@ export function EntryLibraryView({
   const filteredEntries = useMemo(
     () => filterEntries(entriesInCurrentView.filter(item => {
         const source = entrySources[item.id];
+        if (!tagsOnly && activeFieldFilter.name && activeFieldFilter.value.trim() && fieldNames.includes(activeFieldFilter.name)) {
+          const raw = item.fields?.[activeFieldFilter.name] ?? '';
+          const kind = definitions.find(def => def.name === activeFieldFilter.name)?.kind;
+          if (!matchesFieldFilter(raw, activeFieldFilter.value, kind)) return false;
+        }
         if (isHiddenView) return isEntrySourceHidden(source);
         if (isEntrySourceHidden(source)) return false;
-        return !sourceAvailable || selectedSource === 'all' || (selectedSource === 'local' ? !source?.kinds.length : source?.kinds.includes(selectedSource));
+        return tagsOnly || !sourceAvailable || selectedSource === 'all' || (selectedSource === 'local' ? !source?.kinds.length : source?.kinds.includes(selectedSource));
       }),
-      libraryView, activeTagIds, query, sortBy, recentReadingEntryIds, readingStates, { direction: sortDirection, sourceKindsByEntry }),
-    [activeTagIds, entriesInCurrentView, libraryView, query, readingStates, recentReadingEntryIds, sortBy, sortDirection, sourceKindsByEntry, sourceAvailable, selectedSource, entrySources, isHiddenView]
+      libraryView, activeTagIds, tagsOnly ? '' : query, sortBy, recentReadingEntryIds, readingStates, { direction: sortDirection, sourceKindsByEntry, fieldDefinitions: definitions }),
+    [tagsOnly, activeTagIds, entriesInCurrentView, libraryView, query, readingStates, recentReadingEntryIds, sortBy, sortDirection, sourceKindsByEntry, sourceAvailable, selectedSource, entrySources, isHiddenView, activeFieldFilter.name, activeFieldFilter.value, fieldNames, definitions]
   );
+  const folderPapers = filteredEntries.filter(item => activeTag ? item.tagIds.includes(activeTag) : item.tagIds.length === 0);
   const selectionContext = JSON.stringify([workspaceRoot, activeTag, libraryView, section, status, filterResetKey]);
   const selection = useLibrarySelection(selectionContext, JSON.stringify([query, selectedSource, tagScope]), filteredEntries);
   const tagTree = useMemo(() => buildTagTree(tags, entriesInCurrentView.filter(item => isEntrySourceHidden(entrySources[item.id]) === isHiddenView)), [entriesInCurrentView, tags, entrySources, isHiddenView]);
@@ -344,17 +381,18 @@ export function EntryLibraryView({
             disabled={status !== 'ready'} onNavigate={onSelectTag} onDescription={onUpdateTagDescription}
             actions={isTrashView ? <EmptyWorkspaceTrashButton root={workspaceRoot} externalIds={externalEntryIds}
               onPurgeEntry={onPurgeEntry} onPurgeItem={onPurgeTrashItem} /> : <>
-              {(enabledSources.zotero || enabledSources.mineru) && <Button size="default" variant={isHiddenView ? 'secondary' : 'ghost'} className="gap-1.5 text-xs" aria-label={`已隐藏 ${hiddenEntryCount}`} onClick={() => onSelectView('hidden')}>
+              {workspaceRoot && <Button size="default" variant="outline" className="gap-1.5 text-xs" disabled={status !== 'ready' || fieldDefinitions?.root !== workspaceRoot} onClick={onManageFields}><Settings2 size={14} aria-hidden="true" />属性管理</Button>}
+              {(enabledSources.zotero || enabledSources.mineru) && <Button size="default" variant="ghost" aria-pressed={isHiddenView} className="gap-1.5 text-xs hover:border-[var(--control-border)] focus-visible:bg-[var(--control-hover)] aria-pressed:border-primary/30 aria-pressed:bg-accent aria-pressed:text-accent-foreground" aria-label={`已隐藏 ${hiddenEntryCount}`} title={isHiddenView ? '返回正常条目视图' : '查看已隐藏的来源条目'} onClick={toggleHiddenView}>
                 <EyeOff size={14} aria-hidden="true" />已隐藏{hiddenEntryCount > 0 ? ` ${hiddenEntryCount}` : ''}
               </Button>}
               {activeTagMeta ? <TabsList aria-label="标签内容" className="shrink-0">
                 <TabsTrigger value="papers" className="px-2 text-xs">论文</TabsTrigger>
                 <TabsTrigger value="notes" className="px-2 text-xs" disabled={!onOpenTagNote}>标签笔记{noteCount === null ? '' : ` ${noteCount}`}</TabsTrigger>
               </TabsList> : null}
-              {onOpenRelations ? <Button size="default" variant="ghost" aria-label="关系图" title="关系图" className="gap-1.5 text-xs text-muted-foreground @max-[900px]/library-heading:w-8 @max-[900px]/library-heading:px-0" onClick={onOpenRelations}><Network size={14} aria-hidden="true" /><span className="@max-[900px]/library-heading:hidden">关系图</span></Button> : null}
-              {librarySourceSync && <Button size="default" variant="ghost" aria-label={sourceAlertCount ? `查看 ${sourceAlertCount} 项来源动态` : '检查 Zotero 和 MinerU 来源'} title="检查 Zotero 和 MinerU 来源" disabled={librarySourceSync.running} className="gap-1.5 text-xs text-muted-foreground @max-[900px]/library-heading:w-8 @max-[900px]/library-heading:px-0" onClick={sourceAlertCount && librarySourceSync.review ? librarySourceSync.review : librarySourceSync.refresh}><RefreshCw size={14} className={librarySourceSync.running ? 'animate-spin' : undefined} aria-hidden="true" /><span className="@max-[900px]/library-heading:hidden">{sourceAlertCount ? `来源动态 ${sourceAlertCount}` : '检查来源'}</span></Button>}
+              {onOpenRelations ? <Button size="default" variant="ghost" aria-label="关系图" title="关系图" className="gap-1.5 text-xs hover:border-[var(--control-border)] focus-visible:bg-[var(--control-hover)] @max-[900px]/library-heading:w-8 @max-[900px]/library-heading:px-0" onClick={onOpenRelations}><Network size={14} aria-hidden="true" /><span className="@max-[900px]/library-heading:hidden">关系图</span></Button> : null}
+              {librarySourceSync && <Button size="default" variant={sourceAlertCount ? "outline" : "ghost"} aria-label={sourceAlertCount ? `查看 ${sourceAlertCount} 项来源动态` : '检查 Zotero 和 MinerU 来源'} title="检查 Zotero 和 MinerU 来源" disabled={librarySourceSync.running} className="gap-1.5 text-xs hover:border-[var(--control-border)] focus-visible:bg-[var(--control-hover)] @max-[900px]/library-heading:w-8 @max-[900px]/library-heading:px-0" onClick={sourceAlertCount && librarySourceSync.review ? librarySourceSync.review : librarySourceSync.refresh}><RefreshCw size={14} className={librarySourceSync.running ? 'animate-spin' : undefined} aria-hidden="true" /><span className="@max-[900px]/library-heading:hidden">{sourceAlertCount ? `来源动态 ${sourceAlertCount}` : '检查来源'}</span></Button>}
               <Button size="default" aria-label="阅读统计" title="在每日看板查看全资料库阅读统计" variant="ghost"
-                className="gap-1.5 text-xs text-muted-foreground @max-[900px]/library-heading:w-8 @max-[900px]/library-heading:px-0"
+                className="gap-1.5 text-xs hover:border-[var(--control-border)] focus-visible:bg-[var(--control-hover)] @max-[900px]/library-heading:w-8 @max-[900px]/library-heading:px-0"
                 onClick={onOpenDailyDashboard}>
                 <CalendarDays size={14} aria-hidden="true" />
                 <span className="@max-[900px]/library-heading:hidden">阅读统计</span>
@@ -370,10 +408,7 @@ export function EntryLibraryView({
             {librarySourceCatalog?.error && !isTrashView ? <div role="alert" className="flex shrink-0 items-center gap-2 border-b px-3 py-2 text-xs text-destructive">
               <span>来源信息读取失败，可能导致隐藏和恢复操作不可用。</span>{librarySourceCatalog.reload && <Button size="xs" variant="outline" onClick={librarySourceCatalog.reload}>重试读取来源</Button>}
             </div> : null}
-            {!isTrashView && showTagNavigation && status === 'ready' ? <LibraryTagNavigation
-              key={activeTag ?? 'root'} nested={Boolean(activeTag)} nodes={visibleFolderNodes}
-              onOpen={onSelectTag} onAssignEntryToTag={assignEntryToTag} /> : null}
-            {!isTrashView ? <LibraryPaperToolbar query={query} sortBy={sortBy} sortDirection={sortDirection}
+            {!isTrashView ? <LibraryPaperToolbar folderNavigation={{ path: folderBreadcrumb, onNavigate: onSelectTag, folders: visibleFolderNodes.length, papers: folderPapers.length, disabled: status !== 'ready' }} tagsOnly={{ enabled: tagsOnly, onChange: value => { selection.exit(); setTagsOnly(value); window.localStorage.setItem('neuink.entryLibraryTagsOnly', String(value)); } }} query={query} sortBy={sortBy} sortDirection={sortDirection}
               recentOrderAvailable={libraryView === 'recent'}
               onSortDirectionChange={direction => setSort({ by: sortBy, direction })}
               selectionActions={<LibrarySelectionActions active={selection.enabled && !isTrashView && section === 'papers'} context={selectionContext}
@@ -384,13 +419,16 @@ export function EntryLibraryView({
               selection={{ enabled: selection.enabled, disabled: status !== 'ready', onToggle: selection.enabled ? selection.exit : selection.enter }}
               sourceFilter={sourceAvailable && !isHiddenView ? { value: selectedSource, onChange: setSourceFilter, enabledSources, loading: librarySourceCatalog?.loading ?? false } : undefined}
               scope={activeTagMeta ? tagScope : null}
-              visibleColumns={visibleColumns} pinnedEdges={pinnedEdges}
+              visibleColumns={visibleColumns} workspaceRoot={workspaceRoot} fieldNames={fieldNames} fieldDefinitions={definitions} fieldFilter={{ name: activeFieldFilter.name, value: activeFieldFilter.value, onChange: (name, value) => setFieldFilter({root: workspaceRoot, name, value}) }} pinnedEdges={pinnedEdges}
               tagNavigation={{ shown: showTagNavigation, disabled: status !== 'ready', onShownChange: changeShowTagNavigation }}
               onQueryChange={setQuery} onSortChange={by => setSort({ by, direction: defaultLibrarySortDirection(by) })} onColumnChange={toggleColumn} onPinChange={togglePinnedEdge}
               onScopeChange={changeTagScope}
               refresh={libraryView === 'parsing' ? { busy: isRefreshingParseStatus, disabled: activeJobs === 0, onRefresh: () => void onRefreshParseStatus() } : undefined} /> : null}
+            {!isTrashView && (showTagNavigation || tagsOnly) && status === 'ready' ? <LibraryTagNavigation
+              fill={tagsOnly} papers={tagsOnly ? folderPapers : undefined} onOpenPaper={entryId => openEntry(entryId)} key={activeTag ?? 'root'} nested={Boolean(activeTag)} nodes={visibleFolderNodes}
+              onOpen={onSelectTag} onAssignEntryToTag={assignEntryToTag} /> : null}
 
-            {librarySourceSync?.running && <p role="status" className="border-b border-border px-4 py-1 text-xs text-muted-foreground">{librarySourceSync.current || '正在检查来源'} · {librarySourceSync.completed}/{librarySourceSync.total}</p>}
+
 
           {isTrashView ? (
             onRestoreTagArchive ? <WorkspaceTrashView root={workspaceRoot} tags={tags} items={trashItems} onRestoreTag={onRestoreTagArchive}
@@ -406,7 +444,9 @@ export function EntryLibraryView({
               />
             </div>
           ) : <>
-            <LibraryPapers active={section === 'papers'} entries={filteredEntries} status={status}
+            {tagsOnly && <p role="status" className="px-3 py-2 text-xs text-muted-foreground">{status === 'loading' ? '正在读取标签…' : status === 'error' ? '标签读取失败，请重新加载资料库。' : visibleFolderNodes.length === 0 && folderPapers.length === 0 ? '此文件夹为空。可返回上一级，或在“标签导航”中切换显示方式。' : '单击选择，双击或按 Enter 打开文件夹或论文。'}</p>}
+            <div className={tagsOnly ? 'hidden' : 'flex min-h-0 flex-1 flex-col'} aria-hidden={tagsOnly || undefined}>
+            <LibraryPapers workspaceRoot={workspaceRoot} active={section === 'papers' && !tagsOnly} entries={filteredEntries} status={status}
               sort={sort} onSortChange={setSort}
               selection={selection.enabled ? selection : undefined}
               deleteDisabled={Boolean(librarySourceCatalog?.loading || librarySourceCatalog?.error)}
@@ -423,7 +463,13 @@ export function EntryLibraryView({
                 : '没有符合当前筛选条件的条目。'}
               readingStates={readingStates} selectedEntryId={selectedEntryId} draggingEntryId={draggingEntryId}
               onSelect={id => { selection.ensureSelected(id); onSelectEntry(id); }}
-              visibleColumns={visibleColumns} pinnedEdges={pinnedEdges} reparseDisabled={activeJobs > 0}
+              visibleColumns={visibleColumns} fieldNames={fieldNames} fieldDefinitions={definitions} pinnedEdges={pinnedEdges} reparseDisabled={activeJobs > 0}
+              onEditField={workspaceRoot && onRefreshEntries ? async (entry, definition, expected, value) => {
+                try { await updateEntryField(workspaceRoot, entry.id, definition, expected, value); }
+                catch (error) { await onRefreshEntries().catch(() => undefined); throw error; }
+                try { await onRefreshEntries(); }
+                catch { notify({ tone: 'danger', title: '属性已保存，但列表刷新失败', description: '请重新打开条目库以查看最新结果。' }); }
+              } : undefined}
               getRowProps={item => ({
                 ...(!selection.enabled ? entryDragHandlers(item) : {}),
                 onClick: event => {
@@ -449,6 +495,7 @@ export function EntryLibraryView({
                   title: '已重新提交解析', description: `${item.title} 已重新加入解析队列，解析结果会覆盖现有内容。`
                 })).catch(() => undefined);
               }} />
+            </div>
           </> }
           </TabsContent>
           {activeTagMeta && onOpenTagNote ? <TabsContent forceMount value="notes" aria-hidden={section !== 'notes' || undefined} className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -515,10 +562,15 @@ function readStoredEntryLibraryColumns() {
       return defaults;
     }
     const validIds = new Set(ENTRY_LIBRARY_COLUMNS.map((column) => column.id));
-    const selected = stored.filter((value): value is EntryLibraryColumnId => validIds.has(value));
+    const selected = stored.filter((value): value is EntryLibraryColumnId => typeof value === 'string' && (validIds.has(value as EntryLibraryColumnId) || value.startsWith('field:')));
     if (selected.length > 0 && !window.localStorage.getItem('neuink.entryLibrarySourceColumnMigrated.v1')) {
       if (!selected.includes('source')) selected.splice(1, 0, 'source');
       window.localStorage.setItem('neuink.entryLibrarySourceColumnMigrated.v1', '1');
+      window.localStorage.setItem(ENTRY_LIBRARY_COLUMNS_STORAGE_KEY, JSON.stringify(selected));
+    }
+    if (selected.length > 0 && !window.localStorage.getItem('neuink.entryLibraryCloudColumnMigrated.v1')) {
+      if (!selected.includes('cloud')) selected.push('cloud');
+      window.localStorage.setItem('neuink.entryLibraryCloudColumnMigrated.v1', '1');
       window.localStorage.setItem(ENTRY_LIBRARY_COLUMNS_STORAGE_KEY, JSON.stringify(selected));
     }
     return selected.length > 0 ? new Set(selected) : defaults;

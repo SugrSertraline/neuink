@@ -22,6 +22,7 @@ export type WorkspaceSurface = { viewId?: string } & (
   | { kind: 'external-import'; source?: 'zotero' | 'mineru'; navigationId?: string }
   | { kind: 'mineru-client-guide' }
   | { kind: 'tag-editor' }
+  | { kind: 'field-editor' }
   | { kind: 'tag-reading'; tagId: string; label?: string }
   | { kind: 'tag-details'; tagId: string; label?: string; view?: 'overview' | 'papers' | 'notes' }
   | { kind: 'owned-note'; target: NoteTarget; label?: string }
@@ -363,7 +364,7 @@ export function surfaceContentKey(surface: WorkspaceSurface) {
     case 'owned-note': return `note:${noteTargetKey(surface.target)}`;
     case 'note': return `note:${surface.entryId}:${surface.noteId}`;
     case 'segment-notes': return `segment-records:${surface.entryId}`;
-    case 'empty': case 'daily-dashboard': case 'ideation': case 'library': case 'relations': case 'settings': case 'external-import': case 'create-entry': case 'mineru-client-guide': case 'tag-editor': return surface.kind;
+    case 'empty': case 'daily-dashboard': case 'ideation': case 'library': case 'relations': case 'settings': case 'external-import': case 'create-entry': case 'mineru-client-guide': case 'tag-editor': case 'field-editor': return surface.kind;
     default: return `${surface.kind}:${surface.entryId}`;
   }
 }
@@ -422,6 +423,7 @@ export function workspaceSurfaceLabel(
     case 'create-entry': return '新建条目';
     case 'mineru-client-guide': return 'MinerU 客户端教程';
     case 'tag-editor': return '标签管理';
+    case 'field-editor': return '属性管理';
     case 'tag-reading': return `${surface.label ?? '标签'} · 平行阅读`;
     case 'tag-details': return `${surface.label ?? '标签'} · 详情`;
     case 'owned-note': return surface.label ?? '标签笔记';

@@ -1,0 +1,11 @@
+[Unit]
+Description=NeuInk daily backup schedule
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+RandomizedDelaySec=15m
+Persistent=true
+Unit=neuink-backup.service
+
+[Install]
+WantedBy=timers.target

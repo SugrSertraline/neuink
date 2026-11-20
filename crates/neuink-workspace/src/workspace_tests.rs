@@ -477,6 +477,58 @@ fn creates_note_source_link_sidecar() {
 }
 
 #[test]
+fn account_parse_result_does_not_replace_another_task() {
+    let root = std::env::temp_dir().join(format!("neuink_account_parse_{}", unique_suffix()));
+    let source_pdf = root.with_extension("pdf");
+    fs::write(&source_pdf, b"%PDF-1.7").unwrap();
+    let workspace = Workspace::create(&root).unwrap();
+    let entry = workspace.create_entry("A paper").unwrap();
+    workspace.import_pdf(&entry.id, &source_pdf).unwrap();
+    for status in [neuink_domain::PdfParseStatus::Queued, neuink_domain::PdfParseStatus::Uploading, neuink_domain::PdfParseStatus::Uploaded] {
+        workspace.set_pdf_parse_state(&entry.id, status, None).unwrap();
+    }
+    workspace.set_pdf_parse_state_with_task(&entry.id, neuink_domain::PdfParseStatus::Parsing, None, Some("current".into()), Some("account".into())).unwrap();
+    assert!(workspace.update_account_parse_state_if_current(&entry.id, "old", "account", neuink_domain::PdfParseStatus::Parsing, neuink_domain::PdfParseStatus::Failed, None).is_err());
+    assert!(workspace.update_account_parse_state_if_current(&entry.id, "current", "different", neuink_domain::PdfParseStatus::Parsing, neuink_domain::PdfParseStatus::Failed, None).is_err());
+    assert!(workspace.update_account_parse_state_if_current(&entry.id, "current", "account", neuink_domain::PdfParseStatus::Uploading, neuink_domain::PdfParseStatus::Failed, None).is_err());
+    assert!(workspace.apply_account_parse_result(&entry.id, "old", "account", b"not a zip", &[]).is_err());
+    assert!(workspace.apply_account_parse_result(&entry.id, "current", "different", b"not a zip", &[]).is_err());
+    assert_eq!(workspace.read_entry(&entry.id).unwrap().pdf.unwrap().parse.task_id.as_deref(), Some("current"));
+    assert!(!workspace.layout().entry_mineru_output_zip(&entry.id).exists());
+    fs::remove_file(source_pdf).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn account_parse_reservation_and_acknowledgement_are_guarded() {
+    use neuink_domain::PdfParseStatus as S;
+    let root = std::env::temp_dir().join(format!("neuink_parse_reservation_{}", unique_suffix()));
+    let source = root.with_extension("pdf");
+    fs::write(&source, b"%PDF-1.7").unwrap();
+    let workspace = Workspace::create(&root).unwrap();
+    let entry = workspace.create_entry("Paper").unwrap();
+    workspace.import_pdf(&entry.id, &source).unwrap();
+    workspace.set_pdf_parse_state(&entry.id, S::Queued, None).unwrap();
+    workspace.set_pdf_parse_state(&entry.id, S::Uploading, None).unwrap();
+    workspace.reserve_account_parse_task(&entry.id, "one", "account").unwrap();
+    workspace.reserve_account_parse_task(&entry.id, "one", "account").unwrap();
+    assert!(workspace.reserve_account_parse_task(&entry.id, "two", "account").is_err());
+    assert!(workspace.reserve_account_parse_task(&entry.id, "one", "other").is_err());
+    workspace.update_account_parse_state_if_current(&entry.id, "one", "account", S::Uploading, S::Parsing, None).unwrap();
+    assert!(workspace.update_account_parse_state_if_current(&entry.id, "one", "account", S::Uploading, S::Parsing, None).is_err());
+    assert_eq!(workspace.read_entry(&entry.id).unwrap().pdf.unwrap().parse.status, S::Parsing);
+    workspace.set_pdf_parse_state(&entry.id, S::Failed, None).unwrap();
+    workspace.set_pdf_parse_state(&entry.id, S::Queued, None).unwrap();
+    workspace.set_pdf_parse_state(&entry.id, S::Uploading, None).unwrap();
+    workspace.reserve_account_parse_task(&entry.id, "old-version", "account").unwrap();
+    workspace.set_pdf_parse_state(&entry.id, S::Uploaded, None).unwrap();
+    assert!(workspace.update_account_parse_state_if_current(&entry.id, "wrong", "account", S::Uploaded, S::Parsing, None).is_err());
+    workspace.update_account_parse_state_if_current(&entry.id, "old-version", "account", S::Uploaded, S::Parsing, None).unwrap();
+    fs::remove_file(source).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn requeue_failed_pdf_parse_clears_previous_task_metadata() {
     let root = std::env::temp_dir().join(format!("neuink_workspace_{}", unique_suffix()));
     let source_pdf = root.with_extension("pdf");

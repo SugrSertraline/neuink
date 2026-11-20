@@ -3,13 +3,13 @@
     "id": "start",
     "title": "第一次使用",
     "group": "开始",
-    "description": "从创建资料库到保存第一篇带来源的笔记。"
+    "description": "MinerU 客户端解析、读取目录并导入本地，配置小牛后开始阅读；大模型按需选择。"
   },
   {
-    "id": "updates",
-    "title": "近期更新与版本范围",
+    "id": "screenshots",
+    "title": "完整窗口功能图集",
     "group": "开始",
-    "description": "了解 beta 新功能、正式下载版的区别和当前使用边界。"
+    "description": "当前真实客户端截图：翻译、导入来源、阅读笔记、属性标签、关系图与本地 Codex。"
   },
   {
     "id": "concepts",
@@ -18,118 +18,124 @@
     "description": "用层级图和实例认识资料库、条目、标签、片段、笔记与来源。"
   },
   {
-    "id": "screenshots",
-    "title": "实机界面图解",
-    "group": "开始",
-    "description": "认识资料库、条目、片段、笔记与来源，用图文步骤完成第一次阅读。"
-  },
-  {
     "id": "workspace",
     "title": "认识工作台",
     "group": "开始",
-    "description": "五个侧栏入口、多标签、左右分屏、任务和保存保护。"
+    "description": "阅读统计、侧栏、多标签、左右分屏、任务和保存保护。"
   },
   {
-    "id": "library",
-    "title": "条目、标签与属性",
-    "group": "整理资料",
-    "description": "列表与书架、标签层级、自定义属性和阅读统计。"
-  },
-  {
-    "id": "import",
-    "title": "PDF 导入与 MinerU 解析",
-    "group": "整理资料",
-    "description": "PDF 与客户端 ZIP 两条路径，以及自建解析服务。"
-  },
-  {
-    "id": "zotero",
-    "title": "Zotero 资料与笔记",
-    "group": "整理资料",
-    "description": "本机来源接入、独立副本、笔记差异与明确确认的写回。"
-  },
-  {
-    "id": "pdf",
-    "title": "PDF 原文阅读",
-    "group": "阅读与理解",
-    "description": "连续与书页阅读、单页双页、片段预览、选字和收藏位置。"
-  },
-  {
-    "id": "reflow",
-    "title": "重排阅读与图表",
-    "group": "阅读与理解",
-    "description": "按内容阅读段落、公式、表格、图片和 Mermaid。"
+    "id": "updates",
+    "title": "当前产品能力",
+    "group": "开始",
+    "description": "翻译与双语、MinerU/Zotero、TextFold 与笔记、自选模型、本地 Codex 和可选同步。"
   },
   {
     "id": "translation",
     "title": "翻译与双语对照",
-    "group": "阅读与理解",
-    "description": "划词、片段、全文翻译，自动化选项与暂停恢复。"
+    "group": "翻译与双语",
+    "description": "推荐小牛，按任务自选服务；划词、全文、原译 PDF 分屏与重排双语。"
+  },
+  {
+    "id": "import",
+    "title": "MinerU 与 PDF 导入",
+    "group": "接入与整理",
+    "description": "推荐读取 MinerU 客户端结果目录并明确导入；也可自建解析或连接已部署后端。"
+  },
+  {
+    "id": "zotero",
+    "title": "Zotero 资料与笔记",
+    "group": "接入与整理",
+    "description": "浏览本机来源缓存，明确导入独立副本，比较来源笔记并按需确认写回。"
+  },
+  {
+    "id": "library",
+    "title": "条目、标签与属性",
+    "group": "接入与整理",
+    "description": "自定义属性、表格直接编辑、标签层级、列配置和三种浏览视图。"
+  },
+  {
+    "id": "pdf",
+    "title": "PDF 原文与译文",
+    "group": "阅读与笔记",
+    "description": "原版式、原译分屏、目录、悬停翻译、图表预览、固定与选区操作。"
+  },
+  {
+    "id": "reflow",
+    "title": "重排阅读与 TextFold",
+    "group": "阅读与笔记",
+    "description": "整段、逐句和纯中文；TextFold 中英详略及结构化图表阅读。"
   },
   {
     "id": "parallel",
     "title": "标签平行阅读",
-    "group": "阅读与理解",
+    "group": "阅读与笔记",
     "description": "同主题论文、独立对照和标签综合笔记。"
   },
   {
     "id": "notes",
     "title": "笔记、批注与收藏",
-    "group": "记录证据",
-    "description": "区分四种记录，编辑长笔记，保存、恢复与导出。"
+    "group": "阅读与笔记",
+    "description": "批注、片段笔记、文档笔记和标签综合笔记，配合来源、保存与导出。"
   },
   {
     "id": "sources",
     "title": "来源链接与反向引用",
-    "group": "记录证据",
-    "description": "把结论连接到页码与片段，处理失效来源。"
+    "group": "阅读与笔记",
+    "description": "把笔记连接到原文，预览来源、返回页码与片段，查找反向引用。"
   },
   {
     "id": "graph",
     "title": "关系图",
-    "group": "记录证据",
-    "description": "查看真实归属与引用，聚焦对象并探索二维和三维关系。"
+    "group": "阅读与笔记",
+    "description": "查看标签、条目、笔记与来源的真实连接，搜索和聚焦相关对象。"
+  },
+  {
+    "id": "assistant",
+    "title": "大模型与本地 Codex",
+    "group": "模型与检索",
+    "description": "自选模型或接入已登录的本地 Codex，结合阅读材料问答并审阅修改提案。"
   },
   {
     "id": "search",
     "title": "关键词、语义与混合搜索",
-    "group": "检索与 AI",
-    "description": "选搜索方式、读结果、理解索引和模型缺失状态。"
-  },
-  {
-    "id": "assistant",
-    "title": "AI 助手与修改审阅",
-    "group": "检索与 AI",
-    "description": "阅读对象、@ 上下文、对话历史、消息队列和提案确认。"
+    "group": "模型与检索",
+    "description": "检索本地条目、笔记、页面和片段，查看出处与索引状态。"
   },
   {
     "id": "research",
     "title": "在线文献与网页检索",
-    "group": "检索与 AI",
-    "description": "检索候选、核对证据，确认添加 PDF 或元数据。"
+    "group": "模型与检索",
+    "description": "查找候选与来源，确认添加资料，按需生成论文卡片。"
   },
   {
     "id": "browser",
     "title": "内嵌网页与字幕读取",
-    "group": "检索与 AI",
-    "description": "网页标签、公开 PDF、视频字幕与外部来源笔记。"
-  },
-  {
-    "id": "export",
-    "title": "导出与分享",
-    "group": "成果与设置",
-    "description": "全文、译稿、笔记和批注的格式选择与内容检查。"
-  },
-  {
-    "id": "settings",
-    "title": "模型、外观与阅读设置",
-    "group": "成果与设置",
-    "description": "模型连接、任务模型、主题、缩放和七类设置。"
+    "group": "模型与检索",
+    "description": "网页与 PDF、笔记同屏，按需读取公开页面和可用字幕。"
   },
   {
     "id": "data",
     "title": "本地数据、便携与恢复",
-    "group": "成果与设置",
-    "description": "程序内 data、U 盘使用、旧资料自动整理与备份恢复。"
+    "group": "本地与设置",
+    "description": "程序旁的 data、备份与 Windows 电脑迁移，保留本地使用方式。"
+  },
+  {
+    "id": "sync",
+    "title": "可选云端同步",
+    "group": "本地与设置",
+    "description": "提供后端源码自行部署，也可完全不用；连接确认、同步范围与问题处理。"
+  },
+  {
+    "id": "settings",
+    "title": "翻译、模型与阅读设置",
+    "group": "本地与设置",
+    "description": "配置翻译、MinerU 来源、自选模型与本地 Agent；账户和云端服务按需使用。"
+  },
+  {
+    "id": "export",
+    "title": "导出与分享",
+    "group": "本地与设置",
+    "description": "原文、中文或双语稿，以及笔记和批注的格式、范围与来源。"
   },
   {
     "id": "workflows",

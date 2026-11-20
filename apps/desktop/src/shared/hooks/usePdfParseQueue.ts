@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { movePdfParseQueue, processPdfParseQueue, readPdfParseQueue, type ParseQueueMove, type PdfParseQueue } from '@/shared/ipc/pdfParseQueueApi';
+import { cloudAccount } from '@/shared/ipc/cloudAccountApi';
 
 const empty: PdfParseQueue = { waiting: [], active: [], failed: [] };
 
@@ -34,7 +35,7 @@ export function usePdfParseQueue(root: string | null, endpoint: string, apiKey: 
           if (!disposed) return changed.current();
         }).catch(() => {});
         fingerprint = next;
-        if (endpoint.trim() && !submitting && ((!queue.active.length && queue.waiting.length) || queue.active.some(e => !e.pdf?.parse.task_id))) {
+        if (endpoint.trim() && !submitting && ((!queue.active.length && queue.waiting.length) || queue.active.some(e => !e.pdf?.parse.task_id || (endpoint === 'neuink-account' && e.pdf?.parse.status === 'uploading' && e.pdf.parse.endpoint?.startsWith('neuink-account:'))))) {
           submitting = true;
           void processPdfParseQueue(root, endpoint, apiKey).then(async () => {
             if (!disposed) await changed.current();
@@ -69,8 +70,13 @@ export function usePdfParseQueue(root: string | null, endpoint: string, apiKey: 
     }
   }, [root]);
 
+  const cancelAccount = useCallback(async (id: string) => {
+    setActionError({ root, message: '' });
+    try { await cloudAccount({ action: 'parse_task_cancel', id }); await changed.current(); setRevision(v => v + 1); }
+    catch (error) { setActionError({ root, message: String(error) }); }
+  }, [root]);
   return { queue: state.root === root ? state.queue : empty,
     error: (actionError.root === root ? actionError.message : '') || (state.root === root ? state.error : ''),
-    loading: state.root !== root || state.loading, busy, move,
+    loading: state.root !== root || state.loading, busy, move, cancelAccount,
     refresh: () => { setActionError({ root, message: '' }); setRevision(v => v + 1); }, configured: Boolean(endpoint.trim()) };
 }

@@ -2,7 +2,8 @@ import { ArrowDown, ArrowUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { DAILY_SECTIONS, type DailySidebarPreferences } from './dailyLifestyle';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { DAILY_SECTIONS, ZODIAC_SIGNS, type DailySidebarPreferences } from './dailyLifestyle';
 
 export function DailySidebarSettings({ preferences, update }: {
   preferences: DailySidebarPreferences; update: (change: (previous: DailySidebarPreferences) => DailySidebarPreferences) => void;
@@ -20,5 +21,13 @@ export function DailySidebarSettings({ preferences, update }: {
         <Button variant="ghost" size="icon-xs" aria-label={`下移${label}`} disabled={index === preferences.order.length - 1} onClick={() => move(1)}><ArrowDown /></Button>
       </div>;
     })}</div>
+    <div className="space-y-2 border-t border-border pt-3">
+      <Label htmlFor="daily-zodiac" className="text-xs">我的星座</Label>
+      <Select value={preferences.zodiac || undefined} onValueChange={zodiac => update(previous => ({ ...previous, zodiac }))}>
+        <SelectTrigger id="daily-zodiac" aria-label="我的星座" size="sm"><SelectValue placeholder="选择星座" /></SelectTrigger>
+        <SelectContent>{ZODIAC_SIGNS.map(sign => <SelectItem key={sign} value={sign}>{sign}</SelectItem>)}</SelectContent>
+      </Select>
+      <p className="text-muted-foreground">仅用于本地趣味签，选择保存在这台设备上。</p>
+    </div>
   </div>;
 }

@@ -24,6 +24,21 @@ const chooseAll = () => fireEvent.click(screen.getByRole('button', { name: '全�
 const row = (title: string) => screen.getByRole('row', { name: new RegExp(title) });
 const sources = () => ({ sources: { 'paper-1': { kinds: ['zotero'] as ('zotero' | 'mineru')[], hidden: false, zotero_hidden: false } }, loading: false, error: false, setHidden: vi.fn(async () => undefined) });
 
+it('keeps only search and selection tools until selection mode ends', () => {
+  setup();
+  expect(screen.getByRole('combobox', { name: '条目排序' })).toBeTruthy();
+  chooseMode();
+  expect(screen.getByRole('textbox', { name: '搜索条目' })).toBeTruthy();
+  expect(screen.queryByRole('combobox', { name: '条目排序' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '表头' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '标签导航' })).toBeNull();
+  chooseAll();
+  expect(screen.getByRole('button', { name: '移入回收站 3 篇' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '退出选择' }));
+  expect(screen.getByRole('combobox', { name: '条目排序' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '表头' })).toBeTruthy();
+});
+
 it('keeps selection actions in the existing toolbar and adds only the checkbox column', () => {
   setup();
   const toolbar = screen.getByLabelText('条目库筛选与操作');
@@ -126,15 +141,17 @@ it('right-clicking another row extends the selection and closing its menu preser
   expect(screen.getByRole('button', { name: '退出选择' })).toBeTruthy();
 });
 
-it('preserves selection when switching from the bookshelf to the table', () => {
+it('hides display switching during bookshelf selection and restores it on exit', () => {
   window.localStorage.setItem(APP_APPEARANCE_STORAGE_KEY, 'atelier');
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
   setup(); chooseMode();
   const book = screen.getByRole('listitem', { name: '论文甲' });
   fireEvent.click(within(book).getByRole('checkbox', { name: '选择 论文甲' }));
   expect(book.getAttribute('data-state')).toBe('selected');
+  expect(screen.queryByRole('radio', { name: '列表' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '退出选择' }));
   fireEvent.click(screen.getByRole('radio', { name: '列表' }));
-  expect(row('论文甲').getAttribute('aria-selected')).toBe('true');
+  expect(row('论文甲')).toBeTruthy();
 });
 
 it.each(['loading', 'error'] as const)('prevents entering selection mode while the library is %s', status => {

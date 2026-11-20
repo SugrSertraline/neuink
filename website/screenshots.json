@@ -178,5 +178,117 @@
   "local-agent-thinking-012.png": [
     430,
     550
+  ],
+  "current-selection-translation.png": [
+    3840,
+    2100
+  ],
+  "current-translation-parallel.png": [
+    3840,
+    2100
+  ],
+  "current-reflow-bilingual.png": [
+    3840,
+    2100
+  ],
+  "current-reflow-sentences.png": [
+    3840,
+    2100
+  ],
+  "current-reflow-translated.png": [
+    3840,
+    2100
+  ],
+  "current-mineru-source.png": [
+    3840,
+    2100
+  ],
+  "current-zotero-source.png": [
+    3840,
+    2100
+  ],
+  "current-textfold.png": [
+    3840,
+    2100
+  ],
+  "current-hover-settings.png": [
+    3840,
+    2100
+  ],
+  "current-hover-text.png": [
+    3840,
+    2100
+  ],
+  "current-hover-citation.png": [
+    3840,
+    2100
+  ],
+  "current-hover-figure.png": [
+    3840,
+    2100
+  ],
+  "current-pinned-figure.png": [
+    3840,
+    2100
+  ],
+  "current-outline.png": [
+    3840,
+    2100
+  ],
+  "current-reflow-chart.png": [
+    3840,
+    2100
+  ],
+  "current-annotations.png": [
+    3840,
+    2100
+  ],
+  "current-segment-notes.png": [
+    3840,
+    2100
+  ],
+  "current-pdf-notes.png": [
+    3840,
+    2100
+  ],
+  "current-browser.jpg": [
+    3840,
+    2100
+  ],
+  "current-assistant.png": [
+    3840,
+    2100
+  ],
+  "current-local-codex.png": [
+    3840,
+    2100
+  ],
+  "current-library.png": [
+    3840,
+    2100
+  ],
+  "current-library-layout.png": [
+    3840,
+    2100
+  ],
+  "current-folders.png": [
+    3840,
+    2100
+  ],
+  "current-properties.png": [
+    3840,
+    2100
+  ],
+  "current-tags.png": [
+    3840,
+    2100
+  ],
+  "current-graph.png": [
+    3840,
+    2100
+  ],
+  "current-dashboard.png": [
+    3840,
+    2100
   ]
 }

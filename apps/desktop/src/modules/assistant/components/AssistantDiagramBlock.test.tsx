@@ -48,7 +48,7 @@ describe('assistant diagrams', () => {
   it('retains readable source when the diagram cannot render', async () => {
     vi.mocked(renderMermaidSvg).mockRejectedValue(new Error('invalid diagram'));
     const view = render(<MarkdownMessageContent content={diagram} streaming={false} sources={[]} onOpenSource={() => {}} />);
-    await waitFor(() => expect(view.getByText(/Mermaid 渲染失败/)).toBeTruthy());
+    await waitFor(() => expect(view.getByRole('status').textContent).toBe('渲染失败'));
     expect(view.container.querySelector('code')?.textContent).toContain('root((主题))');
   });
 
@@ -68,3 +68,4 @@ describe('assistant diagrams', () => {
     expect(proposal.status).toBe('pending');
   });
 });
+

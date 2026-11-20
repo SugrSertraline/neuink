@@ -81,3 +81,12 @@ it('allows canceling a generating item while another active item is saving', asy
   resolve({ failedSegmentUids: [] });
   await promise;
 });
+
+it('includes individual validation reasons in the task failure message', async () => {
+  mocks.generate.mockImplementation(async ({ onProgress }: { onProgress: (value: FoldGenerationProgress) => void }) => {
+    onProgress({ ...progress, failed: 1, failedSegmentUids: ['a'], segmentErrors: { a: '证据句编号无效。' } });
+    return { failedSegmentUids: ['a'], skipped: [], failureCode: 'validation' };
+  });
+  await expect(startFoldTask('root', 'validation-reason', 'Paper', [segment])).rejects.toMatchObject({ code: 'validation' });
+  expect(getFoldTaskSnapshot('root', 'validation-reason')?.error).toContain('证据句编号无效');
+});

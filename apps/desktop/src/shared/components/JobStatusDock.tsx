@@ -1,6 +1,7 @@
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Clock3, Loader2, MessageSquare, Pause, Square } from 'lucide-react';
 import { useId, useMemo, useState } from 'react';
 
+import { clearNotificationHistory, useNotificationHistory, type NotificationRecord } from '../lib/notificationHistory';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Progress } from '@/components/ui/progress';
@@ -22,7 +23,7 @@ function unfinishedTaskPriority(item: UnfinishedTask) {
   return status === 'paused' ? 3 : status === 'queued' ? 2 : status === 'waiting' ? 1 : 0;
 }
 
-export function JobStatusDock({ jobs, assistantTasks = EMPTY_ASSISTANT_TASKS, entryTitles, onOpenAssistantTask, onStopAssistantTask, onOpenJob }: {
+export function JobStatusDock({ jobs, assistantTasks = EMPTY_ASSISTANT_TASKS, entryTitles, onOpenAssistantTask, onStopAssistantTask, onOpenJob, onOpenNotification }: {
   /** Accepted for existing callers; displayed counts are derived from actual task states. */
   activeCount?: number;
   jobs: Job[];
@@ -31,8 +32,11 @@ export function JobStatusDock({ jobs, assistantTasks = EMPTY_ASSISTANT_TASKS, en
   onOpenAssistantTask?: (id: string) => void;
   onStopAssistantTask?: (id: string) => void;
   onOpenJob?: (job: Job) => void;
+  onOpenNotification?: (notification: NotificationRecord) => void;
 }) {
+  const notifications = useNotificationHistory();
   const [expanded, setExpanded] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
   const [showRecent, setShowRecent] = useState(false);
   const recentId = useId();
   const debug = useAssistantDebug();
@@ -44,9 +48,10 @@ export function JobStatusDock({ jobs, assistantTasks = EMPTY_ASSISTANT_TASKS, en
     ];
     return items.sort((left, right) => unfinishedTaskPriority(left) - unfinishedTaskPriority(right));
   }, [jobs, assistantTasks]);
-  const recent = useMemo(() => jobs.filter(job => !isUnfinishedJob(job)), [jobs]);
+  const failures = useMemo(() => jobs.filter(job => job.status === 'failed'), [jobs]);
+  const recent = useMemo(() => jobs.filter(job => !isUnfinishedJob(job) && job.status !== 'failed'), [jobs]);
 
-  if (jobs.length === 0 && assistantTasks.length === 0) return null;
+
 
   const SummaryIcon = summary.tone === 'running' ? Loader2 : summary.tone === 'waiting' ? Clock3
     : summary.tone === 'failed' ? AlertTriangle : CheckCircle2;
@@ -59,9 +64,9 @@ export function JobStatusDock({ jobs, assistantTasks = EMPTY_ASSISTANT_TASKS, en
   return (
     <Popover open={expanded} onOpenChange={setExpanded}>
       <PopoverTrigger asChild>
-        <Button className="max-w-full gap-1.5" size="sm" type="button" variant="outline" aria-label={`实时任务：${summary.title}`}>
+        <Button className="ml-auto max-w-full shrink-0 gap-1.5" size="sm" type="button" variant="outline" aria-label={`实时任务：${summary.title}`}>
           <SummaryIcon className={cn('size-3.5 shrink-0', iconClass)} aria-hidden="true" />
-          <span className="truncate">{summary.title}</span>
+          <span className="truncate">{summary.count ? summary.title : '通知与任务'}{notifications.length ? ` · ${notifications.length}` : ''}</span>
           <ChevronUp className={cn('size-3.5 shrink-0 transition-transform', expanded && 'rotate-180')} aria-hidden="true" />
         </Button>
       </PopoverTrigger>
@@ -71,7 +76,7 @@ export function JobStatusDock({ jobs, assistantTasks = EMPTY_ASSISTANT_TASKS, en
       <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
           <SummaryIcon className={cn('size-4 shrink-0', iconClass)} aria-hidden="true" />
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-medium">实时任务</div>
+            <div className="text-sm font-medium">通知与任务</div>
             <div className="text-xs text-muted-foreground [overflow-wrap:anywhere]">{summary.description}</div>
           </div>
           <Button aria-label="收起任务面板" title="收起任务面板" size="icon-xs" type="button" variant="ghost" onClick={() => setExpanded(false)}>
@@ -79,6 +84,22 @@ export function JobStatusDock({ jobs, assistantTasks = EMPTY_ASSISTANT_TASKS, en
           </Button>
         </div>
         <div className="min-h-0 max-h-[360px] overflow-x-hidden overflow-y-auto overscroll-contain px-3 [scrollbar-gutter:stable]">
+          <section aria-label="最近通知" className="border-b py-2">
+            <div className="flex items-center justify-between gap-2">
+              <Button size="xs" variant="ghost" aria-expanded={showNotifications} onClick={() => setShowNotifications(value => !value)}>最近通知 · {notifications.length}</Button>
+              {notifications.length > 0 && <Button size="xs" variant="ghost" onClick={clearNotificationHistory}>清空通知</Button>}
+            </div>
+            {notifications.length === 0 && <p className="py-2 text-xs text-muted-foreground">暂无通知</p>}
+            {notifications.filter(item => showNotifications || item.tone === 'danger').map(item => <div key={item.id} className="border-t py-2 first:border-0">
+              <div className={cn('text-xs font-medium', item.tone === 'danger' && 'text-destructive')}>{item.title}</div>
+              {item.description && <p className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground [overflow-wrap:anywhere]">{item.description}</p>}
+              <time className="text-[10px] text-muted-foreground" dateTime={new Date(item.time).toISOString()}>{new Date(item.time).toLocaleTimeString()}</time>
+              {item.navigation && onOpenNotification && <Button size="xs" variant="outline" className="ml-2" onClick={() => { setExpanded(false); onOpenNotification(item); }}>立即处理</Button>}
+            </div>)}
+          </section>
+          {failures.length > 0 && <section aria-label="需要处理的任务" className="divide-y border-b">
+            {failures.map(job => <JobTaskRow key={job.id} job={job} debug={debug} entryTitles={entryTitles} onOpen={onOpenJob ? openJob : undefined} />)}
+          </section>}
           <section aria-label="未完成任务" className="divide-y">
             {unfinished.map(item => item.kind === 'assistant'
               ? <AssistantTaskRow key={`assistant:${item.task.id}`} task={item.task}
@@ -167,8 +188,8 @@ function JobTaskRow({ job, debug, entryTitles, onOpen }: {
           <div className="mt-0.5 whitespace-pre-wrap text-xs text-muted-foreground [overflow-wrap:anywhere]">{jobDescription(job, debug)}</div>
           {progress && <Progress className="mt-2 h-1.5" aria-label={`${title}进度`} indicatorClassName={progressColor}
             value={Math.max(0, Math.min(100, job.progress.percent || 0))} />}
-          {onOpen && job.scope?.kind === 'entry' && <Button className="mt-1.5" size="xs" type="button" variant="outline"
-            onClick={() => onOpen(job)} aria-label={`查看任务：${title}`}>查看任务</Button>}
+          {onOpen && (job.scope?.kind === 'entry' || job.id.startsWith('cloud-task:')) && <Button className="mt-1.5" size="xs" type="button" variant="outline"
+            onClick={() => onOpen(job)} aria-label={`${job.status === 'failed' ? '立即处理' : '查看任务'}：${title}`}>{job.status === 'failed' ? '立即处理' : '查看任务'}</Button>}
         </div>
       </div>
     </div>

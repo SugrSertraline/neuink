@@ -19,6 +19,8 @@ async fn failed_long_segment_resumes_only_unfinished_chunks_after_reopen() {
                 std::thread::sleep(Duration::from_millis(10));
                 continue;
             };
+            // Windows accepted sockets inherit the listener's nonblocking mode.
+            socket.set_nonblocking(false).unwrap();
             socket
                 .set_read_timeout(Some(Duration::from_secs(5)))
                 .unwrap();

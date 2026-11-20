@@ -172,7 +172,11 @@ impl Workspace {
                 }
             }
         }
-        atomic_write_json(path, &state)?;
+        let change = self.content_change(
+            crate::content_transaction::ContentTarget::IdeationState,
+            serde_json::to_vec_pretty(&state)?,
+        )?;
+        self.commit_content_transaction(vec![change])?;
         self.read_ideation()
     }
 }

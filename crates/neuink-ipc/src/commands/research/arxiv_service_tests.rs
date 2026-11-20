@@ -239,7 +239,7 @@ async fn cached_preview_isolates_workspaces_and_expiry_and_latest_metadata() {
             .iter_mut()
             .find(|r| r.root == canonical && r.paper.id == id)
             .unwrap();
-        row.at = Instant::now() - Duration::from_secs(3601);
+        row.expires_at = Instant::now();
     }
     assert!(selected(&Selection {
         root: a.path().to_path_buf(),

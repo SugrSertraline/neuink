@@ -1,0 +1,12 @@
+ALTER TABLE users ADD CONSTRAINT users_quota_nonnegative CHECK (quota >= 0);
+ALTER TABLE libraries ADD CONSTRAINT libraries_revision_nonnegative CHECK (revision >= 0);
+ALTER TABLE blobs ADD CONSTRAINT blobs_size_valid CHECK (size BETWEEN 0 AND 2147483648);
+ALTER TABLE uploads ADD CONSTRAINT uploads_size_valid CHECK (size BETWEEN 0 AND 2147483648);
+ALTER TABLE uploads ADD CONSTRAINT uploads_offset_valid CHECK (offset_bytes BETWEEN 0 AND size);
+ALTER TABLE objects ADD CONSTRAINT objects_state_valid CHECK (revision > 0 AND deleted = (content IS NULL));
+ALTER TABLE changes ADD CONSTRAINT changes_state_valid CHECK (revision > 0 AND deleted = (content IS NULL));
+CREATE INDEX libraries_owner_idx ON libraries(owner);
+CREATE INDEX sessions_user_idx ON sessions(user_id);
+CREATE INDEX uploads_owner_expiry_idx ON uploads(owner, expires_at);
+CREATE INDEX changes_object_history_idx ON changes(library_id, object_id, revision DESC);
+CREATE INDEX reset_tokens_user_idx ON reset_tokens(user_id);

@@ -97,3 +97,6 @@ __pycache__/
 *.py[cod]
 # Local-only investigation reports and raw evidence.
 /.local-archive/
+
+# User-specific one-off maintenance, never distributed.
+/crates/neuink-workspace/examples/reviewed_duplicate_cleanup.rs

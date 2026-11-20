@@ -1,4 +1,5 @@
-import { ExternalLink, FolderOpen, Loader2, RotateCcw } from 'lucide-react';
+import { ReaderLoading } from './ReaderLoading';
+import { ExternalLink, FolderOpen, RotateCcw } from 'lucide-react';
 import type {
   MouseEvent as ReactMouseEvent,
   RefObject
@@ -334,18 +335,8 @@ export function PdfReaderDocumentPane({
             width={bookWidth}
             currentPage={(rows[book.rowIndex]?.[0]?.pageIdx ?? 0) + 1} pageCount={pageCount} resumePageIdx={resumePageIdx} /> : null}
         </div>
-      ) : pdfBytesState.status === 'loading' || pdfState.status === 'loading' ? (
-        <ReaderMessage
-          icon={
-            <Loader2 className="animate-spin" size={22} aria-hidden="true" />
-          }
-          title={pdfBytesState.status === 'loading' ? '正在读取 PDF' : '正在渲染 PDF'}
-          description={
-            pdfBytesState.status === 'loading'
-              ? '正在从本地工作区读取 PDF 文件。'
-              : '正在用 PDF.js 渲染本地 PDF 页面。'
-          }
-        />
+      ) : pdfAvailable && (pdfBytesState.status === 'idle' || pdfBytesState.status === 'loading' || (pdfBytesState.status === 'ready' && (pdfState.status === 'idle' || pdfState.status === 'loading'))) ? (
+        <ReaderLoading />
       ) : pdfBytesState.status === 'error' ? (
         <ReaderMessage
           title="PDF 读取失败"

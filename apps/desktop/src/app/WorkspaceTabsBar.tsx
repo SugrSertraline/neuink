@@ -1,3 +1,4 @@
+import { LibraryTabHoverSwitch, type LibraryTabNavigation } from './LibraryTabHoverSwitch';
 import { ArrowLeftRight, ChevronDown, Link2, PanelRight, Pin, Plus, X } from 'lucide-react';
 import {
   ContextMenu,
@@ -49,6 +50,7 @@ const MENU_WIDTH = 34;
 const TAB_STEP = 180;
 
 type WorkspaceTabsBarProps = {
+  libraryNavigation?: LibraryTabNavigation;
   readingLinkMode?: ReadingLinkMode;
   onReadingLinkModeChange?: (mode: ReadingLinkMode) => void;
   onNewTab?: () => void;
@@ -68,6 +70,7 @@ type WorkspaceTabsBarProps = {
 };
 
 export function WorkspaceTabsBar({
+  libraryNavigation,
   readingLinkMode = 'scroll',
   onReadingLinkModeChange,
   onNewTab,
@@ -283,6 +286,7 @@ export function WorkspaceTabsBar({
     )}>
       <div className={cn('workspace-tabsbar-panes', split && 'is-split')}>
         <TabPane
+          libraryNavigation={libraryNavigation}
           active={layout.left}
           entries={entries}
           label="左侧标签"
@@ -306,6 +310,7 @@ export function WorkspaceTabsBar({
         {split ? <div className="workspace-tabsbar-divider" aria-hidden="true" /> : null}
         {split && layout.right ? (
           <TabPane
+          libraryNavigation={libraryNavigation}
             active={layout.right}
             entries={entries}
             label="右侧标签"
@@ -382,7 +387,7 @@ export function WorkspaceTabsBar({
                 width: dragVisualRef.current.rect.width
               }}
             >
-              <span className="truncate">{workspaceSurfaceLabel(pointerDrag.surface, entries)}</span>
+              <span className="truncate">{(pointerDrag.surface.kind === 'library' && libraryNavigation ? libraryNavigation.title : workspaceSurfaceLabel(pointerDrag.surface, entries))}</span>
             </div>
           </div>,
           document.body
@@ -393,6 +398,7 @@ export function WorkspaceTabsBar({
 }
 
 function TabPane({
+  libraryNavigation,
   active,
   entries,
   label,
@@ -414,6 +420,7 @@ function TabPane({
   onPointerDragStart,
   onSelect
 }: {
+  libraryNavigation?: LibraryTabNavigation;
   active: WorkspaceSurface;
   entries: Array<{ id: string; title: string; pdfFileName?: string | null }>;
   label: string;
@@ -487,7 +494,9 @@ function TabPane({
             }
           }}
         >
-          {isEntryReadingView(surface) && onSwitchEntryView ? (
+          {surface.kind === 'library' && libraryNavigation ? (
+            <LibraryTabHoverSwitch navigation={libraryNavigation} dragging={draggingKey !== null} pinned={pinned} onSelect={() => onSelect(pane, surface)} />
+          ) : isEntryReadingView(surface) && onSwitchEntryView ? (
             <EntryTabHoverSwitch
               dragging={draggingKey !== null}
               entry={entry}
@@ -501,14 +510,14 @@ function TabPane({
               <TooltipTrigger asChild>
                 <button type="button" onClick={() => onSelect(pane, surface)}>
                   {pinned ? <Pin size={12} aria-hidden="true" className="workspace-tab-pin" /> : null}
-                  <span className="truncate">{workspaceSurfaceLabel(surface, entries)}</span>
+                  <span className="truncate">{(surface.kind === 'library' && libraryNavigation ? libraryNavigation.title : workspaceSurfaceLabel(surface, entries))}</span>
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={6}>{workspaceSurfaceLabel(surface, entries)}</TooltipContent>
+              <TooltipContent side="bottom" sideOffset={6}>{(surface.kind === 'library' && libraryNavigation ? libraryNavigation.title : workspaceSurfaceLabel(surface, entries))}</TooltipContent>
             </Tooltip>
           )}
           {!pinned ? <button
-            aria-label={`关闭${workspaceSurfaceLabel(surface, entries)}`}
+            aria-label={`关闭${(surface.kind === 'library' && libraryNavigation ? libraryNavigation.title : workspaceSurfaceLabel(surface, entries))}`}
             data-tab-close="true"
             type="button"
             onClick={() => onClose(pane, surface)}
@@ -559,7 +568,7 @@ function TabPane({
           <DropdownMenuContent align="end" className="w-72">
             {hidden.map((surface) => (
               <DropdownMenuItem key={surfaceKey(surface)} onSelect={() => onSelect(pane, surface)}>
-                <span className="truncate">{workspaceSurfaceLabel(surface, entries)}</span>
+                <span className="truncate">{(surface.kind === 'library' && libraryNavigation ? libraryNavigation.title : workspaceSurfaceLabel(surface, entries))}</span>
               </DropdownMenuItem>
             ))}
           </DropdownMenuContent>

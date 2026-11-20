@@ -13,7 +13,7 @@ use super::model::ExportAsset;
 const MAX_ASSET_BYTES: u64 = 24 * 1024 * 1024;
 const MAX_EXPORT_ASSET_BYTES: usize = 192 * 1024 * 1024;
 
-pub(super) fn html_fragment(markdown: &str) -> Html {
+pub(crate) fn html_fragment(markdown: &str) -> Html {
     let options = Options::ENABLE_TABLES
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_MATH
@@ -23,7 +23,7 @@ pub(super) fn html_fragment(markdown: &str) -> Html {
     Html::parse_fragment(&rendered)
 }
 
-pub(super) fn image_references(markdown: &str) -> Vec<String> {
+pub(crate) fn image_references(markdown: &str) -> Vec<String> {
     let Ok(selector) = Selector::parse("img[src]") else {
         return Vec::new();
     };

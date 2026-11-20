@@ -13,7 +13,7 @@ export type PdfParseAction = {
 };
 
 /** Submission is local; persisted entry status and the existing queue own parsing progress. */
-export function PdfParseButton({ entry, action, iconOnly = false }: { entry: LibraryEntry; action: PdfParseAction; iconOnly?: boolean }) {
+export function PdfParseButton({ entry, action, iconOnly = false, panel = false }: { entry: LibraryEntry; action: PdfParseAction; iconOnly?: boolean; panel?: boolean }) {
   const { notify } = useToast();
   const pending = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -41,8 +41,9 @@ export function PdfParseButton({ entry, action, iconOnly = false }: { entry: Lib
       setBusy(false);
     }
   };
+  const Icon = busy || running ? LoaderCircle : queued ? Clock3 : entry.status === 'Failed' ? RotateCcw : FileScan;
+  if (panel) return <Button type="button" size="sm" variant="ghost" className="w-full justify-start gap-2 px-2 text-foreground" disabled={action.disabled || busy || queued || running} onClick={() => void start()}><Icon aria-hidden="true" className={busy || running ? 'size-4 animate-spin motion-reduce:animate-none' : 'size-4'} />{label}</Button>;
   if (iconOnly) {
-    const Icon = busy || running ? LoaderCircle : queued ? Clock3 : entry.status === 'Failed' ? RotateCcw : FileScan;
     return <TooltipIconButton label={label} tooltip={!action.configured && !queued && !running ? `${label} · 先选择解析方式` : label}
       variant="ghost" className="text-muted-foreground hover:text-foreground" disabled={action.disabled || busy || queued || running}
       onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); void start(); }}>

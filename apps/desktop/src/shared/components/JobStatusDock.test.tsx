@@ -15,8 +15,7 @@ it('shows paper imports with honest counts and safe failure text beside translat
     progress: { current: 0, total: 12, percent: 0 }, message: '已接收 200 字' };
   const view = render(<JobStatusDock activeCount={1} jobs={[translation, failed]} />);
   fireEvent.click(view.getByRole('button', { name: '实时任务：1 个未完成任务' }));
-  expect(view.queryByRole('group', { name: '论文下载与添加' })).toBeNull();
-  fireEvent.click(view.getByRole('button', { name: '最近已结束 · 1' }));
+  expect(view.getByRole('group', { name: '论文下载与添加' })).toBeTruthy();
   const downloads = within(view.getByRole('group', { name: '论文下载与添加' }));
   expect(downloads.getByText('失败 · 已处理 2/6 篇')).toBeTruthy();
   expect(downloads.queryByText(failed.error!)).toBeNull();
@@ -26,9 +25,9 @@ it('shows paper imports with honest counts and safe failure text beside translat
   expect(view.getAllByText('正在翻译 · 已接收 200 字').length).toBeGreaterThan(0);
 });
 
-it('shows no task control for an empty list', () => {
+it('keeps the shared notification and task entry available when idle', () => {
   const view = render(<JobStatusDock activeCount={0} jobs={[]} />);
-  expect(view.queryByRole('button')).toBeNull();
+  expect(view.getByRole('button').textContent).toContain('通知与任务');
 });
 it('labels context preparation without claiming that zero translated characters arrived', () => {
   const job: Job = { id: 'translation', kind: 'translation', status: 'processing', scope: null,
@@ -44,7 +43,6 @@ it('shows an actionable failure when the translation model stops before producin
     progress: { current: 0, total: 398, percent: 0 } };
   const ui = render(<JobStatusDock jobs={[job]} />);
   fireEvent.click(ui.getByRole('button', { name: '实时任务：最近任务有失败' }));
-  fireEvent.click(ui.getByRole('button', { name: '最近已结束 · 1' }));
   expect(ui.getAllByText('全文翻译失败，已有译文保留。请打开翻译任务重试未完成内容。').length).toBeGreaterThan(0);
 });
 it('protects both the summary and a historical failed download when debug is explicitly enabled', () => {
@@ -53,7 +51,6 @@ it('protects both the summary and a historical failed download when debug is exp
     created_at: '', updated_at: '', error: raw, message: raw, progress: { current: 1, total: 3, percent: 100 / 3 } };
   const ui = render(<JobStatusDock activeCount={0} jobs={[failed]} />);
   fireEvent.click(ui.getByRole('button', { name: '实时任务：最近任务有失败' }));
-  fireEvent.click(ui.getByRole('button', { name: '最近已结束 · 1' }));
   expect(ui.queryByText(raw)).toBeNull();
   act(() => setAssistantDebug(true));
   expect(ui.getAllByText(/调试：请求超时 · HTTP 503/)).toHaveLength(2);
@@ -212,4 +209,36 @@ it('marks only its floating panel for native clipping and closes after Escape wi
   expect(document.querySelector('[data-native-browser-overlay]')).toBeNull();
   await waitFor(() => expect(document.activeElement).toBe(trigger));
   expect(stop).not.toHaveBeenCalled();
+});
+
+it('retains notifications in the shared dock without replaying expired actions', async () => {
+  const { rememberNotification, clearNotificationHistory } = await import('../lib/notificationHistory');
+  const view = render(<JobStatusDock jobs={[]} />);
+  act(() => rememberNotification('test', { title: '已保存', description: '保存完成', action: <button>过期撤销</button> }));
+  fireEvent.click(view.getByRole('button'));
+  fireEvent.click(view.getByRole('button', { name: '最近通知 · 1' }));
+  expect(view.getByText('已保存')).toBeTruthy();
+  expect(view.queryByText('过期撤销')).toBeNull();
+  fireEvent.click(view.getByRole('button', { name: '清空通知' }));
+  expect(view.queryByText('已保存')).toBeNull();
+  act(() => clearNotificationHistory());
+});
+
+it('shows sync problems without expanding history and routes both handling buttons', async () => {
+  const { rememberNotification, clearNotificationHistory } = await import('../lib/notificationHistory');
+  const onOpenNotification = vi.fn(); const onOpenJob = vi.fn();
+  const job: Job = { id: 'cloud-task:failed', kind: 'sync', status: 'failed', scope: { kind: 'workspace', root: 'library' },
+    created_at: '', updated_at: '', error: null, message: 'board:ideation · 来源依赖尚未就绪', progress: { current: 0, total: 0, percent: 0 } };
+  act(() => rememberNotification('sync-test', { title: '同步需要处理', description: job.message!, tone: 'danger', navigation: { kind: 'cloud-sync', root: 'library' } }));
+  const ui = render(<JobStatusDock jobs={[job]} onOpenNotification={onOpenNotification} onOpenJob={onOpenJob} />);
+  const trigger = ui.getByRole('button', { name: '实时任务：最近任务有失败' });
+  fireEvent.click(trigger);
+  expect(within(ui.getByRole('region', { name: '最近通知' })).getByText('board:ideation · 来源依赖尚未就绪')).toBeTruthy();
+  expect(within(ui.getByRole('region', { name: '需要处理的任务' })).getByText('board:ideation · 来源依赖尚未就绪')).toBeTruthy();
+  fireEvent.click(ui.getByRole('button', { name: '立即处理' }));
+  expect(onOpenNotification.mock.calls[0][0].navigation).toEqual({ kind: 'cloud-sync', root: 'library' });
+  fireEvent.click(trigger);
+  fireEvent.click(ui.getByRole('button', { name: '立即处理：资料库云同步' }));
+  expect(onOpenJob).toHaveBeenCalledWith(job);
+  act(() => clearNotificationHistory());
 });

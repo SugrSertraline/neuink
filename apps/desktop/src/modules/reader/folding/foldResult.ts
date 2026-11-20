@@ -14,6 +14,7 @@ export type FoldResult = {
 export type ValidatedFoldBatch = {
   results: FoldResult[];
   failedSegmentUids: string[];
+  failureReasons?: Record<string, string>;
 };
 
 /** Treat model output as untrusted: retain original sentences only by validated indices. */
@@ -23,6 +24,7 @@ export function validateFoldBatch(batch: readonly FoldInput[], output: unknown):
   const candidates = Array.isArray(rows) ? rows : [];
   const results: FoldResult[] = [];
   const failedSegmentUids: string[] = [];
+  const failureReasons: Record<string, string> = {};
 
   for (const input of batch) {
     const matches = candidates.filter((row): row is Record<string, unknown> =>
@@ -40,6 +42,13 @@ export function validateFoldBatch(batch: readonly FoldInput[], output: unknown):
     // TextFold's Topic is an exact span of the Takeaway; Key leads with it.
     if (!row || !validEvidence || !key || !takeaway || !topic || !key.startsWith(takeaway) || !takeaway.includes(topic)) {
       failedSegmentUids.push(input.segmentUid);
+      failureReasons[input.segmentUid] = !row ? (matches.length > 1 ? '模型重复返回同一段落。' : '模型未返回对应段落。')
+        : !validEvidence ? '证据句编号无效：需要按原文顺序提供 1 至 3 个有效句子编号。'
+        : !takeaway ? '模型没有返回结论。'
+        : !key ? '模型没有返回要点。'
+        : !topic ? '模型没有返回主题。'
+        : !key.startsWith(takeaway) ? '要点没有以结论开头。'
+        : '主题不是结论中的原文。';
       continue;
     }
     results.push({
@@ -52,7 +61,7 @@ export function validateFoldBatch(batch: readonly FoldInput[], output: unknown):
       topic
     });
   }
-  return { results, failedSegmentUids };
+  return { results, failedSegmentUids, ...(failedSegmentUids.length ? { failureReasons } : {}) };
 }
 
 export function foldResultMatchesSource(result: FoldResult, source: string): boolean {

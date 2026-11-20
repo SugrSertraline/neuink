@@ -13,14 +13,14 @@ export function ZoteroPaperList({ papers, model, onOpenEntry, onPreview }: {
     <TableHeader className="bg-muted"><TableRow><TableHead className="w-10"><span className="sr-only">选择</span></TableHead><TableHead>论文</TableHead><TableHead className="w-36">导入状态</TableHead></TableRow></TableHeader>
     <TableBody>{papers.map(paper => {
       const result = model.outcomes[paper.id];
-      const existing = model.snapshot?.existing[paper.id] ?? result?.result?.entry_id;
+      const existing = result?.result?.entry_id ?? model.snapshot?.existing[paper.id];
       const hidden = model.snapshot?.hidden.includes(paper.id) ?? false;
       const changed = model.snapshot?.changed?.includes(paper.id) ?? false;
       const picked = model.attachments[paper.id];
       const previewFile = paper.attachments.find(a => a.key === picked && a.available) ?? paper.attachments.find(a => a.available);
       const file = paper.attachments.find(a => a.key === picked);
       return <TableRow key={paper.id} data-state={model.selected.has(paper.id) ? 'selected' : undefined}>
-        <TableCell className="align-top pt-3"><Checkbox aria-label={`选择 ${paper.title}`} checked={model.selected.has(paper.id)} disabled={model.busy || Boolean(existing) || hidden} onCheckedChange={checked => {
+        <TableCell className="align-top pt-3"><Checkbox aria-label={`选择 ${paper.title}`} checked={model.selected.has(paper.id)} disabled={model.busy || Boolean(result?.result) || hidden} onCheckedChange={checked => {
           model.setSelected(previous => { const next = new Set(previous); if (checked === true) next.add(paper.id); else next.delete(paper.id); return next; });
         }} /></TableCell>
         <TableCell className="min-w-0 py-2">
@@ -37,7 +37,8 @@ export function ZoteroPaperList({ papers, model, onOpenEntry, onPreview }: {
           <Button size="xs" variant="ghost" className="mt-2 ml-2" disabled={model.busy || model.loading || Boolean(model.hiding)} onClick={() => void model.setHidden(paper.id, !hidden)}>{model.hiding === paper.id ? '保存中…' : hidden ? '恢复显示' : '隐藏'}</Button>
         </TableCell>
         <TableCell className="whitespace-normal align-top py-2">
-          {existing ? <div className="grid justify-items-start gap-1"><span className="text-success">{result?.result?.status === 'imported' ? '已导入' : '已在本地'}</span>{changed && <span className="text-warning">来源有更新；本地内容未覆盖</span>}{onOpenEntry && <Button size="xs" variant="outline" disabled={model.busy} onClick={() => onOpenEntry(existing)}>打开</Button>}</div>
+          {existing && result?.error && <p role="alert" className="break-words text-destructive">{result.error}</p>}
+          {existing ? <div className="grid justify-items-start gap-1"><span className="text-success">{result?.result ? '已导入到本地' : '来源已缓存'}</span>{changed && <span className="text-warning">来源有更新；本地内容未覆盖</span>}{onOpenEntry && <Button size="xs" variant="outline" disabled={model.busy} onClick={() => onOpenEntry(existing)}>打开</Button>}</div>
             : result?.cancelled ? <span className="text-muted-foreground">已取消，可重新导入</span>
             : result?.error ? <p role="alert" className="break-words text-destructive">{result.error}</p>
             : <span className="text-muted-foreground">{file ? '可导入 PDF' : '仅文献信息'}</span>}

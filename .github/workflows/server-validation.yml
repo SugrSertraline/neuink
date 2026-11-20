@@ -1,0 +1,37 @@
+name: Java sync server validation
+on:
+  pull_request:
+    paths: ['apps/server/**', 'crates/neuink-sync/**', 'crates/neuink-sync-protocol/**', 'deploy/server/**', '.github/workflows/server-validation.yml']
+  push:
+    branches: [alpha, beta, main]
+    paths: ['apps/server/**', 'deploy/server/**', '.github/workflows/server-validation.yml']
+permissions:
+  contents: read
+jobs:
+  postgres-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: neuink_test
+          POSTGRES_USER: neuink_test
+          POSTGRES_PASSWORD: isolated-ci-only
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U neuink_test -d neuink_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - run: mvn -B -ntp -f apps/server/pom.xml verify
+        env:
+          NEUINK_INTEGRATION: 'true'
+          NEUINK_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/neuink_test
+          NEUINK_DATABASE_USER: neuink_test
+          NEUINK_DATABASE_PASSWORD: isolated-ci-only
+          NEUINK_SERVER_STORAGE: ${{ runner.temp }}/neuink-server-test
