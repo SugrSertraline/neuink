@@ -27,7 +27,7 @@ const SCOPE = {
 
 export async function ensurePromptFixtures() {
   if (evalState.prompts.size > 0) return;
-  for (const name of ['qna_system', 'qna_context', 'qna_user']) {
+  for (const name of ['qna_system']) {
     evalState.prompts.set(name, await readFile(new URL(`${name}.md`, PROMPTS_URL), 'utf8'));
   }
 }
@@ -99,7 +99,6 @@ export async function runScenario(
       currentNote: scenario.setup?.currentNote ?? null,
       currentEntry: scenario.setup?.currentEntry ?? null,
       availableEntries: scenario.setup?.availableEntries ?? [],
-      harnessBrief: scenario.setup?.harnessBrief,
       question: scenario.prompt,
       abortSignal: AbortSignal.timeout(options.timeoutMs ?? (scenario.slow ? 300_000 : 180_000))
     });

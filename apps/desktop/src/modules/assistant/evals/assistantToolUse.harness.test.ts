@@ -179,7 +179,7 @@ describe('evaluation harness wiring', () => {
     expect(result.run.turns[0].usage).toBeDefined();
   });
 
-  it('records actual per-turn declarations after the local search budget is exhausted', async () => {
+  it('records stable declarations while the host enforces the local search budget', async () => {
     script.turns = [
       ...Array.from({ length: 6 }, (_, i) => ({ call: { name: 'search_segments',
         args: { query: `BLEU WMT result ${i}` } } })),
@@ -189,7 +189,7 @@ describe('evaluation harness wiring', () => {
     const result = await runScenario({ ...base, expect: { required: ['search_segments'] } }, profile);
     expect(result.passed).toBe(true);
     expect(result.run.turns[5].declaredTools).toContain('search_segments');
-    expect(result.run.turns[6].declaredTools).not.toContain('search_segments');
+    expect(result.run.turns[6].declaredTools).toEqual(result.run.turns[5].declaredTools);
     expect(result.run.turns[6].declaredTools).toContain('read_segment_content');
   });
 

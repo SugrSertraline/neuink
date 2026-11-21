@@ -1,6 +1,7 @@
 use super::*;
 fn protocol(provider: Provider) -> Protocol<'static> {
     Protocol {
+        seed_policy: false,
         provider,
         cwd: Path::new("C:/scratch"),
         session: "session_abc".into(),
@@ -113,25 +114,43 @@ fn codex_mcp_tool_approval_routes_only_declared_neuink_tools() {
             "tool_params":{"entry_id":"paper-1","limit":8000}
         },"message":"Allow tool?","requestedSchema":{"type":"object","properties":{}}
     }});
-    assert_eq!(approval_input(Provider::Codex, &request).unwrap(),
+    assert_eq!(
+        approval_input(Provider::Codex, &request).unwrap(),
         json!({"tool_name":"mcp__neuink__read_entry_assistant_context",
-            "input":{"entry_id":"paper-1","limit":8000}}));
+            "input":{"entry_id":"paper-1","limit":8000}})
+    );
     let allow = json!({"content":[{"text":"{\"behavior\":\"allow\"}"}]});
-    assert_eq!(approval_result(Provider::Codex, &request, &allow),
-        json!({"action":"accept","content":{}}));
-    assert_eq!(approval_result(Provider::Codex, &request, &Value::Null),
-        json!({"action":"decline","content":null}));
+    assert_eq!(
+        approval_result(Provider::Codex, &request, &allow),
+        json!({"action":"accept","content":{}})
+    );
+    assert_eq!(
+        approval_result(Provider::Codex, &request, &Value::Null),
+        json!({"action":"decline","content":null})
+    );
 
     let mut without_name = request.clone();
-    without_name["params"]["_meta"].as_object_mut().unwrap().remove("tool_name");
-    assert_eq!(approval_input(Provider::Codex, &without_name).unwrap()["tool_name"], "mcp__neuink__");
+    without_name["params"]["_meta"]
+        .as_object_mut()
+        .unwrap()
+        .remove("tool_name");
+    assert_eq!(
+        approval_input(Provider::Codex, &without_name).unwrap()["tool_name"],
+        "mcp__neuink__"
+    );
 
     let mut foreign = request.clone();
     foreign["params"]["serverName"] = json!("other");
-    assert_eq!(approval_input(Provider::Codex, &foreign).unwrap()["tool_name"], "McpElicitation");
+    assert_eq!(
+        approval_input(Provider::Codex, &foreign).unwrap()["tool_name"],
+        "McpElicitation"
+    );
     let mut form = request.clone();
     form["params"]["_meta"]["codex_approval_kind"] = json!("user_input");
-    assert_eq!(approval_input(Provider::Codex, &form).unwrap()["tool_name"], "McpElicitation");
+    assert_eq!(
+        approval_input(Provider::Codex, &form).unwrap()["tool_name"],
+        "McpElicitation"
+    );
 }
 #[test]
 fn acp_non_success_stop_reasons_fail() {
@@ -155,4 +174,20 @@ fn repeated_connection_errors_do_not_leave_the_chat_waiting_indefinitely() {
     let error = state.observe(&value).unwrap_err();
     assert!(error.contains("服务连接失败"));
     assert!(!error.contains("secret"));
+}
+
+#[test]
+fn acp_seeds_fixed_rules_once_and_can_reseed_legacy_or_compacted_sessions() {
+    let mut state = protocol(Provider::Opencode);
+    assert!(state.turn()["params"]["prompt"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("Native transport additions"));
+    state.resume = true;
+    assert_eq!(state.turn()["params"]["prompt"][0]["text"], "test");
+    state.seed_policy = true;
+    assert!(state.turn()["params"]["prompt"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("Native transport additions"));
 }

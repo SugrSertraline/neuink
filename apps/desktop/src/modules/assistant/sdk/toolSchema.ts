@@ -2,6 +2,7 @@ import { type AssistantToolDescriptor } from '@/shared/ipc/assistantApi';
 import { type AgentExecutionSelection } from '@/shared/types/agentRuntime';
 import { type JSONSchema7, type ToolSet } from 'ai';
 import { ENTRY_CONTEXT_MAX_CHARS } from './entryContext';
+import { PAPER_PRESENTATION_INSTRUCTIONS } from '../research/paperPresentation';
 import { isPlainObject } from './toolValues';
 
 export function noteProposalInputSchema(): JSONSchema7 {
@@ -298,7 +299,16 @@ export function toolDescription(descriptor: AssistantToolDescriptor) {
     return `${descriptor.description} Use this only for an explicitly selected, named, or confirmed Entry. Omit limit for the default 8000 characters; if supplied, limit must be between 100 and ${ENTRY_CONTEXT_MAX_CHARS}. Parsed text is returned in bounded chunks: when more is true, call this tool again with the returned next_read arguments. Read all chunks when full reading is requested; otherwise state partial coverage. Never read CLI tool-result files with native Read/shell to obtain the rest. If no parsed segments exist, the host reads up to the first 3 PDF text-layer pages automatically. Continue with read_pdf_pages / search_pdf_text; respect next_page and incomplete/OCR warnings.`;
   }
   if (descriptor.name === 'search_sciverse_evidence') {
-    return `${descriptor.description} Preserve every returned marker and source identifier in the answer.`;
+    return `${descriptor.description} Cite supported claims with returned [S#] markers. papers is metadata; evidence contains snippets joined by doc_id. counts covers only this batch. Respect truncated, metadata_truncated and omitted_evidence. page_no=null means unknown. Read more with the content tools when needed.\n${PAPER_PRESENTATION_INSTRUCTIONS}`;
+  }
+  if (descriptor.name === 'arxiv_search') {
+    return `${descriptor.description} Follow the exact returned next_query to continue the same search; never recompute days_back or mix search_key offsets. Preserve partial errors and missing/unresolved ids. No semantic similarity: label a keyword alternative explicitly. Search and recommendation do not authorize downloading. Follow the returned presentation_contract when recommending papers.`;
+  }
+  if (descriptor.name === 'search_papers') {
+    return `${descriptor.description} Returns metadata and abstracts, not full-text verification. Use limit (integer 1–10), not top_k. Explain provider errors and partial coverage. Follow the returned presentation_contract when recommending papers.`;
+  }
+  if (descriptor.name === 'import_papers') {
+    return `${descriptor.description} Only for a user request to download/add papers; the host previews and requires approval. paper_ids uses actual returned raw ids, without the research: presentation prefix. Report partial successes. If TOOL_NO_PUBLIC_PDF is returned, tell the user that this attempt did not download or add those records and explain the available source links. Do not retry the same unavailable records or treat them as globally unobtainable.`;
   }
   if (descriptor.name === 'read_sciverse_content') {
     return `${descriptor.description} Use bounded reads and continue with next_offset only when more context is necessary.`;

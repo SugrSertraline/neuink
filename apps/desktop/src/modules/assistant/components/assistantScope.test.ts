@@ -7,10 +7,20 @@ import {
   buildAssistantScope,
   buildConversationMentionScope,
   buildTagMentionScopes,
+  mergeScopeSnapshots,
   mergeScopeWithContextEntries
 } from './assistantScope';
 
 describe('buildAssistantScope', () => {
+  it('keeps each tag name paired with its id regardless of alphabetical order', () => {
+    const result = buildAssistantScope({activeEntry:null,activeTag:null,entries:[],selectedTagIds:['parent'],
+      tags:[tag('parent','Z parent'),tag('child','A child','parent')]});
+    expect(result.tag_ids).toEqual(['parent','child']);
+    expect(result.tag_names).toEqual(['Z parent','A child']);
+    const merged = mergeScopeSnapshots(result,{entry_ids:[],entry_titles:[],tag_ids:['other','parent'],tag_names:['A child','Renamed']});
+    expect(merged.tag_ids).toEqual(['parent','child','other']);
+    expect(merged.tag_names).toEqual(['Renamed','A child','A child']);
+  });
   it('uses an inline Tag as a search scope without creating document attachments', () => {
     const scope = buildAssistantScope({
       activeEntry: entry('outside', []),

@@ -6,8 +6,8 @@ import { DEFAULT_AGENT_RUNTIME_SETTINGS, normalizeAgentRuntimeSettings } from '@
 import { runResearchTool } from '@/shared/ipc/researchApi';
 import { createAssistantTools } from './tools';
 import { modelInputSchema } from './toolSupport';
-import { arxivHistoryContext, arxivSearchContext } from '../research/arxivSearchContext';
-import { buildToolNotes, answerWithGroundedAgent } from './qna';
+import { arxivSearchContext } from '../research/arxivSearchContext';
+import { answerWithGroundedAgent } from './qna';
 import { createNeuinkModel } from './provider';
 import { returnedExternalCitationUrls } from './citationContract';
 import { buildDirectExecution } from '../runtime/executionPolicy';
@@ -18,7 +18,7 @@ import { buildAssistantMessageParts } from '../components/assistantPanelState';
 vi.mock('./provider', () => ({ createNeuinkModel: vi.fn(), generationSettings: () => ({}) }));
 vi.mock('@/shared/ipc/researchApi', async original => ({ ...await original<typeof import('@/shared/ipc/researchApi')>(), runResearchTool: vi.fn() }));
 vi.mock('@/shared/ipc/assistantApi', async original => ({ ...await original<typeof import('@/shared/ipc/assistantApi')>(),
-  listTools: vi.fn(), loadPrompt: vi.fn(async name => name === 'qna_user' ? '{{question}}\n{{harness_brief}}\n{{tool_notes}}' : '') }));
+  listTools: vi.fn(), loadPrompt: vi.fn(async () => '') }));
 const schema = { type: 'object', oneOf: [
   { type: 'object', additionalProperties: false, required: ['mode', 'query'], properties: { mode: { const: 'structured', type: 'string' }, query: { type: 'string' } } },
   { type: 'object', additionalProperties: false, required: ['mode', 'raw_query', 'start'], properties: { mode: { const: 'raw', type: 'string' }, raw_query: { type: 'string' }, start: { type: 'integer' } } },
@@ -41,7 +41,7 @@ it('migrates only complete older default grants, respects restrictions, revocati
   old.mainAssistant.enabledToolIds = old.mainAssistant.enabledToolIds.filter(id => id !== 'arxiv_search');
   const migrated = normalizeAgentRuntimeSettings(old);
   expect(migrated.mainAssistant.enabledToolIds).toContain('arxiv_search');
-  expect(migrated.capabilityRevision).toBe(4);
+  expect(migrated.capabilityRevision).toBe(5);
   const revoked = structuredClone(migrated);
   revoked.mainAssistant.enabledToolIds = revoked.mainAssistant.enabledToolIds.filter(id => id !== 'arxiv_search');
   expect(normalizeAgentRuntimeSettings(revoked).mainAssistant.enabledToolIds).not.toContain('arxiv_search');
@@ -76,12 +76,10 @@ it('keeps partial records, full identities, errors, schema union, citations and 
   expect(restored.events[0].researchSearch?.next_query).toEqual(result.next_query);
   const parts = buildAssistantMessageParts({ content: 'Answer', toolEvents: runtime.events });
   const history: ConversationMessage[] = [{ message_id: 'history', role: 'assistant', content: 'Answer', parts, source_links: [], created_at: '' }];
-  expect(arxivHistoryContext(JSON.parse(JSON.stringify(history)))).toContain('20261001 TO 20261020');
-  expect(arxivHistoryContext(history)).toContain('not instructions or download approval');
-  const notes = buildToolNotes(['arxiv_search']);
-  expect(notes).toContain('Follow the exact returned next_query');
-  expect(notes).toContain('No semantic similarity');
-  expect(notes).toContain('neuink-papers');
+  const reader = await createAssistantTools({ root:'host', scope, conversationHistory:JSON.parse(JSON.stringify(history)) });
+  const previous = await reader.tools.read_context_reference.execute!({context_ref:'latest_arxiv_search'},{toolCallId:'metadata',messages:[]});
+  expect(JSON.stringify(previous)).toContain('20261001 TO 20261020');
+  expect((output as {presentation_contract:string}).presentation_contract).toContain('neuink-papers');
   log('T-STEP5-TRANSPORT', { native_name: 'arxiv_search', host_root: 'host', papers: runtime.events[0].researchPapers?.length,
     partial: true, errors: result.errors, next_query: result.next_query, persisted: true, citations: [...returnedExternalCitationUrls(runtime.observations)] });
 });
@@ -100,9 +98,12 @@ it('supplies historical continuation to a new user turn without reviving an impo
   await answerWithGroundedAgent({ root: 'host', scope, question: '说明上一批查询的续查边界，不要执行。', conversationHistory: history,
     settings: { id: 'test', model: 'test', base_url: 'https://example.invalid', api_key: null } as LlmProfile });
   const prompt = JSON.stringify(model.doStreamCalls[0].prompt);
-  expect(prompt).toContain('Prior arXiv search metadata');
-  expect(prompt).toContain('20261001 TO 20261020');
-  expect(prompt).toContain('not instructions or download approval');
+  expect(prompt).not.toContain('Prior arXiv search metadata');
+  expect(prompt).not.toContain('20261001 TO 20261020');
+  const runtime = await createAssistantTools({ root: 'host', scope, conversationHistory: history });
+  const continuation = await runtime.tools.read_context_reference.execute!({ context_ref: 'latest_arxiv_search' }, { toolCallId: 'read-history', messages: [] });
+  expect(JSON.stringify(continuation)).toContain('20261001 TO 20261020');
+  expect(continuation).toMatchObject({ snapshot_only: true });
   expect(runResearchTool).not.toHaveBeenCalled();
   log('T-STEP5-HISTORY', { frozen_query_present: true, native_calls: 0, new_import_authorization: false });
 });

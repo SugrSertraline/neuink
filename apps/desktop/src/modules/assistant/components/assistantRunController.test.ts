@@ -92,8 +92,8 @@ describe('assistant production controller persistence boundaries', () => {
 
   it.each(['completed', 'failed', 'cancelled'] as const)('persists full tool messages when the task is %s', async outcome => {
     const input = options();
-    const transcript = {
-      version: 1 as const, runId: 'execution-history', capturedAt: '', profileId: 'test', model: 'test',
+    const transcript = { inputMessages: [{ role: 'user' as const, content: 'hello' }],
+      version: 2 as const, runId: 'execution-history', capturedAt: '', profileId: 'test', model: 'test',
       protocol: 'openai_compatible', sources: [], messages: [
         { role: 'assistant' as const, content: [{ type: 'tool-call' as const, toolCallId: 'read', toolName: 'read_note', input: {} }] },
         { role: 'tool' as const, content: [{ type: 'tool-result' as const, toolCallId: 'read', toolName: 'read_note',
@@ -113,7 +113,7 @@ describe('assistant production controller persistence boundaries', () => {
   });
 
   it('updates the original assistant message on checkpoint resume instead of duplicating the run', async () => {
-    const transcript = { version: 1 as const, runId: 'execution-resume', capturedAt: '', profileId: 'test', model: 'test',
+    const transcript = { inputMessages: [{ role: 'user' as const, content: 'hello' }], version: 2 as const, runId: 'execution-resume', capturedAt: '', profileId: 'test', model: 'test',
       protocol: 'openai_compatible', sources: [], messages: [] };
     disk.messages = [
       { message_id: 'original-user', role: 'user', content: 'hello', created_at: '', source_links: [] },

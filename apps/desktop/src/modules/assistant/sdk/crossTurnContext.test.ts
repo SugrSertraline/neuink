@@ -34,6 +34,51 @@ beforeEach(() => {
   });
 });
 describe('cross-turn context through the real provider driver', () => {
+  it('keeps system and tool prefixes stable when switching from a paper to a browser and clearing it', async () => {
+    const runtimeSettings = structuredClone(DEFAULT_AGENT_RUNTIME_SETTINGS);
+    const base = { ...options, runtimeSettings, activeExecution:{agent:runtimeSettings.mainAssistant},
+      ...buildDirectExecution(runtimeSettings,'Explain the context') };
+    const models = [0,1,2].map(()=>scriptedModel([{text:'Context updated.'}]));
+    const history: ConversationMessage[] = [];
+    for (let index=0; index<models.length; index++) {
+      vi.mocked(createNeuinkModel).mockReturnValue(models[index]);
+      const question = `Continue ${index}`;
+      const result = await answerWithGroundedAgent({ ...base, question, conversationHistory:history,
+        currentEntry:index === 0 ? {id:'entry',title:'Paper'} : null,
+        browserTabTarget:index === 1 ? {id:'tab',url:'https://example.org/article',title:'Article',navigationId:'nav'} : null });
+      if (index>0) {
+        const previous = models[index-1].doStreamCalls[0];
+        expect(models[index].doStreamCalls[0].prompt.slice(0,previous.prompt.length)).toEqual(previous.prompt);
+        expect(models[index].doStreamCalls[0].tools).toEqual(previous.tools);
+      }
+      history.push(turn(question,'user'),turn(result.answer,'assistant',result.modelTranscript));
+    }
+  });
+
+  it('preserves the exact prior request prefix and only emits a new workspace snapshot when it changes', async () => {
+    const firstModel = scriptedModel([{ text: 'First answer.' }]);
+    vi.mocked(createNeuinkModel).mockReturnValue(firstModel);
+    const input = { ...options, currentEntry: { id: 'entry', title: 'Paper' } };
+    const first = await answerWithGroundedAgent(input);
+    expect(first.modelTranscript?.version).toBe(2);
+    const history = JSON.parse(JSON.stringify([turn(options.question, 'user'), turn(first.answer, 'assistant', first.modelTranscript)]));
+    const secondModel = scriptedModel([{ text: 'Second answer.' }]);
+    vi.mocked(createNeuinkModel).mockReturnValue(secondModel);
+    const second = await answerWithGroundedAgent({ ...input, question: 'Follow-up', conversationHistory: history });
+    const original = firstModel.doStreamCalls[0].prompt;
+    expect(secondModel.doStreamCalls[0].prompt.slice(0, original.length)).toEqual(original);
+    expect(second.modelTranscript?.inputMessages).toEqual([{ role: 'user', content: 'Follow-up' }]);
+    expect(secondModel.doStreamCalls[0].tools).toEqual(firstModel.doStreamCalls[0].tools);
+    history.push(turn('Follow-up', 'user'), turn(second.answer, 'assistant', second.modelTranscript));
+    const thirdModel = scriptedModel([{ text: 'Changed target.' }]);
+    vi.mocked(createNeuinkModel).mockReturnValue(thirdModel);
+    const third = await answerWithGroundedAgent({ ...input, question: 'New paper', currentEntry: { id: 'other', title: 'Other' }, conversationHistory: history });
+    expect(third.modelTranscript?.inputMessages).toHaveLength(2);
+    const secondRequest = secondModel.doStreamCalls[0].prompt;
+    expect(thirdModel.doStreamCalls[0].prompt.slice(0, secondRequest.length)).toEqual(secondRequest);
+    expect(thirdModel.doStreamCalls[0].prompt[0]).toEqual(original[0]);
+  });
+
   it('replays the full result on the next request without re-executing the read or duplicating text', async () => {
     const firstModel = scriptedModel([
       { call: { name: 'read_segment_content', args: { entry_id: 'entry', segment_uid: 'segment' } } },
@@ -93,7 +138,7 @@ describe('cross-turn context through the real provider driver', () => {
         output: { type: 'error-text', value: 'TOOL_LIMIT_REACHED：没有新信息' } }] }
     );
     const transcript: AssistantModelTranscript = {
-      version: 1, runId: 'old-run', capturedAt: '', profileId: settings.id, model: settings.model,
+      version: 2, inputMessages: [{ role: 'user', content: 'Old search' }], runId: 'old-run', capturedAt: '', profileId: settings.id, model: settings.model,
       protocol: 'openai_compatible', messages, sources: [], outcome: 'failed'
     };
     const model = scriptedModel([
@@ -111,7 +156,7 @@ describe('cross-turn context through the real provider driver', () => {
 
   it('does not let a historical note read satisfy the current write precondition', async () => {
     const transcript: AssistantModelTranscript = {
-      version: 1, runId: 'old-note', capturedAt: '', profileId: settings.id, model: settings.model,
+      version: 2, inputMessages: [{ role: 'user', content: 'Read note' }], runId: 'old-note', capturedAt: '', profileId: settings.id, model: settings.model,
       protocol: 'openai_compatible', sources: [], messages: [
         { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'note', toolName: 'read_note',
           input: { entry_id: 'entry', note_id: 'note' } }] },

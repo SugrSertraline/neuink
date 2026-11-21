@@ -177,13 +177,12 @@ describe('formatConversationMemory', () => {
     expect(rendered).toBe('Summary: s');
   });
 
-  it('adds the counters when the conversation-level path knows them', () => {
+  it('keeps mutable UI counters out of the reusable checkpoint prefix', () => {
     const rendered = formatConversationMemory({
       decisions: [], entities: [], last_user_goal: null, open_items: [],
       pending_proposal_count: 2, source_count: 3, summary: 's', user_preferences: []
     });
-    expect(rendered).toContain('Cited sources so far: 3');
-    expect(rendered).toContain('Pending proposals: 2');
+    expect(rendered).toBe('Summary: s');
   });
 
   it('renders nothing when there is no checkpoint', () => {

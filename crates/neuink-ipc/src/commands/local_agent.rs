@@ -16,6 +16,14 @@ use serde::{Deserialize, Serialize};
 use std::{process::Stdio, time::Duration};
 use tokio::io::AsyncReadExt;
 
+fn system_instructions() -> String {
+    format!(
+        "{}\n\n{}",
+        include_str!("../../prompts/qna_system.md"),
+        include_str!("local_agent/prompt.md")
+    )
+}
+
 #[derive(Debug, Serialize)]
 pub struct LocalAgentDetection {
     status: &'static str,

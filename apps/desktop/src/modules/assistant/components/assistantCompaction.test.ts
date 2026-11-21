@@ -91,7 +91,7 @@ describe('compaction eligibility', () => {
   });
 
   it('allows manually compacting an automatically retained tail even without a newer chat message', () => {
-    const automatic = { ...memory, retained_context: { version: 1 as const, profileId: '', model: '', protocol: '',
+    const automatic = { ...memory, retained_context: { version: 2 as const, profileId: '', model: '', protocol: '',
       messages: [{ role: 'user' as const, content: 'Recent uncompressed request' }] } };
     expect(canCompactConversation([message('assistant', '', { parts: [{ type: 'memory', memory: automatic }] })])).toBe(true);
   });

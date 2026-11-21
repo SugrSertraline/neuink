@@ -220,7 +220,7 @@ describe('ordinary failures stay inside the tool boundary', () => {
     input.budget = budget; input.execution = new DurableExecution('fixture', input.execution.record, budget);
     expect((await answerWithGroundedAgent(input)).answer).toContain('不能确认');
     expect(provider.doStreamCalls).toHaveLength(3); expect(budget.turns).toBe(3);
-    expect(provider.doStreamCalls[1].tools).toBeUndefined();
+    expect(provider.doStreamCalls[1].toolChoice).toEqual({ type: 'none' });
   });
   it('allows a cited-task limitation answer when its required read failed to acquire evidence', async () => {
     model([{ call: readCall }, { text: '无法读取这个片段，没有足够证据确认结论。' }]);
@@ -366,7 +366,8 @@ describe('SDK failure results reach the model through production wiring', () => 
     expect(approval).toHaveBeenCalledOnce();
     expect(JSON.stringify(provider.doStreamCalls[1].prompt)).toContain('TOOL_OUTCOME_UNKNOWN');
     expect(JSON.stringify(provider.doStreamCalls[1].prompt)).toContain('HTTP 403');
-    expect(provider.doStreamCalls[1].tools?.some(tool => tool.name === 'mcp_server_write')).toBe(false);
+    // Definitions remain cache-stable; the host still rejects the later write before dispatch.
+    expect(provider.doStreamCalls[1].tools).toEqual(provider.doStreamCalls[0].tools);
     expect(provider.doStreamCalls[1].tools?.some(tool => tool.name === read.name)).toBe(true);
     expect(input.budget.writesBlocked).toBe(true);
     expect(JSON.stringify(provider.doStreamCalls[3].prompt)).toContain('TOOL_NOT_AVAILABLE');

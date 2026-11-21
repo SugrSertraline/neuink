@@ -3,7 +3,7 @@ import type { CardKind, IdeationState, PaperCard } from '@/shared/ipc/ideationAp
 import { branchRules, placeBranchCard } from './ideationBranches';
 import { arrangeBoard } from './ideationLayout';
 import { resolveAssistantReadingContext } from '@/modules/assistant/components/assistantReadingContext';
-import { modelDrivenBrief } from '@/modules/assistant/harness/engine';
+import { observeWorkspaceContext } from '@/modules/assistant/context/observation';
 import type { AssistantActiveSurfaceSnapshot } from '@/shared/types/assistant';
 
 const problem: PaperCard = { id: 'problem', entry_id: 'ideation-user', kind: 'problem', title: '缺失数据', body: '观测不完整时预测不稳定' };
@@ -41,11 +41,11 @@ it('keeps suggested placements inside persistence bounds near the canvas edge', 
   for (const slot of slots) { expect(slot.x).toBeLessThanOrEqual(10000); expect(slot.y).toBeLessThanOrEqual(10000); expect(slot.y).toBeGreaterThanOrEqual(0); }
 });
 
-it('does not attach an idea or a stale paper when the assistant is opened manually', () => {
+it('does not attach an idea or a stale paper when the assistant is opened manually', async () => {
   const surface: AssistantActiveSurfaceSnapshot = { kind: 'ideation', surfaceKey: 'ideation', pane: 'left', capturedAt: '', entryId: 'old-paper', noteId: null, segmentUid: null };
   const resolved = resolveAssistantReadingContext({ choice: null, entries: [], items: [], activeEntry: null, activeNote: null, activeSegment: null, activeSurface: surface });
   expect(resolved).toMatchObject({ label: '不关联内容', entry: null, bound: false, unavailable: false, surface: { entryId: null } });
-  const brief = modelDrivenBrief({ currentSurface: resolved.surface, history: [], mentionScope: { entry_ids: [], entry_titles: [], tag_ids: [], tag_names: [] } });
-  expect(brief).not.toContain('old-paper');
-  expect(brief).not.toContain('Current research idea');
+  const context = await observeWorkspaceContext({scope:{entry_ids:[],entry_titles:[],tag_ids:[],tag_names:[]},currentEntry:resolved.entry});
+  expect(context.active_entry).toBeNull();
+  expect(context.references).toEqual([]);
 });

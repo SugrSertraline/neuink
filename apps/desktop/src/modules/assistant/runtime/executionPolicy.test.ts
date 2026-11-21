@@ -1,9 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_AGENT_RUNTIME_SETTINGS } from '@/shared/lib/agentRuntimeSettings';
-import { buildDirectExecution, PLANNING_READ_TOOLS } from './executionPolicy';
+import { buildDirectExecution, canParallelAssistantTool, PLANNING_READ_TOOLS } from './executionPolicy';
 import { baseRequestRoute } from './requestRouter';
 
 describe('direct execution policy', () => {
+  it.each(['search_segments', 'read_note', 'read_pdf_pages', 'arxiv_search'])('allows concurrent known reads: %s', name => {
+    expect(canParallelAssistantTool(name)).toBe(true);
+  });
+  it('only overlaps Sciverse content reads after the target has been observed in completed search evidence', () => {
+    const observations = [{ toolName: 'search_sciverse_evidence', output: { evidence: [{ doc_id: 'paper-1' }] } }];
+    expect(canParallelAssistantTool('read_sciverse_content', { doc_id: 'paper-1' })).toBe(false);
+    expect(canParallelAssistantTool('read_sciverse_content', { doc_id: 'paper-1' }, observations)).toBe(true);
+    expect(canParallelAssistantTool('read_sciverse_content', { doc_id: 'paper-2' }, observations)).toBe(false);
+  });
+  it.each(['create_entry', 'import_papers', 'note_propose_create', 'ask_user', 'present_diagram',
+    'task_run_subagent', 'mcp.external.read', 'mcp_external_read', 'unknown'])('keeps effects, interactions and external tools exclusive: %s', name => {
+    expect(canParallelAssistantTool(name)).toBe(false);
+  });
   it('narrows greeting capabilities to zero, without affecting ordinary tasks', () => {
     const route = baseRequestRoute({ question: '你好', hasContext: false });
     const { invocationPlan } = buildDirectExecution(DEFAULT_AGENT_RUNTIME_SETTINGS, '你好', 'act', route);

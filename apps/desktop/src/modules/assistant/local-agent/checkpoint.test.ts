@@ -20,6 +20,11 @@ beforeEach(() => {
   });
 });
 const context = () => ({ id: crypto.randomUUID() });
+function deferred() {
+  let resolve!: (value: string) => void;
+  const promise = new Promise<string>(done => { resolve = done; });
+  return { promise, resolve };
+}
 
 describe('native Agent write-ahead receipts', () => {
   it('persists a dispatched write before effects and reuses its receipt across new call IDs', async () => {
@@ -91,6 +96,92 @@ describe('native Agent write-ahead receipts', () => {
     expect(second).not.toHaveBeenCalled(); release();
     await expect(Promise.all([one, two])).resolves.toEqual(['first', 'second']);
     expect((saved.payload['local:journal'] as { completed: unknown[] }).completed).toHaveLength(2);
+  });
+  it('overlaps reads, bounds them at four and preserves the write barrier in arrival order', async () => {
+    const { checkpoint } = setup();
+    const gate = deferred();
+    const writeGate = deferred();
+    let active = 0, maximum = 0, finished = 0;
+    const read = vi.fn(async () => {
+      active++; maximum = Math.max(maximum, active);
+      await gate.promise;
+      active--; finished++; return 'read';
+    });
+    const write = vi.fn(async () => {
+      expect(active).toBe(0);
+      expect(finished).toBe(6);
+      expect(saved.payload['local:journal']).toMatchObject({ pending: { name: 'create_entry' } });
+      return writeGate.promise;
+    });
+    const later = vi.fn(async () => 'after write');
+    const reads = Array.from({ length: 6 }, () => checkpoint.run('read_note', {}, context(), read));
+    const effect = checkpoint.run('create_entry', {}, context(), write);
+    const last = checkpoint.run('read_note', {}, context(), later);
+    await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(4));
+    expect(write).not.toHaveBeenCalled();
+    gate.resolve('go');
+    await vi.waitFor(() => expect(write).toHaveBeenCalledOnce());
+    expect(later).not.toHaveBeenCalled();
+    writeGate.resolve('created');
+    expect(await Promise.all([...reads, effect, last])).toHaveLength(8);
+    await checkpoint.settled();
+    expect(maximum).toBe(4);
+    expect((saved.payload['local:journal'] as { completed: unknown[] }).completed).toHaveLength(1);
+  });
+  it('checks proposal prerequisites only after earlier note reads have finished', async () => {
+    const { checkpoint } = setup();
+    const gate = deferred();
+    let noteRead = false;
+    const read = checkpoint.run('read_note', {}, context(), async () => { await gate.promise; noteRead = true; });
+    const preflight = vi.fn(() => { expect(noteRead).toBe(true); });
+    const proposal = checkpoint.run('note_propose_patch', {}, context(), async () => 'proposal', preflight);
+    expect(preflight).not.toHaveBeenCalled();
+    gate.resolve('ready');
+    await Promise.all([read, proposal]);
+    expect(preflight).toHaveBeenCalledOnce();
+  });
+  it('delivers successful sibling reads even when another read fails', async () => {
+    const { checkpoint } = setup();
+    const one = checkpoint.run('read_note', {}, context(), async () => { throw new Error('read failed'); });
+    const two = checkpoint.run('read_note', {}, context(), async () => 'evidence');
+    const outcomes = await Promise.allSettled([one, two]);
+    expect(outcomes[0]).toMatchObject({ status: 'rejected' });
+    expect(outcomes[1]).toEqual({ status: 'fulfilled', value: 'evidence' });
+    await checkpoint.settled();
+  });
+  it('cancels uncooperative reads and skips all queued operations', async () => {
+    const { checkpoint } = setup();
+    const controller = new AbortController();
+    const read = vi.fn(() => new Promise(() => {}));
+    const write = vi.fn();
+    const reads = Array.from({ length: 5 }, () => checkpoint.run('read_note', {}, { ...context(), signal: controller.signal }, read));
+    const pending = checkpoint.run('create_entry', {}, { ...context(), signal: controller.signal }, write);
+    const outcomes = Promise.allSettled([...reads, pending]);
+    await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(4));
+    controller.abort();
+    expect((await outcomes).every(outcome => outcome.status === 'rejected')).toBe(true);
+    await expect(checkpoint.settled()).rejects.toMatchObject({ name: 'AbortError' });
+    expect(read).toHaveBeenCalledTimes(4);
+    expect(write).not.toHaveBeenCalled();
+  });
+  it('stops queued reads and writes when concurrent pre-dispatch persistence fails', async () => {
+    const { checkpoint } = setup();
+    vi.mocked(saveAgentExecution).mockRejectedValue('os error 112');
+    const effect = vi.fn();
+    const reads = Array.from({ length: 6 }, () => checkpoint.run('read_note', {}, context(), effect));
+    const write = checkpoint.run('create_entry', {}, context(), effect);
+    const outcomes = await Promise.allSettled([...reads, write]);
+    expect(outcomes.every(outcome => outcome.status === 'rejected')).toBe(true);
+    expect(effect).not.toHaveBeenCalled();
+    await expect(checkpoint.settled()).rejects.toThrow('磁盘空间');
+  });
+  it('discards an interrupted legacy read marker without blocking future effects', async () => {
+    const { checkpoint, budget } = setup({ completed: [], pending: { name: 'read_note', replayable: true } });
+    expect(budget.writesBlocked).toBe(false);
+    await checkpoint.run('read_note', {}, context(), async () => 'fresh');
+    expect(saved.payload['local:journal']).toMatchObject({ completed: [] });
+    expect((saved.payload['local:journal'] as { pending?: unknown }).pending).toBeUndefined();
+    expect(await checkpoint.run('create_entry', {}, context(), async () => 'created')).toBe('created');
   });
   it('rejects damaged journal shapes instead of guessing whether a write was dispatched', () => {
     expect(() => setup({ completed: [], pending: {} })).toThrow('检查点无效');

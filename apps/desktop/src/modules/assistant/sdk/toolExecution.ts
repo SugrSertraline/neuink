@@ -23,6 +23,7 @@ import { isPdfTool, runPdfTool } from './pdfTools';
 import { researchImportResult } from './researchImportResult';
 import { researchOutput } from './researchOutput';
 import { arxivSearchContext } from '../research/arxivSearchContext';
+import { PAPER_PRESENTATION_INSTRUCTIONS } from '../research/paperPresentation';
 import { arxivGateStatus, arxivGateMessage } from '@/shared/lib/arxivGateStatus';
 import { createAgentToolFailure } from '../agent-core/toolFailure';
 import { formatSciverseSearchOutput } from './sciverseOutput';
@@ -56,7 +57,9 @@ export async function executeTool(
     toolCallId?: string;
   }
 ) {
-  if (isPdfTool(toolName)) return runPdfTool(toolName, input, addSource, contextBudget, signal);
+  // Native IPC may finish after cancellation; never allocate citations from a late result.
+  const recordSource = (source: ConversationSourceLink) => { signal?.throwIfAborted(); return addSource(source); };
+  if (isPdfTool(toolName)) return runPdfTool(toolName, input, recordSource, contextBudget, signal);
   if (isResearchTool(toolName)) {
     let result: unknown;
     try { result = await runResearchTool(toolName, input, signal, toolCallId); }
@@ -76,7 +79,9 @@ export async function executeTool(
     const native = result as { errors?: Array<{gate?:unknown}>; source_errors?: {arxiv?:unknown} };
     const gate = arxivGateStatus(native?.source_errors?.arxiv ?? (Array.isArray(native?.errors) ? native.errors.find(row => row.gate)?.gate : undefined));
     const projected = researchOutput(result, contextBudget);
-    const modelOutput = gate && projected && typeof projected === 'object' ? { ...projected, arxivGate: gate } : projected;
+    const modelOutput = projected && typeof projected === 'object' ? { ...projected,
+      ...(['search_papers', 'arxiv_search'].includes(toolName) ? { presentation_contract: PAPER_PRESENTATION_INSTRUCTIONS } : {}),
+      ...(gate ? { arxivGate: gate } : {}) } : projected;
     return { modelOutput, sources: [], researchPapers: ['search_papers', 'arxiv_search'].includes(toolName) ? researchPapersFromResult(result) : undefined,
       researchCacheSource: toolName === 'arxiv_search' ? 'arxiv_search' as const : toolName === 'search_papers' ? 'research' as const : undefined,
       researchSearch: toolName === 'arxiv_search' ? arxivSearchContext(result) : undefined,
@@ -96,7 +101,8 @@ export async function executeTool(
 
   if (toolName === 'search_segments') {
     const results = await invokeAssistantTool<SearchResults>('search_segments', input);
-    return formatSearchSegmentsOutput(results, addSource);
+    signal?.throwIfAborted();
+    return formatSearchSegmentsOutput(results, recordSource);
   }
 
   if (toolName === 'read_segment_content') {
@@ -104,7 +110,8 @@ export async function executeTool(
       'read_segment_content',
       input
     );
-    return formatReadSegmentOutput(result, addSource, contextBudget);
+    signal?.throwIfAborted();
+    return formatReadSegmentOutput(result, recordSource, contextBudget);
   }
 
   if (toolName === 'read_entry_assistant_context') {
@@ -114,21 +121,23 @@ export async function executeTool(
     );
     signal?.throwIfAborted();
     if (result.has_pdf && result.parsed_segment_count === 0) {
-      const fallback = await runPdfTool('read_pdf_pages', { ...input, start_page: 1, page_count: 3 }, addSource, contextBudget, signal);
+      const fallback = await runPdfTool('read_pdf_pages', { ...input, start_page: 1, page_count: 3 }, recordSource, contextBudget, signal);
       return { ...fallback, modelOutput: { ...fallback.modelOutput, requested_tool: 'read_entry_assistant_context',
         note: 'PDF 尚未完整解析，已自动读取前 3 页以内的文字层；按 next_page 继续 read_pdf_pages，不能把这部分当成全文。' } };
     }
-    return formatReadEntryOutput(result, addSource, contextBudget, input);
+    return formatReadEntryOutput(result, recordSource, contextBudget, input);
   }
 
   if (toolName === 'search_sciverse_evidence') {
     const result = await invokeAssistantTool<SciverseAgenticSearchResponse>(toolName, input);
-    return formatSciverseSearchOutput(result, addSource, String(input.query), contextBudget);
+    signal?.throwIfAborted();
+    return formatSciverseSearchOutput(result, recordSource, String(input.query), contextBudget);
   }
 
   if (toolName === 'read_sciverse_content') {
     const result = await invokeAssistantTool<SciverseContentResponse>(toolName, input);
-    return formatSciverseContentOutput(result, input, addSource, contextBudget);
+    signal?.throwIfAborted();
+    return formatSciverseContentOutput(result, input, recordSource, contextBudget);
   }
 
   if (toolName === 'search_sciverse_metadata' || toolName === 'search_sciverse_paper_schema' || toolName === 'get_sciverse_metadata_catalog' || toolName === 'get_sciverse_paper_schema') {

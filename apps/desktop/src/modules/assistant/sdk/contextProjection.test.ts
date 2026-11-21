@@ -2,7 +2,11 @@ import { summaryResponse } from './testHelpers/summary';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ModelMessage } from 'ai';
 import type { LlmProfile } from '@/shared/ipc/assistantApi';
-import { createContextProjector, contextCut, type ProjectionState } from './contextProjection';
+import { createContextProjector, contextCut, projectionRetainedMessages, type ProjectionState } from './contextProjection';
+import { latestContextState, latestContextMessages, workspaceMessage, runPolicyMessage } from '../context/workspace';
+import { renderConversationContext } from '../runtime/conversationTranscript';
+import type { AssistantConversationMemory, ConversationMessage } from '@/shared/ipc/assistantApi';
+import type { WorkspaceContext } from '@/shared/types/modelContext';
 import { runTextModelTask } from './modelTasks';
 import { AgentLocalLimitError, AgentStoppedError, RunBudget } from '../agent-core';
 import { estimateMessagesTokens } from './contextUsage';
@@ -28,12 +32,112 @@ const tools: ModelMessage[] = [
   { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'b', toolName: 'read', input: {} }] },
   { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'b', toolName: 'read', output: { type: 'text', value: 'LATEST_TOOL_RESULT [S2]' } }] }
 ];
+const workspace = (id: string): WorkspaceContext => ({version:1,scope:{entries:[{id,title:id}],tags:[]},
+  active_entry:{id,title:id},active_note:null,browser:null,references:[],pinned_segments:[]});
+const policy = {mode:'act' as const,write_policy:'proposal_only',source_policy:'mixed',required_tools:[]};
+function readBatch(id: string): ModelMessage[] {
+  return [{role:'assistant',content:[{type:'tool-call',toolCallId:id,toolName:'read',input:{}}]},
+    {role:'tool',content:[{type:'tool-result',toolCallId:id,toolName:'read',output:{type:'text',value:'Read result '+id}}]}];
+}
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(runTextModelTask).mockResolvedValue({ text: summaryResponse('Earlier findings [S1] and original goal.'), finishReason: 'stop' });
 });
 
 describe('automatic prefix compaction', () => {
+  it('replays frozen context after recent history and preserves it across persistence', async () => {
+    const old = workspaceMessage(workspace('old'));
+    const frozen = workspace('paper-A');
+    const current = workspaceMessage(frozen);
+    const messages: ModelMessage[] = [old, current, runPolicyMessage(policy), ...history];
+    const original = JSON.stringify(messages);
+    // A later UI change must not retarget the submitted request or regenerate its host messages.
+    frozen.active_entry = {id:'paper-B',title:'paper-B'};
+    const projector = createContextProjector(settings);
+    const projected = await projector.project(messages, 0);
+    const saved = projector.snapshot()!;
+    expect(saved.version).toBe(5);
+    expect(saved.contextRefreshIndex).toBe(messages.length);
+    expect(saved).not.toHaveProperty('baseline');
+    expect(projected.slice(-2)).toEqual([current, runPolicyMessage(policy)]);
+    expect(latestContextState(projected)).toEqual({workspace:workspace('paper-A'),policy});
+    expect(JSON.stringify(projected)).not.toContain('paper-B');
+    expect(JSON.stringify(messages)).toBe(original);
+    const profile = { profileId: 'profile', model: 'model', protocol: 'openai_compatible' };
+    const checkpoint: AssistantConversationMemory = { ...saved.memory,
+      observed_markers: saved.markers, message_count: 42, pending_proposal_count: 0, source_count: 0, updated_at: 'later',
+      retained_context: { version: 2, ...profile, messages: projectionRetainedMessages(saved, messages) } };
+    const disk: ConversationMessage[] = JSON.parse(JSON.stringify([{ message_id: 'checkpoint', role: 'assistant', content: '',
+      created_at: '', source_links: [], parts: [{ type: 'memory', memory: checkpoint }] }]));
+    expect(renderConversationContext(disk, profile)).toEqual(projected);
+    expect(JSON.stringify(checkpoint)).not.toContain('context_baseline');
+  });
+
+  it('keeps the refresh at the same position while complete tool batches are appended', async () => {
+    const messages: ModelMessage[] = [workspaceMessage(workspace('paper-A')), runPolicyMessage(policy), ...history];
+    const projector = createContextProjector(settings);
+    let previous = await projector.project(messages, 0);
+    const index = projector.snapshot()!.contextRefreshIndex;
+    const summaries = vi.mocked(runTextModelTask).mock.calls.length;
+    for (const id of ['one','two']) {
+      messages.push(...readBatch(id));
+      const next = await projector.project(messages, 0);
+      expect(next.slice(0,previous.length)).toEqual(previous);
+      expect(next.slice(previous.length)).toEqual(readBatch(id));
+      expect(next.filter(message=>message.providerOptions?.neuink?.context === 'workspace_context')).toHaveLength(1);
+      expect(projector.snapshot()!.contextRefreshIndex).toBe(index);
+      previous = next;
+    }
+    const restored = createContextProjector(settings, undefined, {restored:JSON.parse(JSON.stringify(projector.snapshot()))});
+    expect(await restored.project(messages,0)).toEqual(previous);
+    expect(runTextModelTask).toHaveBeenCalledTimes(summaries);
+  });
+
+  it('replays explicit clearing after retained older state and publishes a new refresh on another compaction', async () => {
+    const cleared: WorkspaceContext = {...workspace('paper-A'),active_entry:null,scope:{entries:[],tags:[]}};
+    const messages: ModelMessage[] = [workspaceMessage(workspace('old')), ...history,
+      workspaceMessage(cleared), runPolicyMessage({...policy,mode:'plan'}), {role:'user',content:'Current request'}];
+    const projector = createContextProjector(settings);
+    const first = await projector.project(messages,0);
+    const oldCut = projector.snapshot()!.firstKeptIndex;
+    expect(latestContextState(first)).toEqual({workspace:cleared,policy:{...policy,mode:'plan'}});
+    messages.push(...Array.from({length:35},(_,i):ModelMessage=>({role:i%2?'assistant':'user',content:'growth '+ 'a'.repeat(1000)})));
+    const second = await projector.project(messages,0);
+    expect(projector.snapshot()!.firstKeptIndex).toBeGreaterThan(oldCut);
+    expect(projector.snapshot()!.contextRefreshIndex).toBe(messages.length);
+    expect(second.slice(-2)).toEqual([workspaceMessage(cleared),runPolicyMessage({...policy,mode:'plan'})]);
+    expect(second.filter(message=>message.providerOptions?.neuink?.context === 'workspace_context')).toHaveLength(1);
+    const grown = [...messages,...readBatch('after-second')];
+    expect((await projector.project(grown,0)).slice(0,second.length)).toEqual(second);
+  });
+
+  it('ignores invalid v5 refresh positions, including positions splitting a tool batch', async () => {
+    const messages: ModelMessage[] = [workspaceMessage(workspace('paper-A')),...history,...readBatch('last')];
+    const first = createContextProjector(settings);
+    await first.project(messages,0);
+    const saved = first.snapshot()!;
+    for (const index of [-1,saved.firstKeptIndex-1,messages.length+1,messages.length-1,undefined]) {
+      const count = vi.mocked(runTextModelTask).mock.calls.length;
+      const restored = createContextProjector(settings,undefined,{restored:{...saved,contextRefreshIndex:index}});
+      await restored.project(messages,0);
+      expect(restored.snapshot()!.contextRefreshIndex).toBe(messages.length);
+      expect(vi.mocked(runTextModelTask).mock.calls.length).toBeGreaterThan(count);
+    }
+  });
+
+  it('does not invent workspace messages for a transcript without host context', async () => {
+    expect(latestContextMessages(await createContextProjector(settings).project(history,0))).toEqual([]);
+  });
+
+  it('includes replayed workspace size in the capacity check before publishing a checkpoint', async () => {
+    const large = {...workspace('paper-A'),active_entry:{id:'paper-A',title:'x'.repeat(30000)}};
+    const states: ProjectionState[] = [];
+    const projector = createContextProjector(settings,undefined,{onState:value=>states.push(value)});
+    await expect(projector.project([workspaceMessage(large),...history],0)).rejects.toMatchObject({reason:'context_capacity'});
+    expect(runTextModelTask).toHaveBeenCalled();
+    expect(projector.snapshot()).toBeUndefined();
+    expect(states).toEqual([]);
+  });
   it('selects the newest suffix backwards instead of scanning forwards or double-counting the latest message', () => {
     const messages: ModelMessage[] = Array.from({ length: 6 }, () => ({ role: 'user', content: 'a'.repeat(2_000) }));
     expect(contextCut(messages, 1_010)).toBe(4);
@@ -109,15 +213,31 @@ describe('automatic prefix compaction', () => {
       .project(tools, 5_000)).rejects.toBeInstanceOf(AgentStoppedError);
     expect(states).toEqual([]);
   });
+  it.each(['invalid','cancelled','capacity'] as const)('keeps an existing checkpoint when the next compaction is %s', async failure => {
+    const messages: ModelMessage[] = [workspaceMessage(workspace('paper-A')),...history];
+    const projector = createContextProjector(settings);
+    await projector.project(messages,0);
+    const saved = JSON.stringify(projector.snapshot());
+    const controller = new AbortController();
+    const grown: ModelMessage[] = [...messages,...Array.from({length:35},(_,i):ModelMessage=>({role:i%2?'assistant':'user',content:'a'.repeat(1000)}))];
+    if (failure === 'invalid') vi.mocked(runTextModelTask).mockResolvedValue({text:'invalid',finishReason:'length'});
+    if (failure === 'cancelled') vi.mocked(runTextModelTask).mockImplementation(async () => {
+      controller.abort(new DOMException('Cancelled','AbortError'));
+      return {text:summaryResponse('Valid summary'),finishReason:'stop'};
+    });
+    if (failure === 'capacity') grown.push({role:'user',content:'z'.repeat(40000)});
+    await expect(projector.project(grown,0,controller.signal)).rejects.toThrow();
+    expect(JSON.stringify(projector.snapshot())).toBe(saved);
+  });
   it('fails without dropping an oversized current message or a tool batch that cannot fit', async () => {
     await expect(createContextProjector(settings).project([{ role: 'user', content: 'x'.repeat(40_000) }], 5_000))
       .rejects.toMatchObject({ reason: 'context_capacity' });
     expect(runTextModelTask).not.toHaveBeenCalled();
   });
-  it('discards retired projection formats and recomputes from the canonical transcript', async () => {
-    const projector = createContextProjector(settings, undefined, { restored: { version: 2, firstKeptIndex: 3, memory: memory('OLD_BROKEN_STATE') } });
+  it.each([1, 2, 3, 4])('discards retired v%s projections and recomputes from current messages', async version => {
+    const projector = createContextProjector(settings, undefined, { restored: { version, firstKeptIndex: 3, memory: memory('OLD_BROKEN_STATE') } });
     const result = await projector.project(tools, 5_000);
-    expect(projector.snapshot()?.version).toBe(3);
+    expect(projector.snapshot()?.version).toBe(5);
     expect(JSON.stringify(result)).not.toContain('OLD_BROKEN_STATE');
     expect(runTextModelTask).toHaveBeenCalled();
   });

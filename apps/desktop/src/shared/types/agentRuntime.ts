@@ -1,4 +1,5 @@
 export type AgentToolId =
+  | 'read_context_reference'
   | 'read_pdf_pages'
   | 'search_pdf_text'
   | 'search_papers'

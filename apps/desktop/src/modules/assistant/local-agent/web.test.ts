@@ -59,10 +59,10 @@ describe.each(['claude', 'codex', 'opencode'] as const)('%s web integration', pr
   it('carries the frozen browser identity and reading contract without eagerly reading it', async () => {
     vi.mocked(runLocalAgent).mockImplementation(async request => {
       const prompt = JSON.parse(request.prompt);
-      expect(prompt.context.browser).toEqual({ title: browserTab.title, url: 'https://example.org/article' });
+      expect(prompt.workspace_context.browser).toMatchObject({ title: browserTab.title, url: 'https://example.org/article' });
       expect(request.prompt).not.toMatch(/PRIVATE|frozen-navigation|secret/);
-      expect(request.prompt).toContain('read_browser_tab reads the single browser tab captured');
-      expect(request.prompt).toContain('Browser resources have no local Segment');
+      expect(prompt.workspace_context.browser.identity).toMatch(/^[a-f0-9]{64}$/);
+      expect(request.tools.find(tool => tool.name === 'read_browser_tab')?.description).toContain('frozen');
       expect(request.tools.some(tool => tool.name === 'read_browser_tab')).toBe(true);
       return { result: '你好' };
     });
@@ -90,9 +90,9 @@ describe.each(['claude', 'codex', 'opencode'] as const)('%s web integration', pr
   it('provides public search and URL reading without requiring native web tools or extra approval', async () => {
     const approval = vi.fn();
     vi.mocked(runLocalAgent).mockImplementation(async (request, _signal, _event, handle) => {
-      expect(JSON.parse(request.prompt).capabilities).toMatchObject({ search_web: true, read_webpage: true, read_browser_tab: false });
-      expect(request.prompt).toContain('host can verify citations only against URLs returned by those tools');
-      expect(request.prompt).toContain('exact returned URLs');
+      const capabilities = JSON.parse(request.prompt).capabilities;
+      expect(capabilities).toEqual(expect.arrayContaining(['search_web','read_webpage']));
+      expect(capabilities).toContain('read_browser_tab');
       expect((await call(handle, 'read_webpage', { url: 12 })).isError).toBe(true);
       expect(runResearchTool).not.toHaveBeenCalled();
       expect((await call(handle, 'search_web', { query: 'public article' })).isError).not.toBe(true);
@@ -132,7 +132,10 @@ it.each(['disabled', 'catalog-error', 'revoked'] as const)('reports unavailable 
   if (reason === 'revoked') vi.mocked(loadAgentRuntimeSettings).mockResolvedValue({ ...DEFAULT_AGENT_RUNTIME_SETTINGS,
     mainAssistant: { ...DEFAULT_AGENT_RUNTIME_SETTINGS.mainAssistant, enabledToolIds: ['read_note'] } });
   vi.mocked(runLocalAgent).mockImplementation(async request => {
-    expect(JSON.parse(request.prompt).capabilities).toMatchObject({ search_web: false, read_webpage: false, read_browser_tab: reason !== 'revoked' });
+    const capabilities = JSON.parse(request.prompt).capabilities;
+    expect(capabilities).not.toContain('search_web');
+    expect(capabilities).not.toContain('read_webpage');
+    expect(capabilities.includes('read_browser_tab')).toBe(reason !== 'revoked');
     expect(request.tools.some(tool => tool.name === 'read_webpage')).toBe(false);
     expect(request.prompt).not.toContain('PRIVATE');
     if (reason === 'catalog-error') expect(request.prompt).toContain('工具目录读取失败');

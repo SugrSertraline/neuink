@@ -1,3 +1,4 @@
+import { formatContextMemory } from '../context/checkpoint';
 import type { AssistantConversationMemory, LlmProfile } from '@/shared/ipc/assistantApi';
 
 import { AgentStoppedError, type RunBudget } from '../agent-core';
@@ -8,7 +9,7 @@ import { estimateTokensFromText, modelContextTokens } from './contextBudget';
  *  stamped on afterwards, so the summary text stays identical wherever it is produced. */
 export type ConversationSummary = Omit<
   AssistantConversationMemory,
-  'message_count' | 'pending_proposal_count' | 'source_count' | 'updated_at' | 'retained_context'
+  'message_count' | 'pending_proposal_count' | 'source_count' | 'updated_at' | 'retained_context' | 'observed_markers'
 >;
 
 /** Stay within the ceiling `contextProjection` accepts, so a checkpoint survives
@@ -181,27 +182,9 @@ async function summarizeChunk({
   throw new AgentStoppedError(`上下文摘要无效，任务已停止，原始记录未删除。(${lastError})`);
 }
 
-/** The single rendering of a summary, shared by the harness brief and the request projection,
- *  so the model sees the same text whichever trigger produced the checkpoint. The counter lines
- *  are omitted when the caller does not know them (a mid-run projection cannot count them). */
+/** Shared immutable memory rendering; UI counters never alter a model checkpoint prefix. */
 export function formatConversationMemory(
   memory: (ConversationSummary & Partial<Pick<AssistantConversationMemory, 'source_count' | 'pending_proposal_count'>>) | null
 ) {
-  if (!memory) return '';
-  const decisions = memory.decisions ?? [];
-  const entities = memory.entities ?? [];
-  const openItems = memory.open_items ?? [];
-  const userPreferences = memory.user_preferences ?? [];
-  return [
-    `Summary: ${memory.summary}`,
-    memory.last_user_goal ? `Last user goal: ${memory.last_user_goal}` : null,
-    decisions.length > 0 ? `Decisions: ${decisions.join('; ')}` : null,
-    openItems.length > 0 ? `Open items: ${openItems.join('; ')}` : null,
-    entities.length > 0 ? `Entities: ${entities.join('; ')}` : null,
-    userPreferences.length > 0
-      ? `Stable user preferences: ${userPreferences.join('; ')}`
-      : null,
-    typeof memory.source_count === 'number' ? `Cited sources so far: ${memory.source_count}` : null,
-    typeof memory.pending_proposal_count === 'number' ? `Pending proposals: ${memory.pending_proposal_count}` : null
-  ].filter((line): line is string => Boolean(line)).join('\n');
+  return memory ? formatContextMemory(memory) : '';
 }

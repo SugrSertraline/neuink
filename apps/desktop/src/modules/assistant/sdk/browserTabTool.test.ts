@@ -8,7 +8,7 @@ import { agentExecutors } from './agentDriver';
 import { createNeuinkModel } from './provider';
 import { answerWithGroundedAgent } from './qna';
 import { scriptedModel } from './testHelpers/model';
-import { browserTabPromptMetadata } from './browserTabTool';
+import { observeWorkspaceContext } from '../context/observation';
 import { buildDirectExecution } from '../runtime/executionPolicy';
 import { canReplayAssistantTool, DurableExecution } from '../runtime/durableExecution';
 import { RunBudget } from '../agent-core';
@@ -36,9 +36,11 @@ beforeEach(() => {
 });
 
 describe('frozen browser tab read capability', () => {
-  it('is available only to the main assistant with its enabled grant and a captured target', async () => {
+  it('keeps the declaration stable but requires a captured target before execution', async () => {
     expect((await createAssistantTools(options())).toolNames).toContain('read_browser_tab');
-    expect((await createAssistantTools({ ...options(), browserTabTarget: null })).tools.read_browser_tab).toBeUndefined();
+    const withoutTarget = await createAssistantTools({ ...options(), browserTabTarget: null });
+    expect(withoutTarget.tools.read_browser_tab).toBeDefined();
+    await expect(withoutTarget.tools.read_browser_tab.execute!({}, {toolCallId:'missing',messages:[]})).rejects.toThrow('No browser target');
     expect((await createAssistantTools({ ...options(), activeExecution: null })).tools.read_browser_tab).toBeUndefined();
     expect((await createAssistantTools({ ...options(), executionDepth: 1 })).tools.read_browser_tab).toBeUndefined();
     const disabled = options();
@@ -112,9 +114,10 @@ describe('frozen browser tab read capability', () => {
     expect(runtime.events.some(event => event.status === 'done')).toBe(false);
   });
 
-  it('removes query, fragment and userinfo from model-facing target metadata', () => {
-    expect(browserTabPromptMetadata({ ...target, url: 'https://user:password@example.org/path?token=private#secret' }))
-      .toEqual({ title: target.title, url: 'https://example.org/path' });
+  it('removes query, fragment and userinfo from model-facing target metadata', async () => {
+    const observed = await observeWorkspaceContext({scope,browserTabTarget:{ ...target, url: 'https://user:password@example.org/path?token=private#secret' }});
+    expect(observed.browser).toMatchObject({ title: target.title, url: 'https://example.org/path' });
+    expect(JSON.stringify(observed)).not.toMatch(/password|private|secret/);
   });
 });
 
@@ -124,8 +127,9 @@ describe('browser read inside the real main agent loop', () => {
     await answerWithGroundedAgent({ ...options(), settings: profile, question: '你好' });
     expect(readBrowserTab).not.toHaveBeenCalled();
     const prompt = JSON.stringify(model.doStreamCalls[0].prompt);
-    expect(prompt).toContain('no page body has been read');
-    expect(prompt).toContain('untrusted source material');
+    expect(prompt).toContain('workspace_context');
+    expect(prompt).toContain('browser');
+    expect(prompt).not.toContain('Visible article evidence');
     expect(prompt).not.toMatch(/token=private|#secret|Visible article evidence/);
   });
 

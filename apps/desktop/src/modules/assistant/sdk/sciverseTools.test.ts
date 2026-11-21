@@ -12,6 +12,21 @@ vi.mock('@/shared/ipc/assistantApi', async original => ({
 
 beforeEach(() => vi.clearAllMocks());
 
+it('never allocates citations from a native read that finishes after cancellation', async () => {
+  let finish!: (value: unknown) => void;
+  vi.mocked(invokeAssistantTool).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const controller = new AbortController();
+  const addSource = vi.fn(() => 1);
+  const result = executeTool('search_segments', { query: 'test' }, {
+    addSource, contextBudget: 8000, signal: controller.signal
+  });
+  const assertion = expect(result).rejects.toMatchObject({ name: 'AbortError' });
+  controller.abort();
+  finish({ entries: [] });
+  await assertion;
+  expect(addSource).not.toHaveBeenCalled();
+});
+
 it('routes Sciverse IPC results through code normalization with the actual caller budget', async () => {
   const hit = { doc_id: 'doc', chunk_id: 'chunk', title: 'Paper', chunk: 'Evidence '.repeat(2000), author: ['Alice', 'alice'], page_no: 0 };
   vi.mocked(invokeAssistantTool).mockResolvedValue({ hits: [hit, hit] });

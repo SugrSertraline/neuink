@@ -8,7 +8,7 @@ import { lastMemoryCheckpointIndex, renderConversationTranscript } from '../runt
 import { renderMessagesForSummary } from '../sdk/summaryTranscript';
 import type { RunBudget } from '../agent-core';
 import { summarizeConversation } from '../sdk/conversationSummary';
-import { modelTranscript } from '../runtime/modelTranscript';
+import { modelTranscript, conversationTranscriptSources } from '../runtime/modelTranscript';
 
 /** The newest checkpoint is sent as the first conversation turn by `answerWithGroundedAgent`. */
 export function latestConversationMemory(history: ConversationMessage[]) {
@@ -61,8 +61,7 @@ export async function updateConversationMemory({
   sourceCount: number;
 }): Promise<AssistantConversationMemory> {
   const boundary = lastMemoryCheckpointIndex(history);
-  const hasArchivedMessages = history.slice(0, boundary + 1).some(message =>
-    message.content.trim() || modelTranscript(message)?.messages.length);
+  const hasArchivedMessages = history.slice(0, boundary + 1).some(message => modelTranscript(message));
   const summary = await summarizeConversation({
     abortSignal,
     budget,
@@ -75,6 +74,8 @@ export async function updateConversationMemory({
   const materialMessageCount = history.filter((message) => !message.message_id.startsWith('client-')).length;
   return {
     ...summary,
+    observed_markers: [...new Set([...(latestConversationMemory(history)?.observed_markers ?? []),
+      ...[...conversationTranscriptSources(history).keys()].map(marker => `[S${marker}]`)])],
     message_count: materialMessageCount,
     pending_proposal_count: pendingProposalCount,
     source_count: sourceCount,

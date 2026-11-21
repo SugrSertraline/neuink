@@ -7,6 +7,7 @@ import type { ConversationMessage, LlmProfile } from '@/shared/ipc/assistantApi'
 import { updateConversationMemory } from '../harness/conversationMemory';
 import { renderConversationContext } from '../runtime/conversationTranscript';
 import { createNeuinkModel } from './provider';
+import { recordedTurn } from './testHelpers/conversation';
 
 vi.mock('@tauri-apps/plugin-http', () => ({ fetch: globalThis.fetch }));
 const settingsPath = process.env.NEUINK_LIVE_SETTINGS;
@@ -18,10 +19,10 @@ it.skipIf(!settingsPath)('live manual compact repairs a last-reply checkpoint an
   const chat = (role: 'user' | 'assistant', content: string, index: number): ConversationMessage => ({
     role, content, message_id: 'fixture-' + index, created_at: '', source_links: [], parts: []
   });
-  const history = [chat('user', '我叫林同学，请用中文回答。', 0), chat('assistant', '记住了。', 1),
-    chat('user', '介绍虚构论文 NEBULA-42，其实验有 23 名参与者，然后生成思维导图。', 2),
-    chat('assistant', '已介绍论文，尚未完成思维导图。', 3), chat('user', '你好。', 4), chat('assistant', '你好！', 5)];
-  history[3].parts = [{ type: 'model-transcript', transcript: { version: 1, runId: 'fixture', capturedAt: '',
+  const history = [...recordedTurn('我叫林同学，请用中文回答。', '记住了。', 0),
+    ...recordedTurn('介绍虚构论文 NEBULA-42，其实验有 23 名参与者，然后生成思维导图。', '已介绍论文，尚未完成思维导图。', 1),
+    ...recordedTurn('你好。', '你好！', 2)];
+  history[3].parts = [{ type: 'model-transcript', transcript: { inputMessages: [{ role: 'user', content: history[2].content }], version: 2, runId: 'fixture', capturedAt: '',
     profileId: settings.id, model: settings.model, protocol: settings.api_protocol ?? '', sources: [], messages: [
       { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'read', toolName: 'read_segment_content', input: {} }] },
       { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'read', toolName: 'read_segment_content',
