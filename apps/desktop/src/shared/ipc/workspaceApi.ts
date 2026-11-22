@@ -81,6 +81,7 @@ export type SearchHit = {
   snippet: string;
   score: number;
   matched_terms: string[];
+  surrounding_context?: string | null;
 };
 
 export type SearchEntryGroup = {
@@ -1219,10 +1220,16 @@ export type SearchSegmentsBatchItem = {
   task_id: string;
   results?: SearchResults | null;
   error?: { code: string; message: string } | null;
-  /** Which rerank rung ran for this task: `off`, `heuristic`, `cross_encoder`, `fused`. */
+  /** Which rerank rung ran for this task: `off`, `heuristic`, `cross_encoder`, `cross_encoder+scope_v6`, `fused`. */
   rerank_used?: string | null;
-  /** Why a rung was skipped: `model_unavailable`, `provider_error`. */
+  /** Why a rung was skipped: `model_unavailable`, `provider_error`, `api_unconfigured`, `scope_refine_unconfigured`, `scope_refine_error`. */
   rerank_reason?: string | null;
+  /** Tail swaps. Empty when the encoder order stands. */
+  scope_swaps?: ScopeSwapSummary[];
+  /** `single_vector`, `colbert`, or `bge_m3_hybrid`. Absent when the pool is off. */
+  pool_used?: string | null;
+  /** `colbert_head_missing`, `sparse_head_missing`, `provider_unsupported`, or `provider_error`. */
+  pool_reason?: string | null;
 };
 
 /** One IPC call that prepares the workspace index once for every task in the batch. */
@@ -1238,6 +1245,7 @@ export function searchSegmentsBatch(
 /** Composed retrieval: document routing, carrier binding, the visual vote, evidence. */
 export type UnifiedSearchRequest = {
   question: string;
+  english_query?: string | null;
   sub_questions?: string[];
   scope_entry_ids?: EntryId[];
   mandated_entry_ids?: EntryId[];
@@ -1255,12 +1263,16 @@ export type UnifiedCarrierWire = { kind: 'section' | 'table' | 'figure'; label: 
 export type UnifiedSearchTaskWire = {
   question: string;
   carrier_applied: boolean;
+  visual_evidence_applied?: boolean;
   mode: string;
   total_hit_count: number;
-  /** Which rerank rung ran: `off`, `heuristic`, `cross_encoder`, `fused`. */
+  /** Which rerank rung ran: `off`, `heuristic`, `cross_encoder`, `cross_encoder+scope_v6`, `fused`. */
   rerank_used: string;
-  /** Why a rung was skipped: `model_unavailable`, `provider_error`. */
+  /** Why a rung was skipped or the tail was kept. */
   rerank_reason?: string | null;
+  scope_swaps?: ScopeSwapSummary[];
+  pool_used?: string | null;
+  pool_reason?: string | null;
   results: SearchResults;
 };
 
@@ -1346,7 +1358,42 @@ export function saveVisualEmbeddingSettings(
 /** Which rerank stage runs after fusion. */
 export type RerankMode = 'off' | 'heuristic' | 'cross_encoder';
 
-/** Rerank ladder: cross-encoder -> field coverage -> fused order. */
+/** Optional v6 tail after a successful cross-encoder pass. The key is write-only. */
+export type ScopeRefineSettings = {
+  enabled: boolean;
+  use_assistant_llm: boolean;
+  api_endpoint: string | null;
+  api_model: string | null;
+  api_key?: string | null;
+  timeout_ms: number;
+  max_concurrency: number;
+};
+
+export type ScopeSwapSummary = {
+  slot: number;
+  path: string;
+  challenger_uid: string;
+  incumbent_uid: string;
+};
+
+/** Rerank ladder: cross-encoder -> optional scope v6 -> field coverage -> fused order. */
+export type ListwiseRefineSettings = {
+  enabled: boolean;
+  use_assistant_llm: boolean;
+  api_endpoint: string | null;
+  api_model: string | null;
+  api_key?: string | null;
+  top_n: number;
+  fuse_rrf: boolean;
+  /** Single-paper scope uses substantive-evidence prompt and direct L1 order (no RRF). */
+  single_paper_mode?: boolean;
+  timeout_ms: number;
+};
+
+export type ListwiseRefineState = Omit<ListwiseRefineSettings, 'api_key'> & {
+  has_api_key: boolean;
+};
+
 export type RerankSettings = {
   /** `local` runs ONNX in-process; `api` calls a hosted rerank endpoint. */
   transport: 'local' | 'api';
@@ -1365,6 +1412,21 @@ export type RerankSettings = {
   max_candidates: number;
   /** Fall back to field coverage when the encoder cannot run. */
   fallback_heuristic: boolean;
+  /** Absent on older saved payloads; the screen treats that as off. */
+  scope_refine?: ScopeRefineSettings;
+  /** Blank omits the field, matching the previous request bytes. */
+  api_instruction?: string | null;
+  /** Fuse the cross-encoder order with the first-stage pool. Default off. */
+  fuse_with_pool?: boolean;
+  /** Prefix cross-encoder passages with `[Section] [Type]` (zero neighbor text). Default off. */
+  structured_input?: boolean;
+  /** Zero-API offline soft demotion of Abstract and bare Headings. Default off. */
+  structural_soft_demotion?: boolean;
+  listwise?: ListwiseRefineSettings;
+};
+
+export type ScopeRefineState = Omit<ScopeRefineSettings, 'api_key'> & {
+  has_api_key: boolean;
 };
 
 export type RerankSettingsState = RerankSettings & {
@@ -1372,6 +1434,12 @@ export type RerankSettingsState = RerankSettings & {
   /** Whether a token is stored; the token itself is never returned. */
   has_api_key: boolean;
   model_present: boolean;
+  scope_refine?: ScopeRefineState;
+  api_instruction?: string | null;
+  fuse_with_pool?: boolean;
+  structured_input?: boolean;
+  structural_soft_demotion?: boolean;
+  listwise?: ListwiseRefineState;
 };
 
 export function getRerankSettings(): Promise<RerankSettingsState> {
@@ -1383,9 +1451,19 @@ export function saveRerankSettings(settings: RerankSettings): Promise<RerankSett
 }
 
 /** Which retrieval path the assistant's library tool uses. */
+export type MultivectorPoolMode = 'colbert' | 'bge_m3_hybrid';
+
+export type MultivectorPoolSettings = {
+  enabled: boolean;
+  mode: MultivectorPoolMode;
+  max_full_scope_segments: number;
+  rescore_window: number;
+};
+
 export type RetrievalSettingsState = {
   /** Composed path: document routing, carrier binding, visual vote and rerank. */
   unified: boolean;
+  multivector?: MultivectorPoolSettings;
 };
 
 export function getRetrievalSettings(): Promise<RetrievalSettingsState> {
@@ -1538,6 +1616,8 @@ export type TextModelSettingsState = {
   loaded_dimensions: number | null;
   available: boolean;
   message: string | null;
+  colbert_head_present?: boolean;
+  sparse_head_present?: boolean;
 };
 
 /** Settings payload; the key is write-only, so omit it to keep the stored value. */

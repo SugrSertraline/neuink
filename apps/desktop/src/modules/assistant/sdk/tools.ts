@@ -84,8 +84,17 @@ import { RunBudget, type AgentLoopGuard } from '../agent-core';
 import { SourceLedger } from '../runtime/sourceLedger';
 import type { ApplicationActions } from '../runtime/applicationActions';
 import { resolveModelProfile, runJsonModelTask } from './modelTasks';
-import { PLANNER_TASK_DESCRIPTION, PLANNER_TASK_NAME, fallbackDirectPlan, planRetrieval, type PlanResolution } from './retrievalPlanning';
-import { runSearchLibrary, type PlanInput, type SearchOptions } from './searchLibrary';
+import {
+  HOP2_RESOLVE_TASK_DESCRIPTION,
+  HOP2_RESOLVE_TASK_NAME,
+  PLANNER_TASK_DESCRIPTION,
+  PLANNER_TASK_NAME,
+  fallbackDirectPlan,
+  planRetrieval,
+  resolveDependentTaskQuery,
+  type PlanResolution
+} from './retrievalPlanning';
+import { runSearchLibrary, type DependentTaskResolveInput, type PlanInput, type SearchOptions } from './searchLibrary';
 import { createSearchLibraryBatch, type UnifiedRetrievalConfig } from './searchLibraryBatch';
 import { frozenScopeFromSnapshot, scopeRequestFromToolInput } from './searchScope';
 import { PLANNING_READ_TOOLS } from '../runtime/executionPolicy';
@@ -702,6 +711,31 @@ export async function createAssistantTools({
       });
     };
 
+    const resolveDependentTask = async (input: DependentTaskResolveInput) => {
+      let profile: LlmProfile;
+      try {
+        profile = resolveModelProfile(null, profiles, defaultProfile);
+      } catch {
+        return null;
+      }
+      return resolveDependentTaskQuery({
+        originalQuestion: input.originalQuestion,
+        task: input.task,
+        dependencyEvidence: input.dependencyEvidence,
+        abortSignal: input.abortSignal,
+        runModel: async (system, prompt) =>
+          runJsonModelTask({
+            budget,
+            abortSignal: input.abortSignal,
+            settings: profile,
+            name: HOP2_RESOLVE_TASK_NAME,
+            description: HOP2_RESOLVE_TASK_DESCRIPTION,
+            system,
+            prompt
+          })
+      });
+    };
+
     tools.search_library = tool<unknown, unknown>({
       description:
         'Search the library for evidence answering a question. Planning is on by default: the planner may split multi-target or cross-paper questions into per-paper sub-questions. Returns evidence per sub-question with each task status (retrieved, empty, or failed) and any planning degradation. Retrieval status does not show that the answer is complete.',
@@ -758,6 +792,7 @@ export async function createAssistantTools({
             libraryEntries: availableEntries.map((entry) => ({ id: entry.id, title: entry.title })),
             plan: planSearch,
             searchBatch: createSearchLibraryBatch({ root, addSource, abortSignal: searchSignal, unifiedRetrieval }),
+            resolveDependentTask,
             abortSignal: searchSignal
           });
           searchSignal?.throwIfAborted();

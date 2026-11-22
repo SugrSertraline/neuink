@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react';
-import { SettingsGroup, SettingSwitch } from './SettingsPrimitives';
-import { readUnifiedRetrieval, writeUnifiedRetrieval } from '@/shared/lib/retrievalMode';
+import { SettingsGroup, SettingSelect, SettingSwitch } from './SettingsPrimitives';
+import {
+  DEFAULT_MULTIVECTOR,
+  readRetrievalSettings,
+  readUnifiedRetrieval,
+  writeRetrievalSettings,
+  writeUnifiedRetrieval
+} from '@/shared/lib/retrievalMode';
+import { getTextModelSettings, type MultivectorPoolSettings } from '@/shared/ipc/workspaceApi';
 
 /**
  * The single switch that decides whether the assistant uses the composed retrieval path.
@@ -10,6 +17,8 @@ import { readUnifiedRetrieval, writeUnifiedRetrieval } from '@/shared/lib/retrie
  */
 export function RetrievalPathSetting({ active }: { active: boolean }) {
   const [unified, setUnified] = useState<boolean | null>(null);
+  const [pool, setPool] = useState<MultivectorPoolSettings>(DEFAULT_MULTIVECTOR);
+  const [heads, setHeads] = useState('投影权重尚未检查');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -18,6 +27,21 @@ export function RetrievalPathSetting({ active }: { active: boolean }) {
     void readUnifiedRetrieval().then((value) => {
       if (!cancelled) setUnified(value);
     });
+    void readRetrievalSettings()
+      .then((settings) => {
+        if (!cancelled) setPool(settings.multivector ?? DEFAULT_MULTIVECTOR);
+      })
+      .catch(() => undefined);
+    void getTextModelSettings()
+      .then((status) => {
+        if (cancelled) return;
+        if (status.colbert_head_present && status.sparse_head_present) setHeads('就绪');
+        else if (!status.colbert_head_present) setHeads('缺少 colbert_linear.bin，查询时自动回退单向量');
+        else setHeads('缺少 sparse_linear.bin，混合模式会回退单向量');
+      })
+      .catch(() => {
+        if (!cancelled) setHeads('缺少 colbert_linear.bin，查询时自动回退单向量');
+      });
     return () => {
       cancelled = true;
     };
@@ -50,6 +74,46 @@ export function RetrievalPathSetting({ active }: { active: boolean }) {
         checked={unified === true}
         onCheckedChange={toggle}
       />
+      <SettingSwitch
+        id="tools-retrieval-multivector"
+        label="启用多向量召回池（BGE-M3，实验）"
+        description="默认关闭。缺投影权重或不是本地 BGE-M3 时，查询自动退回单向量，搜索不会中断。"
+        disabled={unified === null}
+        checked={pool.enabled}
+        onCheckedChange={(value) => {
+          const next = { ...pool, enabled: value };
+          setPool(next);
+          setError(null);
+          void writeRetrievalSettings({ unified: unified === true, multivector: next })
+            .then((saved) => setPool(saved.multivector ?? next))
+            .catch(() => {
+              setPool(pool);
+              setError('未能保存检索路径设置。');
+            });
+        }}
+      />
+      {pool.enabled && (
+        <SettingSelect
+          id="tools-retrieval-multivector-mode"
+          label="多向量模式"
+          description={heads}
+          value={pool.mode}
+          options={[
+            { value: 'bge_m3_hybrid', label: 'BGE-M3 三路混合（推荐）' },
+            { value: 'colbert', label: '纯 ColBERT 多向量' }
+          ]}
+          onValueChange={(value) => {
+            const next = { ...pool, mode: value as MultivectorPoolSettings['mode'] };
+            setPool(next);
+            void writeRetrievalSettings({ unified: unified === true, multivector: next })
+              .then((saved) => setPool(saved.multivector ?? next))
+              .catch(() => {
+                setPool(pool);
+                setError('未能保存检索路径设置。');
+              });
+          }}
+        />
+      )}
     </SettingsGroup>
   );
 }

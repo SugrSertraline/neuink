@@ -29,6 +29,46 @@ describe('local search degradation', () => {
       total_hit_count: 0, entries: [] }, () => 1);
     expect(output.modelOutput.warnings).toEqual([]);
   });
+
+  it('forwards post-ranking surrounding_context to evidence without polluting citation quotes', () => {
+    const output = formatSearchSegmentsOutput({
+      query: 'accuracy',
+      mode: 'hybrid',
+      index_generation: 1,
+      total_hit_count: 1,
+      entries: [{
+        entry_id: 'e1',
+        entry_title: 'Paper A',
+        hit_count: 1,
+        max_score: 0.9,
+        hits: [{
+          entry_id: 'e1',
+          entry_title: 'Paper A',
+          source: {
+            kind: 'segment',
+            label: 'Segment',
+            field_name: null,
+            tag_id: null,
+            note_id: null,
+            segment_uid: 's2',
+            page_idx: 2
+          },
+          target: { kind: 'segment', entry_id: 'e1', segment_uid: 's2', page_idx: 2 },
+          title: 'Results',
+          snippet: 'Table 2 reports 91.4% F1.',
+          score: 0.9,
+          matched_terms: [],
+          surrounding_context: '[Prev] Experimental setup.\n[Next] Ablations confirm the gain.'
+        }]
+      }],
+      warnings: []
+    }, () => 1);
+    expect(output.modelOutput.evidence).toHaveLength(1);
+    expect(output.modelOutput.evidence[0]?.surrounding_context).toBe(
+      '[Prev] Experimental setup.\n[Next] Ablations confirm the gain.'
+    );
+    expect(output.sources[0]?.quote).toBe('Table 2 reports 91.4% F1.');
+  });
 });
 
 describe('prepend note proposals', () => {

@@ -172,6 +172,7 @@ type ToolEvidence = {
   score?: number;
   segment_uid: string;
   snippet?: string;
+  surrounding_context?: string;
   text?: string;
 };
 
@@ -537,7 +538,8 @@ export function formatSearchSegmentsOutput(
         page: source.page_idx + 1,
         score: hit.score,
         segment_uid: source.segment_uid,
-        snippet: hit.snippet
+        snippet: hit.snippet,
+        ...(hit.surrounding_context ? { surrounding_context: hit.surrounding_context } : {})
       } satisfies ToolEvidence;
     });
 

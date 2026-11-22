@@ -4,6 +4,7 @@ import {
   fallbackDirectPlan,
   planRetrieval,
   PLANNER_SYSTEM_PROMPT,
+  resolveDependentTaskQuery,
   validatePlanningOutput
 } from './retrievalPlanning';
 
@@ -219,5 +220,47 @@ describe('host question and task binding', () => {
     });
     await expect(planRetrieval({ question: hostQuestion, runModel, abortSignal: controller.signal })).rejects.toThrow();
     expect(runModel).toHaveBeenCalledTimes(1);
+  });
+
+  it('instantiates a hop-2 dependent query and fails closed on invalid output', async () => {
+    const task = {
+      id: 'q2',
+      question: '论文 B 在该数据集上的准确率是多少？',
+      constraints: ['Paper B'],
+      depends_on: ['q1'],
+      target_entry_ids: ['b']
+    };
+    const evidence = [
+      {
+        task_id: 'q1',
+        entry_title: 'Paper A',
+        snippet: 'We introduce the BioBench-2025 dataset for biomedical QA.',
+        surrounding_context: '[Next] It contains 12,000 curated items.'
+      }
+    ];
+    const resolved = await resolveDependentTaskQuery({
+      originalQuestion: '论文 A 提出的数据集在论文 B 上表现如何？',
+      task,
+      dependencyEvidence: evidence,
+      runModel: async (_sys, prompt) => {
+        expect(prompt).toContain('BioBench-2025');
+        return {
+          question: '论文 B 在 BioBench-2025 数据集上的准确率是多少？',
+          english_query: 'Paper B accuracy on BioBench-2025 dataset'
+        };
+      }
+    });
+    expect(resolved).toEqual({
+      question: '论文 B 在 BioBench-2025 数据集上的准确率是多少？',
+      english_query: 'Paper B accuracy on BioBench-2025 dataset'
+    });
+
+    const bad = await resolveDependentTaskQuery({
+      originalQuestion: 'q',
+      task,
+      dependencyEvidence: evidence,
+      runModel: async () => ({ question: '' })
+    });
+    expect(bad).toBeNull();
   });
 });

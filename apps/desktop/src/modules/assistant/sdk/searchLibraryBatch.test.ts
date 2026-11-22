@@ -1,9 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
-import { searchSegmentsBatch, type SearchResults, type SearchSegmentsBatchItem } from '@/shared/ipc/workspaceApi';
+import {
+  searchSegmentsBatch,
+  searchUnified,
+  type SearchResults,
+  type SearchSegmentsBatchItem,
+  type UnifiedSearchResponse
+} from '@/shared/ipc/workspaceApi';
 import { createSearchLibraryBatch } from './searchLibraryBatch';
 import type { TaskSearchRequest } from './searchLibrary';
 
-vi.mock('@/shared/ipc/workspaceApi', () => ({ searchSegmentsBatch: vi.fn() }));
+vi.mock('@/shared/ipc/workspaceApi', () => ({
+  searchSegmentsBatch: vi.fn(),
+  searchUnified: vi.fn()
+}));
 
 const request: TaskSearchRequest = {
   task_id: 'q1',
@@ -119,6 +128,61 @@ describe('createSearchLibraryBatch', () => {
     }
     expect(addSource).toHaveBeenCalledTimes(1);
     expect(addSource.mock.calls[0][0]).toMatchObject({ entry_id: 'a' });
+  });
+
+  it('keeps the cross-encoder order in the warning when tail refine fails', async () => {
+    vi.mocked(searchUnified).mockReset().mockResolvedValue({
+      question: '方法？',
+      routed_documents: ['a'],
+      routing_skip: null,
+      truncated: false,
+      text_entries: 1,
+      visual_entries: 0,
+      visual_status: 'disabled',
+      carriers: [],
+      degradations: [],
+      tasks: [{
+        question: '方法？',
+        carrier_applied: false,
+        mode: 'hybrid',
+        total_hit_count: 1,
+        rerank_used: 'cross_encoder',
+        rerank_reason: 'scope_refine_error',
+        results: results('hybrid')
+      }]
+    } satisfies UnifiedSearchResponse);
+    const [item] = await createSearchLibraryBatch({
+      root: 'root',
+      addSource: () => 1,
+      unifiedRetrieval: {}
+    })([{ ...request, mandated_entry_ids: ['a'] }]);
+    expect(searchUnified).toHaveBeenCalledWith(
+      'root',
+      expect.objectContaining({
+        question: '方法？',
+        english_query: 'method',
+        mandated_entry_ids: ['a']
+      })
+    );
+    expect(item.outcome.status).toBe('ok');
+    if (item.outcome.status === 'ok') {
+      expect(item.outcome.warnings.join(' ')).toContain('已保留交叉编码器排序');
+    }
+  });
+
+  it('shows a tail-refine fallback on the default batch path', async () => {
+    vi.mocked(searchSegmentsBatch).mockReset().mockResolvedValue([{
+      task_id: 'q1',
+      results: results('hybrid'),
+      rerank_used: 'cross_encoder',
+      rerank_reason: 'scope_refine_unconfigured',
+      scope_swaps: []
+    }]);
+    const [item] = await createSearchLibraryBatch({ root: 'root', addSource: () => 1 })([request]);
+    expect(item.outcome.status).toBe('ok');
+    if (item.outcome.status === 'ok') {
+      expect(item.outcome.warnings.join(' ')).toContain('已保留交叉编码器排序');
+    }
   });
 
   it('keeps global results inside the frozen library ids', async () => {

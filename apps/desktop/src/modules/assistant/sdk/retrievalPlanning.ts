@@ -165,7 +165,7 @@ export const PLANNER_SYSTEM_PROMPT = [
   '- single: one direct question; do not decompose.',
   '- multi_target: several independent information needs in one question; one task per need.',
   '- cross_paper: comparison or synthesis across papers; keep one task per paper-and-dimension and bind evidence to its paper.',
-  '- dependent_multihop: the next query needs an earlier answer; mark depends_on but do not pretend the chain is executed.',
+  '- dependent_multihop: the next query needs an earlier answer (at most 2 hops); put hop-1 tasks with empty depends_on and hop-2 tasks referencing hop-1 ids in depends_on.',
   '- global: exhaustive aggregation over a whole set; only claim the coverage you can actually retrieve.',
   'Preserve entities, times, and other restrictions from the original question inside the question text of every task they apply to. Retrieval searches only the question text, so a constraint left out of it is lost.',
   'original_question must copy the frozen user question exactly. Never rewrite it.',
@@ -262,4 +262,84 @@ export async function planRetrieval({
     feedback = result.issues.join('; ').slice(0, 1_000);
   }
   return { status: 'degraded', plan: fallbackDirectPlan(question, 'plan_invalid').plan, reason: 'plan_invalid', attempts: maxAttempts };
+}
+
+export const HOP2_RESOLVE_TASK_NAME = 'retrieval_hop2_resolve';
+
+export const HOP2_RESOLVE_TASK_DESCRIPTION =
+  'Rewrite a dependent hop-2 retrieval sub-question using concrete entities found in hop-1 evidence.';
+
+const dependentTaskResolutionSchema = z.object({
+  question: z.string().trim().min(1).max(500),
+  english_query: z.string().trim().min(1).max(500).optional()
+});
+
+export type DependentTaskResolution = z.infer<typeof dependentTaskResolutionSchema>;
+
+export type DependencyEvidenceItem = {
+  task_id: string;
+  entry_title: string;
+  snippet: string;
+  surrounding_context?: string;
+};
+
+const HOP2_RESOLVE_SYSTEM_PROMPT = [
+  'You instantiate a dependent hop-2 academic paper search query using concrete facts retrieved in hop-1.',
+  'Replace vague placeholders (such as "that dataset", "the method proposed in Paper A") with the exact named entities, benchmarks, metrics, or authors found in the hop-1 evidence.',
+  'Never invent entities not supported by the hop-1 evidence, and never widen the question scope.',
+  'Optionally provide a concise English academic english_query when question is in Chinese.',
+  'Return JSON only with keys: question (string) and optional english_query (string).'
+].join('\n');
+
+export function buildHop2ResolvePrompt(input: {
+  originalQuestion: string;
+  task: RetrievalTask;
+  dependencyEvidence: ReadonlyArray<DependencyEvidenceItem>;
+}) {
+  const evidenceLines = input.dependencyEvidence
+    .slice(0, 5)
+    .map((item, idx) => {
+      const ctx = item.surrounding_context ? ` | Context: ${item.surrounding_context.slice(0, 240)}` : '';
+      return `${idx + 1}. [${item.task_id} | ${item.entry_title}] ${item.snippet.slice(0, 320)}${ctx}`;
+    })
+    .join('\n');
+  return [
+    `Original user question:\n${input.originalQuestion}`,
+    `Dependent hop-2 task (${input.task.id}):\n${input.task.question}`,
+    input.task.constraints.length > 0 ? `Constraints: ${input.task.constraints.join('; ')}` : '',
+    `Hop-1 retrieved evidence:\n${evidenceLines}`,
+    'Return JSON with the instantiated hop-2 search question.'
+  ].filter(Boolean).join('\n\n');
+}
+
+/**
+ * Instantiates a single hop-2 dependent retrieval task using hop-1 evidence.
+ * Fails closed (`null`) on provider error or schema violation; abort errors propagate.
+ */
+export async function resolveDependentTaskQuery({
+  originalQuestion,
+  task,
+  dependencyEvidence,
+  runModel,
+  abortSignal
+}: {
+  originalQuestion: string;
+  task: RetrievalTask;
+  dependencyEvidence: ReadonlyArray<DependencyEvidenceItem>;
+  runModel: (system: string, prompt: string) => Promise<unknown>;
+  abortSignal?: AbortSignal;
+}): Promise<DependentTaskResolution | null> {
+  if (dependencyEvidence.length === 0) return null;
+  let output: unknown;
+  try {
+    output = await runModel(
+      HOP2_RESOLVE_SYSTEM_PROMPT,
+      buildHop2ResolvePrompt({ originalQuestion, task, dependencyEvidence })
+    );
+  } catch (error) {
+    if (isAbortLike(error, abortSignal)) throw error;
+    return null;
+  }
+  const parsed = dependentTaskResolutionSchema.safeParse(output);
+  return parsed.success ? parsed.data : null;
 }

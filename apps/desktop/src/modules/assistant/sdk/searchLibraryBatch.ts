@@ -41,8 +41,25 @@ const UNIFIED_VISUAL_STATUS_COPY: Record<string, string> = {
 /** Rerank ladder reason copy. The rung that ran is reported on the task itself. */
 const UNIFIED_RERANK_COPY: Record<string, string> = {
   model_unavailable: '本地重排模型未安装，已退回字段覆盖排序。',
-  provider_error: '重排模型调用失败，已退回字段覆盖排序。'
+  provider_error: '重排模型调用失败，已退回字段覆盖排序。',
+  api_unconfigured: '远程重排 API 尚未配置完整，已退回字段覆盖排序。',
+  scope_refine_unconfigured: '尾部范围精排未配置可用的 OpenAI 兼容模型，已保留交叉编码器排序。',
+  scope_refine_error: '尾部范围精排调用失败，已保留交叉编码器排序。',
+  listwise_unconfigured: 'Listwise 未配置可用的 OpenAI 兼容模型，已保留上游排序。',
+  listwise_error: 'Listwise 调用或解析失败，已保留上游排序。'
 };
+
+const POOL_REASON_COPY: Record<string, string> = {
+  colbert_head_missing: '缺少 colbert_linear.bin，已回退单向量召回。',
+  sparse_head_missing: '缺少 sparse_linear.bin，已回退单向量召回。',
+  provider_unsupported: '当前文本模型不支持多向量，已回退单向量召回。',
+  provider_error: '多向量打分失败，已回退单向量召回。'
+};
+
+function pushPoolWarning(warnings: string[], reason: string | null | undefined) {
+  const copy = reason ? POOL_REASON_COPY[reason] : undefined;
+  if (copy && !warnings.includes(copy)) warnings.push(copy);
+}
 
 function hitIdentity(hit: SearchResults['entries'][number]['hits'][number]): string {
   const target = hit.target;
@@ -112,6 +129,7 @@ function outcomeFromUnified(
     if (rerankCopy && !warnings.includes(rerankCopy)) {
       warnings.push(rerankCopy);
     }
+    pushPoolWarning(warnings, task.pool_reason);
   }
   const merged = mergeUnifiedResults(response, request.query);
   if (!merged) {
@@ -155,8 +173,10 @@ export function createSearchLibraryBatch({
           const response = await raceWithAbort(
             searchUnified(root, {
               question: request.query,
+              english_query: request.english_query,
               sub_questions: request.sub_queries ?? [],
               scope_entry_ids: request.scope_entry_ids ?? [],
+              mandated_entry_ids: request.mandated_entry_ids ?? [],
               section_filter: request.section_filter,
               segment_types: request.segment_types ?? [],
               mode: 'hybrid',
@@ -259,7 +279,8 @@ function restrictResults(
     );
     return hits.length > 0 ? [{ ...group, hits, hit_count: hits.length }] : [];
   });
-  return { ...results, entries };
+  const total_hit_count = entries.reduce((sum, group) => sum + group.hit_count, 0);
+  return { ...results, entries, total_hit_count };
 }
 
 function outcomeFromItem(
@@ -281,12 +302,18 @@ function outcomeFromItem(
     const allowed = new Set(request.allowed_entry_ids);
     const restricted = restrictResults(item.results, allowed);
     const formatted = formatSearchSegmentsOutput(restricted, addSource, request.section_filter);
+    const warnings = [...formatted.modelOutput.warnings];
+    const rerankCopy = item.rerank_reason ? UNIFIED_RERANK_COPY[item.rerank_reason] : undefined;
+    if (rerankCopy && !warnings.includes(rerankCopy)) {
+      warnings.push(rerankCopy);
+    }
+    pushPoolWarning(warnings, item.pool_reason);
     return {
       status: 'ok',
       mode: formatted.modelOutput.mode,
       evidence: formatted.modelOutput.evidence,
       sources: formatted.sources,
-      warnings: formatted.modelOutput.warnings
+      warnings
     };
   } catch (error) {
     if (signal?.aborted) throw error;

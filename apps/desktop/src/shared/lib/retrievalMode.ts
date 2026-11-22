@@ -1,4 +1,12 @@
 import * as ipc from '@/shared/ipc/workspaceApi';
+import type { MultivectorPoolSettings, RetrievalSettingsState } from '@/shared/ipc/workspaceApi';
+
+export const DEFAULT_MULTIVECTOR: MultivectorPoolSettings = {
+  enabled: false,
+  mode: 'bge_m3_hybrid',
+  max_full_scope_segments: 600,
+  rescore_window: 100
+};
 
 /**
  * Cached view of the "use the composed retrieval path" flag.
@@ -13,12 +21,14 @@ import * as ipc from '@/shared/ipc/workspaceApi';
  * instead of exploding at import time.
  */
 let cached: Promise<boolean> | null = null;
+let cachedSettings: RetrievalSettingsState | null = null;
 
 export function readUnifiedRetrieval(): Promise<boolean> {
   if (!cached) {
     cached = (async () => {
       try {
         const settings = await ipc.getRetrievalSettings();
+        cachedSettings = settings;
         return settings.unified;
       } catch {
         // A failed read must not silently switch retrieval paths.
@@ -31,12 +41,37 @@ export function readUnifiedRetrieval(): Promise<boolean> {
 }
 
 export async function writeUnifiedRetrieval(unified: boolean): Promise<boolean> {
-  const saved = await ipc.saveRetrievalSettings({ unified });
+  const current = cachedSettings ?? { unified, multivector: DEFAULT_MULTIVECTOR };
+  const saved = await ipc.saveRetrievalSettings({
+    unified,
+    multivector: current.multivector ?? DEFAULT_MULTIVECTOR
+  });
+  cachedSettings = saved;
   cached = Promise.resolve(saved.unified);
   return saved.unified;
 }
 
+export async function readRetrievalSettings(): Promise<RetrievalSettingsState> {
+  const settings = await ipc.getRetrievalSettings();
+  cachedSettings = settings;
+  return {
+    ...settings,
+    multivector: settings.multivector ?? DEFAULT_MULTIVECTOR
+  };
+}
+
+export async function writeRetrievalSettings(settings: RetrievalSettingsState): Promise<RetrievalSettingsState> {
+  const saved = await ipc.saveRetrievalSettings({
+    unified: settings.unified,
+    multivector: settings.multivector ?? DEFAULT_MULTIVECTOR
+  });
+  cachedSettings = saved;
+  cached = Promise.resolve(saved.unified);
+  return saved;
+}
+
 /** Test seam: drop the cache so a new read hits the backend. */
 export function resetUnifiedRetrievalCache(): void {
+  cachedSettings = null;
   cached = null;
 }

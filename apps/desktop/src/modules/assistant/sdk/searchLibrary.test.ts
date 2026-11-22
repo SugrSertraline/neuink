@@ -335,6 +335,117 @@ describe('runSearchLibrary planning outcomes', () => {
     expect(searchBatch.mock.calls[0][0]).toHaveLength(1);
   });
 
+  it('executes a 2-hop dependent plan inside frozen scope when a hop-2 resolver is supplied', async () => {
+    const searchBatch = vi.fn(async (requests: TaskSearchRequest[]): Promise<TaskSearchItem[]> =>
+      requests.map((req) => ({
+        task_id: req.task_id,
+        outcome: req.task_id === 'q1'
+          ? {
+              status: 'ok',
+              mode: 'hybrid',
+              evidence: [{
+                entry_id: 'a',
+                entry_title: 'Paper A',
+                segment_uid: 's1',
+                page: 1,
+                snippet: 'Paper A proposes the MedQA-V2 benchmark.',
+                marker: '[S1]'
+              }],
+              sources: [{ entry_id: 'a', entry_title: 'Paper A', page_idx: 0, quote: 'MedQA-V2', segment_uid: 's1' }],
+              warnings: []
+            }
+          : okOutcome('b', 's2')
+      }))
+    );
+    const resolveDependentTask = vi.fn(async (input) => {
+      expect(input.dependencyEvidence[0]?.snippet).toContain('MedQA-V2');
+      return {
+        question: '论文 B 在 MedQA-V2 上的 F1 是多少？',
+        english_query: 'Paper B F1 score on MedQA-V2'
+      };
+    });
+
+    const result = await run({
+      frozenScope: { intent: 'selection', entry_ids: ['a', 'b'] },
+      plan: async () => planned({
+        question_types: ['dependent_multihop'],
+        scope_kind: 'explicit_multi',
+        original_question: QUESTION,
+        retrieval_tasks: [
+          { id: 'q1', question: '论文 A 提出了什么数据集？', constraints: [], depends_on: [], target_entry_ids: ['a'] },
+          { id: 'q2', question: '论文 B 在该数据集上的 F1 是多少？', constraints: [], depends_on: ['q1'], target_entry_ids: ['b'] }
+        ],
+        unresolved_targets: []
+      }),
+      searchBatch,
+      resolveDependentTask
+    });
+
+    expect(searchBatch).toHaveBeenCalledTimes(2);
+    expect(searchBatch.mock.calls[0][0].map((r) => r.task_id)).toEqual(['q1']);
+    expect(searchBatch.mock.calls[1][0]).toEqual([
+      expect.objectContaining({
+        task_id: 'q2',
+        query: '论文 B 在 MedQA-V2 上的 F1 是多少？',
+        english_query: 'Paper B F1 score on MedQA-V2',
+        scope_entry_ids: ['b'],
+        allowed_entry_ids: ['b']
+      })
+    ]);
+    expect(resolveDependentTask).toHaveBeenCalledTimes(1);
+    expect(result.modelOutput.task_results.map((t) => t.task_id)).toEqual(['q1', 'q2']);
+    expect(result.modelOutput.warnings.join(' ')).not.toContain('未执行完整依赖链');
+  });
+
+  it('falls back to direct retrieval for chains deeper than 2 hops', async () => {
+    const searchBatch = batchReturning(() => okOutcome('a', 's'));
+    const resolveDependentTask = vi.fn(async () => ({ question: 'rewritten' }));
+    const result = await run({
+      plan: async () => planned({
+        question_types: ['dependent_multihop'],
+        scope_kind: 'unspecified',
+        original_question: QUESTION,
+        retrieval_tasks: [
+          { id: 'q1', question: 'step 1', constraints: [], depends_on: [], target_entry_ids: [] },
+          { id: 'q2', question: 'step 2', constraints: [], depends_on: ['q1'], target_entry_ids: [] },
+          { id: 'q3', question: 'step 3', constraints: [], depends_on: ['q2'], target_entry_ids: [] }
+        ],
+        unresolved_targets: []
+      }),
+      searchBatch,
+      resolveDependentTask
+    });
+    expect(resolveDependentTask).not.toHaveBeenCalled();
+    expect(searchBatch).toHaveBeenCalledTimes(1);
+    expect(searchBatch.mock.calls[0][0].map((r) => r.task_id)).toEqual(['direct']);
+    expect(result.modelOutput.warnings.join(' ')).toContain('依赖型多跳');
+  });
+
+  it('fails closed on hop-2 resolver error without crashing or dropping hop-1 evidence', async () => {
+    const searchBatch = batchReturning((req) => okOutcome(req.task_id === 'q1' ? 'a' : 'b', 's1'));
+    const resolveDependentTask = vi.fn(async () => {
+      throw new Error('upstream 500');
+    });
+    const result = await run({
+      frozenScope: { intent: 'selection', entry_ids: ['a', 'b'] },
+      plan: async () => planned({
+        question_types: ['dependent_multihop'],
+        scope_kind: 'explicit_multi',
+        original_question: QUESTION,
+        retrieval_tasks: [
+          { id: 'q1', question: 'step 1', constraints: [], depends_on: [], target_entry_ids: ['a'] },
+          { id: 'q2', question: 'step 2 original', constraints: [], depends_on: ['q1'], target_entry_ids: ['b'] }
+        ],
+        unresolved_targets: []
+      }),
+      searchBatch,
+      resolveDependentTask
+    });
+    expect(searchBatch).toHaveBeenCalledTimes(2);
+    expect(searchBatch.mock.calls[1][0][0]?.query).toBe('step 2 original');
+    expect(result.modelOutput.task_results[1]?.warnings.join(' ')).toContain('第 2 跳依赖改写失败');
+  });
+
   it('retrieves the original question directly after a no-model degradation', async () => {
     const searchBatch = batchReturning(() => okOutcome('a', 's'));
     const result = await run({ plan: async () => fallbackDirectPlan(QUESTION, 'no_model_configured'), searchBatch });

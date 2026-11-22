@@ -4,9 +4,29 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { RetrievalPathSetting } from './RetrievalPathSetting';
 import { readUnifiedRetrieval, writeUnifiedRetrieval } from '@/shared/lib/retrievalMode';
 
+vi.mock('@/shared/ipc/workspaceApi', () => ({
+  getTextModelSettings: vi.fn(async () => ({ colbert_head_present: false, sparse_head_present: false }))
+}));
+
 vi.mock('@/shared/lib/retrievalMode', () => ({
+  DEFAULT_MULTIVECTOR: {
+    enabled: false,
+    mode: 'bge_m3_hybrid',
+    max_full_scope_segments: 600,
+    rescore_window: 100
+  },
   readUnifiedRetrieval: vi.fn(),
-  writeUnifiedRetrieval: vi.fn()
+  writeUnifiedRetrieval: vi.fn(),
+  readRetrievalSettings: vi.fn(async () => ({
+    unified: false,
+    multivector: {
+      enabled: false,
+      mode: 'bge_m3_hybrid',
+      max_full_scope_segments: 600,
+      rescore_window: 100
+    }
+  })),
+  writeRetrievalSettings: vi.fn(async (settings: { multivector?: { enabled: boolean } }) => settings)
 }));
 
 afterEach(cleanup);
