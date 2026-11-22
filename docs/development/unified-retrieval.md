@@ -33,6 +33,22 @@
 
 不变量由结构保证而非约定：路由只读 `question`，`sub_questions` 只在证据阶段出现，`run_unified` 里没有任何路径能让子问题修改 `RoutingStage.documents`。测试 `sub_questions_never_change_the_routed_documents` 固定这一点。
 
+## 3.1 可选召回池与精排
+
+三项都默认关闭，失败时保留上一步排序，不中断搜索。
+
+| 能力 | 默认 | 实测依据 | 降级 |
+|---|---|---|---|
+| BGE-M3 多向量池 `colbert` / `bge_m3_hybrid`（0.4/0.2/0.4） | 关 | QASPER Recall@30 +2.58~+3.33pp；DORIS C0 相对单向量 +4.52pp、相对 B0 +7.14pp；TREC-COVID 全库 C0-union 相对单向量 +6.86pp P@10 / +6.73pp nDCG@10 | `colbert_head_missing`、`sparse_head_missing`、`provider_unsupported`、`provider_error`，回退单向量 |
+| 远程重排 `api_instruction`；`fuse_with_pool` = RRF(第一阶段, 交叉编码器, k=60) | 指令留空不发字段；融合关 | Qwen3-Reranker-8B 加指令：TREC 2020 +2.41pp，DORIS 相对 B0 +10.24pp，TREC-COVID 相对 B0 +8.29pp。F1 = RRF(C0, Q0-inst) 是 DORIS 确认集 40.71% P@10 / 0.7164 nDCG@10 | 交叉编码器失败时不融合 |
+| 单次无锁 Top-25 Listwise，可选再与上游 RRF | 关，且与 scope v6 互斥 | 无重排 API 时 DORIS L1-C0 38.81% P@10 / 0.7060 nDCG@10；TREC-COVID Q0-inst → L1 → F2 85.14% P@10 / 0.8896 nDCG@10 | `listwise_unconfigured`、`listwise_error`，保留上游 |
+
+范围不超过 600 段时全量打分，更宽时只重打单向量前 100。同分按 `hit_identity` 升序。Listwise 沿用 1600 字句末截断；有效标签少于 `min(10, n)` 时保留原序。
+
+`retrieval-probe` 增加 `--multivector-pool off|colbert|bge_m3_hybrid`、`--rerank-api-instruction`、`--rerank-fuse-pool`、`--listwise-rerank`、`--listwise-no-rrf`。
+
+未纳入：固定邻居 Late Chunking、把上下文前拼进交叉编码器、多步滑窗、MaxSim 内部 IDF 或局部窗口微调。
+
 ## 3. 契约与降级
 
 - `search_unified` 独立于 `search_segments_batch`，批次请求与结果形状不变；旧调用不受影响。
@@ -71,15 +87,23 @@
 - 真实布局 crop（替代几何四等分）尚未接入；重排阶梯中的启发式字段覆盖可选，默认关闭。
 - 宿主开关由 `qna.ts` 读取；主助手默认关闭组合检索。
 
-## 7. 重排阶梯（cross-encoder / 无模型 / 降级）
+## 7. 重排阶梯（cross-encoder / 尾部范围精排 / 无模型 / 降级）
 
-重排是可选的第三段，阶梯固定为 **cross-encoder → 字段覆盖（无模型）→ 融合序**，每次任务都会报告实际用哪一档。
+重排是可选的第三段，阶梯固定为 **cross-encoder → cross_encoder+scope_v6（可选，默认关）→ 字段覆盖（无模型）→ 融合序**。每次任务报告实际用哪一档。尾部范围精排只锁住第 1–8 名，允许第 9、10 名与第 11–20 名互换。锚点只绑定同一篇论文里章节相同、段号差不超过 2 的命中。未配置、引用不合格，或任一待评段落调用失败时，整题保留交叉编码器顺序，搜索本身不失败。
+
+两处会把重排结果写回去的缺陷已接上：
+
+- 重排后给名次写严格递减的 `score`，避免 `results_from_hits` 按原融合分把顺序排回去。
+- 批次检索与组合检索共用 `provider_for`。重排开启时召回窗口至少覆盖 `max_candidates`，尾部精排开启时至少 20，并且交叉编码器至少给这 20 条打分。证据窗口取候选窗口与该召回窗口的较大值。精排之后再截回请求的 `top_k`。关闭重排时不改分数、不截断。远程 API 或已填写的模型目录不会因为内置目录缺失而中断检索。
+- 换位键使用含 `entry_id` 的命中身份，避免不同论文的相同 `segment_uid` 撞键。超长证据按保守 token 估计跳过：ASCII 每 3 个字符计 1 个 token，其余字符各计 1 个，上限 4096。这比按字符数卡 4096 宽松，同时仍会拒绝真正超过 4096 token 的英文段落。
+
+单篇 dev80 上，scope-rerank v6 相对 bge-reranker-v2-m3 Top10（111/800，P@10 13.875%，Recall@10 78.33%，零命中 9）得到 **115/800，P@10 14.375%，+4/0，Recall@10 82.71%，零命中 5**。它没有达到 119/800，因此产品里默认关闭，不把它写成已经过线。
 
 | 设置 `rerank.mode` | 行为 | 体积 |
 |---|---|---|
 | `off`（默认） | 不重排 | 0 |
 | `heuristic` | 字段覆盖重排：数字/指标词/实体加权，命中查询词才生效 | 0 |
-| `cross_encoder` | 本地 ONNX 交叉编码器，只判头部 `max_candidates`（默认 20） | 279 MB（base int8）/ 570 MB（m3 int8） |
+| `cross_encoder` | 本地 ONNX 交叉编码器，只判头部 `max_candidates`（默认 20）；尾部精排开启时至少判前 20 条 | 279 MB（base int8）/ 570 MB（m3 int8） |
 
 降级规则：模型缺失 → `used=heuristic, reason=model_unavailable`；推理失败 → `used=heuristic, reason=provider_error`；`fallback_heuristic=false` 时两档都退回 `used=fused`。单条命中不触发重排。模型目录按目录+mtime 缓存，加载失败也缓存，避免每查询重试 279 MB 模型。
 
@@ -125,15 +149,19 @@ apps/desktop/src-tauri/resources/embedding-models/reranker/
 ## 9. 一次调用跑完整条检索（retrieval-probe）
 
 ```powershell
-cargo run -p neuink-ipc --bin retrieval-probe -- `
+cargo run -p neuink-ipc --bin retrieval-probe --features local-embedding -- `
   --root <库路径> `
   --model-dir apps/desktop/src-tauri/resources/embedding-models/default `
   --question "what accuracy does table 11 report?" `
   [--build-text-index] [--prepare-visual] [--visual-endpoint http://127.0.0.1:8765] `
-  [--rerank-mode off|heuristic|cross_encoder] [--rerank-dir <模型目录>] [--skip-visual]
+  [--rerank-mode off|heuristic|cross_encoder] [--rerank-dir <模型目录>] `
+  [--rerank-api-endpoint URL] [--rerank-api-model NAME] [--rerank-api-key-env VAR] `
+  [--rerank-api-style protocol|dashscope] `
+  [--scope-refine] [--scope-llm-endpoint URL] [--scope-llm-model NAME] [--scope-llm-key-env VAR] `
+  [--scope-entry ID] [--skip-visual]
 ```
 
-输出一份 JSON：`text_model`（是否可用/维度/名称）、`text_index`（构建耗时与向量数）、`visual_prepare`（1 篇 / 23 资产 / 128 向量源 / 405 ms）、`routing`（论文、跳过原因、文本与视觉条目数、`visual_status`、门控）、`carriers`、`tasks`（命中数、`rerank_used`/`rerank_reason`、前三条），以及 `timing_ms`。
+输出一份 JSON：`text_model`、`text_index`、`visual_prepare`、`routing`、`carriers`、`tasks`（命中数、`rerank_used` / `rerank_reason`、`scope_swaps`、前 10 条的 entry / segment_uid / section_path / score / snippet），以及 `timing_ms`。`--scope-refine` 打开尾部精排；密钥只从环境变量读取，缺失时原因是 `scope_refine_unconfigured`，顺序保持交叉编码器结果。
 
 实测（dev 库，stub 视觉服务 + base int8 重排）：`visual_status=ready`、`rerank_used=cross_encoder`、检索 2.87 s、准备索引 405 ms。
 
