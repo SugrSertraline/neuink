@@ -202,6 +202,17 @@ pub(crate) fn read_assistant_profile<R: Runtime>(
     Ok(profile)
 }
 
+/// Reads the assistant profile without writing settings back.
+///
+/// Scope refine must not rewrite the user's settings file just because a search ran.
+pub(crate) fn peek_assistant_profile<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<Option<LlmProfile>, String> {
+    let mut settings = read_settings(app)?;
+    ensure_legacy_profile(&mut settings);
+    Ok(task_profile(settings.assistant_llm_profile_id.as_deref(), &settings).cloned())
+}
+
 fn ensure_legacy_profile(settings: &mut AppSettings) {
     if settings.llm_profiles.is_empty() {
         if let Some(llm) = settings.llm.clone() {

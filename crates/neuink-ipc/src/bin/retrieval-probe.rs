@@ -20,7 +20,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use neuink_config::{RerankMode, RerankSettings, VisualEmbeddingSettings};
+use neuink_config::{RemoteApiStyle, RerankMode, RerankSettings, RerankTransport, VisualEmbeddingSettings};
 use neuink_ipc::commands::search::rerank_stage;
 use neuink_ipc::commands::search::unified::{run_unified_search, UnifiedSearchRequest};
 use neuink_ipc::commands::search::visual::{prepare_visual_index, provider_for};
@@ -39,6 +39,23 @@ struct Args {
     prepare_visual: bool,
     build_text_index: bool,
     seed_demo: Option<PathBuf>,
+    scope_entry_ids: Vec<String>,
+    rerank_api_endpoint: Option<String>,
+    rerank_api_model: Option<String>,
+    rerank_api_key_env: Option<String>,
+    rerank_api_style: RemoteApiStyle,
+    scope_refine: bool,
+    scope_llm_endpoint: String,
+    scope_llm_model: String,
+    scope_llm_key_env: String,
+    multivector_pool: Option<String>,
+    rerank_api_instruction: Option<String>,
+    rerank_fuse_pool: bool,
+    structured_input: bool,
+    structural_soft: bool,
+    listwise_rerank: bool,
+    listwise_no_rrf: bool,
+    listwise_no_single_paper: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -55,6 +72,23 @@ fn parse_args() -> Result<Args, String> {
     let mut prepare = false;
     let mut build_text_index = false;
     let mut seed_demo: Option<PathBuf> = None;
+    let mut scope_entry_ids = Vec::new();
+    let mut rerank_api_endpoint = None;
+    let mut rerank_api_model = None;
+    let mut rerank_api_key_env = None;
+    let mut rerank_api_style = RemoteApiStyle::Protocol;
+    let mut scope_refine = false;
+    let mut scope_llm_endpoint = "https://api.siliconflow.cn/v1".to_string();
+    let mut scope_llm_model = "deepseek-ai/DeepSeek-V4.1-Flash".to_string();
+    let mut scope_llm_key_env = "SILICONFLOW_API_KEY".to_string();
+    let mut multivector_pool = None;
+    let mut rerank_api_instruction = None;
+    let mut rerank_fuse_pool = false;
+    let mut structured_input = false;
+    let mut structural_soft = false;
+    let mut listwise_rerank = false;
+    let mut listwise_no_rrf = false;
+    let mut listwise_no_single_paper = false;
 
     while let Some(flag) = args.next() {
         let mut value = || {
@@ -83,11 +117,41 @@ fn parse_args() -> Result<Args, String> {
             "--prepare-visual" => prepare = true,
             "--build-text-index" => build_text_index = true,
             "--seed-demo" => seed_demo = Some(PathBuf::from(value()?)),
+            "--scope-entry" => scope_entry_ids.push(value()?),
+            "--rerank-api-endpoint" => rerank_api_endpoint = Some(value()?),
+            "--rerank-api-model" => rerank_api_model = Some(value()?),
+            "--rerank-api-key-env" => rerank_api_key_env = Some(value()?),
+            "--rerank-api-style" => {
+                rerank_api_style = match value()?.as_str() {
+                    "protocol" => RemoteApiStyle::Protocol,
+                    "dashscope" => RemoteApiStyle::DashScope,
+                    other => return Err(format!("unknown rerank api style: {other}")),
+                }
+            }
+            "--scope-refine" => scope_refine = true,
+            "--scope-llm-endpoint" => scope_llm_endpoint = value()?,
+            "--scope-llm-model" => scope_llm_model = value()?,
+            "--scope-llm-key-env" => scope_llm_key_env = value()?,
+            "--multivector-pool" => multivector_pool = Some(value()?),
+            "--rerank-api-instruction" => rerank_api_instruction = Some(value()?),
+            "--rerank-fuse-pool" => rerank_fuse_pool = true,
+            "--structured-input" => structured_input = true,
+            "--structural-soft" => structural_soft = true,
+            "--listwise-rerank" => listwise_rerank = true,
+            "--listwise-no-rrf" => listwise_no_rrf = true,
+            "--listwise-no-single-paper" => listwise_no_single_paper = true,
             "--help" | "-h" => {
                 println!(
                     "retrieval-probe --root DIR --model-dir DIR --question TEXT \
-                     [--sub-question TEXT]... [--top-k N] \
+                     [--sub-question TEXT]... [--top-k N] [--scope-entry ID]... \
+                     [--multivector-pool off|colbert|bge_m3_hybrid] \
                      [--rerank-mode off|heuristic|cross_encoder] [--rerank-dir DIR] \
+                     [--rerank-api-endpoint URL] [--rerank-api-model NAME] \
+                     [--rerank-api-key-env VAR] [--rerank-api-style protocol|dashscope] \
+                     [--rerank-api-instruction TEXT] [--rerank-fuse-pool] \
+                     [--structured-input] [--structural-soft] \
+                     [--scope-refine] [--listwise-rerank] [--listwise-no-rrf] [--listwise-no-single-paper] \
+                     [--scope-llm-endpoint URL] [--scope-llm-model NAME] [--scope-llm-key-env VAR] \
                      [--visual-endpoint URL] [--skip-visual] [--prepare-visual]"
                 );
                 std::process::exit(0);
@@ -96,6 +160,13 @@ fn parse_args() -> Result<Args, String> {
         }
     }
 
+    let root = root.or_else(|| seed_demo.clone());
+    let model_dir = model_dir.or_else(|| {
+        Some(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../apps/desktop/src-tauri/resources/embedding-models/default"),
+        )
+    });
     Ok(Args {
         root: root.ok_or("--root is required")?,
         question: question.ok_or("--question is required")?,
@@ -109,7 +180,28 @@ fn parse_args() -> Result<Args, String> {
         prepare_visual: prepare,
         build_text_index,
         seed_demo,
+        scope_entry_ids,
+        rerank_api_endpoint,
+        rerank_api_model,
+        rerank_api_key_env,
+        rerank_api_style,
+        scope_refine,
+        scope_llm_endpoint,
+        scope_llm_model,
+        scope_llm_key_env,
+        multivector_pool,
+        rerank_api_instruction,
+        rerank_fuse_pool,
+        structured_input,
+        structural_soft,
+        listwise_rerank,
+        listwise_no_rrf,
+        listwise_no_single_paper,
     })
+}
+
+fn env_secret(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|value| !value.trim().is_empty())
 }
 
 
@@ -263,7 +355,7 @@ fn run() -> Result<(), String> {
     }
     report.insert("visual_prepare".to_string(), visual_prepare);
 
-    let rerank_settings = RerankSettings {
+    let mut rerank_settings = RerankSettings {
         mode: args.rerank_mode,
         model_dir: args
             .rerank_dir
@@ -271,27 +363,82 @@ fn run() -> Result<(), String> {
             .map(|dir| dir.to_string_lossy().to_string()),
         ..RerankSettings::default()
     };
+    if args.rerank_api_endpoint.is_some() || args.rerank_api_model.is_some() || args.rerank_api_key_env.is_some() {
+        rerank_settings.transport = RerankTransport::Api;
+        rerank_settings.api_endpoint = args.rerank_api_endpoint.clone();
+        rerank_settings.api_model = args.rerank_api_model.clone();
+        rerank_settings.api_style = args.rerank_api_style;
+        if let Some(name) = args.rerank_api_key_env.as_deref() {
+            rerank_settings.api_key = env_secret(name);
+        }
+    }
+    if args.rerank_fuse_pool {
+        rerank_settings.fuse_with_pool = true;
+    }
+    if args.structured_input {
+        rerank_settings.structured_input = true;
+    }
+    if args.structural_soft {
+        rerank_settings.structural_soft_demotion = true;
+    }
+    if let Some(instruction) = args.rerank_api_instruction.clone() {
+        rerank_settings.api_instruction = Some(instruction);
+    }
+    if args.listwise_rerank {
+        rerank_settings.listwise.enabled = true;
+        rerank_settings.listwise.fuse_rrf = !args.listwise_no_rrf;
+        rerank_settings.listwise.single_paper_mode = !args.listwise_no_single_paper;
+        rerank_settings.listwise.use_assistant_llm = false;
+        rerank_settings.listwise.api_endpoint = Some(args.scope_llm_endpoint.clone());
+        rerank_settings.listwise.api_model = Some(args.scope_llm_model.clone());
+        rerank_settings.listwise.api_key = env_secret(&args.scope_llm_key_env);
+    }
+    let mut multivector = neuink_config::MultivectorPoolSettings::default();
+    if let Some(mode) = args.multivector_pool.as_deref() {
+        multivector.enabled = true;
+        multivector.mode = match mode {
+            "colbert" => neuink_config::MultivectorPoolMode::Colbert,
+            "off" => {
+                multivector.enabled = false;
+                neuink_config::MultivectorPoolMode::BgeM3Hybrid
+            }
+            "bge_m3_hybrid" => neuink_config::MultivectorPoolMode::BgeM3Hybrid,
+            other => return Err(format!("unknown multivector pool: {other}")),
+        };
+    }
+    if args.scope_refine {
+        rerank_settings.scope_refine.enabled = true;
+        rerank_settings.scope_refine.use_assistant_llm = false;
+        rerank_settings.scope_refine.api_endpoint = Some(args.scope_llm_endpoint.clone());
+        rerank_settings.scope_refine.api_model = Some(args.scope_llm_model.clone());
+        rerank_settings.scope_refine.api_key = env_secret(&args.scope_llm_key_env);
+    }
+    let rerank_dir = args.rerank_dir.clone().unwrap_or_else(|| PathBuf::from("unused"));
     let rerank_provider: Option<Arc<dyn neuink_search::RerankProvider>> =
         if args.rerank_mode == RerankMode::CrossEncoder {
-            args.rerank_dir
-                .as_deref()
-                .and_then(rerank_stage::reranker_for)
-                .map(|reranker| reranker as Arc<dyn neuink_search::RerankProvider>)
+            rerank_stage::provider_for(&rerank_settings, &rerank_dir)
         } else {
             None
         };
+    let scope_judge = rerank_stage::scope_judge_for(&rerank_settings, None)
+        .map(|judge| Arc::new(judge) as Arc<dyn neuink_search::ScopeJudgeProvider>);
+    let listwise = rerank_stage::listwise_reranker_for(&rerank_settings, None)
+        .map(|reranker| Arc::new(reranker) as Arc<dyn neuink_search::ListwiseRerankProvider>);
     report.insert(
         "rerank".to_string(),
         serde_json::json!({
             "requested": rerank_settings.mode.as_str(),
             "provider_loaded": rerank_provider.is_some(),
             "max_candidates": rerank_settings.max_candidates,
+            "transport": rerank_settings.transport.as_str(),
+            "scope_refine": rerank_settings.scope_refine.enabled,
+            "scope_judge_loaded": scope_judge.is_some(),
+            "listwise": rerank_settings.listwise.enabled,
+            "listwise_loaded": listwise.is_some(),
+            "structured_input": rerank_settings.structured_input,
+            "structural_soft": rerank_settings.structural_soft_demotion,
         }),
     );
-
-
-    // The probe is headless, so it always uses the local ONNX transport; the app resolves
-    // the configured transport (local or API) through the same trait.
     let text_provider: Arc<dyn neuink_search::EmbeddingProvider> =
         Arc::new(neuink_search::FastEmbedProvider::from_model_dir(
             args.model_dir.clone(),
@@ -337,11 +484,19 @@ fn run() -> Result<(), String> {
         neuink_config::VisualFusionSettings::default(),
         rerank_settings,
         rerank_provider,
+        scope_judge,
+        listwise,
+        multivector,
         UnifiedSearchRequest {
             root: args.root.clone(),
             question: args.question.clone(),
+            english_query: None,
             sub_questions: args.sub_questions.clone(),
-            scope_entry_ids: Vec::new(),
+            scope_entry_ids: args
+                .scope_entry_ids
+                .iter()
+                .map(|id| neuink_domain::EntryId::from_string(id.clone()))
+                .collect(),
             mandated_entry_ids: Vec::new(),
             section_filter: None,
             segment_types: Vec::new(),
@@ -387,16 +542,26 @@ fn run() -> Result<(), String> {
             .map(|task| serde_json::json!({
                 "question": task.question,
                 "carrier_applied": task.carrier_applied,
+                "visual_evidence_applied": task.visual_evidence_applied,
                 "mode": task.mode,
                 "hits": task.total_hit_count,
                 "rerank_used": task.rerank_used,
                 "rerank_reason": task.rerank_reason,
+                "pool_used": task.pool_used,
+                "pool_reason": task.pool_reason,
+                "scope_swaps": task.scope_swaps,
                 "top": neuink_search::ordered_hits(&task.results)
                     .into_iter()
-                    .take(3)
+                    .take(10)
                     .map(|hit| serde_json::json!({
                         "entry": hit.entry_id.to_string(),
-                        "snippet": hit.snippet.chars().take(120).collect::<String>(),
+                        "segment_uid": match &hit.target {
+                            neuink_search::SearchTarget::Segment { segment_uid, .. } => segment_uid.to_string(),
+                            _ => String::new(),
+                        },
+                        "section_path": hit.source.section_path,
+                        "score": hit.score,
+                        "snippet": hit.snippet,
                     }))
                     .collect::<Vec<_>>(),
             }))

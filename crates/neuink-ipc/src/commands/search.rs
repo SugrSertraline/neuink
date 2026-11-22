@@ -26,6 +26,7 @@ use super::embedding_resources::{embedding_model_dir, rerank_model_dir};
 
 pub mod unified;
 pub mod rerank_stage;
+mod multivector_stage;
 pub mod visual;
 pub mod page_render;
 pub mod recommended_rerank_models;
@@ -126,12 +127,24 @@ pub struct SearchSegmentsBatchItem {
     pub results: Option<SearchResults>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<SearchSegmentsTaskError>,
-    /// Which rerank rung ran: `off`, `heuristic`, `cross_encoder`, `fused`.
+    /// Which rerank rung ran: `off`, `heuristic`, `cross_encoder`, `cross_encoder+scope_v6`, `fused`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rerank_used: Option<&'static str>,
-    /// Why a rung was skipped: `model_unavailable`, `provider_error`.
+    /// Why a rung was skipped: `model_unavailable`, `provider_error`, `scope_refine_unconfigured`, `scope_refine_error`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rerank_reason: Option<&'static str>,
+    /// Tail swaps from scope refine. Omitted when the cross-encoder order stands.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub scope_swaps: Vec<neuink_search::ScopeSwapSummary>,
+    /// `single_vector`, `colbert`, or `bge_m3_hybrid`. Omitted when the pool is off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pool_used: Option<&'static str>,
+    /// Why the pool fell back: `colbert_head_missing`, `sparse_head_missing`, `provider_unsupported`, `provider_error`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pool_reason: Option<&'static str>,
+    /// The caller's top_k, kept off the wire so the ladder can cut after a wider recall.
+    #[serde(skip)]
+    pub requested_top_k: usize,
 }
 
 /// Fixed, path-free codes. Raw backend errors can contain workspace paths, so they are dropped.
@@ -312,6 +325,10 @@ struct PreparedSearch {
     /// The same entries in first-seen order, so an empty request scope can mean this set
     /// rather than an empty boundary.
     entries: Vec<String>,
+    /// Post-ranking read-only same-section `[Prev]`/`[Next]` context map.
+    surrounding_contexts: Arc<neuink_search::SegmentContextMap>,
+    /// Zero-I/O page-to-segment map for within-paper visual sidecar evidence rescue.
+    visual_page_segments: Arc<neuink_search::VisualPageSegments>,
 }
 
 fn prepare_search(
@@ -378,6 +395,12 @@ fn prepare_search(
                 .filter(|entry| seen.insert(entry.clone()))
                 .collect()
         },
+        surrounding_contexts: Arc::new(neuink_search::SegmentContextMap::from_documents(
+            &documents,
+        )),
+        visual_page_segments: Arc::new(neuink_search::VisualPageSegments::from_documents(
+            &documents,
+        )),
     })
 }
 
@@ -526,9 +549,21 @@ pub async fn search_segments_batch<R: tauri::Runtime>(
     request: SearchSegmentsBatchRequest,
 ) -> Result<Vec<SearchSegmentsBatchItem>, String> {
     let provider = text_provider_for_app(&app)?;
-    let (rerank, rerank_provider) = resolve_rerank(&app)?;
+    let saved = crate::storage::read_settings(&app)?;
+    let multivector = saved.retrieval.multivector;
+    let (rerank, rerank_provider, scope_judge, listwise) = resolve_rerank(&app)?;
+    let pool_provider = provider.clone();
     tokio::task::spawn_blocking(move || {
-        run_segments_batch(provider, rerank, rerank_provider, request)
+        run_segments_batch(
+            provider,
+            rerank,
+            rerank_provider,
+            scope_judge,
+            listwise,
+            pool_provider,
+            multivector,
+            request,
+        )
     })
     .await
     .map_err(|error| error.to_string())?
@@ -542,40 +577,114 @@ fn resolve_rerank<R: tauri::Runtime>(
     (
         neuink_config::RerankSettings,
         Option<Arc<dyn neuink_search::RerankProvider>>,
+        Option<Arc<dyn neuink_search::ScopeJudgeProvider>>,
+        Option<Arc<dyn neuink_search::ListwiseRerankProvider>>,
     ),
     String,
 > {
     let settings = crate::storage::read_settings(app)?.rerank;
+    let assistant = crate::commands::settings::peek_assistant_profile(app).ok().flatten();
     let provider: Option<Arc<dyn neuink_search::RerankProvider>> =
         if settings.mode == neuink_config::RerankMode::CrossEncoder {
-            let dir = rerank_model_dir(app)?;
-            rerank_stage::reranker_for(&dir)
+            match settings.transport {
+                neuink_config::RerankTransport::Api => {
+                    rerank_stage::provider_for(&settings, std::path::Path::new(""))
+                }
+                neuink_config::RerankTransport::Local => {
+                    let bundled = if settings
+                        .model_dir
+                        .as_deref()
+                        .map(str::trim)
+                        .is_some_and(|value| !value.is_empty())
+                    {
+                        None
+                    } else {
+                        rerank_model_dir(app).ok()
+                    };
+                    match rerank_stage::local_model_dir(&settings, bundled.as_deref()) {
+                        Some(dir) => rerank_stage::provider_for(&settings, &dir),
+                        None => None,
+                    }
+                }
+            }
         } else {
             None
         };
-    Ok((settings, provider))
+    let scope_judge = rerank_stage::scope_judge_for(&settings, assistant.as_ref())
+        .map(|judge| Arc::new(judge) as Arc<dyn neuink_search::ScopeJudgeProvider>);
+    let listwise = rerank_stage::listwise_reranker_for(&settings, assistant.as_ref())
+        .map(|reranker| Arc::new(reranker) as Arc<dyn neuink_search::ListwiseRerankProvider>);
+    Ok((settings, provider, scope_judge, listwise))
 }
 
 /// Applies the ladder to every successful batch item. The batch wire is unchanged except
 /// for two additive fields, so a caller that ignores reranking keeps working.
+#[cfg(test)]
 fn apply_batch_rerank(
     items: Vec<SearchSegmentsBatchItem>,
     settings: &neuink_config::RerankSettings,
     provider: Option<&dyn neuink_search::RerankProvider>,
+    scope_judge: Option<&dyn neuink_search::ScopeJudgeProvider>,
+    listwise: Option<&dyn neuink_search::ListwiseRerankProvider>,
+    embedding: Option<&dyn neuink_search::EmbeddingProvider>,
+    multivector: &neuink_config::MultivectorPoolSettings,
+) -> Vec<SearchSegmentsBatchItem> {
+    apply_batch_rerank_with_cache(
+        items,
+        settings,
+        provider,
+        scope_judge,
+        listwise,
+        embedding,
+        multivector,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_batch_rerank_with_cache(
+    items: Vec<SearchSegmentsBatchItem>,
+    settings: &neuink_config::RerankSettings,
+    provider: Option<&dyn neuink_search::RerankProvider>,
+    scope_judge: Option<&dyn neuink_search::ScopeJudgeProvider>,
+    listwise: Option<&dyn neuink_search::ListwiseRerankProvider>,
+    embedding: Option<&dyn neuink_search::EmbeddingProvider>,
+    multivector: &neuink_config::MultivectorPoolSettings,
+    cache_root: Option<&std::path::Path>,
 ) -> Vec<SearchSegmentsBatchItem> {
     items
         .into_iter()
         .map(|item| match item.results {
             Some(results) => {
                 let question = results.query.clone();
-                let (reranked, outcome) =
-                    unified::rerank_task_results(results, &question, settings, provider);
+                let (results, pool) = match embedding {
+                    Some(embedding) => multivector_stage::rescore_results_with_cache(
+                        results,
+                        multivector,
+                        embedding,
+                        cache_root,
+                    ),
+                    None => (results, None),
+                };
+                let (reranked, outcome) = unified::rerank_task_results(
+                    results,
+                    &question,
+                    settings,
+                    provider,
+                    scope_judge,
+                    listwise,
+                    item.requested_top_k,
+                );
                 SearchSegmentsBatchItem {
                     task_id: item.task_id,
                     results: Some(reranked),
                     error: item.error,
                     rerank_used: Some(outcome.used),
                     rerank_reason: outcome.reason,
+                    scope_swaps: outcome.swaps,
+                    pool_used: pool.map(|mark| mark.used),
+                    pool_reason: pool.and_then(|mark| mark.reason),
+                    requested_top_k: item.requested_top_k,
                 }
             }
             None => item,
@@ -589,13 +698,23 @@ fn run_segments_batch(
     provider: Arc<dyn EmbeddingProvider>,
     rerank: neuink_config::RerankSettings,
     rerank_provider: Option<Arc<dyn neuink_search::RerankProvider>>,
+    scope_judge: Option<Arc<dyn neuink_search::ScopeJudgeProvider>>,
+    listwise: Option<Arc<dyn neuink_search::ListwiseRerankProvider>>,
+    pool_provider: Arc<dyn EmbeddingProvider>,
+    multivector: neuink_config::MultivectorPoolSettings,
     request: SearchSegmentsBatchRequest,
 ) -> Result<Vec<SearchSegmentsBatchItem>, String> {
     let SearchSegmentsBatchRequest { root, tasks } = request;
+    let mut surrounding_contexts: Option<Arc<neuink_search::SegmentContextMap>> = None;
     let items = collect_segments_batch(
         tasks,
-        |needs_semantic| prepare_search(provider, &root, true, needs_semantic),
+        |needs_semantic| {
+            let prepared = prepare_search(provider, &root, true, needs_semantic)?;
+            surrounding_contexts = Some(prepared.surrounding_contexts.clone());
+            Ok(prepared)
+        },
         |prepared, task| {
+            let requested = task.top_k.unwrap_or(20).clamp(1, 20);
             run_single_query(
                 prepared,
                 &task.query,
@@ -603,14 +722,36 @@ fn run_segments_batch(
                 &task.sub_queries,
                 task.scope_entry_ids,
                 task.mode,
-                task.top_k.unwrap_or(20).clamp(1, 20),
+                rerank_stage::effective_recall_window(requested, &rerank, &multivector),
                 true,
                 task.section_filter,
                 parse_segment_types(&task.segment_types),
             )
         },
     )?;
-    Ok(apply_batch_rerank(items, &rerank, rerank_provider.as_deref()))
+    let cache_root = root.join(".neuink").join("cache");
+    let mut reranked = apply_batch_rerank_with_cache(
+        items,
+        &rerank,
+        rerank_provider.as_deref(),
+        scope_judge.as_deref(),
+        listwise.as_deref(),
+        Some(pool_provider.as_ref()),
+        &multivector,
+        Some(&cache_root),
+    );
+    if let Some(contexts) = surrounding_contexts.as_deref() {
+        for item in &mut reranked {
+            if let Some(results) = item.results.as_mut() {
+                neuink_search::attach_surrounding_context(
+                    results,
+                    contexts,
+                    neuink_search::DEFAULT_SURROUNDING_CONTEXT_TOP_N,
+                );
+            }
+        }
+    }
+    Ok(reranked)
 }
 
 const BATCH_INVALID_QUERY: SearchSegmentsTaskError = SearchSegmentsTaskError {
@@ -648,6 +789,7 @@ fn collect_segments_batch<P>(
                 return batch_error_item(task.task_id, BATCH_INVALID_QUERY);
             }
             let task_id = task.task_id.clone();
+            let requested_top_k = task.top_k.unwrap_or(20).clamp(1, 20);
             match run(&prepared, task) {
                 Ok(results) => SearchSegmentsBatchItem {
                     task_id,
@@ -656,6 +798,10 @@ fn collect_segments_batch<P>(
                     // The ladder runs after the batch; until then no rung has been applied.
                     rerank_used: None,
                     rerank_reason: None,
+                    scope_swaps: Vec::new(),
+                    pool_used: None,
+                    pool_reason: None,
+                    requested_top_k,
                 },
                 Err(_) => batch_error_item(task_id, BATCH_SEARCH_FAILED),
             }
@@ -670,6 +816,10 @@ fn batch_error_item(task_id: String, error: SearchSegmentsTaskError) -> SearchSe
         error: Some(error),
         rerank_used: None,
         rerank_reason: None,
+        scope_swaps: Vec::new(),
+        pool_used: None,
+        pool_reason: None,
+        requested_top_k: 0,
     }
 }
 
@@ -2028,6 +2178,7 @@ mod tests {
             snippet: "body".to_string(),
             score: 1.0,
             matched_terms: Vec::new(),
+            surrounding_context: None,
         };
         let results = SearchResults {
             query: "q".to_string(),
@@ -2437,6 +2588,8 @@ mod tests {
             // Fixtures below use two entries, so the head's scope size is 2.
             document_count: 2,
             entries: vec!["entry-a".to_string(), "entry-b".to_string()],
+            surrounding_contexts: Arc::new(neuink_search::SegmentContextMap::default()),
+            visual_page_segments: Arc::new(neuink_search::VisualPageSegments::default()),
         }
     }
 
@@ -2747,20 +2900,8 @@ pub async fn search_unified<R: tauri::Runtime>(
     // Constructing the provider probes the service over blocking HTTP; it must not run on
     // the async worker or reqwest drops its runtime inside an async context and panics.
     let visual_settings = settings.clone();
-    let rerank_settings = saved.rerank;
-    // Only a cross-encoder run needs the model; the heuristic rung is model-free.
-    let rerank_provider: Option<Arc<dyn neuink_search::RerankProvider>> =
-        if rerank_settings.mode == neuink_config::RerankMode::CrossEncoder {
-            let dir = rerank_settings
-                .model_dir
-                .as_deref()
-                .map(std::path::PathBuf::from)
-                .unwrap_or(rerank_model_dir(&app)?);
-            // Transport decides between ONNX in-process and a hosted rerank API.
-            rerank_stage::provider_for(&rerank_settings, &dir)
-        } else {
-            None
-        };
+    let multivector = saved.retrieval.multivector;
+    let (rerank_settings, rerank_provider, scope_judge, listwise) = resolve_rerank(&app)?;
     tokio::task::spawn_blocking(move || {
         let visual_provider = visual::provider_for(&visual_settings);
         unified::run_unified_search(
@@ -2769,6 +2910,9 @@ pub async fn search_unified<R: tauri::Runtime>(
             fusion,
             rerank_settings,
             rerank_provider,
+            scope_judge,
+            listwise,
+            multivector,
             request,
         )
     })
@@ -2815,6 +2959,7 @@ mod visual_service_tests;
 pub struct RerankSettingsState {
     /// `local` (ONNX in-process) or `api` (hosted rerank endpoint).
     pub transport: &'static str,
+    pub api_style: &'static str,
     pub api_endpoint: Option<String>,
     pub api_model: Option<String>,
     /// Whether a token is stored; the token itself is never returned.
@@ -2826,6 +2971,37 @@ pub struct RerankSettingsState {
     /// Whether a model is actually present at the resolved directory. A settings screen
     /// needs this to tell "configured but not installed" from "working".
     pub model_present: bool,
+    pub scope_refine: ScopeRefineState,
+    pub api_instruction: Option<String>,
+    pub fuse_with_pool: bool,
+    pub structured_input: bool,
+    pub structural_soft_demotion: bool,
+    pub listwise: ListwiseRefineState,
+}
+
+/// Tail-refine settings the screen may show. The bearer token stays on disk.
+#[derive(Debug, serde::Serialize)]
+pub struct ScopeRefineState {
+    pub enabled: bool,
+    pub use_assistant_llm: bool,
+    pub api_endpoint: Option<String>,
+    pub api_model: Option<String>,
+    pub has_api_key: bool,
+    pub timeout_ms: u64,
+    pub max_concurrency: usize,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct ListwiseRefineState {
+    pub enabled: bool,
+    pub use_assistant_llm: bool,
+    pub api_endpoint: Option<String>,
+    pub api_model: Option<String>,
+    pub has_api_key: bool,
+    pub top_n: usize,
+    pub fuse_rrf: bool,
+    pub single_paper_mode: bool,
+    pub timeout_ms: u64,
 }
 
 impl RerankSettingsState {
@@ -2837,12 +3013,55 @@ impl RerankSettingsState {
             fallback_heuristic: settings.fallback_heuristic,
             model_present,
             transport: settings.transport.as_str(),
+            api_style: settings.api_style.as_str(),
             api_endpoint: settings.api_endpoint.clone(),
             api_model: settings.api_model.clone(),
             has_api_key: settings
                 .api_key
                 .as_deref()
                 .is_some_and(|key| !key.trim().is_empty()),
+            scope_refine: ScopeRefineState::from_settings(&settings.scope_refine),
+            api_instruction: settings.api_instruction.clone(),
+            fuse_with_pool: settings.fuse_with_pool,
+            structured_input: settings.structured_input,
+            structural_soft_demotion: settings.structural_soft_demotion,
+            listwise: ListwiseRefineState::from_settings(&settings.listwise),
+        }
+    }
+}
+
+impl ListwiseRefineState {
+    fn from_settings(settings: &neuink_config::ListwiseRefineSettings) -> Self {
+        Self {
+            enabled: settings.enabled,
+            use_assistant_llm: settings.use_assistant_llm,
+            api_endpoint: settings.api_endpoint.clone(),
+            api_model: settings.api_model.clone(),
+            has_api_key: settings
+                .api_key
+                .as_deref()
+                .is_some_and(|key| !key.trim().is_empty()),
+            top_n: settings.top_n,
+            fuse_rrf: settings.fuse_rrf,
+            single_paper_mode: settings.single_paper_mode,
+            timeout_ms: settings.timeout_ms,
+        }
+    }
+}
+
+impl ScopeRefineState {
+    fn from_settings(settings: &neuink_config::ScopeRefineSettings) -> Self {
+        Self {
+            enabled: settings.enabled,
+            use_assistant_llm: settings.use_assistant_llm,
+            api_endpoint: settings.api_endpoint.clone(),
+            api_model: settings.api_model.clone(),
+            has_api_key: settings
+                .api_key
+                .as_deref()
+                .is_some_and(|key| !key.trim().is_empty()),
+            timeout_ms: settings.timeout_ms,
+            max_concurrency: settings.max_concurrency,
         }
     }
 }
@@ -2959,9 +3178,30 @@ pub fn save_rerank_settings<R: tauri::Runtime>(
     // A None key means "keep the stored one": the screen never receives the token, so it
     // cannot send it back unchanged.
     let mut settings = settings;
-    if settings.api_key.is_none() {
-        if let Ok(saved) = crate::storage::read_settings(&app) {
+    if let Ok(saved) = crate::storage::read_settings(&app) {
+        if settings.api_key.is_none() {
             settings.api_key = saved.rerank.api_key;
+        }
+        // A blank scope key means keep. The screen never receives the stored token.
+        if settings
+            .scope_refine
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("")
+            .is_empty()
+        {
+            settings.scope_refine.api_key = saved.rerank.scope_refine.api_key;
+        }
+        if settings
+            .listwise
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("")
+            .is_empty()
+        {
+            settings.listwise.api_key = saved.rerank.listwise.api_key;
         }
     }
     settings.validate()?;
@@ -2984,6 +3224,7 @@ pub fn save_rerank_settings<R: tauri::Runtime>(
 #[derive(Debug, serde::Serialize)]
 pub struct RetrievalSettingsState {
     pub unified: bool,
+    pub multivector: neuink_config::MultivectorPoolSettings,
 }
 
 #[tauri::command]
@@ -2993,6 +3234,7 @@ pub fn get_retrieval_settings<R: tauri::Runtime>(
     let settings = crate::storage::read_settings(&app)?.retrieval;
     Ok(RetrievalSettingsState {
         unified: settings.unified,
+        multivector: settings.multivector,
     })
 }
 
@@ -3007,6 +3249,7 @@ pub fn save_retrieval_settings<R: tauri::Runtime>(
     crate::storage::write_settings(&app, &saved)?;
     Ok(RetrievalSettingsState {
         unified: saved.retrieval.unified,
+        multivector: saved.retrieval.multivector,
     })
 }
 
@@ -3028,6 +3271,8 @@ pub struct TextModelSettingsState {
     pub loaded_dimensions: Option<usize>,
     pub available: bool,
     pub message: Option<String>,
+    pub colbert_head_present: bool,
+    pub sparse_head_present: bool,
 }
 
 /// Result of a live probe, used by the settings screen's "测试连接" button.
@@ -3057,6 +3302,7 @@ impl TextModelSettingsState {
             .clone()
             .or_else(|| settings.endpoint.clone())
             .unwrap_or_default();
+        let heads = neuink_search::inspect_multivector_heads(std::path::Path::new(&resolved_dir));
         Ok(Self {
             provider: settings.provider.as_str().to_string(),
             model_dir: settings.model_dir.clone(),
@@ -3074,6 +3320,8 @@ impl TextModelSettingsState {
             loaded_dimensions: status.dimensions,
             available: status.available,
             message: status.message,
+            colbert_head_present: heads.colbert_present,
+            sparse_head_present: heads.sparse_present,
         })
     }
 }

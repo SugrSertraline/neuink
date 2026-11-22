@@ -45,6 +45,10 @@ pub struct RecommendedTextModel {
     pub dimensions: usize,
     /// `mean` or `cls`.
     pub pooling: &'static str,
+    /// Prefix prepended to query texts before embedding (empty for BGE-M3, `"query: "` for E5).
+    pub query_prefix: &'static str,
+    /// Prefix prepended to passage texts before embedding (empty for BGE-M3, `"passage: "` for E5).
+    pub passage_prefix: &'static str,
     /// HF-relative ONNX path that is self-contained (no `*_data` sibling).
     pub onnx_path: &'static str,
     pub onnx_megabytes: u32,
@@ -74,6 +78,8 @@ pub const RECOMMENDED: [RecommendedTextModel; 4] = [
         repository: "Xenova/bge-m3",
         dimensions: 1024,
         pooling: "cls",
+        query_prefix: "",
+        passage_prefix: "",
         onnx_path: "onnx/model_int8.onnx",
         onnx_megabytes: 569,
         languages: "中英 + 100 语种",
@@ -97,6 +103,8 @@ pub const RECOMMENDED: [RecommendedTextModel; 4] = [
         repository: "Xenova/multilingual-e5-small",
         dimensions: 384,
         pooling: "mean",
+        query_prefix: "query: ",
+        passage_prefix: "passage: ",
         onnx_path: "onnx/model_quantized.onnx",
         onnx_megabytes: 118,
         languages: "中英 + 100 语种",
@@ -120,6 +128,8 @@ pub const RECOMMENDED: [RecommendedTextModel; 4] = [
         repository: "BAAI/bge-m3",
         dimensions: 1024,
         pooling: "cls",
+        query_prefix: "",
+        passage_prefix: "",
         onnx_path: "onnx/model.onnx",
         onnx_megabytes: 2162,
         languages: "中英 + 100 语种",
@@ -144,6 +154,8 @@ pub const RECOMMENDED: [RecommendedTextModel; 4] = [
         repository: "BAAI/bge-large-zh-v1.5",
         dimensions: 1024,
         pooling: "cls",
+        query_prefix: "",
+        passage_prefix: "",
         onnx_path: "",
         onnx_megabytes: 1300,
         languages: "中文优先",
@@ -194,8 +206,8 @@ pub fn install_dir(root: &Path, id: &str) -> Option<PathBuf> {
 pub fn write_model_metadata(dir: &Path, model: &RecommendedTextModel) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
     let manifest = format!(
-        "{{\n  \"provider\": \"fastembed-local\",\n  \"model_name\": \"{}\",\n  \"dimensions\": {},\n  \"pooling\": \"{}\"\n}}\n",
-        model.repository, model.dimensions, model.pooling
+        "{{\n  \"provider\": \"fastembed-local\",\n  \"model_name\": \"{}\",\n  \"dimensions\": {},\n  \"pooling\": \"{}\",\n  \"query_prefix\": \"{}\",\n  \"passage_prefix\": \"{}\"\n}}\n",
+        model.repository, model.dimensions, model.pooling, model.query_prefix, model.passage_prefix
     );
     std::fs::write(dir.join("neuink-embedding.json"), manifest).map_err(|error| error.to_string())?;
     let special = dir.join("special_tokens_map.json");

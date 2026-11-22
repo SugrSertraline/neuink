@@ -27,6 +27,8 @@ pub struct UnifiedSearchRequest {
     pub root: PathBuf,
     pub question: String,
     #[serde(default)]
+    pub english_query: Option<String>,
+    #[serde(default)]
     pub sub_questions: Vec<String>,
     /// Entries the question may report. Empty means the whole library.
     #[serde(default)]
@@ -77,12 +79,21 @@ pub struct CarrierOutput {
 pub struct UnifiedTaskOutput {
     pub question: String,
     pub carrier_applied: bool,
+    #[serde(default)]
+    pub visual_evidence_applied: bool,
     pub mode: String,
     pub total_hit_count: usize,
-    /// Which rerank rung ran: `off`, `heuristic`, `cross_encoder`, `fused`.
+    /// Which rerank rung ran: `off`, `heuristic`, `cross_encoder`, `cross_encoder+scope_v6`, `fused`.
     pub rerank_used: &'static str,
-    /// Why a rung was skipped: `model_unavailable`, `provider_error`.
+    /// Why a rung was skipped: `model_unavailable`, `provider_error`, `scope_refine_unconfigured`, `scope_refine_error`.
     pub rerank_reason: Option<&'static str>,
+    /// Tail swaps applied after the cross-encoder. Empty when the encoder order stands.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub scope_swaps: Vec<neuink_search::ScopeSwapSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pool_used: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pool_reason: Option<&'static str>,
     pub results: SearchResults,
 }
 
@@ -93,18 +104,26 @@ pub fn run_unified_search(
     fusion: neuink_config::VisualFusionSettings,
     rerank: neuink_config::RerankSettings,
     rerank_provider: Option<Arc<dyn neuink_search::RerankProvider>>,
+    scope_judge: Option<Arc<dyn neuink_search::ScopeJudgeProvider>>,
+    listwise: Option<Arc<dyn neuink_search::ListwiseRerankProvider>>,
+    multivector: neuink_config::MultivectorPoolSettings,
     request: UnifiedSearchRequest,
 ) -> Result<UnifiedSearchResponse, String> {
     let question = request.question.trim().to_string();
     if question.is_empty() {
         return Err("query is required".into());
     }
+    let requested_top_k = request.top_k.unwrap_or(20).clamp(1, 20);
+    let pool_provider = provider.clone();
     let prepared = prepare_search(
         provider,
         &request.root,
         true,
         request.mode != SearchMode::Keyword,
     )?;
+    let english_query_for_visual = request.english_query.clone();
+    let section_filter_for_visual = request.section_filter.clone();
+    let segment_types_for_visual = parse_segment_types(&request.segment_types);
     let template = SearchQuery {
         text: question.clone(),
         mode: request.mode,
@@ -113,7 +132,7 @@ pub fn run_unified_search(
         },
         include: prepared.include.clone(),
         section_filter: request.section_filter.clone(),
-        segment_types: parse_segment_types(&request.segment_types),
+        segment_types: segment_types_for_visual.clone(),
         segments_only: true,
         filter_stopwords: false,
         limit: request.top_k.unwrap_or(20).clamp(1, 20),
@@ -139,8 +158,14 @@ pub fn run_unified_search(
         limits: UnifiedLimits {
             head_units: request.head_units.unwrap_or(20).max(1),
             max_documents: request.max_documents.unwrap_or(20).max(1),
-            route_window: neuink_search::candidate_window(request.top_k.unwrap_or(20)),
-            evidence_window: neuink_search::candidate_window(request.top_k.unwrap_or(20)),
+            route_window: neuink_search::candidate_window(requested_top_k),
+            evidence_window: neuink_search::candidate_window(requested_top_k).max(
+                super::rerank_stage::effective_recall_window(
+                    requested_top_k,
+                    &rerank,
+                    &multivector,
+                ),
+            ),
             evidence_limit: request.top_k.unwrap_or(20).clamp(1, 20),
         },
         bind_carriers: request.bind_carriers.unwrap_or(true),
@@ -176,6 +201,7 @@ pub fn run_unified_search(
         &plan,
         &UnifiedRequest {
             question: question.clone(),
+            english_question: request.english_query,
             sub_questions: request.sub_questions,
             mandated_entries,
             allowed_entries,
@@ -185,9 +211,37 @@ pub fn run_unified_search(
     )
     .map_err(|error| error.to_string())?;
 
+    let routed_documents = output.routing.documents;
+    let visual_parents = output.routing.visual_parents;
+    let binding_for_visual = output.binding.clone();
+    let visual_options = neuink_search::WithinPaperVisualOptions {
+        text_weight: fusion.text_weight,
+        visual_weight: fusion.visual_weight,
+        rrf_k: fusion.rrf_k,
+        max_snippet_overlap: fusion.gate.max_snippet_overlap,
+    };
+
+    let rerank_active =
+        rerank.mode == neuink_config::RerankMode::CrossEncoder || rerank.listwise.enabled;
+    let rerank_window = if rerank_active {
+        let mut head = 0usize;
+        if rerank.mode == neuink_config::RerankMode::CrossEncoder {
+            head = head.max(rerank.max_candidates.max(1));
+            if rerank.scope_refine.enabled {
+                head = head.max(20);
+            }
+        }
+        if rerank.listwise.enabled {
+            head = head.max(rerank.listwise.top_n.max(1));
+        }
+        head.min(neuink_search::RERANK_MAX_CANDIDATES_LIMIT)
+    } else {
+        0
+    };
+
     Ok(UnifiedSearchResponse {
         question,
-        routed_documents: output.routing.documents,
+        routed_documents: routed_documents.clone(),
         routing_skip: output.routing.skipped.map(skip_code),
         truncated: output.routing.truncated,
         text_entries: output.routing.text_entries,
@@ -207,14 +261,77 @@ pub fn run_unified_search(
             .tasks
             .into_iter()
             .map(|task| {
-                let reranked = rerank_task_results(task.results, &task.question, &rerank, rerank_provider.as_deref());
+                let (visual_fused, visual_evidence_applied) =
+                    neuink_search::apply_within_paper_visual_evidence(
+                        task.results,
+                        &visual_parents,
+                        &prepared.visual_page_segments,
+                        &routed_documents,
+                        &task.question,
+                        english_query_for_visual.as_deref(),
+                        &binding_for_visual,
+                        &segment_types_for_visual,
+                        section_filter_for_visual.as_deref(),
+                        visual_options,
+                    );
+                // Rerank-gated zero-extra-embedding chapter-subtree supplementation:
+                // proven +1.55~1.60pp Recall@10 / +1.26pp nDCG@10 on DAPR 652-doc when
+                // a reranker scores the pool; strict no-op when rerank is off.
+                let chapter_enriched = if rerank_active && rerank_window >= 6 {
+                    if let (Some(semantic), Ok(query_vec)) = (
+                        prepared.semantic.as_deref(),
+                        embed_query_vector(pool_provider.as_ref(), &task.question),
+                    ) {
+                        neuink_search::supplement_hits_from_chapters(
+                            visual_fused,
+                            semantic,
+                            &query_vec,
+                            &routed_documents,
+                            &segment_types_for_visual,
+                            section_filter_for_visual.as_deref(),
+                            rerank_window,
+                            3,
+                            4,
+                            10,
+                        )
+                    } else {
+                        visual_fused
+                    }
+                } else {
+                    visual_fused
+                };
+                let cache_root = request.root.join(".neuink").join("cache");
+                let (pooled, pool) = super::multivector_stage::rescore_results_with_cache(
+                    chapter_enriched,
+                    &multivector,
+                    pool_provider.as_ref(),
+                    Some(&cache_root),
+                );
+                let mut reranked = rerank_task_results(
+                    pooled,
+                    &task.question,
+                    &rerank,
+                    rerank_provider.as_deref(),
+                    scope_judge.as_deref(),
+                    listwise.as_deref(),
+                    requested_top_k,
+                );
+                neuink_search::attach_surrounding_context(
+                    &mut reranked.0,
+                    &prepared.surrounding_contexts,
+                    neuink_search::DEFAULT_SURROUNDING_CONTEXT_TOP_N,
+                );
                 UnifiedTaskOutput {
                     question: task.question,
                     carrier_applied: task.carrier_applied,
+                    visual_evidence_applied,
                     mode: reranked.0.mode.clone(),
                     total_hit_count: reranked.0.total_hit_count,
                     rerank_used: reranked.1.used,
                     rerank_reason: reranked.1.reason,
+                    scope_swaps: reranked.1.swaps,
+                    pool_used: pool.map(|mark| mark.used),
+                    pool_reason: pool.and_then(|mark| mark.reason),
                     results: reranked.0,
                 }
             })
@@ -236,13 +353,31 @@ pub(super) fn rerank_task_results(
     question: &str,
     settings: &neuink_config::RerankSettings,
     provider: Option<&dyn neuink_search::RerankProvider>,
+    scope_judge: Option<&dyn neuink_search::ScopeJudgeProvider>,
+    listwise: Option<&dyn neuink_search::ListwiseRerankProvider>,
+    top_k: usize,
 ) -> (SearchResults, super::rerank_stage::RerankOutcome) {
-    if settings.mode == neuink_config::RerankMode::Off {
+    if settings.mode == neuink_config::RerankMode::Off
+        && !settings.listwise.enabled
+        && !settings.structural_soft_demotion
+    {
+        let trimmed = if top_k > 0 && results.total_hit_count > top_k {
+            let query = results.query.clone();
+            let mode = results.mode.clone();
+            let generation = results.index_generation;
+            let warnings = results.warnings.clone();
+            let mut hits = neuink_search::ordered_hits(&results);
+            hits.truncate(top_k);
+            neuink_search::results_from_hits(query, mode, generation, hits, warnings)
+        } else {
+            results
+        };
         return (
-            results,
+            trimmed,
             super::rerank_stage::RerankOutcome {
                 used: super::rerank_stage::RERANK_OFF,
                 reason: None,
+                swaps: Vec::new(),
             },
         );
     }
@@ -251,7 +386,15 @@ pub(super) fn rerank_task_results(
     let generation = results.index_generation;
     let warnings = results.warnings.clone();
     let hits = neuink_search::ordered_hits(&results);
-    let (ordered, outcome) = super::rerank_stage::apply_rerank(hits, question, settings, provider);
+    let (ordered, outcome) = super::rerank_stage::apply_rerank_with_scope(
+        hits,
+        question,
+        settings,
+        provider,
+        scope_judge,
+        listwise,
+        top_k,
+    );
     (
         neuink_search::results_from_hits(query, mode, generation, ordered, warnings),
         outcome,
