@@ -3,7 +3,7 @@ use std::{cmp::Ordering, collections::BTreeMap};
 use rayon::prelude::*;
 
 use crate::embedding_representation::{
-    embed_query_vector, embedding_text, included_by_query, matches_semantic_document,
+    embed_query_vector, embedding_text_with_prefix, included_by_query, matches_semantic_document,
     normalize_embedding_vector as normalize, validate_embedding_vector, validate_embedding_vectors,
     SemanticVectorDocument,
 };
@@ -24,13 +24,14 @@ impl InMemorySemanticSearchIndex {
         provider: &dyn EmbeddingProvider,
         include: &SearchInclude,
     ) -> SearchResult<Self> {
+        let passage_prefix = provider.prefixes().passage;
         let inputs = documents
             .iter()
             .enumerate()
             .filter(|(_, document)| included_by_query(include, document.source.kind))
             .map(|(index, document)| EmbeddingInput {
                 id: index.to_string(),
-                text: embedding_text(document),
+                text: embedding_text_with_prefix(document, &passage_prefix),
             })
             .collect::<Vec<_>>();
 
@@ -117,6 +118,7 @@ impl InMemorySemanticSearchIndex {
                     snippet: make_semantic_snippet(&indexed.text_for_snippet),
                     score,
                     matched_terms: Vec::new(),
+                    surrounding_context: None,
                 })
             })
             .collect::<Vec<_>>();
@@ -215,7 +217,7 @@ fn compare_hits(left: &SearchHit, right: &SearchHit) -> Ordering {
 
 #[cfg(test)]
 mod tests {
-    use super::embedding_text;
+    use crate::embedding_representation::embedding_text;
     use crate::{SearchDocument, SearchDocumentSource, SearchTarget, SearchTextSection};
     use neuink_domain::EntryId;
 

@@ -565,6 +565,213 @@ fn default_rerank_max_candidates() -> usize {
     20
 }
 
+fn default_scope_refine_timeout_ms() -> u64 {
+    30_000
+}
+
+fn default_scope_refine_concurrency() -> usize {
+    8
+}
+
+/// Optional post-cross-encoder tail refinement (Scope-Rerank v6).
+///
+/// Locks ranks 1..=8 and evaluates only slots 9..=10 against challengers 11..=20.
+/// Always fail-closed to the cross-encoder ranking.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(default)]
+pub struct ScopeRefineSettings {
+    /// Opt-in switch; off by default.
+    pub enabled: bool,
+    /// Reuse the configured OpenAI-compatible assistant LLM profile when overrides are blank.
+    #[serde(default = "default_true")]
+    pub use_assistant_llm: bool,
+    /// Optional OpenAI-compatible base URL or `/chat/completions` override.
+    #[serde(default)]
+    pub api_endpoint: Option<String>,
+    /// Optional model override.
+    #[serde(default)]
+    pub api_model: Option<String>,
+    /// Optional write-only bearer token override. Never returned to the frontend.
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default = "default_scope_refine_timeout_ms")]
+    pub timeout_ms: u64,
+    #[serde(default = "default_scope_refine_concurrency")]
+    pub max_concurrency: usize,
+}
+
+impl Default for ScopeRefineSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            use_assistant_llm: true,
+            api_endpoint: None,
+            api_model: None,
+            api_key: None,
+            timeout_ms: default_scope_refine_timeout_ms(),
+            max_concurrency: default_scope_refine_concurrency(),
+        }
+    }
+}
+
+impl ScopeRefineSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        if !(1..=120_000).contains(&self.timeout_ms) {
+            return Err("尾部范围精排超时必须在 1 到 120000 毫秒之间".to_string());
+        }
+        if !(1..=16).contains(&self.max_concurrency) {
+            return Err("尾部范围精排并发必须在 1 到 16 之间".to_string());
+        }
+        if let Some(endpoint) = self.api_endpoint.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+            if !(endpoint.starts_with("http://") || endpoint.starts_with("https://")) {
+                return Err("尾部范围精排地址必须以 http:// 或 https:// 开头".to_string());
+            }
+            if endpoint.starts_with("http://") && !is_loopback_endpoint(endpoint) {
+                return Err("尾部范围精排必须使用 https://；仅本机回环地址允许 http://".to_string());
+            }
+        }
+        Ok(())
+    }
+}
+
+fn default_listwise_timeout_ms() -> u64 {
+    60_000
+}
+
+fn default_listwise_top_n() -> usize {
+    25
+}
+
+fn default_max_full_scope_segments() -> usize {
+    600
+}
+
+fn default_rescore_window() -> usize {
+    100
+}
+
+/// Which BGE-M3 multi-vector score to use when the pool is enabled.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MultivectorPoolMode {
+    /// ColBERT MaxSim only.
+    Colbert,
+    /// `0.4` dense + `0.2` lexical + `0.4` ColBERT. This is the measured C0 mix.
+    #[default]
+    BgeM3Hybrid,
+}
+
+impl MultivectorPoolMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Colbert => "colbert",
+            Self::BgeM3Hybrid => "bge_m3_hybrid",
+        }
+    }
+}
+
+/// Opt-in first-stage pool. Off by default; a missing head falls back to single-vector.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(default)]
+pub struct MultivectorPoolSettings {
+    pub enabled: bool,
+    pub mode: MultivectorPoolMode,
+    #[serde(default = "default_max_full_scope_segments")]
+    pub max_full_scope_segments: usize,
+    #[serde(default = "default_rescore_window")]
+    pub rescore_window: usize,
+}
+
+impl Default for MultivectorPoolSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            mode: MultivectorPoolMode::BgeM3Hybrid,
+            max_full_scope_segments: default_max_full_scope_segments(),
+            rescore_window: default_rescore_window(),
+        }
+    }
+}
+
+impl MultivectorPoolSettings {
+    pub fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if !(1..=2000).contains(&self.max_full_scope_segments) {
+            return Err("多向量全量打分上限必须在 1 到 2000 段之间".to_string());
+        }
+        if !(10..=200).contains(&self.rescore_window) {
+            return Err("多向量重打分窗口必须在 10 到 200 之间".to_string());
+        }
+        Ok(())
+    }
+}
+
+/// One unlocked Top-N listwise pass. Mutually exclusive with scope refine.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(default)]
+pub struct ListwiseRefineSettings {
+    pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub use_assistant_llm: bool,
+    #[serde(default)]
+    pub api_endpoint: Option<String>,
+    #[serde(default)]
+    pub api_model: Option<String>,
+    /// Write-only bearer token. Never returned to the frontend.
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default = "default_listwise_top_n")]
+    pub top_n: usize,
+    #[serde(default = "default_true")]
+    pub fuse_rrf: bool,
+    /// When every candidate comes from a single entry, use the single-paper
+    /// substantive-evidence prompt (`[Section] [Type]`) and output direct L1 order
+    /// without RRF re-injecting Abstract false positives. Multi-doc queries still obey `fuse_rrf`.
+    #[serde(default = "default_true")]
+    pub single_paper_mode: bool,
+    #[serde(default = "default_listwise_timeout_ms")]
+    pub timeout_ms: u64,
+}
+
+impl Default for ListwiseRefineSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            use_assistant_llm: true,
+            api_endpoint: None,
+            api_model: None,
+            api_key: None,
+            top_n: default_listwise_top_n(),
+            fuse_rrf: true,
+            single_paper_mode: true,
+            timeout_ms: default_listwise_timeout_ms(),
+        }
+    }
+}
+
+impl ListwiseRefineSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        if !(10..=30).contains(&self.top_n) {
+            return Err("Listwise 候选数必须在 10 到 30 之间".to_string());
+        }
+        if !(1..=120_000).contains(&self.timeout_ms) {
+            return Err("Listwise 超时必须在 1 到 120000 毫秒之间".to_string());
+        }
+        if let Some(endpoint) = self.api_endpoint.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+            if !(endpoint.starts_with("http://") || endpoint.starts_with("https://")) {
+                return Err("Listwise 地址必须以 http:// 或 https:// 开头".to_string());
+            }
+            if endpoint.starts_with("http://") && !is_loopback_endpoint(endpoint) {
+                return Err("Listwise 必须使用 https://；仅本机回环地址允许 http://".to_string());
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Rerank ladder: `CrossEncoder → Heuristic → fused order`.
 ///
 /// A model that is missing, fails to load, or errors mid-scoring must never break a
@@ -601,6 +808,25 @@ pub struct RerankSettings {
 
     #[serde(default)]
     pub api_style: RemoteApiStyle,
+    /// Optional v6 tail refinement after a successful cross-encoder pass.
+    #[serde(default)]
+    pub scope_refine: ScopeRefineSettings,
+    /// Optional hosted rerank instruction. Blank or `None` omits the field.
+    #[serde(default)]
+    pub api_instruction: Option<String>,
+    /// After a successful cross-encoder, fuse it with the first-stage order.
+    #[serde(default)]
+    pub fuse_with_pool: bool,
+    /// Prefix cross-encoder documents with clean `[Section] [Type]` tags (zero neighbor text).
+    #[serde(default = "default_true")]
+    pub structured_input: bool,
+    /// Zero-API offline soft prior (`B0-sec-soft`): gently demotes Abstract/Front matter
+    /// and short pure-Heading units when the query has no summary intent.
+    #[serde(default = "default_true")]
+    pub structural_soft_demotion: bool,
+    /// Optional single-call listwise pass. Cannot be on together with scope refine.
+    #[serde(default)]
+    pub listwise: ListwiseRefineSettings,
 }
 
 fn default_true() -> bool {
@@ -619,6 +845,12 @@ impl Default for RerankSettings {
             api_model: None,
             api_style: RemoteApiStyle::Protocol,
             fallback_heuristic: true,
+            scope_refine: ScopeRefineSettings::default(),
+            api_instruction: None,
+            fuse_with_pool: false,
+            structured_input: true,
+            structural_soft_demotion: true,
+            listwise: ListwiseRefineSettings::default(),
         }
     }
 }
@@ -633,6 +865,16 @@ impl RerankSettings {
                 if model_dir.trim().is_empty() {
                     return Err("选择本地重排模型时目录不能为空串，留空表示使用内置路径".to_string());
                 }
+            }
+        }
+        self.scope_refine.validate()?;
+        self.listwise.validate()?;
+        if self.scope_refine.enabled && self.listwise.enabled {
+            return Err("尾部范围精排与无锁 Listwise 不能同时开启".to_string());
+        }
+        if let Some(instruction) = self.api_instruction.as_deref() {
+            if instruction.trim().chars().count() > 1000 {
+                return Err("重排任务指令不能超过 1000 个字符".to_string());
             }
         }
         Ok(())
@@ -650,7 +892,22 @@ mod rerank_settings_tests {
         assert_eq!(settings.mode.as_str(), "off");
         assert_eq!(settings.max_candidates, 20);
         assert!(settings.fallback_heuristic);
+        assert!(settings.structured_input);
+        assert!(settings.structural_soft_demotion);
+        assert!(settings.listwise.single_paper_mode);
         assert!(settings.validate().is_ok());
+
+        let legacy: RerankSettings = serde_json::from_str("{}").expect("legacy json");
+        assert!(legacy.structured_input);
+        assert!(legacy.structural_soft_demotion);
+        assert!(legacy.listwise.single_paper_mode);
+
+        let opt_out: RerankSettings = serde_json::from_str(
+            r#"{"structured_input":false,"structural_soft_demotion":false}"#,
+        )
+        .expect("explicit opt-out");
+        assert!(!opt_out.structured_input);
+        assert!(!opt_out.structural_soft_demotion);
     }
 
     #[test]
@@ -678,6 +935,62 @@ mod rerank_settings_tests {
         settings.model_dir = None;
         assert!(settings.validate().is_ok());
     }
+
+    #[test]
+    fn an_old_settings_file_leaves_scope_refine_off() {
+        let settings: RerankSettings = serde_json::from_str(r#"{"mode":"off"}"#).expect("legacy");
+        assert!(!settings.scope_refine.enabled);
+        assert!(settings.scope_refine.use_assistant_llm);
+        assert!(settings.validate().is_ok());
+    }
+
+    #[test]
+    fn scope_refine_rejects_a_cleartext_remote_endpoint() {
+        let mut settings = RerankSettings::default();
+        settings.scope_refine.api_endpoint = Some("http://example.com/v1".to_string());
+        assert!(settings.validate().is_err());
+        settings.scope_refine.api_endpoint = Some("http://127.0.0.1:9/v1".to_string());
+        assert!(settings.validate().is_ok());
+        settings.scope_refine.max_concurrency = 0;
+        assert!(settings.validate().is_err());
+    }
+
+    #[test]
+    fn an_old_file_leaves_instruction_fusion_and_listwise_off() {
+        let settings: RerankSettings = serde_json::from_str(r#"{"mode":"cross_encoder"}"#).expect("legacy");
+        assert!(settings.api_instruction.is_none());
+        assert!(!settings.fuse_with_pool);
+        assert!(!settings.listwise.enabled);
+        assert!(settings.listwise.fuse_rrf);
+        assert_eq!(settings.listwise.top_n, 25);
+        assert!(settings.validate().is_ok());
+    }
+
+    #[test]
+    fn scope_refine_and_listwise_are_mutually_exclusive() {
+        let mut settings = RerankSettings::default();
+        settings.scope_refine.enabled = true;
+        settings.listwise.enabled = true;
+        let error = settings.validate().expect_err("mutex");
+        assert!(error.contains("不能同时开启"));
+        settings.listwise.enabled = false;
+        assert!(settings.validate().is_ok());
+    }
+
+    #[test]
+    fn listwise_bounds_and_instruction_length_are_enforced() {
+        let mut settings = RerankSettings::default();
+        settings.listwise.top_n = 9;
+        assert!(settings.validate().is_err());
+        settings.listwise.top_n = 25;
+        settings.listwise.api_endpoint = Some("http://example.com/v1".to_string());
+        assert!(settings.validate().is_err());
+        settings.listwise.api_endpoint = Some("http://127.0.0.1:9/v1".to_string());
+        settings.api_instruction = Some("x".repeat(1001));
+        assert!(settings.validate().is_err());
+        settings.api_instruction = Some("  ".to_string());
+        assert!(settings.validate().is_ok());
+    }
 }
 
 /// Which retrieval path the assistant's library tool uses.
@@ -690,11 +1003,14 @@ mod rerank_settings_tests {
 pub struct RetrievalSettings {
     /// Use `search_unified` (document routing, carrier binding, visual vote, rerank).
     pub unified: bool,
+    /// Opt-in BGE-M3 multi-vector pool. Omitted on older files, which stay single-vector.
+    #[serde(default, skip_serializing_if = "MultivectorPoolSettings::is_default")]
+    pub multivector: MultivectorPoolSettings,
 }
 
 impl RetrievalSettings {
     pub fn validate(&self) -> Result<(), String> {
-        Ok(())
+        self.multivector.validate()
     }
 }
 
@@ -712,14 +1028,33 @@ mod retrieval_settings_tests {
 
     #[test]
     fn the_flag_round_trips_through_json() {
-        let settings = RetrievalSettings { unified: true };
+        let settings = RetrievalSettings {
+            unified: true,
+            ..RetrievalSettings::default()
+        };
         let encoded = serde_json::to_string(&settings).expect("encode");
         assert_eq!(encoded, r#"{"unified":true}"#);
         let decoded: RetrievalSettings = serde_json::from_str(&encoded).expect("decode");
         assert!(decoded.unified);
+        assert!(!decoded.multivector.enabled);
         // An older settings file without the field still loads.
-        let legacy: RetrievalSettings = serde_json::from_str("{}").expect("legacy");
-        assert!(!legacy.unified);
+        let legacy: RetrievalSettings = serde_json::from_str(r#"{"unified":true}"#).expect("legacy");
+        assert!(legacy.unified);
+        assert!(!legacy.multivector.enabled);
+        assert_eq!(legacy.multivector.max_full_scope_segments, 600);
+    }
+
+    #[test]
+    fn multivector_bounds_are_enforced() {
+        let mut settings = RetrievalSettings::default();
+        settings.multivector.enabled = true;
+        settings.multivector.max_full_scope_segments = 0;
+        assert!(settings.validate().is_err());
+        settings.multivector.max_full_scope_segments = 600;
+        settings.multivector.rescore_window = 9;
+        assert!(settings.validate().is_err());
+        settings.multivector.rescore_window = 100;
+        assert!(settings.validate().is_ok());
     }
 }
 

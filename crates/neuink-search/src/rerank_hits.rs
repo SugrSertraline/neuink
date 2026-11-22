@@ -6,6 +6,7 @@
 //! caller can see that only the head was judged.
 
 use crate::reranking::{rerank_candidates, RerankCandidate, RerankProvider, RerankResult};
+use crate::structural_prior::format_structured_hit;
 use crate::SearchHit;
 
 pub fn rerank_hits_with_provider(
@@ -13,6 +14,31 @@ pub fn rerank_hits_with_provider(
     query: &str,
     provider: &dyn RerankProvider,
     max_candidates: usize,
+) -> RerankResult<Vec<SearchHit>> {
+    rerank_hits_with_provider_structured(hits, query, provider, max_candidates, false)
+}
+
+pub fn rerank_hits_with_provider_structured(
+    hits: &[SearchHit],
+    query: &str,
+    provider: &dyn RerankProvider,
+    max_candidates: usize,
+    structured_input: bool,
+) -> RerankResult<Vec<SearchHit>> {
+    let mut ordered =
+        rerank_hits_with_provider_raw(hits, query, provider, max_candidates, structured_input)?;
+    stamp_rank_scores(&mut ordered);
+    Ok(ordered)
+}
+
+/// Reorders the head while preserving the provider's raw finite scores on scored hits
+/// so a subsequent score-based prior (`B0-sec-soft`) is independent of pool length `N`.
+pub fn rerank_hits_with_provider_raw(
+    hits: &[SearchHit],
+    query: &str,
+    provider: &dyn RerankProvider,
+    max_candidates: usize,
+    structured_input: bool,
 ) -> RerankResult<Vec<SearchHit>> {
     if hits.is_empty() {
         return Ok(Vec::new());
@@ -22,16 +48,35 @@ pub fn rerank_hits_with_provider(
         .iter()
         .map(|hit| RerankCandidate {
             id: String::new(),
-            text: hit.snippet.clone(),
+            text: if structured_input {
+                format_structured_hit(hit)
+            } else {
+                hit.snippet.clone()
+            },
         })
         .collect::<Vec<_>>();
     let reranked = rerank_candidates(provider, query, &candidates, head)?;
     let mut ordered = Vec::with_capacity(hits.len());
     for candidate in reranked {
-        ordered.push(hits[candidate.original_index].clone());
+        let mut item = hits[candidate.original_index].clone();
+        item.score = candidate.score;
+        ordered.push(item);
     }
     ordered.extend(hits[head..].iter().cloned());
     Ok(ordered)
+}
+
+/// Writes a strictly decreasing score from rank so a later score sort cannot restore
+/// the pre-rerank order. Rank 0 keeps the highest score.
+pub fn stamp_rank_scores(hits: &mut [SearchHit]) {
+    let total = hits.len();
+    if total == 0 {
+        return;
+    }
+    let total = total as f32;
+    for (rank, hit) in hits.iter_mut().enumerate() {
+        hit.score = (total - rank as f32) / total;
+    }
 }
 
 #[cfg(test)]
@@ -55,6 +100,7 @@ mod tests {
             snippet: snippet.to_string(),
             score: 1.0,
             matched_terms: Vec::new(),
+            surrounding_context: None,
         }
     }
 
@@ -111,5 +157,24 @@ mod tests {
         assert!(rerank_hits_with_provider(&[], "q", &AlwaysFails, 10)
             .expect("empty")
             .is_empty());
+    }
+
+    #[test]
+    fn stamped_scores_keep_the_provider_order_after_results_are_rebuilt() {
+        let mut first = hit("a", "plain prose");
+        first.score = 0.95;
+        let mut second = hit("b", "a target value");
+        second.score = 0.10;
+        let ordered = rerank_hits_with_provider(&[first, second], "q", &KeywordReranker, 20).expect("rerank");
+        assert!(ordered[0].score > ordered[1].score);
+        let results = crate::retrieval_pipeline::results_from_hits(
+            "q".to_string(),
+            "hybrid".to_string(),
+            1,
+            ordered,
+            Vec::new(),
+        );
+        let again = crate::retrieval_pipeline::ordered_hits(&results);
+        assert!(again[0].snippet.contains("target"), "score sort restored the old order");
     }
 }

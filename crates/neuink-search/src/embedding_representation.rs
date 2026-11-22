@@ -14,6 +14,10 @@ pub struct SemanticVectorDocument<'a> {
 }
 
 pub fn embedding_text(document: &SearchDocument) -> String {
+    embedding_text_with_prefix(document, "passage: ")
+}
+
+pub fn embedding_text_with_prefix(document: &SearchDocument, passage_prefix: &str) -> String {
     let mut parts = Vec::with_capacity(document.sections.len() + 1);
     if !document.title.trim().is_empty() {
         parts.push(document.title.trim().to_string());
@@ -31,10 +35,19 @@ pub fn embedding_text(document: &SearchDocument) -> String {
             });
         }
     }
-    format!("passage: {}", parts.join("\n"))
+    let body = parts.join("\n");
+    if passage_prefix.is_empty() {
+        body
+    } else {
+        format!("{passage_prefix}{body}")
+    }
 }
 
 pub fn stable_document_key(document: &SearchDocument) -> String {
+    stable_document_key_with_prefix(document, "passage: ")
+}
+
+pub fn stable_document_key_with_prefix(document: &SearchDocument, passage_prefix: &str) -> String {
     let target = match &document.target {
         SearchTarget::Entry { entry_id } => format!("entry:{}", entry_id.as_str()),
         SearchTarget::Note { entry_id, note_id } => {
@@ -83,7 +96,7 @@ pub fn stable_document_key(document: &SearchDocument) -> String {
             .page_idx
             .map(|value| value.to_string())
             .unwrap_or_default(),
-        embedding_text(document),
+        embedding_text_with_prefix(document, passage_prefix),
     ] {
         hasher.update(&(field.len() as u64).to_le_bytes());
         hasher.update(field.as_bytes());
@@ -96,11 +109,16 @@ pub fn stable_document_key(document: &SearchDocument) -> String {
 pub fn semantic_embedding_identity(provider: &dyn EmbeddingProvider) -> Option<String> {
     let provider_identity = provider.cache_identity()?;
     let status = provider.status();
+    let prefixes = provider.prefixes();
     let mut hasher = blake3::Hasher::new();
     hasher.update(&EMBEDDING_REPRESENTATION_VERSION.to_le_bytes());
     hasher.update(&(status.dimensions.unwrap_or_default() as u64).to_le_bytes());
     hasher.update(&(provider_identity.len() as u64).to_le_bytes());
     hasher.update(provider_identity.as_bytes());
+    hasher.update(&(prefixes.query.len() as u64).to_le_bytes());
+    hasher.update(prefixes.query.as_bytes());
+    hasher.update(&(prefixes.passage.len() as u64).to_le_bytes());
+    hasher.update(prefixes.passage.as_bytes());
     Some(hasher.finalize().to_hex().to_string())
 }
 
@@ -108,9 +126,15 @@ pub fn embed_query_vector(
     provider: &dyn EmbeddingProvider,
     normalized_query: &str,
 ) -> SearchResult<Vec<f32>> {
+    let query_prefix = provider.prefixes().query;
+    let text = if query_prefix.is_empty() {
+        normalized_query.to_string()
+    } else {
+        format!("{query_prefix}{normalized_query}")
+    };
     let mut vectors = provider.embed(&[EmbeddingInput {
         id: "query".to_string(),
-        text: format!("query: {normalized_query}"),
+        text,
     }])?;
     validate_embedding_vectors(&vectors, 1, provider.status().dimensions)?;
     Ok(normalize_embedding_vector(vectors.remove(0).values))

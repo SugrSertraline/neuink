@@ -44,6 +44,7 @@ fn hit(document: &SearchDocument, score: f32) -> SearchHit {
         snippet: document.text_for_snippet(),
         score,
         matched_terms: vec!["content".to_string()],
+        surrounding_context: None,
     }
 }
 
@@ -740,4 +741,83 @@ fn fused_ties_beyond_the_window_keep_the_same_members_across_order_and_rebuilds(
     assert_eq!(forward, run(true));
     assert_eq!(forward, run(false));
     let _ = InMemorySemanticSearchIndex::build;
+}
+
+#[test]
+fn chapter_subtree_supplement_inserts_unseen_routed_chapter_hits_into_rerank_head() {
+    use crate::{
+        supplement_hits_from_chapters, EmbeddingInput, EmbeddingProvider, EmbeddingProviderStatus,
+        EmbeddingVector, PersistentSemanticSearchIndex, SearchInclude, SearchResult,
+    };
+    struct MappedProvider;
+    impl EmbeddingProvider for MappedProvider {
+        fn status(&self) -> EmbeddingProviderStatus {
+            EmbeddingProviderStatus {
+                available: true,
+                provider: "mapped".into(),
+                model_name: Some("mapped".into()),
+                model_path: None,
+                dimensions: Some(2),
+                message: None,
+            }
+        }
+        fn embed(&self, inputs: &[EmbeddingInput]) -> SearchResult<Vec<EmbeddingVector>> {
+            Ok(inputs
+                .iter()
+                .map(|input| {
+                    let values = if input.id.contains(":target-") || input.id.contains(":heading-") {
+                        vec![1.0, 0.0]
+                    } else {
+                        vec![0.0, 1.0]
+                    };
+                    EmbeddingVector { values }
+                })
+                .collect())
+        }
+    }
+
+    let mut heading_doc = document("entry-a", "heading-1", Some(("sec-exp", "Experiments")));
+    heading_doc.source.segment_type = Some(SegmentType::Heading);
+    let docs = vec![
+        document("entry-a", "seed-1", Some(("sec-intro", "Intro"))),
+        document("entry-a", "seed-2", Some(("sec-intro", "Intro"))),
+        document("entry-a", "seed-3", Some(("sec-intro", "Intro"))),
+        document("entry-a", "seed-4", Some(("sec-intro", "Intro"))),
+        document("entry-a", "seed-5", Some(("sec-intro", "Intro"))),
+        document("entry-a", "seed-6", Some(("sec-intro", "Intro"))),
+        heading_doc,
+        document("entry-a", "target-1", Some(("sec-exp", "Experiments"))),
+        document("entry-out", "target-out", Some(("sec-exp", "Experiments"))),
+    ];
+    let semantic =
+        PersistentSemanticSearchIndex::build(&docs, &MappedProvider, &SearchInclude::default())
+            .unwrap();
+    let initial = results(vec![
+        hit(&docs[0], 0.90),
+        hit(&docs[1], 0.85),
+        hit(&docs[2], 0.80),
+        hit(&docs[3], 0.75),
+        hit(&docs[4], 0.70),
+        hit(&docs[5], 0.65),
+    ]);
+    let enriched = supplement_hits_from_chapters(
+        initial,
+        &semantic,
+        &[1.0, 0.0],
+        &["entry-a".to_string()],
+        &[],
+        None,
+        6,
+        3,
+        4,
+        10,
+    );
+    let ids = identities(&enriched);
+    // `target-1` is inserted inside `0..6` (rerank head), skipping `heading-1` and `entry-out`,
+    // while keeping displaced `seed-6` behind the rerank head so no Stage-1 hit is dropped.
+    assert!(ids[..6].iter().any(|id| id == "s:entry-a:target-1"));
+    assert!(!ids.iter().any(|id| id == "s:entry-a:heading-1"));
+    assert!(!ids.iter().any(|id| id == "s:entry-out:target-out"));
+    assert!(ids.iter().any(|id| id == "s:entry-a:seed-6"));
+    assert_eq!(ids.len(), 7);
 }

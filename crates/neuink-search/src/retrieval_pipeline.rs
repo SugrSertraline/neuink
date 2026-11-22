@@ -23,7 +23,7 @@ pub enum HybridPolicy {
 
 impl HybridPolicy {
     pub fn filters_stopwords(self) -> bool {
-        matches!(self, Self::H1 | Self::H2 | Self::H3)
+        matches!(self, Self::Legacy | Self::H1 | Self::H2 | Self::H3)
     }
 
     pub fn weights(self, query: &str, matched: Option<&[String]>) -> (f32, f32, f32) {
@@ -206,8 +206,15 @@ pub fn recall_candidates(
 ) -> SearchResult<SearchResults> {
     let mut candidate = query.clone();
     candidate.limit = window;
-    candidate.filter_stopwords =
-        query.filter_stopwords || (query.mode == SearchMode::Hybrid && policy.filters_stopwords());
+    // In cross-paper / whole-library hybrid search, filtering high-DF English stopwords
+    // prevents irrelevant documents from flooding BM25 Top-K (+7.00pp P@10 on TREC-COVID,
+    // +1.02pp AllDoc@20 on MultiHopRAG, +1.03pp R@10 and -69% latency on DAPR).
+    // Inside a single paper (~70 segments), keeping full query tokens preserves BM25 rank
+    // coverage across the paper for RRF (+5.55pp R@10 on single-paper QASPER).
+    let apply_policy_stopwords = query.mode == SearchMode::Hybrid
+        && policy.filters_stopwords()
+        && !(policy == HybridPolicy::Legacy && query.scope.entry_ids.len() == 1);
+    candidate.filter_stopwords = query.filter_stopwords || apply_policy_stopwords;
     if query.mode == SearchMode::Keyword {
         return keyword.search(candidate);
     }
@@ -534,6 +541,186 @@ pub fn finalize_candidates(
         results.mode,
         results.index_generation,
         hits,
+        results.warnings,
+    )
+}
+
+/// Supplements a first-stage candidate pool with unseen non-heading segments from the
+/// top-scoring chapters (via cached `ChapterCentroids`, zero extra embedding inference)
+/// strictly inside `routed_entries`.
+///
+/// The supplemented hits are placed inside the `0..rerank_head` scoring window right
+/// after the strongest `rerank_head - appended` Stage-1 hits (preserving any displaced
+/// Stage-1 hits behind `rerank_head`) so a downstream Cross-Encoder or Listwise reranker
+/// actually scores them. Call only when a reranker (`CrossEncoder` or `Listwise`) is active.
+#[allow(clippy::too_many_arguments)]
+pub fn supplement_hits_from_chapters(
+    results: SearchResults,
+    semantic: &PersistentSemanticSearchIndex,
+    query_vector: &[f32],
+    routed_entries: &[String],
+    segment_types: &[SegmentType],
+    section_filter: Option<&str>,
+    rerank_head: usize,
+    top_sections: usize,
+    per_section_max: usize,
+    max_append: usize,
+) -> SearchResults {
+    let allowed_append = max_append.min(rerank_head / 3);
+    if allowed_append == 0
+        || top_sections == 0
+        || per_section_max == 0
+        || routed_entries.is_empty()
+        || query_vector.is_empty()
+        || query_vector.iter().any(|v| !v.is_finite())
+        || query_vector.iter().map(|v| v * v).sum::<f32>() <= 1e-12
+    {
+        return results;
+    }
+
+    let routed_set: HashSet<&str> = routed_entries.iter().map(String::as_str).collect();
+    let chapters = semantic.chapter_centroids();
+    let mut section_scores: Vec<(f32, &str, &str)> = Vec::new();
+    for ((entry_id, section_id), vectors) in &chapters.sections {
+        if !routed_set.contains(entry_id.as_str()) {
+            continue;
+        }
+        let Some(own) = vectors.own.as_deref() else {
+            continue;
+        };
+        if let Some(score) = cosine(query_vector, own) {
+            section_scores.push((score, entry_id.as_str(), section_id.as_str()));
+        }
+    }
+    if section_scores.is_empty() {
+        return results;
+    }
+    section_scores.sort_by(|left, right| {
+        right
+            .0
+            .total_cmp(&left.0)
+            .then_with(|| left.1.cmp(right.1))
+            .then_with(|| left.2.cmp(right.2))
+    });
+    let chosen_sections: Vec<(&str, &str)> = section_scores
+        .into_iter()
+        .take(top_sections)
+        .map(|(_, entry, sec)| (entry, sec))
+        .collect();
+    let chosen_set: HashSet<(&str, &str)> = chosen_sections.iter().copied().collect();
+
+    let existing = ordered_hits(&results);
+    let mut seen: HashSet<String> = existing.iter().map(hit_identity).collect();
+    let filter_lower = section_filter
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_lowercase);
+
+    let mut members_by_section: BTreeMap<(&str, &str), Vec<(f32, &SearchDocument)>> =
+        BTreeMap::new();
+    for record in semantic.vector_documents() {
+        let doc = record.document;
+        if doc.source.kind != crate::SearchDocumentSourceKind::Segment
+            || doc.source.segment_type == Some(SegmentType::Heading)
+        {
+            continue;
+        }
+        let entry = doc.entry_id.as_str();
+        let Some(sec_id) = doc.source.section_id.as_deref() else {
+            continue;
+        };
+        if !chosen_set.contains(&(entry, sec_id)) {
+            continue;
+        }
+        if !segment_types.is_empty()
+            && !doc
+                .source
+                .segment_type
+                .is_some_and(|kind| segment_types.contains(&kind))
+        {
+            continue;
+        }
+        if let Some(filter) = filter_lower.as_deref() {
+            let matches_id = doc
+                .source
+                .section_id
+                .as_deref()
+                .is_some_and(|value| value.to_lowercase() == filter);
+            let matches_path = doc
+                .source
+                .section_path
+                .as_deref()
+                .is_some_and(|value| value.to_lowercase().contains(filter));
+            if !matches_id && !matches_path {
+                continue;
+            }
+        }
+        if let Some(score) = cosine(query_vector, record.vector) {
+            members_by_section
+                .entry((entry, sec_id))
+                .or_default()
+                .push((score, doc));
+        }
+    }
+
+    let mut additions: Vec<SearchHit> = Vec::new();
+    for key in chosen_sections {
+        if additions.len() >= allowed_append {
+            break;
+        }
+        let Some(mut members) = members_by_section.remove(&key) else {
+            continue;
+        };
+        members.sort_by(|left, right| {
+            right.0.total_cmp(&left.0).then_with(|| {
+                left.1
+                    .source
+                    .segment_uid
+                    .as_ref()
+                    .map(|u| u.as_str())
+                    .cmp(&right.1.source.segment_uid.as_ref().map(|u| u.as_str()))
+            })
+        });
+        let mut took_in_section = 0usize;
+        for (_, doc) in members {
+            if took_in_section >= per_section_max || additions.len() >= allowed_append {
+                break;
+            }
+            let candidate = SearchHit {
+                entry_id: doc.entry_id.clone(),
+                entry_title: doc.entry_title.clone(),
+                source: doc.source.clone(),
+                target: doc.target.clone(),
+                title: doc.title.clone(),
+                snippet: doc.text_for_snippet(),
+                score: 0.0,
+                matched_terms: Vec::new(),
+                surrounding_context: None,
+            };
+            if !seen.insert(hit_identity(&candidate)) {
+                continue;
+            }
+            additions.push(candidate);
+            took_in_section += 1;
+        }
+    }
+    if additions.is_empty() {
+        return results;
+    }
+
+    let keep_prefix = existing
+        .len()
+        .min(rerank_head.saturating_sub(additions.len()));
+    let mut combined = Vec::with_capacity(existing.len() + additions.len());
+    combined.extend_from_slice(&existing[..keep_prefix]);
+    combined.extend(additions);
+    combined.extend_from_slice(&existing[keep_prefix..]);
+    crate::stamp_rank_scores(&mut combined);
+    results_from_hits(
+        results.query,
+        results.mode,
+        results.index_generation,
+        combined,
         results.warnings,
     )
 }

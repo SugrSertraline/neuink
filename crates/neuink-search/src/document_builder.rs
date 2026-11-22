@@ -1,7 +1,9 @@
 use crate::{
     SearchDocument, SearchDocumentSource, SearchDocumentSourceKind, SearchTarget, SearchTextSection,
 };
-use neuink_domain::EntryId;
+use neuink_domain::{EntryId, SegmentType};
+
+const HEADING_SEGMENT_BOOST_FACTOR: f32 = 0.35;
 
 /// The IPC adapter and benchmark supply the same representation fields.
 pub struct SearchDocumentInput {
@@ -46,6 +48,13 @@ pub fn compose_search_document(input: SearchDocumentInput) -> SearchDocument {
             0.85,
         ));
     }
+    let boost = if input.source.kind == SearchDocumentSourceKind::Segment
+        && input.source.segment_type == Some(SegmentType::Heading)
+    {
+        input.boost * HEADING_SEGMENT_BOOST_FACTOR
+    } else {
+        input.boost
+    };
     SearchDocument {
         entry_id: input.entry_id,
         entry_title: input.entry_title,
@@ -53,6 +62,43 @@ pub fn compose_search_document(input: SearchDocumentInput) -> SearchDocument {
         target: input.target,
         title: input.title,
         sections,
-        boost: input.boost,
+        boost,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use neuink_domain::SegmentUid;
+
+    fn sample(segment_type: SegmentType) -> SearchDocument {
+        compose_search_document(SearchDocumentInput {
+            entry_id: EntryId::from_string("e1"),
+            entry_title: "Paper".into(),
+            source: SearchDocumentSource {
+                kind: SearchDocumentSourceKind::Segment,
+                segment_type: Some(segment_type),
+                section_path: Some("Experiments".into()),
+                ..SearchDocumentSource::default()
+            },
+            target: SearchTarget::Segment {
+                entry_id: EntryId::from_string("e1"),
+                segment_uid: SegmentUid::from_string("s1"),
+                page_idx: 0,
+            },
+            title: "Paper".into(),
+            body: "Experiments".into(),
+            caption: None,
+            translation: None,
+            boost: 1.0,
+        })
+    }
+
+    #[test]
+    fn standalone_heading_segments_receive_reduced_boost() {
+        let heading = sample(SegmentType::Heading);
+        let paragraph = sample(SegmentType::Paragraph);
+        assert!((heading.boost - 0.35).abs() < 1e-6);
+        assert!((paragraph.boost - 1.0).abs() < 1e-6);
     }
 }

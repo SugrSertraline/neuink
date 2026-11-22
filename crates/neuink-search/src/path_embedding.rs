@@ -83,6 +83,9 @@ impl PathEmbeddingEngine {
 
     /// Embeds texts in fixed-size batches; each input becomes one L2-normalised vector.
     pub fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, String> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
         let mut out = Vec::with_capacity(texts.len());
         for chunk in texts.chunks(self.batch) {
             let encodings = self
@@ -95,6 +98,9 @@ impl PathEmbeddingEngine {
                 .map(|encoding| encoding.get_ids().len())
                 .max()
                 .unwrap_or(0);
+            if sequence == 0 {
+                return Err("ONNX 输入序列长度为 0".to_string());
+            }
             let mut ids = Vec::with_capacity(batch * sequence);
             let mut mask = Vec::with_capacity(batch * sequence);
             for encoding in &encodings {
@@ -177,6 +183,126 @@ impl PathEmbeddingEngine {
         }
         Ok(out)
     }
+
+    /// Token states for the multi-vector heads. Dense matches [`Self::embed`].
+    pub fn encode_token_states(&self, texts: &[String]) -> Result<Vec<TokenHiddenStates>, String> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut out = Vec::with_capacity(texts.len());
+        for chunk in texts.chunks(self.batch) {
+            let encodings = self
+                .tokenizer
+                .encode_batch(chunk.to_vec(), true)
+                .map_err(|error| format!("分词失败：{error}"))?;
+            let batch = encodings.len();
+            let sequence = encodings
+                .iter()
+                .map(|encoding| encoding.get_ids().len())
+                .max()
+                .unwrap_or(0);
+            if sequence == 0 {
+                return Err("ONNX 输入序列长度为 0".to_string());
+            }
+            let mut ids = Vec::with_capacity(batch * sequence);
+            let mut mask = Vec::with_capacity(batch * sequence);
+            let mut token_ids = Vec::with_capacity(batch);
+            for encoding in &encodings {
+                let row = encoding.get_ids();
+                token_ids.push(row.to_vec());
+                let pad = sequence.saturating_sub(row.len());
+                ids.extend(row.iter().map(|value| *value as i64));
+                ids.extend(std::iter::repeat_n(0_i64, pad));
+                mask.extend(encoding.get_attention_mask().iter().map(|value| *value as i64));
+                mask.extend(std::iter::repeat_n(0_i64, pad));
+            }
+            let id_tensor = Tensor::from_array(([batch as i64, sequence as i64], ids))
+                .map_err(|error| error.to_string())?;
+            let mask_tensor = Tensor::from_array(([batch as i64, sequence as i64], mask.clone()))
+                .map_err(|error| error.to_string())?;
+            let position = Tensor::from_array((
+                [batch as i64, sequence as i64],
+                vec![0_i64; batch * sequence],
+            ))
+            .map_err(|error| error.to_string())?;
+            let mut session = self.session.lock().map_err(|_| "ONNX 会话锁被污染".to_string())?;
+            let mut feeds = ort::inputs![
+                "input_ids" => id_tensor,
+                "attention_mask" => mask_tensor,
+            ];
+            if session.inputs().iter().any(|input| input.name() == "token_type_ids") {
+                feeds.push((std::borrow::Cow::Borrowed("token_type_ids"), position.into()));
+            }
+            let outputs = session.run(feeds).map_err(|error| format!("ONNX 推理失败：{error}"))?;
+            let (shape, data) = outputs[0]
+                .try_extract_tensor::<f32>()
+                .map_err(|error| format!("输出张量无法读取：{error}"))?;
+            let hidden = *shape.last().ok_or("输出维度为空")? as usize;
+            if hidden != self.dimensions {
+                return Err(format!(
+                    "模型输出维度 {hidden} 与清单声明的 {} 不一致",
+                    self.dimensions
+                ));
+            }
+            for row in 0..batch {
+                let valid_len = mask[row * sequence..(row + 1) * sequence]
+                    .iter()
+                    .filter(|value| **value != 0)
+                    .count()
+                    .min(token_ids[row].len());
+                let start = row * sequence * hidden;
+                let mut dense = vec![0.0_f32; hidden];
+                match self.pooling {
+                    PoolKind::Cls => {
+                        if valid_len > 0 {
+                            dense.copy_from_slice(&data[start..start + hidden]);
+                        }
+                    }
+                    PoolKind::Mean => {
+                        let mut counted = 0.0_f32;
+                        for token in 0..valid_len {
+                            let offset = start + token * hidden;
+                            for index in 0..hidden {
+                                dense[index] += data[offset + index];
+                            }
+                            counted += 1.0;
+                        }
+                        if counted > 0.0 {
+                            for value in dense.iter_mut() {
+                                *value /= counted;
+                            }
+                        }
+                    }
+                }
+                let norm = dense.iter().map(|value| value * value).sum::<f32>().sqrt();
+                if norm > 0.0 {
+                    for value in dense.iter_mut() {
+                        *value /= norm;
+                    }
+                }
+                let mut hidden_tokens = Vec::with_capacity(valid_len);
+                for token in 0..valid_len {
+                    let offset = start + token * hidden;
+                    hidden_tokens.push(data[offset..offset + hidden].to_vec());
+                }
+                out.push(TokenHiddenStates {
+                    dense,
+                    hidden_tokens,
+                    token_ids: token_ids[row][..valid_len].to_vec(),
+                    valid_len,
+                });
+            }
+        }
+        Ok(out)
+    }
+}
+
+/// One text's pooled vector and the token rows the projection heads consume.
+pub struct TokenHiddenStates {
+    pub dense: Vec<f32>,
+    pub hidden_tokens: Vec<Vec<f32>>,
+    pub token_ids: Vec<u32>,
+    pub valid_len: usize,
 }
 
 #[cfg(test)]

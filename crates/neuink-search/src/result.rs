@@ -158,4 +158,7 @@ pub struct SearchHit {
     pub snippet: String,
     pub score: f32,
     pub matched_terms: Vec<String>,
+    /// Read-only same-section `[Prev]`/`[Next]` context populated strictly *after* final ranking.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub surrounding_context: Option<String>,
 }

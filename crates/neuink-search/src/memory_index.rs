@@ -206,6 +206,7 @@ impl SearchSnapshot {
                     ),
                     score,
                     matched_terms: candidate.matched_terms.into_iter().collect(),
+                    surrounding_context: None,
                 })
             })
             .collect::<Vec<_>>();

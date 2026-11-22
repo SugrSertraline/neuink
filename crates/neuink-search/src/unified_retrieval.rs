@@ -25,7 +25,8 @@ use crate::carrier_binding::{apply_to_query, parse_binding, CarrierBinding, Unbo
 use crate::document_head::{document_head, DocumentHeadConfig, HeadSkip};
 use crate::retrieval_pipeline::ordered_hits;
 use crate::visual_sidecar::{
-    aggregate_parents, fuse_entry_orders, parent_entry_order, VisualChannelStatus, VisualRecall,
+    aggregate_parents, fuse_entry_orders, parent_entry_order, ParentScore, VisualChannelStatus,
+    VisualRecall,
 };
 use crate::{SearchError, SearchQuery, SearchResult, SearchResults};
 
@@ -151,6 +152,8 @@ impl Default for UnifiedPlan {
 #[derive(Clone, Debug, PartialEq)]
 pub struct UnifiedRequest {
     pub question: String,
+    /// Optional English translation of `question` for cross-lingual retrieval.
+    pub english_question: Option<String>,
     /// Evidence-layer sub-questions. Never affect routing.
     pub sub_questions: Vec<String>,
     /// Papers the user named. Kept ahead of the document cap.
@@ -198,6 +201,9 @@ pub struct RoutingStage {
     pub visual_entries: usize,
     /// `Some(open)` only under gated append: whether the gate let visual entries in.
     pub visual_gate_open: Option<bool>,
+    /// Collapsed page/asset visual scores from the routing pass, retained for
+    /// zero-extra-cost within-paper visual evidence fusion.
+    pub visual_parents: Vec<ParentScore>,
 }
 
 /// `SearchResults` has no `PartialEq`, so these outputs compare by fields in tests.
@@ -234,16 +240,27 @@ pub fn run_unified(
     // Routing reads the whole question with no evidence-layer restriction: a
     // carrier narrows evidence, and a section filter must not decide which
     // documents can be routed.
+    let english_question = request
+        .english_question
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != question.as_str());
     let mut route_query = request.template.clone();
     route_query.text = question.clone();
     route_query.limit = plan.limits.route_window.max(1);
     route_query.section_filter = None;
     route_query.segment_types.clear();
-    let route_results = text.recall(&route_query, plan.limits.route_window.max(1))?;
+    let route_results = recall_bilingual(
+        text,
+        &route_query,
+        english_question,
+        plan.limits.route_window.max(1),
+    )?;
     let text_hits = ordered_hits(&route_results);
     let text_order = entry_order_from(&text_hits);
 
-    let visual_order = visual_vote(visual, &question, request, plan, &mut degradations)?;
+    let (visual_order, visual_parents) =
+        visual_vote(visual, &question, request, plan, &mut degradations)?;
     let (mut routed, visual_gate_open) = match plan.visual_fusion {
         VisualFusionPolicy::Weighted { visual_weight } => (
             fuse_entry_orders(
@@ -256,9 +273,11 @@ pub fn run_unified(
             None,
         ),
         VisualFusionPolicy::AppendGated { gate } => {
+            let overlap = head_overlap(&text_hits, &question)
+                .max(english_question.map_or(0, |eng| head_overlap(&text_hits, eng)));
             let gate_open = text_order.is_empty()
                 || text_order.len() < gate.min_head_entries
-                || head_overlap(&text_hits, &question) <= gate.max_snippet_overlap;
+                || overlap <= gate.max_snippet_overlap;
             let combined = if gate_open {
                 append_missing(&text_order, &visual_order)
             } else {
@@ -295,6 +314,7 @@ pub fn run_unified(
         text_entries: text_order.len(),
         visual_entries: visual_order.len(),
         visual_gate_open,
+        visual_parents,
     };
     if head.documents.is_empty() {
         push_unique(&mut degradations, Degradation::NoDocuments);
@@ -307,7 +327,14 @@ pub fn run_unified(
     }
 
     let binding = if plan.bind_carriers {
-        parse_binding(&question)
+        let primary_binding = parse_binding(&question);
+        if primary_binding.carriers.is_empty() && primary_binding.unbound_reason().is_none() {
+            english_question
+                .map(parse_binding)
+                .unwrap_or(primary_binding)
+        } else {
+            primary_binding
+        }
     } else {
         CarrierBinding::default()
     };
@@ -329,6 +356,11 @@ pub fn run_unified(
         .collect::<Vec<_>>();
     let mut tasks = Vec::new();
     for task_question in evidence_questions(request, plan) {
+        let task_english = if task_question == question {
+            english_question
+        } else {
+            None
+        };
         let mut query = request.template.clone();
         query.text = task_question.clone();
         query.limit = plan.limits.evidence_limit.max(1);
@@ -336,7 +368,12 @@ pub fn run_unified(
         let narrowed = constraint
             .as_ref()
             .is_some_and(|constraint| apply_to_query(constraint, &mut query));
-        let mut results = text.recall(&query, plan.limits.evidence_window.max(1))?;
+        let mut results = recall_bilingual(
+            text,
+            &query,
+            task_english,
+            plan.limits.evidence_window.max(1),
+        )?;
         let mut carrier_applied = narrowed;
         if narrowed && results.total_hit_count == 0 {
             // An empty narrowed pool says nothing about relevance, so retry the
@@ -346,7 +383,12 @@ pub fn run_unified(
             plain.text = task_question.clone();
             plain.limit = plan.limits.evidence_limit.max(1);
             plain.scope.entry_ids = scope.clone();
-            results = text.recall(&plain, plan.limits.evidence_window.max(1))?;
+            results = recall_bilingual(
+                text,
+                &plain,
+                task_english,
+                plan.limits.evidence_window.max(1),
+            )?;
             carrier_applied = false;
         }
         tasks.push(UnifiedTaskOutput {
@@ -364,13 +406,36 @@ pub fn run_unified(
     })
 }
 
+fn recall_bilingual(
+    text: &mut dyn TextRecall,
+    query: &SearchQuery,
+    english_question: Option<&str>,
+    window: usize,
+) -> SearchResult<SearchResults> {
+    let primary = text.recall(query, window)?;
+    let Some(english) = english_question.map(str::trim).filter(|q| !q.is_empty()) else {
+        return Ok(primary);
+    };
+    if english == query.text.trim() {
+        return Ok(primary);
+    }
+    let mut english_query = query.clone();
+    english_query.text = english.to_string();
+    let secondary = text.recall(&english_query, window)?;
+    Ok(crate::retrieval_pipeline::fuse_query_candidates(
+        &query.text,
+        &[primary, secondary],
+        &[1.0, 0.9],
+    ))
+}
+
 fn visual_vote(
     visual: &mut dyn VisualRecall,
     question: &str,
     request: &UnifiedRequest,
     plan: &UnifiedPlan,
     degradations: &mut Vec<Degradation>,
-) -> SearchResult<Vec<String>> {
+) -> SearchResult<(Vec<String>, Vec<ParentScore>)> {
     let status = visual.status();
     if let Some(code) = status.degradation_code() {
         let degradation = match status {
@@ -380,16 +445,16 @@ fn visual_vote(
         };
         let _ = code;
         push_unique(degradations, degradation);
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     }
     if request.allowed_entries.is_empty() {
         // Without a frozen allowed set the visual channel has no boundary, and an
         // unbounded page vote would be an unfrozen search.
         push_unique(degradations, Degradation::VisualNoAllowedEntries);
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     }
     if plan.visual_weight <= 0.0 {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     }
     let scores = visual.recall(
         question,
@@ -397,19 +462,43 @@ fn visual_vote(
         plan.limits.route_window.max(1),
     )?;
     let parents = aggregate_parents(&scores);
-    Ok(parent_entry_order(&parents, plan.limits.head_units.max(1)))
+    let entries = parent_entry_order(&parents, plan.limits.head_units.max(1));
+    Ok((entries, parents))
 }
 
+/// Deterministic Multi-Hit RRF document ordering from ranked text hits.
+///
+/// Accumulates diminishing RRF votes from up to the top 3 hits per document
+/// (`1.0 / 0.45 / 0.25` divided by `60 + rank + 1`), breaking ties by first rank
+/// and then `entry_id`. Single-hit documents keep their exact rank order, while
+/// documents with multiple strong hits are promoted above single-hit noise.
 fn entry_order_from(hits: &[crate::SearchHit]) -> Vec<String> {
-    let mut entries = Vec::new();
-    for hit in hits {
+    let mut scores = std::collections::BTreeMap::<String, (f32, usize, usize)>::new();
+    for (rank, hit) in hits.iter().enumerate() {
         let entry = hit.entry_id.to_string();
-        if entries.iter().any(|seen| seen == &entry) {
-            continue;
+        let state = scores.entry(entry).or_insert((0.0, 0, rank));
+        if state.1 < 3 {
+            let weight = match state.1 {
+                0 => 1.0_f32,
+                1 => 0.45_f32,
+                _ => 0.25_f32,
+            };
+            state.0 += weight / (crate::DEFAULT_RRF_K + rank as f32 + 1.0);
+            state.1 += 1;
         }
-        entries.push(entry);
     }
-    entries
+    let mut ranked = scores
+        .into_iter()
+        .map(|(entry, (score, _, first_rank))| (entry, score, first_rank))
+        .collect::<Vec<_>>();
+    ranked.sort_by(|left, right| {
+        right
+            .1
+            .total_cmp(&left.1)
+            .then_with(|| left.2.cmp(&right.2))
+            .then_with(|| left.0.cmp(&right.0))
+    });
+    ranked.into_iter().map(|(entry, _, _)| entry).collect()
 }
 
 /// Token overlap between the question and the best text hit, used by the append gate.
@@ -507,6 +596,7 @@ mod tests {
             snippet: format!("{entry} {uid}"),
             score,
             matched_terms: Vec::new(),
+            surrounding_context: None,
         }
     }
 
@@ -599,6 +689,7 @@ mod tests {
     fn request(question: &str) -> UnifiedRequest {
         UnifiedRequest {
             question: question.to_string(),
+            english_question: None,
             sub_questions: Vec::new(),
             mandated_entries: Vec::new(),
             allowed_entries: ["a", "b", "c", "d", "e", "f"]
@@ -608,6 +699,43 @@ mod tests {
             in_scope_documents: 6,
             template: SearchQuery::new(question),
         }
+    }
+
+    #[test]
+    fn english_question_participates_in_routing_and_evidence_recall() {
+        struct BilingualText {
+            calls: Vec<String>,
+        }
+        impl TextRecall for BilingualText {
+            fn recall(&mut self, query: &SearchQuery, _window: usize) -> SearchResult<SearchResults> {
+                self.calls.push(query.text.clone());
+                let hits = if query.text.contains("contrastive") {
+                    vec![hit("paper-en", "s1", 0.9)]
+                } else {
+                    Vec::new()
+                };
+                Ok(results_from_hits(
+                    query.text.clone(),
+                    "hybrid".to_string(),
+                    1,
+                    hits,
+                    Vec::new(),
+                ))
+            }
+        }
+        let mut text = BilingualText { calls: Vec::new() };
+        let mut visual = NoVisualChannel(VisualChannelStatus::Disabled);
+        let mut req = request("对比学习有什么效果？");
+        req.english_question = Some("contrastive learning accuracy".to_string());
+        req.allowed_entries = vec!["paper-en".to_string()];
+        req.in_scope_documents = 1;
+        req.template.scope.entry_ids = vec![EntryId::from_string("paper-en".to_string())];
+
+        let output = run_unified(&mut text, &mut visual, &UnifiedPlan::default(), &req).unwrap();
+        assert_eq!(output.routing.documents, ["paper-en"]);
+        assert_eq!(output.tasks.len(), 1);
+        assert_eq!(output.tasks[0].results.total_hit_count, 1);
+        assert!(text.calls.iter().any(|q| q == "contrastive learning accuracy"));
     }
 
     #[test]
@@ -669,6 +797,8 @@ mod tests {
                 parent_id: "p1".to_string(),
                 region: Some(0),
                 score: 0.9,
+                page_idx: Some(1),
+                segment_type: None,
             }],
         };
         let plan = UnifiedPlan {
@@ -712,6 +842,8 @@ mod tests {
                 parent_id: "p".to_string(),
                 region: None,
                 score: 1.0,
+                page_idx: None,
+                segment_type: None,
             }],
         };
         let mut req = request("q");
@@ -844,6 +976,8 @@ mod tests {
                 parent_id: "images/c.jpg".to_string(),
                 region: None,
                 score: 0.9,
+                page_idx: None,
+                segment_type: None,
             }],
         };
         let plan = UnifiedPlan {
@@ -874,12 +1008,16 @@ mod tests {
                     parent_id: "images/c.jpg".to_string(),
                     region: None,
                     score: 0.9,
+                    page_idx: None,
+                    segment_type: None,
                 },
                 VisualScore {
                     entry_id: "a".to_string(),
                     parent_id: "images/a.jpg".to_string(),
                     region: None,
                     score: 0.8,
+                    page_idx: None,
+                    segment_type: None,
                 },
             ],
         };
@@ -911,6 +1049,8 @@ mod tests {
                 parent_id: "images/d.jpg".to_string(),
                 region: None,
                 score: 0.7,
+                page_idx: None,
+                segment_type: None,
             }],
         };
         let plan = UnifiedPlan {
@@ -938,6 +1078,8 @@ mod tests {
                 parent_id: "images/b.jpg".to_string(),
                 region: None,
                 score: 0.95,
+                page_idx: None,
+                segment_type: None,
             }],
         };
         let plan = UnifiedPlan {
@@ -948,5 +1090,46 @@ mod tests {
             .expect("run");
         assert_eq!(output.routing.visual_gate_open, None);
         assert_eq!(output.routing.documents[0], "b");
+    }
+
+    #[test]
+    fn single_paper_scope_retains_visual_parents_for_within_paper_fusion() {
+        let mut text = ScriptedText::new(&[("solo", 2.0)]);
+        let mut visual = ScriptedVisual {
+            status: VisualChannelStatus::Ready,
+            scores: vec![VisualScore {
+                entry_id: "solo".to_string(),
+                parent_id: "page:4".to_string(),
+                region: None,
+                score: 0.91,
+                page_idx: Some(4),
+                segment_type: Some(SegmentType::Figure),
+            }],
+        };
+        let mut req = request("Figure 4 trend");
+        req.allowed_entries = vec!["solo".to_string()];
+        req.in_scope_documents = 1;
+        req.template.scope.entry_ids = vec![EntryId::from_string("solo")];
+        let output = run_unified(&mut text, &mut visual, &UnifiedPlan::default(), &req).unwrap();
+        assert_eq!(output.routing.skipped, Some(HeadSkip::SingleDocument));
+        assert_eq!(output.routing.visual_parents.len(), 1);
+        assert_eq!(output.routing.visual_parents[0].page_idx, Some(4));
+        assert_eq!(
+            output.routing.visual_parents[0].segment_type,
+            Some(SegmentType::Figure)
+        );
+    }
+
+    #[test]
+    fn multi_hit_document_routing_promotes_paper_with_multiple_top_hits() {
+        let hits = vec![
+            hit("single-noise", "s1", 0.95),
+            hit("multi-strong", "s1", 0.90),
+            hit("multi-strong", "s2", 0.88),
+            hit("multi-strong", "s3", 0.85),
+            hit("tail-doc", "s1", 0.40),
+        ];
+        let order = entry_order_from(&hits);
+        assert_eq!(order, ["multi-strong", "single-noise", "tail-doc"]);
     }
 }

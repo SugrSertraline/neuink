@@ -26,6 +26,7 @@ pub struct HttpReranker {
     api_key: String,
     model: String,
     style: RemoteApiStyle,
+    instruction: Option<String>,
 }
 
 impl HttpReranker {
@@ -53,24 +54,45 @@ impl HttpReranker {
             api_key,
             model,
             style,
+            instruction: None,
         })
+    }
+
+    /// Adds a task instruction. A blank value keeps the request byte-compatible.
+    pub fn with_instruction(mut self, instruction: Option<String>) -> Self {
+        self.instruction = instruction
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        self
     }
 
     /// Request body, kept public for tests so a shape change is reviewable.
     pub fn payload(&self, query: &str, documents: &[&str]) -> serde_json::Value {
         match self.style {
-            RemoteApiStyle::Protocol => serde_json::json!({
-                "model": self.model,
-                "query": query,
-                "documents": documents,
-                "top_n": documents.len(),
-            }),
+            RemoteApiStyle::Protocol => {
+                let mut payload = serde_json::json!({
+                    "model": self.model,
+                    "query": query,
+                    "documents": documents,
+                    "top_n": documents.len(),
+                });
+                if let Some(instruction) = &self.instruction {
+                    payload["instruction"] = serde_json::Value::String(instruction.clone());
+                }
+                payload
+            }
             // Model Studio nests query/documents under `input` and options under `parameters`.
-            RemoteApiStyle::DashScope => serde_json::json!({
-                "model": self.model,
-                "input": { "query": query, "documents": documents },
-                "parameters": { "top_n": documents.len(), "return_documents": false },
-            }),
+            RemoteApiStyle::DashScope => {
+                let mut payload = serde_json::json!({
+                    "model": self.model,
+                    "input": { "query": query, "documents": documents },
+                    "parameters": { "top_n": documents.len(), "return_documents": false },
+                });
+                if let Some(instruction) = &self.instruction {
+                    payload["parameters"]["instruct"] = serde_json::Value::String(instruction.clone());
+                }
+                payload
+            }
         }
     }
 }
@@ -198,6 +220,28 @@ mod tests {
         assert_eq!(payload["query"], "q");
         assert_eq!(payload["documents"].as_array().expect("array").len(), 2);
         assert_eq!(payload["top_n"], 2);
+        assert!(payload.get("instruction").is_none());
+        let instructed = reranker.with_instruction(Some("  retrieve papers  ".to_string()));
+        let payload = instructed.payload("q", &["a"]);
+        assert_eq!(payload["instruction"], "retrieve papers");
+        let dash = HttpReranker::new(
+            DASHSCOPE_RERANK_ENDPOINT.to_string(),
+            "token".to_string(),
+            DASHSCOPE_RERANK_MODEL.to_string(),
+            RemoteApiStyle::DashScope,
+        )
+        .expect("dashscope")
+        .with_instruction(Some("instruction".to_string()));
+        assert_eq!(dash.payload("q", &["a"])["parameters"]["instruct"], "instruction");
+        let blank = HttpReranker::new(
+            JINA_RERANK_ENDPOINT.to_string(),
+            "token".to_string(),
+            JINA_RERANK_MODEL.to_string(),
+            RemoteApiStyle::Protocol,
+        )
+        .expect("provider")
+        .with_instruction(Some("   ".to_string()));
+        assert!(blank.payload("q", &["a"]).get("instruction").is_none());
     }
 
     #[test]

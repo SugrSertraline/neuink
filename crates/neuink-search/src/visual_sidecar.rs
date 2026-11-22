@@ -13,6 +13,7 @@
 //! and an unavailable channel degrades to text instead of silently returning
 //! nothing.
 
+use neuink_domain::SegmentType;
 use serde::{Deserialize, Serialize};
 
 use crate::{weighted_reciprocal_rank_fusion, SearchResult};
@@ -26,6 +27,12 @@ pub struct VisualScore {
     pub parent_id: String,
     pub region: Option<u32>,
     pub score: f32,
+    /// Zero-based PDF page index of this visual source when known.
+    #[serde(default)]
+    pub page_idx: Option<u32>,
+    /// Asset segment type (`Figure` / `Table`) for MinerU visual crops; `None` for full pages.
+    #[serde(default)]
+    pub segment_type: Option<SegmentType>,
 }
 
 /// One vote per parent, after region collapse.
@@ -34,6 +41,10 @@ pub struct ParentScore {
     pub entry_id: String,
     pub parent_id: String,
     pub score: f32,
+    #[serde(default)]
+    pub page_idx: Option<u32>,
+    #[serde(default)]
+    pub segment_type: Option<SegmentType>,
 }
 
 impl ParentScore {
@@ -96,6 +107,12 @@ pub fn aggregate_parents(scores: &[VisualScore]) -> Vec<ParentScore> {
         if !score.score.is_finite() || score.parent_id.trim().is_empty() {
             continue;
         }
+        let resolved_page = score.page_idx.or_else(|| {
+            score
+                .parent_id
+                .strip_prefix("page:")
+                .and_then(|raw| raw.parse::<u32>().ok())
+        });
         match parents
             .iter_mut()
             .find(|parent| parent.entry_id == score.entry_id && parent.parent_id == score.parent_id)
@@ -104,11 +121,19 @@ pub fn aggregate_parents(scores: &[VisualScore]) -> Vec<ParentScore> {
                 if score.score > existing.score {
                     existing.score = score.score;
                 }
+                if existing.page_idx.is_none() {
+                    existing.page_idx = resolved_page;
+                }
+                if existing.segment_type.is_none() {
+                    existing.segment_type = score.segment_type;
+                }
             }
             None => parents.push(ParentScore {
                 entry_id: score.entry_id.clone(),
                 parent_id: score.parent_id.clone(),
                 score: score.score,
+                page_idx: resolved_page,
+                segment_type: score.segment_type,
             }),
         }
     }
@@ -186,6 +211,8 @@ mod tests {
             parent_id: parent.to_string(),
             region,
             score: value,
+            page_idx: None,
+            segment_type: None,
         }
     }
 

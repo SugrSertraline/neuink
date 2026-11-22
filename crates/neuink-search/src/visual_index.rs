@@ -173,6 +173,8 @@ impl VisualSearchIndex {
                 parent_id: document.parent_id(),
                 region: document.region_index(),
                 score: cosine,
+                page_idx: document.page_idx,
+                segment_type: document.segment_type,
             });
         }
         scores.sort_by(|left, right| {

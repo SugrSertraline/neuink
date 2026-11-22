@@ -179,6 +179,14 @@ impl EmbeddingProvider for RemoteEmbeddingProvider {
         }
     }
 
+    fn prefixes(&self) -> crate::EmbeddingPrefixes {
+        if self.model.to_ascii_lowercase().contains("e5") {
+            crate::EmbeddingPrefixes::e5_default()
+        } else {
+            crate::EmbeddingPrefixes::none()
+        }
+    }
+
     /// For a remote model the immutable facts we can observe are its declared identity and
     /// output width. The endpoint stays out of the hash on purpose: two gateways serving the
     /// same model produce compatible vectors, and switching gateway should not re-embed the

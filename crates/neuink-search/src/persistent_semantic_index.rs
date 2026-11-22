@@ -10,7 +10,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::embedding_representation::{
-    embed_query_vector, embedding_text, included_by_query, matches_semantic_document,
+    embed_query_vector, embedding_text_with_prefix, included_by_query, matches_semantic_document,
     normalize_embedding_vector as normalize, semantic_embedding_identity, stable_document_key,
     validate_embedding_vector, validate_embedding_vectors, SemanticVectorDocument,
     EMBEDDING_REPRESENTATION_VERSION,
@@ -122,12 +122,13 @@ impl PersistentSemanticSearchIndex {
         mut by_id: HashMap<String, Vec<f32>>,
         on_progress: &dyn Fn(usize, usize),
     ) -> SearchResult<Self> {
+        let passage_prefix = provider.prefixes().passage;
         let inputs = documents
             .iter()
             .filter(|document| included_by_query(include, document.source.kind))
             .map(|document| EmbeddingInput {
                 id: stable_document_key(document),
-                text: embedding_text(document),
+                text: embedding_text_with_prefix(document, &passage_prefix),
             })
             .collect::<Vec<_>>();
 
@@ -232,6 +233,7 @@ impl PersistentSemanticSearchIndex {
                     snippet: make_semantic_snippet(&indexed.text_for_snippet),
                     score,
                     matched_terms: Vec::new(),
+                    surrounding_context: None,
                 })
             })
             .collect::<Vec<_>>();
@@ -478,7 +480,8 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use super::{embedding_text, stable_document_key, PersistentSemanticSearchIndex};
+    use super::PersistentSemanticSearchIndex;
+    use crate::embedding_representation::{embedding_text, stable_document_key};
     use crate::{
         EmbeddingInput, EmbeddingProvider, EmbeddingProviderStatus, EmbeddingVector,
         SearchDocument, SearchDocumentSource, SearchInclude, SearchResult, SearchTarget,
@@ -861,6 +864,96 @@ mod tests {
                 .map(|input| EmbeddingVector::new(vec![input.text.len() as f32, 1.0]))
                 .collect())
         }
+    }
+
+    #[test]
+    fn provider_prefixes_control_passage_and_query_texts_and_cache_identity() {
+        struct RecordingProvider {
+            prefixes: crate::EmbeddingPrefixes,
+            seen: Mutex<Vec<String>>,
+        }
+        impl EmbeddingProvider for RecordingProvider {
+            fn status(&self) -> EmbeddingProviderStatus {
+                EmbeddingProviderStatus {
+                    available: true,
+                    provider: "recording".to_string(),
+                    dimensions: Some(2),
+                    ..EmbeddingProviderStatus::default()
+                }
+            }
+            fn cache_identity(&self) -> Option<String> {
+                Some("same-weights".to_string())
+            }
+            fn prefixes(&self) -> crate::EmbeddingPrefixes {
+                self.prefixes.clone()
+            }
+            fn embed(&self, inputs: &[EmbeddingInput]) -> SearchResult<Vec<EmbeddingVector>> {
+                let mut guard = self.seen.lock().unwrap();
+                guard.extend(inputs.iter().map(|item| item.text.clone()));
+                Ok(inputs
+                    .iter()
+                    .map(|_| EmbeddingVector::new(vec![1.0, 0.0]))
+                    .collect())
+            }
+        }
+
+        let unprefixed = RecordingProvider {
+            prefixes: crate::EmbeddingPrefixes::none(),
+            seen: Mutex::new(Vec::new()),
+        };
+        let e5 = RecordingProvider {
+            prefixes: crate::EmbeddingPrefixes::e5_default(),
+            seen: Mutex::new(Vec::new()),
+        };
+        assert_ne!(
+            super::semantic_embedding_identity(&unprefixed),
+            super::semantic_embedding_identity(&e5)
+        );
+        let docs = vec![document("entry-a", "Contrastive learning")];
+        let include = SearchInclude::default();
+        let dir = test_cache_dir("prefix-roundtrip");
+        let path = dir.join("semantic.json");
+        let index = PersistentSemanticSearchIndex::open_or_build(
+            &path,
+            &docs,
+            &unprefixed,
+            &include,
+            42,
+        )
+        .unwrap();
+        let unprefixed_id = super::semantic_embedding_identity(&unprefixed).unwrap();
+        let reopened = PersistentSemanticSearchIndex::open_cached_with_identity(
+            &path,
+            &docs,
+            &include,
+            42,
+            &unprefixed_id,
+        )
+        .unwrap();
+        assert!(reopened.is_some());
+        let e5_id = super::semantic_embedding_identity(&e5).unwrap();
+        assert!(PersistentSemanticSearchIndex::open_cached_with_identity(
+            &path,
+            &docs,
+            &include,
+            42,
+            &e5_id,
+        )
+        .unwrap()
+        .is_none());
+        let _ = index
+            .search(
+                &crate::SearchQuery::new("contrastive"),
+                "contrastive",
+                &unprefixed,
+                "semantic",
+                Vec::new(),
+                1,
+            )
+            .unwrap();
+        let recorded = unprefixed.seen.lock().unwrap().clone();
+        assert_eq!(recorded, vec!["Contrastive learning", "contrastive"]);
+        let _ = fs::remove_dir_all(dir);
     }
 
     fn document(entry_id: &str, text: &str) -> SearchDocument {

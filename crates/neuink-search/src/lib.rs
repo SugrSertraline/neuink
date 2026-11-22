@@ -1,3 +1,4 @@
+mod colbert_head;
 mod document_builder;
 mod carrier_binding;
 mod document_head;
@@ -6,7 +7,9 @@ mod embedding_provider_trait;
 mod embedding_representation;
 mod error;
 mod fastembed_provider;
+mod listwise_rerank;
 mod memory_index;
+mod multivector_index;
 mod persistent_semantic_index;
 mod remote_embedding_provider;
 mod query;
@@ -15,6 +18,7 @@ mod path_embedding;
 mod query_plan;
 mod rerank_hits;
 mod remote_reranking;
+mod scope_rerank;
 mod reranking;
 #[cfg(test)]
 mod reranking_tests;
@@ -28,20 +32,37 @@ mod rrf;
 mod search_index_trait;
 mod section_tree_index;
 mod semantic_index;
+mod structural_prior;
+mod surrounding_context;
 mod token;
 mod unified_retrieval;
 mod vector_store_trait;
 mod visual_embedding;
+mod visual_evidence;
 mod visual_index;
 mod visual_sidecar;
 
+pub use colbert_head::{
+    affine, head_sha256, inspect_multivector_heads, lexical_weights, load_colbert, load_sparse,
+    project_colbert, write_head, LinearHead, MultivectorHeadStatus, MultivectorSupport,
+};
 pub use document_builder::{compose_search_document, SearchDocumentInput};
+pub use listwise_rerank::{
+    fuse_rankings_rrf, parse_ranked_ids, reorder_hits as reorder_listwise_hits,
+    single_paper_listwise_user_prompt, HttpListwiseReranker, ListwiseOrder, ListwisePromptStyle,
+    ListwiseRerankProvider,
+};
+pub use multivector_index::{
+    cache_path, rank_documents, read_cache, reorder_hits as reorder_multivector_hits, rescore_selection,
+    write_cache, EntryMultivectorCache, MultivectorDocument,
+};
 pub use embedding_provider_trait::{
-    EmbeddingInput, EmbeddingProvider, EmbeddingProviderStatus, EmbeddingVector,
+    EmbeddingInput, EmbeddingPrefixes, EmbeddingProvider, EmbeddingProviderStatus, EmbeddingVector,
 };
 pub use embedding_representation::{
-    embed_query_vector, embedding_text, semantic_embedding_identity, stable_document_key,
-    SemanticVectorDocument, EMBEDDING_REPRESENTATION_VERSION,
+    embed_query_vector, embedding_text, embedding_text_with_prefix, semantic_embedding_identity,
+    stable_document_key, stable_document_key_with_prefix, SemanticVectorDocument,
+    EMBEDDING_REPRESENTATION_VERSION,
 };
 pub use error::{SearchError, SearchResult};
 pub use fastembed_provider::{
@@ -62,7 +83,21 @@ pub use remote_reranking::{
     HttpReranker, COHERE_RERANK_ENDPOINT, COHERE_RERANK_MODEL, DASHSCOPE_RERANK_ENDPOINT,
     DASHSCOPE_RERANK_MODEL, JINA_RERANK_ENDPOINT, JINA_RERANK_MODEL,
 };
-pub use rerank_hits::rerank_hits_with_provider;
+pub use rerank_hits::{
+    rerank_hits_with_provider, rerank_hits_with_provider_raw, rerank_hits_with_provider_structured,
+    stamp_rank_scores,
+};
+pub use structural_prior::{
+    apply_structural_soft_demotion, apply_structural_soft_demotion_head, format_structured_hit,
+    is_single_paper_hits, query_has_summary_intent, strip_passage_header,
+};
+pub use surrounding_context::{
+    attach_surrounding_context, SegmentContextMap, DEFAULT_SURROUNDING_CONTEXT_TOP_N,
+};
+pub use scope_rerank::{
+    refine_tail_with_scope_v6, HttpScopeJudge, PassageJudgment, ScopeDecision, ScopeItem,
+    ScopeJudgeError, ScopeJudgeProvider, ScopeJudgeRequest, ScopeRefineReport, ScopeSwapSummary,
+};
 pub use reranking::{
     rerank_candidates, LocalRerankerOptions, RerankCandidate, RerankError, RerankProvider,
     RerankResult, RerankScore, RerankedCandidate, DEFAULT_RERANK_MAX_CANDIDATES,
@@ -108,6 +143,10 @@ pub use visual_index::{
     build_visual_index, reopen_visual_index, visual_index_path, visual_namespace,
     VisualIndexDocument, VisualSearchIndex, VisualSourceKind, VISUAL_EMBED_BATCH_SIZE,
     VISUAL_INDEX_FILE_NAME, VISUAL_INDEX_FORMAT_VERSION,
+};
+pub use visual_evidence::{
+    apply_within_paper_visual_evidence, question_has_visual_intent, VisualPageSegments,
+    WithinPaperVisualOptions,
 };
 pub use visual_sidecar::{
     aggregate_parents, fuse_entry_orders, parent_entry_order, ParentScore, VisualChannelStatus,

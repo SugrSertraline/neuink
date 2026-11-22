@@ -172,7 +172,9 @@ pub fn rerank_hits_by_coverage(
             .total_cmp(&left.0)
             .then_with(|| left.1.cmp(&right.1))
     });
-    scored.into_iter().map(|(_, _, hit)| hit).collect()
+    let mut ordered = scored.into_iter().map(|(_, _, hit)| hit).collect::<Vec<_>>();
+    crate::rerank_hits::stamp_rank_scores(&mut ordered);
+    ordered
 }
 
 #[cfg(test)]
@@ -195,6 +197,7 @@ mod tests {
             snippet: snippet.to_string(),
             score: 1.0,
             matched_terms: Vec::new(),
+            surrounding_context: None,
         }
     }
 
@@ -256,5 +259,24 @@ mod tests {
         assert!(fields.entities.contains("bert"));
         assert!(fields.entities.contains("roberta"));
         assert!(fields.entities.contains("glue"));
+    }
+
+    #[test]
+    fn stamped_scores_keep_the_coverage_order_after_results_are_rebuilt() {
+        let mut plain = hit("a", "no fields here");
+        plain.score = 0.95;
+        let mut numeric = hit("b", "accuracy 91.2 percent");
+        numeric.score = 0.10;
+        let ordered = rerank_hits_by_coverage(&[plain, numeric], "what accuracy percent", &FieldCoverageWeights::default());
+        assert!(ordered[0].score > ordered[1].score);
+        let results = crate::retrieval_pipeline::results_from_hits(
+            "what accuracy percent".to_string(),
+            "hybrid".to_string(),
+            1,
+            ordered,
+            Vec::new(),
+        );
+        let again = crate::retrieval_pipeline::ordered_hits(&results);
+        assert!(again[0].snippet.contains("91.2"));
     }
 }

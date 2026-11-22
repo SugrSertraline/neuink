@@ -31,12 +31,24 @@ pub const LOCAL_EMBEDDING_BATCH_SIZE: usize = 8;
 pub struct FastEmbedProvider {
     model_dir: PathBuf,
     status: EmbeddingProviderStatus,
+    prefixes: crate::EmbeddingPrefixes,
     /// `None` keeps ONNX Runtime's default (all cores). Thread count changes speed
     /// only; it is not part of the content identity, so it never forces re-embedding.
     intra_threads: Option<usize>,
     cache_identity: OnceLock<Option<String>>,
+    multivector_head_identity: OnceLock<Option<String>>,
     #[cfg(feature = "local-embedding")]
     backend: OnceLock<SearchResult<Backend>>,
+    #[cfg(feature = "local-embedding")]
+    multivector_heads: OnceLock<
+        Result<
+            (
+                crate::colbert_head::LinearHead,
+                Option<crate::colbert_head::LinearHead>,
+            ),
+            String,
+        >,
+    >,
 }
 
 impl FastEmbedProvider {
@@ -55,13 +67,20 @@ impl FastEmbedProvider {
 
     fn build(model_dir: PathBuf, intra_threads: Option<usize>) -> Self {
         let status = inspect_model_dir(&model_dir);
+        let prefixes = read_manifest(&model_dir.join(MANIFEST_FILE_NAME))
+            .map(|manifest| manifest.resolved_prefixes())
+            .unwrap_or_else(crate::EmbeddingPrefixes::e5_default);
         Self {
             model_dir,
             status,
+            prefixes,
             intra_threads,
             cache_identity: OnceLock::new(),
+            multivector_head_identity: OnceLock::new(),
             #[cfg(feature = "local-embedding")]
             backend: OnceLock::new(),
+            #[cfg(feature = "local-embedding")]
+            multivector_heads: OnceLock::new(),
         }
     }
 
@@ -79,6 +98,10 @@ impl EmbeddingProvider for FastEmbedProvider {
         self.status.clone()
     }
 
+    fn prefixes(&self) -> crate::EmbeddingPrefixes {
+        self.prefixes.clone()
+    }
+
     fn cache_identity(&self) -> Option<String> {
         self.cache_identity
             .get_or_init(|| model_content_identity(&self.model_dir).ok())
@@ -88,6 +111,29 @@ impl EmbeddingProvider for FastEmbedProvider {
     #[cfg(feature = "local-embedding")]
     fn embed(&self, inputs: &[EmbeddingInput]) -> SearchResult<Vec<EmbeddingVector>> {
         self.embed_with_progress(inputs, &|_, _| {})
+    }
+
+    fn multivector_support(&self) -> crate::colbert_head::MultivectorSupport {
+        crate::colbert_head::MultivectorSupport::Local(crate::colbert_head::inspect_multivector_heads(
+            &self.model_dir,
+        ))
+    }
+
+    fn multivector_head_identity(&self) -> Option<String> {
+        self.multivector_head_identity
+            .get_or_init(|| {
+                let head_hash = crate::colbert_head::head_sha256(&self.model_dir);
+                let base = self.cache_identity().unwrap_or_else(|| "local".to_string());
+                Some(format!("{base}:{head_hash}"))
+            })
+            .clone()
+    }
+
+    fn encode_multivector_documents(
+        &self,
+        texts: &[String],
+    ) -> Result<Vec<crate::multivector_index::MultivectorDocument>, String> {
+        self.encode_multivector_documents_impl(texts)
     }
 
     #[cfg(feature = "local-embedding")]
@@ -188,12 +234,25 @@ fn model_content_identity(model_dir: &Path) -> std::io::Result<String> {
         ));
     }
     let mut hasher = blake3::Hasher::new();
-    // Pooling belongs to the identity: the same weights pooled differently produce
+    // Pooling and text prefixes belong to the identity: changing either produces
     // incompatible vectors, so a manifest change must invalidate cached embeddings.
-    let pooling = read_manifest(&model_dir.join(MANIFEST_FILE_NAME))
+    let manifest = read_manifest(&model_dir.join(MANIFEST_FILE_NAME));
+    let pooling = manifest
+        .as_ref()
         .and_then(|manifest| manifest.pooling_tag())
         .unwrap_or("mean");
+    let prefixes = manifest
+        .as_ref()
+        .map(EmbeddingManifest::resolved_prefixes)
+        .unwrap_or_else(crate::EmbeddingPrefixes::e5_default);
     hasher.update(format!("neuink-fastembed-pooling-v2:{pooling}").as_bytes());
+    hasher.update(
+        format!(
+            "neuink-fastembed-prefixes-v1:{}:{}",
+            prefixes.query, prefixes.passage
+        )
+        .as_bytes(),
+    );
     let mut buffer = [0_u8; 64 * 1024];
     for path in files {
         let relative = path
@@ -269,6 +328,61 @@ fn load_backend(model_dir: &Path, intra_threads: Option<usize>) -> SearchResult<
         return Ok(Backend::ExternalData(engine));
     }
     load_text_embedding(model_dir, intra_threads).map(Backend::SingleFile)
+}
+
+#[cfg(feature = "local-embedding")]
+impl FastEmbedProvider {
+    fn encode_multivector_documents_impl(
+        &self,
+        texts: &[String],
+    ) -> Result<Vec<crate::multivector_index::MultivectorDocument>, String> {
+        let backend = self
+            .backend
+            .get_or_init(|| load_backend(&self.model_dir, self.intra_threads));
+        let Backend::ExternalData(engine) = backend.as_ref().map_err(|error| error.to_string())? else {
+            return Err("provider_unsupported".to_string());
+        };
+        let states = engine.encode_token_states(texts)?;
+        let (colbert, sparse) = self
+            .multivector_heads
+            .get_or_init(|| {
+                let colbert = crate::colbert_head::load_colbert(&self.model_dir)?;
+                let sparse = crate::colbert_head::load_sparse(&self.model_dir).ok();
+                Ok((colbert, sparse))
+            })
+            .as_ref()
+            .map_err(Clone::clone)?;
+        states
+            .into_iter()
+            .map(|state| {
+                let lexical = match sparse {
+                    Some(head) => crate::colbert_head::lexical_weights(
+                        head,
+                        &state.hidden_tokens,
+                        &state.token_ids,
+                        state.valid_len,
+                    )?,
+                    None => Vec::new(),
+                };
+                Ok(crate::multivector_index::MultivectorDocument {
+                    identity: String::new(),
+                    dense: state.dense,
+                    lexical,
+                    colbert: crate::colbert_head::project_colbert(colbert, &state.hidden_tokens, state.valid_len)?,
+                })
+            })
+            .collect()
+    }
+}
+
+#[cfg(not(feature = "local-embedding"))]
+impl FastEmbedProvider {
+    fn encode_multivector_documents_impl(
+        &self,
+        _texts: &[String],
+    ) -> Result<Vec<crate::multivector_index::MultivectorDocument>, String> {
+        Err("provider_unsupported".to_string())
+    }
 }
 
 #[cfg(feature = "local-embedding")]
@@ -452,6 +566,10 @@ struct EmbeddingManifest {
     /// manifest declares it instead of the code assuming one kind.
     #[serde(default)]
     pooling: Option<String>,
+    #[serde(default)]
+    query_prefix: Option<String>,
+    #[serde(default)]
+    passage_prefix: Option<String>,
 }
 
 impl EmbeddingManifest {
@@ -462,6 +580,28 @@ impl EmbeddingManifest {
             Some(value) if value == "mean" => Some("mean"),
             Some(value) if value == "cls" => Some("cls"),
             Some(_) => None,
+        }
+    }
+
+    fn resolved_prefixes(&self) -> crate::EmbeddingPrefixes {
+        if self.query_prefix.is_some() || self.passage_prefix.is_some() {
+            return crate::EmbeddingPrefixes {
+                query: self.query_prefix.clone().unwrap_or_default(),
+                passage: self.passage_prefix.clone().unwrap_or_default(),
+            };
+        }
+        let lower = self
+            .model_name
+            .as_deref()
+            .map(str::to_ascii_lowercase)
+            .unwrap_or_default();
+        if lower.contains("bge-m3")
+            || lower.contains("qwen3-embedding")
+            || (lower.contains("bge-") && self.pooling_tag() == Some("cls"))
+        {
+            crate::EmbeddingPrefixes::none()
+        } else {
+            crate::EmbeddingPrefixes::e5_default()
         }
     }
 }
@@ -623,6 +763,46 @@ mod tests {
         assert_eq!(clamped.intra_threads(), Some(1));
         assert_eq!(default.cache_identity(), capped.cache_identity());
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn manifest_resolves_bge_m3_unprefixed_and_e5_prefixed_with_distinct_identities() {
+        let bge_dir = std::env::temp_dir().join(unique_name("neuink-prefix-bge"));
+        let e5_dir = std::env::temp_dir().join(unique_name("neuink-prefix-e5"));
+        for dir in [&bge_dir, &e5_dir] {
+            fs::create_dir_all(dir).unwrap();
+            fs::write(dir.join("model.onnx"), b"weights").unwrap();
+            fs::write(dir.join(TOKENIZER_FILE_NAME), b"tokenizer").unwrap();
+        }
+        fs::write(
+            bge_dir.join(MANIFEST_FILE_NAME),
+            br#"{"model_name":"BAAI/bge-m3","dimensions":1024,"pooling":"cls"}"#,
+        )
+        .unwrap();
+        fs::write(
+            e5_dir.join(MANIFEST_FILE_NAME),
+            br#"{"model_name":"Xenova/multilingual-e5-small","dimensions":384,"pooling":"mean"}"#,
+        )
+        .unwrap();
+
+        let bge = FastEmbedProvider::from_model_dir(&bge_dir);
+        let e5 = FastEmbedProvider::from_model_dir(&e5_dir);
+        assert_eq!(bge.prefixes(), crate::EmbeddingPrefixes::none());
+        assert_eq!(e5.prefixes(), crate::EmbeddingPrefixes::e5_default());
+
+        let original_id = bge.cache_identity().unwrap();
+        fs::write(
+            bge_dir.join(MANIFEST_FILE_NAME),
+            br#"{"model_name":"BAAI/bge-m3","dimensions":1024,"pooling":"cls","query_prefix":"Instruct: " ,"passage_prefix":""}"#,
+        )
+        .unwrap();
+        let custom = FastEmbedProvider::from_model_dir(&bge_dir);
+        assert_eq!(custom.prefixes().query, "Instruct: ");
+        assert_eq!(custom.prefixes().passage, "");
+        assert_ne!(original_id, custom.cache_identity().unwrap());
+
+        fs::remove_dir_all(bge_dir).unwrap();
+        fs::remove_dir_all(e5_dir).unwrap();
     }
 
     fn unique_name(prefix: &str) -> String {
