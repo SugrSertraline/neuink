@@ -268,11 +268,12 @@ impl LocalReranker {
             tokenizer_config_file: read_tokenizer_asset(model_dir, "tokenizer_config.json")?,
         };
         let model = UserDefinedRerankingModel::new(OnnxSource::File(model_file), tokenizer_files);
-        let mut init_options =
-            RerankInitOptionsUserDefined::new().with_max_length(RERANK_MAX_LENGTH);
-        if let Some(threads) = options.intra_threads {
-            init_options = init_options.with_intra_threads(threads);
-        }
+        let effective_threads = options
+            .intra_threads
+            .unwrap_or_else(crate::path_embedding::default_cpu_intra_threads);
+        let init_options = RerankInitOptionsUserDefined::new()
+            .with_max_length(RERANK_MAX_LENGTH)
+            .with_intra_threads(effective_threads);
         let reranker =
             TextRerank::try_new_from_user_defined(model, init_options).map_err(|_| {
                 RerankError::ModelUnavailable("reranker session or tokenizer failed to load")
@@ -291,24 +292,173 @@ fn read_tokenizer_asset(model_dir: &std::path::Path, name: &str) -> RerankResult
     })
 }
 
+/// Local CPU cross-encoder input budget per candidate document.
+///
+/// The reader/LLM still receives the full `hit.snippet` (700/1500 chars), while local
+/// CPU ONNX scoring strips verbose HTML table markup (`<td>`, `colspan=...`) and caps
+/// scoring input at 480 chars (~110–130 tokens) to avoid O(L^2) CPU self-attention waste.
+#[cfg(any(feature = "local-embedding", test))]
+pub(crate) const LOCAL_RERANK_MAX_DOC_CHARS: usize = 480;
+
+/// Strips HTML tags (such as `<table>`, `<tr>`, `<td colspan="4">`) into spaces,
+/// collapses whitespace, and clips to `LOCAL_RERANK_MAX_DOC_CHARS` for fast CPU scoring.
+///
+/// For long tables (either raw HTML `<table` or compacted pipe tables `|...|`), preserves
+/// both the head (column headers) and tail (typically the proposed method's final row).
+#[cfg(any(feature = "local-embedding", test))]
+pub(crate) fn prepare_local_rerank_doc(text: &str) -> String {
+    let is_table = crate::result::contains_html_table(text)
+        || (text.starts_with('|') && text.contains("|\n|"));
+    let mut plain = String::with_capacity(text.len().min(LOCAL_RERANK_MAX_DOC_CHARS + 64));
+    let mut chars = text.chars().peekable();
+    let mut prev_space = true;
+    while let Some(ch) = chars.next() {
+        if ch == '<' {
+            if let Some(&next) = chars.peek() {
+                if next.is_ascii_alphabetic() || next == '/' {
+                    for inner in chars.by_ref() {
+                        if inner == '>' {
+                            break;
+                        }
+                    }
+                    if !prev_space {
+                        plain.push(' ');
+                        prev_space = true;
+                    }
+                    continue;
+                }
+            }
+        }
+        if ch.is_whitespace() {
+            if !prev_space {
+                plain.push(' ');
+                prev_space = true;
+            }
+        } else {
+            plain.push(ch);
+            prev_space = false;
+        }
+    }
+    let trimmed = plain.trim();
+    let total_chars = trimmed.chars().count();
+    if total_chars <= LOCAL_RERANK_MAX_DOC_CHARS {
+        return trimmed.to_string();
+    }
+    if is_table {
+        const HEAD_CHARS: usize = 260;
+        const SEP: &str = " ... ";
+        let tail_chars = LOCAL_RERANK_MAX_DOC_CHARS.saturating_sub(HEAD_CHARS + SEP.len());
+        let head: String = trimmed.chars().take(HEAD_CHARS).collect();
+        let tail: String = trimmed
+            .chars()
+            .skip(total_chars.saturating_sub(tail_chars))
+            .collect();
+        return format!("{}{SEP}{}", head.trim_end(), tail.trim_start());
+    }
+    trimmed
+        .chars()
+        .take(LOCAL_RERANK_MAX_DOC_CHARS)
+        .collect::<String>()
+        .trim_end()
+        .to_string()
+}
+
+/// Orders candidate document indices by ascending byte length so each ONNX batch
+/// groups passages of similar token length, avoiding O(L^2) padding waste on CPU.
+#[cfg(any(feature = "local-embedding", test))]
+pub(crate) fn order_document_indices_by_length<S: AsRef<str>>(
+    documents: &[S],
+    batch_size: usize,
+) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..documents.len()).collect();
+    if order.len() > batch_size {
+        order.sort_by_key(|&index| documents[index].as_ref().len());
+    }
+    order
+}
+
 #[cfg(feature = "local-embedding")]
 impl RerankProvider for LocalReranker {
     fn score(&self, query: &str, documents: &[&str]) -> RerankResult<Vec<RerankScore>> {
+        if documents.is_empty() {
+            return Ok(Vec::new());
+        }
+        let prepared: Vec<String> = documents
+            .iter()
+            .map(|doc| prepare_local_rerank_doc(doc))
+            .collect();
+        let order = order_document_indices_by_length(&prepared, self.batch_size);
+        let ordered_docs: Vec<&str> = order.iter().map(|&idx| prepared[idx].as_str()).collect();
         let mut model = self
             .model
             .lock()
             .map_err(|_| RerankError::InferenceFailed("reranker lock is poisoned"))?;
         let results = model
-            .rerank(query, documents, false, Some(self.batch_size))
+            .rerank(query, &ordered_docs, false, Some(self.batch_size))
             .map_err(|_| RerankError::InferenceFailed("reranker inference failed"))?;
-        Ok(results
+        results
             .into_iter()
-            .map(|result| RerankScore {
-                index: result.index,
-                score: result.score,
+            .map(|result| {
+                let original_index = *order
+                    .get(result.index)
+                    .ok_or(RerankError::InvalidOutput("score index is out of range"))?;
+                Ok(RerankScore {
+                    index: original_index,
+                    score: result.score,
+                })
             })
-            .collect())
+            .collect()
     }
 }
 
+#[cfg(test)]
+mod length_batching_tests {
+    use super::{
+        order_document_indices_by_length, prepare_local_rerank_doc, LOCAL_RERANK_MAX_DOC_CHARS,
+    };
 
+    #[test]
+    fn groups_documents_by_length_when_above_batch_size() {
+        let docs = [
+            "a long paragraph with many words to simulate a 400 token segment",
+            "short",
+            "medium length snippet here",
+            "x",
+            "another very long scientific passage describing experimental tables and ablations",
+            "tiny",
+            "mid size text",
+            "longer sentence about cross-encoder reranking efficiency",
+            "ok",
+        ];
+        let order = order_document_indices_by_length(&docs, 4);
+        assert_eq!(order.len(), docs.len());
+        for pair in order.windows(2) {
+            assert!(docs[pair[0]].len() <= docs[pair[1]].len());
+        }
+        let mut sorted = order.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, (0..docs.len()).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn local_rerank_doc_strips_html_tables_preserves_math_and_caps_length() {
+        let html = "<table><tr><td colspan=\"2\">HiKEY</td><td>84.9</td></tr><tr><td>K < 10</td><td>83.0</td></tr></table>";
+        let cleaned = prepare_local_rerank_doc(html);
+        assert_eq!(cleaned, "HiKEY 84.9 K < 10 83.0");
+
+        let huge = "word ".repeat(300);
+        let clipped = prepare_local_rerank_doc(&huge);
+        assert!(clipped.chars().count() <= LOCAL_RERANK_MAX_DOC_CHARS);
+
+        let middle_rows = (0..25)
+            .map(|i| format!("<tr><td>Baseline{i}</td><td>70.{i}</td><td>60.{i}</td></tr>"))
+            .collect::<String>();
+        let long_table = format!(
+            "<table><tr><td>Method</td><td>Recall</td><td>All</td></tr>{middle_rows}<tr><td>HiKEY</td><td>84.9</td><td>73.6</td></tr></table>"
+        );
+        let table_doc = prepare_local_rerank_doc(&long_table);
+        assert!(table_doc.chars().count() <= LOCAL_RERANK_MAX_DOC_CHARS);
+        assert!(table_doc.contains("Method Recall All"));
+        assert!(table_doc.contains("HiKEY 84.9 73.6"));
+    }
+}

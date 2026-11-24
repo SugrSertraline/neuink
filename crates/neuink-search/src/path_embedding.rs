@@ -11,9 +11,27 @@
 
 use std::path::Path;
 
+use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
 use ort::value::Tensor;
+use serde::Deserialize;
 use tokenizers::{PaddingParams, Tokenizer, TruncationParams};
+
+/// Chooses an intra-op thread count that targets physical P-cores rather than
+/// saturating hyperthreads or slow E-cores on hybrid CPUs (where barrier sync
+/// slows CPU GEMM down). Explicit overrides still win.
+pub fn default_cpu_intra_threads() -> usize {
+    let logical = std::thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(4);
+    if logical <= 4 {
+        logical.max(1)
+    } else if logical <= 8 {
+        (logical / 2).max(4)
+    } else {
+        (logical / 2).clamp(4, 6)
+    }
+}
 
 /// Pooling over the token axis, matching the manifest vocabulary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,36 +49,109 @@ impl PoolKind {
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct ModelConfigPadding {
+    #[serde(default)]
+    pad_token_id: Option<u32>,
+    #[serde(default)]
+    model_type: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TokenizerConfigPadding {
+    #[serde(default)]
+    pad_token: Option<serde_json::Value>,
+}
+
+fn extract_token_text(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(text) if !text.is_empty() => Some(text.clone()),
+        serde_json::Value::Object(map) => map
+            .get("content")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(ToString::to_string),
+        _ => None,
+    }
+}
+
+fn resolve_padding_params(model_dir: &Path, tokenizer: &Tokenizer) -> (u32, String) {
+    let model_cfg = std::fs::read(model_dir.join("config.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<ModelConfigPadding>(&bytes).ok());
+    let tok_cfg = std::fs::read(model_dir.join("tokenizer_config.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<TokenizerConfigPadding>(&bytes).ok());
+    let special_cfg = std::fs::read(model_dir.join("special_tokens_map.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<TokenizerConfigPadding>(&bytes).ok());
+
+    let pad_token = tok_cfg
+        .and_then(|cfg| cfg.pad_token.as_ref().and_then(extract_token_text))
+        .or_else(|| {
+            special_cfg.and_then(|cfg| cfg.pad_token.as_ref().and_then(extract_token_text))
+        })
+        .unwrap_or_else(|| {
+            let is_roberta = model_cfg
+                .as_ref()
+                .and_then(|cfg| cfg.model_type.as_deref())
+                .is_some_and(|kind| kind.to_ascii_lowercase().contains("roberta"));
+            if is_roberta {
+                "<pad>".to_string()
+            } else {
+                "[PAD]".to_string()
+            }
+        });
+
+    let pad_id = model_cfg
+        .as_ref()
+        .and_then(|cfg| cfg.pad_token_id)
+        .or_else(|| tokenizer.token_to_id(&pad_token))
+        .unwrap_or(0);
+
+    (pad_id, pad_token)
+}
+
 /// A file-path ONNX session plus the tokenizer facts the provider needs.
 pub struct PathEmbeddingEngine {
     /// `run` needs `&mut`, and the provider guards this engine with a mutex.
     session: std::sync::Mutex<Session>,
     tokenizer: Tokenizer,
     pooling: PoolKind,
-    dimensions: usize,
+    dimensions: Option<usize>,
+    pad_id: i64,
     batch: usize,
 }
 
 impl PathEmbeddingEngine {
-    /// Opens the session from `model_file` so ONNX Runtime can resolve `*_data` sidecars.
+    /// Opens the session directly from `model_file` so ONNX Runtime avoids copying
+    /// the whole model buffer in Rust RAM and can also resolve `*_data` sidecars.
     pub fn load(
         model_dir: &Path,
         model_file: &Path,
         pooling: PoolKind,
-        dimensions: usize,
+        dimensions: Option<usize>,
         intra_threads: Option<usize>,
     ) -> Result<Self, String> {
-        let mut builder = Session::builder().map_err(|error| error.to_string())?;
-        if let Some(threads) = intra_threads {
-            builder = builder
-                .with_intra_threads(threads.max(1))
-                .map_err(|error| error.to_string())?;
-        }
+        let effective_threads = intra_threads
+            .map(|threads| threads.max(1))
+            .unwrap_or_else(default_cpu_intra_threads);
+        let mut builder = Session::builder()
+            .map_err(|error| error.to_string())?
+            .with_optimization_level(GraphOptimizationLevel::Level3)
+            .map_err(|error| error.to_string())?
+            .with_intra_threads(effective_threads)
+            .map_err(|error| error.to_string())?
+            .with_inter_threads(1)
+            .map_err(|error| error.to_string())?
+            .with_parallel_execution(false)
+            .map_err(|error| error.to_string())?;
         let session = builder
             .commit_from_file(model_file)
             .map_err(|error| format!("无法加载 ONNX 会话：{error}"))?;
         let mut tokenizer = Tokenizer::from_file(model_dir.join("tokenizer.json"))
             .map_err(|error| format!("无法加载 tokenizer.json：{error}"))?;
+        let (pad_id, pad_token) = resolve_padding_params(model_dir, &tokenizer);
         tokenizer
             .with_truncation(Some(TruncationParams {
                 max_length: 512,
@@ -68,8 +159,8 @@ impl PathEmbeddingEngine {
             }))
             .map_err(|error| error.to_string())?;
         tokenizer.with_padding(Some(PaddingParams {
-            pad_id: 1,
-            pad_token: "<pad>".to_string(),
+            pad_id,
+            pad_token,
             ..Default::default()
         }));
         Ok(Self {
@@ -77,6 +168,7 @@ impl PathEmbeddingEngine {
             tokenizer,
             pooling,
             dimensions,
+            pad_id: pad_id as i64,
             batch: 8,
         })
     }
@@ -107,8 +199,13 @@ impl PathEmbeddingEngine {
                 let row = encoding.get_ids();
                 let pad = sequence.saturating_sub(row.len());
                 ids.extend(row.iter().map(|value| *value as i64));
-                ids.extend(std::iter::repeat_n(0_i64, pad));
-                mask.extend(encoding.get_attention_mask().iter().map(|value| *value as i64));
+                ids.extend(std::iter::repeat_n(self.pad_id, pad));
+                mask.extend(
+                    encoding
+                        .get_attention_mask()
+                        .iter()
+                        .map(|value| *value as i64),
+                );
                 mask.extend(std::iter::repeat_n(0_i64, pad));
             }
             let ids = Tensor::from_array(([batch as i64, sequence as i64], ids))
@@ -129,8 +226,15 @@ impl PathEmbeddingEngine {
                 "input_ids" => ids,
                 "attention_mask" => mask_tensor,
             ];
-            if session.inputs().iter().any(|input| input.name() == "token_type_ids") {
-                feeds.push((std::borrow::Cow::Borrowed("token_type_ids"), position.into()));
+            if session
+                .inputs()
+                .iter()
+                .any(|input| input.name() == "token_type_ids")
+            {
+                feeds.push((
+                    std::borrow::Cow::Borrowed("token_type_ids"),
+                    position.into(),
+                ));
             }
             let outputs = session
                 .run(feeds)
@@ -138,14 +242,30 @@ impl PathEmbeddingEngine {
             let (shape, data) = outputs[0]
                 .try_extract_tensor::<f32>()
                 .map_err(|error| format!("输出张量无法读取：{error}"))?;
-            // Expected shape: (batch, sequence, hidden).
             let hidden = *shape.last().ok_or("输出维度为空")? as usize;
-            if hidden != self.dimensions {
-                return Err(format!(
-                    "模型输出维度 {hidden} 与清单声明的 {} 不一致",
-                    self.dimensions
-                ));
+            if let Some(expected) = self.dimensions {
+                if hidden != expected {
+                    return Err(format!(
+                        "模型输出维度 {hidden} 与清单声明的 {expected} 不一致"
+                    ));
+                }
             }
+            if shape.len() == 2 {
+                // Pre-pooled (batch, hidden) export.
+                for row in 0..batch {
+                    let start = row * hidden;
+                    let mut vector = data[start..start + hidden].to_vec();
+                    let norm = vector.iter().map(|value| value * value).sum::<f32>().sqrt();
+                    if norm > 0.0 {
+                        for value in vector.iter_mut() {
+                            *value /= norm;
+                        }
+                    }
+                    out.push(vector);
+                }
+                continue;
+            }
+            // Standard (batch, sequence, hidden) export.
             for row in 0..batch {
                 let start = row * sequence * hidden;
                 let mut vector = vec![0.0_f32; hidden];
@@ -212,8 +332,13 @@ impl PathEmbeddingEngine {
                 token_ids.push(row.to_vec());
                 let pad = sequence.saturating_sub(row.len());
                 ids.extend(row.iter().map(|value| *value as i64));
-                ids.extend(std::iter::repeat_n(0_i64, pad));
-                mask.extend(encoding.get_attention_mask().iter().map(|value| *value as i64));
+                ids.extend(std::iter::repeat_n(self.pad_id, pad));
+                mask.extend(
+                    encoding
+                        .get_attention_mask()
+                        .iter()
+                        .map(|value| *value as i64),
+                );
                 mask.extend(std::iter::repeat_n(0_i64, pad));
             }
             let id_tensor = Tensor::from_array(([batch as i64, sequence as i64], ids))
@@ -225,24 +350,37 @@ impl PathEmbeddingEngine {
                 vec![0_i64; batch * sequence],
             ))
             .map_err(|error| error.to_string())?;
-            let mut session = self.session.lock().map_err(|_| "ONNX 会话锁被污染".to_string())?;
+            let mut session = self
+                .session
+                .lock()
+                .map_err(|_| "ONNX 会话锁被污染".to_string())?;
             let mut feeds = ort::inputs![
                 "input_ids" => id_tensor,
                 "attention_mask" => mask_tensor,
             ];
-            if session.inputs().iter().any(|input| input.name() == "token_type_ids") {
-                feeds.push((std::borrow::Cow::Borrowed("token_type_ids"), position.into()));
+            if session
+                .inputs()
+                .iter()
+                .any(|input| input.name() == "token_type_ids")
+            {
+                feeds.push((
+                    std::borrow::Cow::Borrowed("token_type_ids"),
+                    position.into(),
+                ));
             }
-            let outputs = session.run(feeds).map_err(|error| format!("ONNX 推理失败：{error}"))?;
+            let outputs = session
+                .run(feeds)
+                .map_err(|error| format!("ONNX 推理失败：{error}"))?;
             let (shape, data) = outputs[0]
                 .try_extract_tensor::<f32>()
                 .map_err(|error| format!("输出张量无法读取：{error}"))?;
             let hidden = *shape.last().ok_or("输出维度为空")? as usize;
-            if hidden != self.dimensions {
-                return Err(format!(
-                    "模型输出维度 {hidden} 与清单声明的 {} 不一致",
-                    self.dimensions
-                ));
+            if let Some(expected) = self.dimensions {
+                if hidden != expected {
+                    return Err(format!(
+                        "模型输出维度 {hidden} 与清单声明的 {expected} 不一致"
+                    ));
+                }
             }
             for row in 0..batch {
                 let valid_len = mask[row * sequence..(row + 1) * sequence]
@@ -307,7 +445,9 @@ pub struct TokenHiddenStates {
 
 #[cfg(test)]
 mod tests {
-    use super::PoolKind;
+    use super::{default_cpu_intra_threads, resolve_padding_params, PoolKind};
+    use tokenizers::models::wordlevel::WordLevel;
+    use tokenizers::Tokenizer;
 
     #[test]
     fn pooling_follows_the_manifest_with_mean_as_default() {
@@ -316,8 +456,58 @@ mod tests {
         assert_eq!(PoolKind::from_manifest(Some("mean")), PoolKind::Mean);
         assert_eq!(PoolKind::from_manifest(None), PoolKind::Mean);
     }
+
+    #[test]
+    fn default_cpu_intra_threads_stays_bounded_for_hybrid_cpus() {
+        let threads = default_cpu_intra_threads();
+        assert!((1..=6).contains(&threads));
+    }
+
+    #[test]
+    fn resolve_padding_params_reads_model_config_for_roberta_and_bert() {
+        let tokenizer = Tokenizer::new(WordLevel::default());
+        let base = std::env::temp_dir().join(format!(
+            "neuink-pad-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        let roberta = base.join("roberta");
+        std::fs::create_dir_all(&roberta).unwrap();
+        std::fs::write(
+            roberta.join("config.json"),
+            br#"{"model_type":"xlm-roberta","pad_token_id":1}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            roberta.join("tokenizer_config.json"),
+            br#"{"pad_token":"<pad>"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            resolve_padding_params(&roberta, &tokenizer),
+            (1, "<pad>".to_string())
+        );
+
+        let bert = base.join("bert");
+        std::fs::create_dir_all(&bert).unwrap();
+        std::fs::write(
+            bert.join("config.json"),
+            br#"{"model_type":"bert","pad_token_id":0}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            bert.join("special_tokens_map.json"),
+            br#"{"pad_token":{"content":"[PAD]"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            resolve_padding_params(&bert, &tokenizer),
+            (0, "[PAD]".to_string())
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }
-
-
-
-

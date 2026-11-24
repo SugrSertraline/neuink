@@ -1,12 +1,6 @@
 use std::path::{Path, PathBuf};
-#[cfg(feature = "local-embedding")]
-use std::sync::Mutex;
 use std::{io::Read, sync::OnceLock};
 
-#[cfg(feature = "local-embedding")]
-use fastembed::{
-    InitOptionsUserDefined, Pooling, TextEmbedding, TokenizerFiles, UserDefinedEmbeddingModel,
-};
 use serde::Deserialize;
 
 use crate::{
@@ -114,9 +108,9 @@ impl EmbeddingProvider for FastEmbedProvider {
     }
 
     fn multivector_support(&self) -> crate::colbert_head::MultivectorSupport {
-        crate::colbert_head::MultivectorSupport::Local(crate::colbert_head::inspect_multivector_heads(
-            &self.model_dir,
-        ))
+        crate::colbert_head::MultivectorSupport::Local(
+            crate::colbert_head::inspect_multivector_heads(&self.model_dir),
+        )
     }
 
     fn multivector_head_identity(&self) -> Option<String> {
@@ -158,22 +152,35 @@ impl EmbeddingProvider for FastEmbedProvider {
             Ok(backend) => backend,
             Err(error) => return Err(clone_search_error(error)),
         };
-        let mut vectors = Vec::with_capacity(inputs.len());
-        for batch in inputs.chunks(LOCAL_EMBEDDING_BATCH_SIZE) {
-            let texts = batch.iter().map(|input| input.text.clone()).collect::<Vec<_>>();
+        if inputs.is_empty() {
+            on_progress(0, 0);
+            return Ok(Vec::new());
+        }
+
+        // Group inputs of similar length into the same batch so short passages
+        // do not pay O(L^2) self-attention padding up to 512 tokens because one
+        // long paragraph happened to sit beside them, then restore input order.
+        let order = order_indices_by_length(inputs);
+        let mut ordered_vectors: Vec<Option<EmbeddingVector>> = vec![None; inputs.len()];
+        let mut completed = 0_usize;
+        for batch_indices in order.chunks(LOCAL_EMBEDDING_BATCH_SIZE) {
+            let texts = batch_indices
+                .iter()
+                .map(|&index| inputs[index].text.clone())
+                .collect::<Vec<_>>();
             let batch_vectors = match backend {
-                Backend::SingleFile(model) => {
-                    let mut model = model.lock().map_err(|_| SearchError::LockPoisoned)?;
-                    let borrowed = texts.iter().map(String::as_str).collect::<Vec<_>>();
-                    model
-                        .embed(borrowed, Some(LOCAL_EMBEDDING_BATCH_SIZE))
-                        .map_err(|error| SearchError::EmbeddingUnavailable(error.to_string()))?
-                }
-                Backend::ExternalData(engine) => engine
+                Backend::Path(engine) => engine
                     .embed(&texts)
                     .map_err(SearchError::EmbeddingUnavailable)?,
             };
-            for vector in batch_vectors {
+            if batch_vectors.len() != batch_indices.len() {
+                return Err(SearchError::EmbeddingUnavailable(format!(
+                    "Embedding backend returned {} vectors for {} inputs.",
+                    batch_vectors.len(),
+                    batch_indices.len()
+                )));
+            }
+            for (&original_index, vector) in batch_indices.iter().zip(batch_vectors) {
                 // The manifest is the contract. A directory holding both an old and a new
                 // weight file used to load the wrong one and silently change every vector,
                 // so a mismatch is an error rather than a quietly different result.
@@ -186,14 +193,15 @@ impl EmbeddingProvider for FastEmbedProvider {
                         )));
                     }
                 }
-                vectors.push(EmbeddingVector::new(vector));
+                ordered_vectors[original_index] = Some(EmbeddingVector::new(vector));
             }
-            on_progress(vectors.len(), inputs.len());
+            completed += batch_indices.len();
+            on_progress(completed, inputs.len());
         }
-        if inputs.is_empty() {
-            on_progress(0, 0);
-        }
-        Ok(vectors)
+        Ok(ordered_vectors
+            .into_iter()
+            .map(|vector| vector.expect("every input index must be populated"))
+            .collect())
     }
 
     #[cfg(not(feature = "local-embedding"))]
@@ -274,26 +282,27 @@ fn model_content_identity(model_dir: &Path) -> std::io::Result<String> {
     Ok(hasher.finalize().to_hex().to_string())
 }
 
-/// Which ONNX backend a model directory needs.
-///
-/// `SingleFile` covers exports where graph and weights live in one `.onnx` (fastembed path).
-/// `ExternalData` covers the official bge-m3 shape: a small graph plus a `*_data` sidecar that
-/// only ONNX Runtime's path-based loader resolves.
-#[cfg(feature = "local-embedding")]
-pub enum Backend {
-    SingleFile(Mutex<TextEmbedding>),
-    ExternalData(crate::path_embedding::PathEmbeddingEngine),
+/// Orders input indices by ascending byte length so each batch groups passages
+/// of similar token length, minimizing O(L^2) self-attention padding waste.
+#[cfg(any(feature = "local-embedding", test))]
+fn order_indices_by_length(inputs: &[EmbeddingInput]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..inputs.len()).collect();
+    if order.len() > LOCAL_EMBEDDING_BATCH_SIZE {
+        order.sort_by_key(|&index| inputs[index].text.len());
+    }
+    order
 }
 
-/// True when the chosen graph references weights kept beside it.
+/// ONNX backend for local embedding models.
+///
+/// Both single-file exports (`model_int8.onnx`, `model_quantized.onnx`) and
+/// external-data exports (`model.onnx` + `model.onnx_data`) load straight from
+/// the file path via [`crate::path_embedding::PathEmbeddingEngine`], avoiding
+/// loading hundreds of megabytes into an intermediate Rust `Vec<u8>` buffer
+/// and giving direct control over ONNX Runtime graph optimization and threads.
 #[cfg(feature = "local-embedding")]
-fn has_external_data(model_file: &Path) -> bool {
-    let Some(name) = model_file.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    model_file
-        .with_file_name(format!("{name}_data"))
-        .is_file()
+pub enum Backend {
+    Path(crate::path_embedding::PathEmbeddingEngine),
 }
 
 #[cfg(feature = "local-embedding")]
@@ -303,31 +312,28 @@ fn load_backend(model_dir: &Path, intra_threads: Option<usize>) -> SearchResult<
             "Embedding ONNX model is missing; expected onnx/model.onnx, onnx/model_int8.onnx, onnx/model_quantized.onnx or model.onnx.".to_string(),
         )
     })?;
-    if has_external_data(&model_file) {
-        let manifest = read_manifest(&model_dir.join(MANIFEST_FILE_NAME));
-        let pooling = crate::path_embedding::PoolKind::from_manifest(
-            manifest.as_ref().and_then(|manifest| manifest.pooling.as_deref()),
-        );
-        let dimensions = manifest
-            .as_ref()
-            .and_then(|manifest| manifest.dimensions)
-            .ok_or_else(|| {
-                SearchError::EmbeddingUnavailable(
-                    "Embedding manifest must declare dimensions for an external-data model."
-                        .to_string(),
-                )
-            })?;
-        let engine = crate::path_embedding::PathEmbeddingEngine::load(
-            model_dir,
-            &model_file,
-            pooling,
-            dimensions,
-            intra_threads,
-        )
-        .map_err(SearchError::EmbeddingUnavailable)?;
-        return Ok(Backend::ExternalData(engine));
-    }
-    load_text_embedding(model_dir, intra_threads).map(Backend::SingleFile)
+    let manifest = read_manifest(&model_dir.join(MANIFEST_FILE_NAME));
+    let pooling = match manifest.as_ref() {
+        Some(manifest) => match manifest.pooling_tag() {
+            Some(tag) => crate::path_embedding::PoolKind::from_manifest(Some(tag)),
+            None => {
+                return Err(SearchError::EmbeddingUnavailable(
+                    "Embedding manifest names an unsupported pooling; use mean or cls.".to_string(),
+                ));
+            }
+        },
+        None => crate::path_embedding::PoolKind::from_manifest(None),
+    };
+    let dimensions = manifest.as_ref().and_then(|manifest| manifest.dimensions);
+    let engine = crate::path_embedding::PathEmbeddingEngine::load(
+        model_dir,
+        &model_file,
+        pooling,
+        dimensions,
+        intra_threads,
+    )
+    .map_err(SearchError::EmbeddingUnavailable)?;
+    Ok(Backend::Path(engine))
 }
 
 #[cfg(feature = "local-embedding")]
@@ -339,9 +345,7 @@ impl FastEmbedProvider {
         let backend = self
             .backend
             .get_or_init(|| load_backend(&self.model_dir, self.intra_threads));
-        let Backend::ExternalData(engine) = backend.as_ref().map_err(|error| error.to_string())? else {
-            return Err("provider_unsupported".to_string());
-        };
+        let Backend::Path(engine) = backend.as_ref().map_err(|error| error.to_string())?;
         let states = engine.encode_token_states(texts)?;
         let (colbert, sparse) = self
             .multivector_heads
@@ -368,7 +372,11 @@ impl FastEmbedProvider {
                     identity: String::new(),
                     dense: state.dense,
                     lexical,
-                    colbert: crate::colbert_head::project_colbert(colbert, &state.hidden_tokens, state.valid_len)?,
+                    colbert: crate::colbert_head::project_colbert(
+                        colbert,
+                        &state.hidden_tokens,
+                        state.valid_len,
+                    )?,
                 })
             })
             .collect()
@@ -383,55 +391,6 @@ impl FastEmbedProvider {
     ) -> Result<Vec<crate::multivector_index::MultivectorDocument>, String> {
         Err("provider_unsupported".to_string())
     }
-}
-
-#[cfg(feature = "local-embedding")]
-fn load_text_embedding(
-    model_dir: &Path,
-    intra_threads: Option<usize>,
-) -> SearchResult<Mutex<TextEmbedding>> {
-    let model_file = first_existing_file(model_dir, EMBEDDING_MODEL_FILE_NAMES).ok_or_else(|| {
-        SearchError::EmbeddingUnavailable(
-            "Embedding ONNX model is missing; expected onnx/model.onnx, onnx/model_int8.onnx, onnx/model_quantized.onnx or model.onnx.".to_string(),
-        )
-    })?;
-    let pooling = match read_manifest(&model_dir.join(MANIFEST_FILE_NAME))
-        .and_then(|manifest| manifest.pooling_tag())
-    {
-        Some("cls") => Pooling::Cls,
-        Some(_) => Pooling::Mean,
-        None => {
-            return Err(SearchError::EmbeddingUnavailable(
-                "Embedding manifest names an unsupported pooling; use mean or cls.".to_string(),
-            ))
-        }
-    };
-    let tokenizer_files = TokenizerFiles {
-        tokenizer_file: read_required_file(&model_dir.join(TOKENIZER_FILE_NAME))?,
-        config_file: read_required_file(&model_dir.join("config.json"))?,
-        special_tokens_map_file: read_required_file(&model_dir.join("special_tokens_map.json"))?,
-        tokenizer_config_file: read_required_file(&model_dir.join("tokenizer_config.json"))?,
-    };
-    let user_model =
-        UserDefinedEmbeddingModel::new(read_required_file(&model_file)?, tokenizer_files)
-            .with_pooling(pooling);
-    let mut options = InitOptionsUserDefined::default();
-    if let Some(threads) = intra_threads {
-        options = options.with_intra_threads(threads);
-    }
-    TextEmbedding::try_new_from_user_defined(user_model, options)
-        .map(Mutex::new)
-        .map_err(|error| SearchError::EmbeddingUnavailable(error.to_string()))
-}
-
-#[cfg(feature = "local-embedding")]
-fn read_required_file(path: &Path) -> SearchResult<Vec<u8>> {
-    std::fs::read(path).map_err(|error| {
-        SearchError::EmbeddingUnavailable(format!(
-            "Failed to read embedding model file {}: {error}",
-            path.display()
-        ))
-    })
 }
 
 #[cfg(feature = "local-embedding")]
@@ -614,10 +573,8 @@ mod quantized_model_file_tests {
     /// misses it rejects a fully downloaded recommended model, so this pins the name.
     #[test]
     fn accepts_a_quantized_onnx_export_name() {
-        let dir = std::env::temp_dir().join(format!(
-            "neuink-quantized-model-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("neuink-quantized-model-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("onnx")).unwrap();
         std::fs::write(dir.join("onnx/model_quantized.onnx"), b"placeholder").unwrap();
@@ -805,6 +762,125 @@ mod tests {
         fs::remove_dir_all(e5_dir).unwrap();
     }
 
+    #[test]
+    fn length_sorted_ordering_groups_similar_lengths_when_above_batch_size() {
+        let inputs = (0..10)
+            .map(|index| EmbeddingInput {
+                id: format!("id-{index}"),
+                text: "a".repeat(if index % 2 == 0 { 400 - index * 10 } else { 10 + index }),
+            })
+            .collect::<Vec<_>>();
+        let order = order_indices_by_length(&inputs);
+        assert_eq!(order.len(), inputs.len());
+        for pair in order.windows(2) {
+            assert!(inputs[pair[0]].text.len() <= inputs[pair[1]].text.len());
+        }
+        let mut sorted_ids = order.clone();
+        sorted_ids.sort_unstable();
+        assert_eq!(sorted_ids, (0..10).collect::<Vec<_>>());
+    }
+
+    #[test]
+    #[cfg(feature = "local-embedding")]
+    fn path_engine_matches_fastembed_and_length_sorted_batching_preserves_order() {
+        let model_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../apps/desktop/src-tauri/resources/embedding-models/default");
+        let Some(model_file) = first_existing_file(&model_dir, EMBEDDING_MODEL_FILE_NAMES) else {
+            return;
+        };
+        let manifest = read_manifest(&model_dir.join(MANIFEST_FILE_NAME));
+        let pooling = match manifest.as_ref().and_then(EmbeddingManifest::pooling_tag) {
+            Some("cls") => fastembed::Pooling::Cls,
+            _ => fastembed::Pooling::Mean,
+        };
+        let samples = vec![
+            "Short title",
+            "Transformer attention weights across multiple scientific paper sections and ablations in long-context retrieval experiments.",
+            "中文科研论文检索测试：对比单文件 ONNX 路径加载与 fastembed 的向量余弦相似度。",
+            "A",
+            "BGE-M3 dense vector parity check.",
+            "Another short note",
+            "Evaluating multi-hop reasoning across heterogeneous academic corpora with section-aware soft demotion.",
+            "Table 3: Accuracy breakdown.",
+            "Figure 2 shows recall@5 improvements over BM25 baseline.",
+            "Tiny",
+        ];
+
+        let cosine = |a: &[f32], b: &[f32]| -> f32 {
+            let na = a.iter().map(|v| v * v).sum::<f32>().sqrt();
+            let nb = b.iter().map(|v| v * v).sum::<f32>().sqrt();
+            a.iter()
+                .zip(b)
+                .map(|(x, y)| (x / na) * (y / nb))
+                .sum::<f32>()
+        };
+
+        let provider = FastEmbedProvider::from_model_dir(&model_dir);
+        let inputs: Vec<EmbeddingInput> = samples
+            .iter()
+            .enumerate()
+            .map(|(idx, text)| EmbeddingInput {
+                id: format!("s-{idx}"),
+                text: (*text).to_string(),
+            })
+            .collect();
+        let batched_vectors = provider.embed(&inputs).unwrap();
+        assert_eq!(batched_vectors.len(), samples.len());
+
+        let single_vectors: Vec<Vec<f32>> = samples
+            .iter()
+            .enumerate()
+            .map(|(idx, sample)| {
+                provider
+                    .embed(&[EmbeddingInput {
+                        id: format!("single-{idx}"),
+                        text: (*sample).to_string(),
+                    }])
+                    .unwrap()
+                    .pop()
+                    .unwrap()
+                    .values
+            })
+            .collect();
+
+        // Compare against legacy fastembed SingleFile loader (both batch=1 and batch=8).
+        let tokenizer_files = fastembed::TokenizerFiles {
+            tokenizer_file: fs::read(model_dir.join(TOKENIZER_FILE_NAME)).unwrap(),
+            config_file: fs::read(model_dir.join("config.json")).unwrap(),
+            special_tokens_map_file: fs::read(model_dir.join("special_tokens_map.json")).unwrap(),
+            tokenizer_config_file: fs::read(model_dir.join("tokenizer_config.json")).unwrap(),
+        };
+        let user_model =
+            fastembed::UserDefinedEmbeddingModel::new(fs::read(&model_file).unwrap(), tokenizer_files)
+                .with_pooling(pooling);
+        let mut legacy = fastembed::TextEmbedding::try_new_from_user_defined(
+            user_model,
+            fastembed::InitOptionsUserDefined::default(),
+        )
+        .unwrap();
+        let legacy_singles: Vec<Vec<f32>> = samples
+            .iter()
+            .take(4)
+            .map(|s| legacy.embed(vec![*s], Some(1)).unwrap().pop().unwrap())
+            .collect();
+
+        for idx in 0..4 {
+            let c_path_vs_legacy_b1 = cosine(&single_vectors[idx], &legacy_singles[idx]);
+            let c_path_b8_vs_b1 = cosine(&batched_vectors[idx].values, &single_vectors[idx]);
+            assert!(
+                c_path_vs_legacy_b1 > 0.9999,
+                "PathEmbeddingEngine(b1) diverged from fastembed(b1) at idx={idx}: cos={c_path_vs_legacy_b1}"
+            );
+            // Dynamic INT8 ONNX quantizes activations per batch tensor, so batch=8 vs batch=1
+            // naturally sits around ~0.97-0.99 (same as legacy fastembed). Checking > 0.95
+            // guarantees length-sorted batching restored the exact original input order.
+            assert!(
+                c_path_b8_vs_b1 > 0.95,
+                "length-sorted batching order mismatch at idx={idx}: cos={c_path_b8_vs_b1}"
+            );
+        }
+    }
+
     fn unique_name(prefix: &str) -> String {
         let nanos = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -813,6 +889,3 @@ mod tests {
         format!("{prefix}-{nanos}")
     }
 }
-
-
-

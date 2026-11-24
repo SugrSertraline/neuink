@@ -29,6 +29,19 @@ pub struct HttpReranker {
     instruction: Option<String>,
 }
 
+fn is_loopback_http(endpoint: &str) -> bool {
+    let Some(rest) = endpoint.strip_prefix("http://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = if let Some(bracketed) = authority.strip_prefix('[') {
+        bracketed.split(']').next().unwrap_or("")
+    } else {
+        authority.split(':').next().unwrap_or("")
+    };
+    host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "::1"
+}
+
 impl HttpReranker {
     pub fn new(
         endpoint: String,
@@ -36,7 +49,8 @@ impl HttpReranker {
         model: String,
         style: RemoteApiStyle,
     ) -> RerankResult<Self> {
-        if !endpoint.starts_with("https://") {
+        let loopback_http = is_loopback_http(&endpoint);
+        if !endpoint.starts_with("https://") && !loopback_http {
             return Err(RerankError::Invalid(format!(
                 "rerank endpoint must use https: {endpoint}"
             )));
@@ -44,8 +58,12 @@ impl HttpReranker {
         if api_key.trim().is_empty() {
             return Err(RerankError::Invalid("rerank API key is empty".to_string()));
         }
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
+        let mut builder =
+            reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(30));
+        if loopback_http {
+            builder = builder.no_proxy();
+        }
+        let client = builder
             .build()
             .map_err(|error| RerankError::Invalid(error.to_string()))?;
         Ok(Self {
@@ -89,7 +107,8 @@ impl HttpReranker {
                     "parameters": { "top_n": documents.len(), "return_documents": false },
                 });
                 if let Some(instruction) = &self.instruction {
-                    payload["parameters"]["instruct"] = serde_json::Value::String(instruction.clone());
+                    payload["parameters"]["instruct"] =
+                        serde_json::Value::String(instruction.clone());
                 }
                 payload
             }
@@ -128,7 +147,9 @@ pub fn parse_scores(body: &str, documents: usize) -> RerankResult<Vec<RerankScor
             )));
         }
         if !score.is_finite() {
-            return Err(RerankError::Invalid("rerank score is not finite".to_string()));
+            return Err(RerankError::Invalid(
+                "rerank score is not finite".to_string(),
+            ));
         }
         scores[index] = Some(score as f32);
     }
@@ -137,10 +158,7 @@ pub fn parse_scores(body: &str, documents: usize) -> RerankResult<Vec<RerankScor
         .enumerate()
         .map(|(index, score)| {
             score
-                .map(|score| RerankScore {
-                    index,
-                    score,
-                })
+                .map(|score| RerankScore { index, score })
                 .ok_or_else(|| {
                     RerankError::Invalid(format!(
                         "rerank response omitted a score for document {index}"
@@ -179,7 +197,8 @@ mod tests {
 
     #[test]
     fn parses_jina_and_cohere_shaped_results() {
-        let body = r#"{"results":[{"index":1,"relevance_score":0.9},{"index":0,"relevance_score":0.2}]}"#;
+        let body =
+            r#"{"results":[{"index":1,"relevance_score":0.9},{"index":0,"relevance_score":0.2}]}"#;
         let scores = parse_scores(body, 2).expect("scores");
         assert_eq!(scores[0].index, 0);
         assert!((scores[0].score - 0.2).abs() < 1e-6);
@@ -232,7 +251,10 @@ mod tests {
         )
         .expect("dashscope")
         .with_instruction(Some("instruction".to_string()));
-        assert_eq!(dash.payload("q", &["a"])["parameters"]["instruct"], "instruction");
+        assert_eq!(
+            dash.payload("q", &["a"])["parameters"]["instruct"],
+            "instruction"
+        );
         let blank = HttpReranker::new(
             JINA_RERANK_ENDPOINT.to_string(),
             "token".to_string(),
@@ -245,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn a_plain_http_endpoint_is_rejected() {
+    fn a_plain_http_endpoint_is_rejected_except_on_loopback() {
         assert!(HttpReranker::new(
             "http://api.example.com/rerank".to_string(),
             "token".to_string(),
@@ -253,10 +275,15 @@ mod tests {
             RemoteApiStyle::Protocol,
         )
         .is_err());
+        assert!(HttpReranker::new(
+            "http://127.0.0.1:8000/v1/rerank".to_string(),
+            "token".to_string(),
+            "model".to_string(),
+            RemoteApiStyle::Protocol,
+        )
+        .is_ok());
     }
 }
-
-
 
 #[cfg(test)]
 mod dashscope_tests {
@@ -278,7 +305,10 @@ mod dashscope_tests {
         assert_eq!(payload["model"], DASHSCOPE_RERANK_MODEL);
         assert_eq!(payload["input"]["query"], "q");
         assert_eq!(
-            payload["input"]["documents"].as_array().expect("array").len(),
+            payload["input"]["documents"]
+                .as_array()
+                .expect("array")
+                .len(),
             2
         );
         assert_eq!(payload["parameters"]["top_n"], 2);
@@ -299,4 +329,3 @@ mod dashscope_tests {
         assert!(parse_scores(body, 1).is_err());
     }
 }
-

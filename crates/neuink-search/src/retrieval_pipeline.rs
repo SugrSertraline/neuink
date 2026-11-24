@@ -110,6 +110,7 @@ pub fn results_from_hits(
         total_hit_count: entries.iter().map(|g| g.hit_count).sum(),
         entries,
         warnings,
+        rerank_used: None,
     }
 }
 
@@ -545,14 +546,14 @@ pub fn finalize_candidates(
     )
 }
 
-/// Supplements a first-stage candidate pool with unseen non-heading segments from the
+/// Supplements a first-stage candidate pool with non-heading segments from the
 /// top-scoring chapters (via cached `ChapterCentroids`, zero extra embedding inference)
-/// strictly inside `routed_entries`.
+/// inside the anchored routed papers.
 ///
-/// The supplemented hits are placed inside the `0..rerank_head` scoring window right
-/// after the strongest `rerank_head - appended` Stage-1 hits (preserving any displaced
-/// Stage-1 hits behind `rerank_head`) so a downstream Cross-Encoder or Listwise reranker
-/// actually scores them. Call only when a reranker (`CrossEncoder` or `Listwise`) is active.
+/// Only `existing[..keep_prefix]` is locked. A same-chapter segment in the Stage-1
+/// tail, or outside the pool, may occupy `keep_prefix..rerank_head`. Displaced hits
+/// stay after that window, and a moved tail hit is not duplicated. References stay
+/// out unless `section_filter` asks for them. Call only when a reranker is active.
 #[allow(clippy::too_many_arguments)]
 pub fn supplement_hits_from_chapters(
     results: SearchResults,
@@ -578,18 +579,40 @@ pub fn supplement_hits_from_chapters(
         return results;
     }
 
-    let routed_set: HashSet<&str> = routed_entries.iter().map(String::as_str).collect();
+    let existing = ordered_hits(&results);
+    let anchor_entries = chapter_anchor_entries(&existing, routed_entries);
+    if anchor_entries.is_empty() {
+        return results;
+    }
+    let decay_by_paper = routed_entries.len() > 1;
     let chapters = semantic.chapter_centroids();
-    let mut section_scores: Vec<(f32, &str, &str)> = Vec::new();
+    let mut section_scores: Vec<(f32, String, String)> = Vec::new();
     for ((entry_id, section_id), vectors) in &chapters.sections {
-        if !routed_set.contains(entry_id.as_str()) {
+        let Some(doc_rank) = anchor_entries.iter().position(|id| id == entry_id) else {
             continue;
-        }
+        };
         let Some(own) = vectors.own.as_deref() else {
             continue;
         };
-        if let Some(score) = cosine(query_vector, own) {
-            section_scores.push((score, entry_id.as_str(), section_id.as_str()));
+        let Some(own_score) = cosine(query_vector, own) else {
+            continue;
+        };
+        let parent_score = vectors
+            .parent
+            .as_ref()
+            .and_then(|parent_id| chapters.sections.get(&(entry_id.clone(), parent_id.clone())))
+            .and_then(|parent| parent.subtree.as_deref())
+            .and_then(|subtree| cosine(query_vector, subtree))
+            .unwrap_or(own_score);
+        let blended =
+            (0.85 * own_score.max(0.0) + 0.15 * parent_score.max(0.0)).clamp(0.0, 1.0);
+        let score = if decay_by_paper {
+            blended / (1.0 + 0.15 * doc_rank as f32)
+        } else {
+            blended
+        };
+        if score.is_finite() {
+            section_scores.push((score, entry_id.clone(), section_id.clone()));
         }
     }
     if section_scores.is_empty() {
@@ -599,37 +622,36 @@ pub fn supplement_hits_from_chapters(
         right
             .0
             .total_cmp(&left.0)
-            .then_with(|| left.1.cmp(right.1))
-            .then_with(|| left.2.cmp(right.2))
+            .then_with(|| left.1.cmp(&right.1))
+            .then_with(|| left.2.cmp(&right.2))
     });
-    let chosen_sections: Vec<(&str, &str)> = section_scores
+    let chosen_sections: Vec<(String, String)> = section_scores
         .into_iter()
         .take(top_sections)
         .map(|(_, entry, sec)| (entry, sec))
         .collect();
-    let chosen_set: HashSet<(&str, &str)> = chosen_sections.iter().copied().collect();
+    let chosen_set: HashSet<(String, String)> = chosen_sections.iter().cloned().collect();
 
-    let existing = ordered_hits(&results);
-    let mut seen: HashSet<String> = existing.iter().map(hit_identity).collect();
     let filter_lower = section_filter
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_lowercase);
 
-    let mut members_by_section: BTreeMap<(&str, &str), Vec<(f32, &SearchDocument)>> =
+    let mut members_by_section: BTreeMap<(String, String), Vec<(f32, &SearchDocument)>> =
         BTreeMap::new();
     for record in semantic.vector_documents() {
         let doc = record.document;
         if doc.source.kind != crate::SearchDocumentSourceKind::Segment
             || doc.source.segment_type == Some(SegmentType::Heading)
+            || reference_segment_blocked(doc, section_filter)
         {
             continue;
         }
-        let entry = doc.entry_id.as_str();
         let Some(sec_id) = doc.source.section_id.as_deref() else {
             continue;
         };
-        if !chosen_set.contains(&(entry, sec_id)) {
+        let key = (doc.entry_id.to_string(), sec_id.to_string());
+        if !chosen_set.contains(&key) {
             continue;
         }
         if !segment_types.is_empty()
@@ -656,65 +678,33 @@ pub fn supplement_hits_from_chapters(
             }
         }
         if let Some(score) = cosine(query_vector, record.vector) {
-            members_by_section
-                .entry((entry, sec_id))
-                .or_default()
-                .push((score, doc));
+            members_by_section.entry(key).or_default().push((score, doc));
         }
     }
 
-    let mut additions: Vec<SearchHit> = Vec::new();
-    for key in chosen_sections {
-        if additions.len() >= allowed_append {
-            break;
-        }
-        let Some(mut members) = members_by_section.remove(&key) else {
-            continue;
-        };
-        members.sort_by(|left, right| {
-            right.0.total_cmp(&left.0).then_with(|| {
-                left.1
-                    .source
-                    .segment_uid
-                    .as_ref()
-                    .map(|u| u.as_str())
-                    .cmp(&right.1.source.segment_uid.as_ref().map(|u| u.as_str()))
-            })
-        });
-        let mut took_in_section = 0usize;
-        for (_, doc) in members {
-            if took_in_section >= per_section_max || additions.len() >= allowed_append {
-                break;
-            }
-            let candidate = SearchHit {
-                entry_id: doc.entry_id.clone(),
-                entry_title: doc.entry_title.clone(),
-                source: doc.source.clone(),
-                target: doc.target.clone(),
-                title: doc.title.clone(),
-                snippet: doc.text_for_snippet(),
-                score: 0.0,
-                matched_terms: Vec::new(),
-                surrounding_context: None,
-            };
-            if !seen.insert(hit_identity(&candidate)) {
-                continue;
-            }
-            additions.push(candidate);
-            took_in_section += 1;
-        }
-    }
-    if additions.is_empty() {
+    let Some(additions) = select_chapter_window_additions(
+        &existing,
+        &chosen_sections,
+        &members_by_section,
+        rerank_head,
+        allowed_append,
+        per_section_max,
+    ) else {
         return results;
-    }
+    };
 
     let keep_prefix = existing
         .len()
         .min(rerank_head.saturating_sub(additions.len()));
+    let addition_ids = additions.iter().map(hit_identity).collect::<HashSet<_>>();
     let mut combined = Vec::with_capacity(existing.len() + additions.len());
     combined.extend_from_slice(&existing[..keep_prefix]);
     combined.extend(additions);
-    combined.extend_from_slice(&existing[keep_prefix..]);
+    for hit in existing.iter().skip(keep_prefix) {
+        if !addition_ids.contains(&hit_identity(hit)) {
+            combined.push(hit.clone());
+        }
+    }
     crate::stamp_rank_scores(&mut combined);
     results_from_hits(
         results.query,
@@ -723,4 +713,160 @@ pub fn supplement_hits_from_chapters(
         combined,
         results.warnings,
     )
+}
+
+/// Multi-paper supplement only reads chapters from the first three papers in the
+/// current text-hit order. An empty pool falls back to the routed head.
+fn chapter_anchor_entries(existing: &[SearchHit], routed_entries: &[String]) -> Vec<String> {
+    if routed_entries.len() <= 1 {
+        return routed_entries.to_vec();
+    }
+    const MAX_ANCHOR_ENTRIES: usize = 3;
+    let routed = routed_entries
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let mut anchors = Vec::new();
+    for hit in existing {
+        let entry = hit.entry_id.as_str();
+        if routed.contains(entry) && !anchors.iter().any(|kept: &String| kept == entry) {
+            anchors.push(entry.to_string());
+            if anchors.len() == MAX_ANCHOR_ENTRIES {
+                break;
+            }
+        }
+    }
+    if anchors.is_empty() {
+        routed_entries
+            .iter()
+            .take(MAX_ANCHOR_ENTRIES)
+            .cloned()
+            .collect()
+    } else {
+        anchors
+    }
+}
+
+fn section_filter_requests_references(section_filter: Option<&str>) -> bool {
+    section_filter.is_some_and(|filter| {
+        let filter = filter.trim();
+        !filter.is_empty()
+            && (filter.to_lowercase().contains("reference") || filter.contains("参考文献"))
+    })
+}
+
+/// References re-enter only when the filter names them, or names this section id.
+fn reference_segment_blocked(doc: &SearchDocument, section_filter: Option<&str>) -> bool {
+    if doc.source.section_role != Some(CanonicalSectionRole::References) {
+        return false;
+    }
+    if section_filter_requests_references(section_filter) {
+        return false;
+    }
+    let names_this_section = section_filter.map(str::trim).is_some_and(|filter| {
+        !filter.is_empty() && doc.source.section_id.as_deref() == Some(filter)
+    });
+    !names_this_section
+}
+
+/// Largest `k` whose first `k` chapter members all sit outside the prefix that `k`
+/// itself would preserve. Prefix hits stay locked; tail and out-of-pool hits may move.
+fn select_chapter_window_additions(
+    existing: &[SearchHit],
+    chosen_sections: &[(String, String)],
+    members_by_section: &BTreeMap<(String, String), Vec<(f32, &SearchDocument)>>,
+    rerank_head: usize,
+    allowed_append: usize,
+    per_section_max: usize,
+) -> Option<Vec<SearchHit>> {
+    let ranked = chosen_sections
+        .iter()
+        .map(|key| {
+            let Some(members) = members_by_section.get(key) else {
+                return Vec::new();
+            };
+            let mut members = members.clone();
+            members.sort_by(|left, right| {
+                right.0.total_cmp(&left.0).then_with(|| {
+                    left.1
+                        .source
+                        .segment_uid
+                        .as_ref()
+                        .map(|uid| uid.as_str())
+                        .cmp(&right.1.source.segment_uid.as_ref().map(|uid| uid.as_str()))
+                })
+            });
+            members
+                .into_iter()
+                .map(|(_, doc)| doc)
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    for count in (1..=allowed_append.min(rerank_head)).rev() {
+        let keep = existing.len().min(rerank_head.saturating_sub(count));
+        let mut blocked = existing
+            .iter()
+            .take(keep)
+            .map(hit_identity)
+            .collect::<HashSet<_>>();
+        let mut picks = Vec::new();
+        for members in &ranked {
+            if picks.len() == count {
+                break;
+            }
+            if members.is_empty() {
+                continue;
+            }
+            let mut took = 0usize;
+            for doc in members {
+                if took >= per_section_max || picks.len() == count {
+                    break;
+                }
+                let candidate = hit_from_document(doc);
+                if blocked.insert(hit_identity(&candidate)) {
+                    picks.push(candidate);
+                    took += 1;
+                }
+            }
+        }
+        if picks.len() == count {
+            return Some(picks);
+        }
+    }
+    None
+}
+
+const SUPPLEMENT_SNIPPET_PARAGRAPH_CHARS: usize = 700;
+const SUPPLEMENT_SNIPPET_TABLE_CHARS: usize = 1600;
+
+fn bounded_document_snippet(doc: &SearchDocument) -> String {
+    let raw = doc.text_for_snippet();
+    let is_table = doc.source.segment_type == Some(neuink_domain::SegmentType::Table)
+        || crate::result::contains_html_table(&raw);
+    let clean = crate::result::compact_html_table_if_present(&raw);
+    let limit = if is_table {
+        SUPPLEMENT_SNIPPET_TABLE_CHARS
+    } else {
+        SUPPLEMENT_SNIPPET_PARAGRAPH_CHARS
+    };
+    if clean.chars().count() <= limit {
+        clean
+    } else {
+        let body = clean.chars().take(limit).collect::<String>();
+        format!("{}...", body.trim())
+    }
+}
+
+fn hit_from_document(doc: &SearchDocument) -> SearchHit {
+    SearchHit {
+        entry_id: doc.entry_id.clone(),
+        entry_title: doc.entry_title.clone(),
+        source: doc.source.clone(),
+        target: doc.target.clone(),
+        title: doc.title.clone(),
+        snippet: bounded_document_snippet(doc),
+        score: 0.0,
+        matched_terms: Vec::new(),
+        surrounding_context: None,
+    }
 }

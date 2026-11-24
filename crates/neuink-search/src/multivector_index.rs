@@ -30,7 +30,10 @@ pub struct EntryMultivectorCache {
 }
 
 pub fn cache_path(cache_dir: &Path, namespace: &str, entry_id: &str) -> PathBuf {
-    cache_dir.join("colbert").join(namespace).join(format!("{entry_id}.mv1"))
+    cache_dir
+        .join("colbert")
+        .join(namespace)
+        .join(format!("{entry_id}.mv1"))
 }
 
 pub fn write_cache(path: &Path, cache: &EntryMultivectorCache) -> Result<(), String> {
@@ -47,24 +50,43 @@ pub fn write_cache(path: &Path, cache: &EntryMultivectorCache) -> Result<(), Str
     fs::rename(&temporary, path).map_err(|error| error.to_string())
 }
 
-pub fn read_cache(path: &Path, entry_fingerprint: &str, head_sha256: &str) -> Result<EntryMultivectorCache, String> {
+pub fn read_cache(
+    path: &Path,
+    entry_fingerprint: &str,
+    head_sha256: &str,
+) -> Result<EntryMultivectorCache, String> {
     let bytes = fs::read(path).map_err(|error| error.to_string())?;
     let cache = decode_cache(&bytes)?;
     if cache.entry_fingerprint != entry_fingerprint || cache.head_sha256 != head_sha256 {
-        return Err("multi-vector cache does not match the entry or the projection head".to_string());
+        return Err(
+            "multi-vector cache does not match the entry or the projection head".to_string(),
+        );
     }
     Ok(cache)
 }
 
 /// Indexes to score. A small scope is exact. A wide scope keeps the single-vector head.
-pub fn rescore_selection(scope_len: usize, single_vector_order: &[usize], max_full_scope_segments: usize, rescore_window: usize) -> Vec<usize> {
+pub fn rescore_selection(
+    scope_len: usize,
+    single_vector_order: &[usize],
+    max_full_scope_segments: usize,
+    rescore_window: usize,
+) -> Vec<usize> {
     if scope_len <= max_full_scope_segments {
         return (0..scope_len).collect();
     }
-    single_vector_order.iter().copied().take(rescore_window).collect()
+    single_vector_order
+        .iter()
+        .copied()
+        .take(rescore_window)
+        .collect()
 }
 
-pub fn rank_documents(query: &MultivectorDocument, documents: &[MultivectorDocument], hybrid: bool) -> Vec<usize> {
+pub fn rank_documents(
+    query: &MultivectorDocument,
+    documents: &[MultivectorDocument],
+    hybrid: bool,
+) -> Vec<usize> {
     let mut scored = documents
         .iter()
         .enumerate()
@@ -91,7 +113,12 @@ pub fn rank_documents(query: &MultivectorDocument, documents: &[MultivectorDocum
 }
 
 /// Reorders `hits` by the multi-vector score of the selected prefix. The tail stays put.
-pub fn reorder_hits(hits: &[SearchHit], query: &MultivectorDocument, documents: &[MultivectorDocument], hybrid: bool) -> Vec<SearchHit> {
+pub fn reorder_hits(
+    hits: &[SearchHit],
+    query: &MultivectorDocument,
+    documents: &[MultivectorDocument],
+    hybrid: bool,
+) -> Vec<SearchHit> {
     if documents.len() != hits.len() || hits.is_empty() {
         return hits.to_vec();
     }
@@ -100,7 +127,10 @@ pub fn reorder_hits(hits: &[SearchHit], query: &MultivectorDocument, documents: 
         document.identity = hit_identity(hit);
     }
     let order = rank_documents(query, &aligned, hybrid);
-    let mut ordered = order.into_iter().map(|index| hits[index].clone()).collect::<Vec<_>>();
+    let mut ordered = order
+        .into_iter()
+        .map(|index| hits[index].clone())
+        .collect::<Vec<_>>();
     crate::stamp_rank_scores(&mut ordered);
     ordered
 }
@@ -229,7 +259,10 @@ fn dot(left: &[f32], right: &[f32]) -> f32 {
     if left.len() != right.len() {
         return 0.0;
     }
-    left.iter().zip(right).map(|(left, right)| left * right).sum()
+    left.iter()
+        .zip(right)
+        .map(|(left, right)| left * right)
+        .sum()
 }
 
 #[cfg(test)]
@@ -250,7 +283,10 @@ mod tests {
         let query = document("q", 1.0);
         let documents = vec![document("b", 1.0), document("a", 1.0)];
         assert_eq!(rank_documents(&query, &documents, false), vec![1, 0]);
-        assert_eq!(rescore_selection(50, &[2, 0, 1], 600, 100), (0..50).collect::<Vec<_>>());
+        assert_eq!(
+            rescore_selection(50, &[2, 0, 1], 600, 100),
+            (0..50).collect::<Vec<_>>()
+        );
         assert_eq!(rescore_selection(800, &[4, 1, 2, 3], 600, 2), vec![4, 1]);
     }
 

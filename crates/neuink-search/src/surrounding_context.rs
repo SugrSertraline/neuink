@@ -14,7 +14,8 @@ use crate::{
     strip_passage_header, SearchDocument, SearchDocumentSourceKind, SearchResults, SearchTarget,
 };
 
-const NEIGHBOR_CHAR_LIMIT: usize = 240;
+const NEIGHBOR_CHAR_LIMIT: usize = 480;
+const TABLE_NEIGHBOR_CHAR_LIMIT: usize = 1600;
 pub const DEFAULT_SURROUNDING_CONTEXT_TOP_N: usize = 3;
 
 /// Read-only map from `(entry_id, segment_uid)` to its same-section `[Prev]` / `[Next]`
@@ -26,7 +27,8 @@ pub struct SegmentContextMap {
 
 impl SegmentContextMap {
     pub fn from_documents(documents: &[SearchDocument]) -> Self {
-        let mut runs: Vec<(String, String, Vec<(String, String)>)> = Vec::new();
+        let mut runs: Vec<(String, String, Vec<(String, String, Option<SegmentType>)>)> =
+            Vec::new();
         for document in documents {
             if document.source.kind != SearchDocumentSourceKind::Segment {
                 continue;
@@ -43,10 +45,14 @@ impl SegmentContextMap {
             }
             let entry_id = document.entry_id.as_str().to_string();
             let section_key = section_run_key(document);
-            let item = (segment_uid.as_str().to_string(), body);
+            let item = (
+                segment_uid.as_str().to_string(),
+                body,
+                document.source.segment_type,
+            );
             if let Some(last) = runs.last_mut() {
                 if last.0 == entry_id && last.1 == section_key {
-                    if last.2.last().map(|(uid, _)| uid) != Some(&item.0) {
+                    if last.2.last().map(|(uid, _, _)| uid) != Some(&item.0) {
                         last.2.push(item);
                     }
                     continue;
@@ -60,16 +66,18 @@ impl SegmentContextMap {
             if items.len() < 2 {
                 continue;
             }
-            for (idx, (uid, _)) in items.iter().enumerate() {
+            for (idx, (uid, _, _)) in items.iter().enumerate() {
                 let mut parts = Vec::with_capacity(2);
                 if idx > 0 {
-                    let prev = clip_chars(&items[idx - 1].1, NEIGHBOR_CHAR_LIMIT);
+                    let limit = neighbor_char_limit(items[idx - 1].2, &items[idx - 1].1);
+                    let prev = clip_chars(&items[idx - 1].1, limit);
                     if !prev.is_empty() {
                         parts.push(format!("[Prev] {prev}"));
                     }
                 }
                 if idx + 1 < items.len() {
-                    let next = clip_chars(&items[idx + 1].1, NEIGHBOR_CHAR_LIMIT);
+                    let limit = neighbor_char_limit(items[idx + 1].2, &items[idx + 1].1);
+                    let next = clip_chars(&items[idx + 1].1, limit);
                     if !next.is_empty() {
                         parts.push(format!("[Next] {next}"));
                     }
@@ -135,6 +143,14 @@ pub fn attach_surrounding_context(
     }
 }
 
+fn neighbor_char_limit(segment_type: Option<SegmentType>, body: &str) -> usize {
+    if segment_type == Some(SegmentType::Table) || body.contains("<table") {
+        TABLE_NEIGHBOR_CHAR_LIMIT
+    } else {
+        NEIGHBOR_CHAR_LIMIT
+    }
+}
+
 fn is_substantive_segment_type(segment_type: Option<SegmentType>) -> bool {
     !matches!(
         segment_type,
@@ -179,7 +195,7 @@ fn cleaned_body(document: &SearchDocument) -> String {
         .map(|section| section.text.as_str())
         .unwrap_or("");
     let stripped = strip_passage_header(raw);
-    stripped.split_whitespace().collect::<Vec<_>>().join(" ")
+    crate::result::compact_html_table_if_present(stripped)
 }
 
 fn clip_chars(text: &str, max_chars: usize) -> String {
@@ -195,9 +211,7 @@ fn clip_chars(text: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        results_from_hits, SearchDocumentSource, SearchHit, SearchTextSection,
-    };
+    use crate::{results_from_hits, SearchDocumentSource, SearchHit, SearchTextSection};
     use neuink_domain::{EntryId, SegmentUid};
 
     fn seg_doc(
@@ -256,22 +270,52 @@ mod tests {
     fn builds_same_section_prev_next_and_never_crosses_sections_or_includes_headings() {
         let docs = vec![
             seg_doc("e1", "h1", "sec-1", SegmentType::Heading, "Experiments"),
-            seg_doc("e1", "s1", "sec-1", SegmentType::Paragraph, "Table 2 summarizes accuracy."),
-            seg_doc("e1", "s2", "sec-1", SegmentType::Table, "Our model achieves 91.4% F1."),
-            seg_doc("e1", "s3", "sec-1", SegmentType::Paragraph, "Ablations confirm the gain."),
-            seg_doc("e1", "s4", "sec-2", SegmentType::Paragraph, "In conclusion we summarize."),
+            seg_doc(
+                "e1",
+                "s1",
+                "sec-1",
+                SegmentType::Paragraph,
+                "Table 2 summarizes accuracy.",
+            ),
+            seg_doc(
+                "e1",
+                "s2",
+                "sec-1",
+                SegmentType::Table,
+                "Our model achieves 91.4% F1.",
+            ),
+            seg_doc(
+                "e1",
+                "s3",
+                "sec-1",
+                SegmentType::Paragraph,
+                "Ablations confirm the gain.",
+            ),
+            seg_doc(
+                "e1",
+                "s4",
+                "sec-2",
+                SegmentType::Paragraph,
+                "In conclusion we summarize.",
+            ),
         ];
         let map = SegmentContextMap::from_documents(&docs);
 
         // Heading is excluded, so s1 only sees s2 as [Next].
         assert_eq!(map.get("e1", "h1"), None);
-        assert_eq!(map.get("e1", "s1"), Some("[Next] Our model achieves 91.4% F1."));
+        assert_eq!(
+            map.get("e1", "s1"),
+            Some("[Next] Our model achieves 91.4% F1.")
+        );
         assert_eq!(
             map.get("e1", "s2"),
             Some("[Prev] Table 2 summarizes accuracy.\n[Next] Ablations confirm the gain.")
         );
         // s3 does not cross into sec-2 (s4).
-        assert_eq!(map.get("e1", "s3"), Some("[Prev] Our model achieves 91.4% F1."));
+        assert_eq!(
+            map.get("e1", "s3"),
+            Some("[Prev] Our model achieves 91.4% F1.")
+        );
         assert_eq!(map.get("e1", "s4"), None);
     }
 
@@ -304,5 +348,24 @@ mod tests {
         assert!(hits[3].surrounding_context.is_none());
         assert_eq!(hits[0].snippet, "snippet s1");
         assert_eq!(hits[0].score, 4.0);
+    }
+
+    #[test]
+    fn preserves_long_paragraphs_and_table_rows_in_surrounding_context() {
+        let long_para = format!("{} Final Gain: +4.5pp.", "context ".repeat(45));
+        let long_table = format!(
+            "<table><tr><td>Method</td><td>Score</td></tr>{}<tr><td>HiKEY</td><td>84.9</td></tr></table>",
+            "<tr><td>Base</td><td>70.0</td></tr>".repeat(20)
+        );
+        let docs = vec![
+            seg_doc("e1", "s1", "sec-1", SegmentType::Paragraph, &long_para),
+            seg_doc("e1", "s2", "sec-1", SegmentType::Paragraph, "Table 1 overview."),
+            seg_doc("e1", "s3", "sec-1", SegmentType::Table, &long_table),
+        ];
+        let map = SegmentContextMap::from_documents(&docs);
+        let ctx = map.get("e1", "s2").expect("middle segment should have prev and next");
+        assert!(ctx.contains("Final Gain: +4.5pp."));
+        assert!(!ctx.contains("<table>"));
+        assert!(ctx.contains("|HiKEY|84.9|"));
     }
 }

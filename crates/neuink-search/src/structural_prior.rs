@@ -13,6 +13,7 @@ use crate::{stamp_rank_scores, SearchHit};
 
 const ABSTRACT_SOFT_WEIGHT: f32 = 0.80;
 const SHORT_HEADING_SOFT_WEIGHT: f32 = 0.85;
+const RELATED_WORK_SOFT_WEIGHT: f32 = 0.85;
 const SHORT_HEADING_MAX_CHARS: usize = 120;
 
 /// Strips an embedding-style `passage: ...` first header line if present.
@@ -88,8 +89,11 @@ pub fn query_has_summary_intent(query: &str) -> bool {
     const EN_PHRASES: &[&str] = &[
         "main contribution",
         "what is this paper about",
+        "what does this paper do",
+        "what did this paper do",
         "goal of this paper",
         "purpose of this paper",
+        "paper summary",
     ];
     if EN_PHRASES.iter().any(|phrase| lower.contains(phrase)) {
         return true;
@@ -114,10 +118,79 @@ pub fn query_has_summary_intent(query: &str) -> bool {
         "概述",
         "主要贡献",
         "核心贡献",
-        "讲了什么",
+        "主要内容",
+        "核心内容",
+        "核心思想",
+        "整体思路",
         "研究目的",
+        "研究内容",
+        "讲了什么",
+        "写了什么",
+        "做了什么",
+        "干什么",
+        "干了什么",
+        "介绍了什么",
+        "整篇论文",
+        "全文总结",
     ];
     ZH_PHRASES.iter().any(|phrase| query.contains(phrase))
+}
+
+/// Returns true when the query asks about related work, baselines, or comparisons.
+pub fn query_has_related_work_intent(query: &str) -> bool {
+    let lower = query.to_ascii_lowercase();
+    const EN_PHRASES: &[&str] = &[
+        "related work",
+        "prior work",
+        "previous work",
+        "existing work",
+        "existing methods",
+        "other methods",
+        "state of the art",
+    ];
+    if EN_PHRASES.iter().any(|phrase| lower.contains(phrase)) {
+        return true;
+    }
+    const EN_WORDS: &[&str] = &[
+        "literature",
+        "baseline",
+        "baselines",
+        "compare",
+        "compared",
+        "comparison",
+        "sota",
+    ];
+    if lower
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .any(|word| EN_WORDS.contains(&word))
+    {
+        return true;
+    }
+    const ZH_PHRASES: &[&str] = &[
+        "相关工作",
+        "前人",
+        "已有方法",
+        "现有方法",
+        "文献综述",
+        "基线",
+        "对比",
+        "比较",
+    ];
+    ZH_PHRASES.iter().any(|phrase| query.contains(phrase))
+}
+
+fn is_related_work(hit: &SearchHit) -> bool {
+    if hit.source.section_role == Some(CanonicalSectionRole::RelatedWork) {
+        return true;
+    }
+    let Some(path) = hit.source.section_path.as_deref() else {
+        return false;
+    };
+    let lower = path.trim().to_ascii_lowercase();
+    lower == "related work"
+        || lower.starts_with("related work ")
+        || lower.starts_with("related work:")
+        || lower.starts_with("related work/")
 }
 
 fn is_abstract_or_front_matter(hit: &SearchHit) -> bool {
@@ -154,6 +227,7 @@ fn apply_structural_soft_demotion_slice(
     hits: &[SearchHit],
     query: &str,
     single_paper: bool,
+    demote_related_work: bool,
 ) -> Vec<SearchHit> {
     if hits.len() <= 1 {
         return hits.to_vec();
@@ -162,9 +236,16 @@ fn apply_structural_soft_demotion_slice(
     // confirm200), whereas across multiple papers an abstract is often the primary document
     // selection signal (unconditional demotion caused -7.42pp R@10 on MultiHopRAG and
     // -1.50pp nDCG@10 on DAPR). Bare short headings (0.85x) are demoted in both scopes.
+    // The 0.85 Related Work coefficient is single-paper only. Product callers pass
+    // `demote_related_work = false`: on QASPER-83 ordinary_40 it dropped P@1 from
+    // 0.3750 to 0.3500 and nDCG@10 from 0.4932 to 0.4630.
     let demote_abstract = single_paper && !query_has_summary_intent(query);
+    let demote_related =
+        single_paper && demote_related_work && !query_has_related_work_intent(query);
     let has_target = hits.iter().any(|hit| {
-        (demote_abstract && is_abstract_or_front_matter(hit)) || is_short_heading(hit)
+        (demote_abstract && is_abstract_or_front_matter(hit))
+            || (demote_related && is_related_work(hit))
+            || is_short_heading(hit)
     });
     if !has_target {
         return hits.to_vec();
@@ -186,6 +267,9 @@ fn apply_structural_soft_demotion_slice(
             let mut weight = 1.0_f32;
             if demote_abstract && is_abstract_or_front_matter(hit) {
                 weight *= ABSTRACT_SOFT_WEIGHT;
+            }
+            if demote_related && is_related_work(hit) {
+                weight *= RELATED_WORK_SOFT_WEIGHT;
             }
             if is_short_heading(hit) {
                 weight *= SHORT_HEADING_SOFT_WEIGHT;
@@ -211,7 +295,7 @@ fn apply_structural_soft_demotion_slice(
 /// single-paper queries asking for an abstract/overview untouched, and avoids demoting
 /// abstracts on cross-paper whole-library results.
 pub fn apply_structural_soft_demotion(hits: &[SearchHit], query: &str) -> Vec<SearchHit> {
-    apply_structural_soft_demotion_slice(hits, query, is_single_paper_hits(hits))
+    apply_structural_soft_demotion_slice(hits, query, is_single_paper_hits(hits), false)
 }
 
 /// Applies `B0-sec-soft` strictly within the scored prefix `hits[..head]` and keeps the
@@ -227,13 +311,30 @@ pub fn apply_structural_soft_demotion_head(
     query: &str,
     head: usize,
 ) -> Vec<SearchHit> {
+    apply_structural_soft_demotion_head_with_related(hits, query, head, false)
+}
+
+/// Same head-scoped `B0-sec-soft` pass, with single-paper Related Work demotion optional.
+///
+/// `demote_related_work == false` keeps the abstract and short-heading rules and skips
+/// the 0.85 Related Work coefficient. Multi-paper lists never apply that coefficient.
+pub fn apply_structural_soft_demotion_head_with_related(
+    hits: &[SearchHit],
+    query: &str,
+    head: usize,
+    demote_related_work: bool,
+) -> Vec<SearchHit> {
     let bound = head.min(hits.len());
     let single_paper = is_single_paper_hits(hits);
     let mut combined = if bound <= 1 {
         hits.to_vec()
     } else {
-        let mut head_ordered =
-            apply_structural_soft_demotion_slice(&hits[..bound], query, single_paper);
+        let mut head_ordered = apply_structural_soft_demotion_slice(
+            &hits[..bound],
+            query,
+            single_paper,
+            demote_related_work,
+        );
         head_ordered.extend_from_slice(&hits[bound..]);
         head_ordered
     };
@@ -361,11 +462,20 @@ mod tests {
             ),
         ];
         assert_eq!(
-            apply_structural_soft_demotion(&hits, "Give an overview of the main contribution")[0].snippet,
+            apply_structural_soft_demotion(&hits, "Give an overview of the main contribution")[0]
+                .snippet,
             "Paper abstract."
         );
         assert_eq!(
             apply_structural_soft_demotion(&hits, "这篇论文的主要贡献是什么")[0].snippet,
+            "Paper abstract."
+        );
+        assert_eq!(
+            apply_structural_soft_demotion(&hits, "整篇论文干什么了")[0].snippet,
+            "Paper abstract."
+        );
+        assert_eq!(
+            apply_structural_soft_demotion(&hits, "What does this paper do?")[0].snippet,
             "Paper abstract."
         );
     }
@@ -436,7 +546,8 @@ mod tests {
                 0.025,
             ),
         ];
-        let reordered = apply_structural_soft_demotion_head(&hits, "What baselines were evaluated?", 3);
+        let reordered =
+            apply_structural_soft_demotion_head(&hits, "What baselines were evaluated?", 3);
         assert_eq!(reordered[0].snippet, "Evidence head hit");
         assert_eq!(reordered[1].snippet, "Abstract head hit");
         assert_eq!(reordered[2].snippet, "Negative logit head hit");
@@ -444,7 +555,8 @@ mod tests {
         assert!(reordered[2].score > reordered[3].score);
 
         // Summary-intent query keeps head order and still normalizes raw negative logits.
-        let summary = apply_structural_soft_demotion_head(&hits, "What is the main contribution?", 3);
+        let summary =
+            apply_structural_soft_demotion_head(&hits, "What is the main contribution?", 3);
         assert_eq!(summary[0].snippet, "Abstract head hit");
         assert_eq!(summary[3].snippet, "Unscored Stage-1 RRF tail hit");
         assert!(summary.windows(2).all(|w| w[0].score > w[1].score));
@@ -501,5 +613,64 @@ mod tests {
         assert_eq!(reordered[0].entry_id.as_str(), "paper-a");
         assert_eq!(reordered[1].snippet, "Paper B reports 92.1% accuracy.");
         assert_eq!(reordered[2].snippet, "Results");
+    }
+
+    fn related_pair(related_score: f32, evidence_score: f32) -> Vec<SearchHit> {
+        vec![
+            seg_hit(
+                "e1",
+                "rw",
+                Some("Related Work"),
+                Some(CanonicalSectionRole::RelatedWork),
+                Some(SegmentType::Paragraph),
+                "Smith et al. studied a similar task.",
+                related_score,
+            ),
+            seg_hit(
+                "e1",
+                "exp",
+                Some("Experiments"),
+                Some(CanonicalSectionRole::Experiments),
+                Some(SegmentType::Paragraph),
+                "Our model reaches 91.4 F1.",
+                evidence_score,
+            ),
+        ]
+    }
+
+    #[test]
+    fn single_paper_related_work_stays_on_the_product_path() {
+        let hits = related_pair(0.90, 0.80);
+        let product = apply_structural_soft_demotion(&hits, "What F1 does the model reach?");
+        assert_eq!(product[0].snippet, "Smith et al. studied a similar task.");
+        let demoted = apply_structural_soft_demotion_head_with_related(
+            &hits,
+            "What F1 does the model reach?",
+            hits.len(),
+            true,
+        );
+        assert_eq!(demoted[0].snippet, "Our model reaches 91.4 F1.");
+        let exempt = apply_structural_soft_demotion_head_with_related(
+            &hits,
+            "How does this compare to prior work?",
+            hits.len(),
+            true,
+        );
+        assert_eq!(exempt[0].snippet, "Smith et al. studied a similar task.");
+        let zh = apply_structural_soft_demotion_head_with_related(
+            &hits,
+            "和前人工作对比如何",
+            hits.len(),
+            true,
+        );
+        assert_eq!(zh[0].snippet, "Smith et al. studied a similar task.");
+    }
+
+    #[test]
+    fn multi_paper_related_work_is_not_demoted() {
+        let mut hits = related_pair(0.90, 0.80);
+        hits[1].entry_id = EntryId::from_string("e2");
+        let ordered = apply_structural_soft_demotion(&hits, "What F1 does the model reach?");
+        assert_eq!(ordered[0].snippet, "Smith et al. studied a similar task.");
     }
 }

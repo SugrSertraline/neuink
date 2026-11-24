@@ -106,7 +106,17 @@ impl QwenVisualServiceProvider {
                 }
             }
         };
-        let health = probe(&client, &endpoint, api_key.as_deref());
+        let probe_client = if loopback_only {
+            reqwest::blocking::Client::builder()
+                .connect_timeout(Duration::from_millis(350))
+                .timeout(timeout.min(Duration::from_millis(1500)))
+                .no_proxy()
+                .build()
+                .ok()
+        } else {
+            None
+        };
+        let health = probe(probe_client.as_ref().unwrap_or(&client), &endpoint, api_key.as_deref());
         let status = match &health {
             Some(health) if health.ready && health.dimensions.is_some() && health.identity.is_some() => {
                 VisualProviderStatus {

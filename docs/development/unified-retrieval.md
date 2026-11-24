@@ -82,10 +82,10 @@
 
 - 引用追加池：`neuink-search` 尚未包含引用抽取与扩池，`document_head` 只完成了头部选择。接入需要引用抽取器与独立的可重建引用索引。
 - 图表资产不再复制：`images/**` 直接从已存 `<entry>/mineru-output/full.zip` 读取（`entry_assets.rs` 只读），`asset_path` 与 ZIP 相对路径一致。此前的 `<entry>/assets/` 副本、`assets.manifest.json` 与 `backfill_entry_assets` 回填命令一并移除——老库与新建库行为一致，无需迁移。
-- **页面与区域源来自原生 PDF，图表资产来自 MinerU，二者同进一个快照**（`VisualSourceKind::{Page,Region,Figure,Table}`）。页面与四个 region 共享同一 `parent`（`page:{idx}`），所以一页只投一票，region 只用来取最大分；资产按 `asset:images/...` 独立投票。页面由桌面进程通过 PDFium 渲染，图片发送到本地或远程编码服务；产品不保存页面位图。
+- 视觉索引只纳入 MinerU 图表资产，以及带 `Figure`、`Table` 或非空 `asset_path` 的 PDF 页。纯文字页和参考文献页不编码。页面与区域源来自原生 PDF，图表资产来自 MinerU，二者同进一个快照（`VisualSourceKind::{Page,Region,Figure,Table}`）。快照格式是 `NEVIS003` 二进制 `f32`，文件为 `visual-<namespace>.vectors.bin`，每条 2048 维向量约 8 KB。旧的 v2 `.vectors.json` 仍可读取，下次成功写入时升级为二进制并删除旧文件。页面与区域共享同一 `parent`（`page:{idx}`），所以一页只投一票，region 只用来取最大分；资产按 `asset:images/...` 独立投票。页面由桌面进程通过 PDFium 渲染，图片发送到本地或远程编码服务；产品不保存页面位图。已编码的 key 只读文件头判断，缺失源才解压或渲染。
 - 视觉通道固定使用 Qwen3-VL-Embedding-2B，两种运行方式：`qwen_local`（默认 `http://127.0.0.1:8765`）与 `qwen_api`（https + 密钥）。随包 fastembed 视觉编码已停用，旧设置值仍可反序列化但会被拒绝并提示改选。索引 namespace 由服务上报的模型身份派生。`prepare_visual_search_index` 编码一次、查询只读快照；服务不可达或快照不匹配时固定报 `model_unavailable`/`index_missing` 并退回文本通道。
 - 真实布局 crop（替代几何四等分）尚未接入；重排阶梯中的启发式字段覆盖可选，默认关闭。
-- 宿主开关由 `qna.ts` 读取；主助手默认关闭组合检索。
+- 宿主开关由 `qna.ts` 读取；新工作区默认启用组合检索（旧 `settings.json` 若显式保存 `"unified": false` 仍保留原值），前端设置页不再暴露旧路径切换开关。
 
 ## 7. 重排阶梯（cross-encoder / 尾部范围精排 / 无模型 / 降级）
 

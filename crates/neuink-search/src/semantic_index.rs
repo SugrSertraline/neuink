@@ -115,7 +115,10 @@ impl InMemorySemanticSearchIndex {
                     source: indexed.document.source.clone(),
                     target: indexed.document.target.clone(),
                     title: indexed.document.title.clone(),
-                    snippet: make_semantic_snippet(&indexed.text_for_snippet),
+                    snippet: make_semantic_snippet(
+                        &indexed.text_for_snippet,
+                        indexed.document.source.segment_type,
+                    ),
                     score,
                     matched_terms: Vec::new(),
                     surrounding_context: None,
@@ -180,6 +183,7 @@ fn group_hits(
         total_hit_count,
         entries,
         warnings,
+        rerank_used: None,
     }
 }
 
@@ -190,9 +194,19 @@ fn dot_product(left: &[f32], right: &[f32]) -> f32 {
         .sum()
 }
 
-fn make_semantic_snippet(text: &str) -> String {
-    let clean = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    trim_chars(&clean, 0, 220)
+const SEMANTIC_SNIPPET_PARAGRAPH_CHARS: usize = 700;
+const SEMANTIC_SNIPPET_TABLE_CHARS: usize = 1600;
+
+fn make_semantic_snippet(text: &str, segment_type: Option<neuink_domain::SegmentType>) -> String {
+    let is_table = segment_type == Some(neuink_domain::SegmentType::Table)
+        || crate::result::contains_html_table(text);
+    let clean = crate::result::compact_html_table_if_present(text);
+    let limit = if is_table {
+        SEMANTIC_SNIPPET_TABLE_CHARS
+    } else {
+        SEMANTIC_SNIPPET_PARAGRAPH_CHARS
+    };
+    trim_chars(&clean, 0, limit)
 }
 
 fn trim_chars(text: &str, start: usize, len: usize) -> String {

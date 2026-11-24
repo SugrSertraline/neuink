@@ -34,10 +34,38 @@ impl Default for FieldCoverageWeights {
 }
 
 const METRIC_WORDS: &[&str] = &[
-    "f1", "precision", "recall", "accuracy", "score", "auc", "roc", "map", "mrr", "bleu",
-    "rouge", "meteor", "perplexity", "loss", "error", "rate", "ratio", "percentage", "percent",
-    "value", "mean", "average", "median", "std", "deviation", "count", "number", "total", "sum",
-    "difference", "delta", "metric",
+    "f1",
+    "precision",
+    "recall",
+    "accuracy",
+    "score",
+    "auc",
+    "roc",
+    "map",
+    "mrr",
+    "bleu",
+    "rouge",
+    "meteor",
+    "perplexity",
+    "loss",
+    "error",
+    "rate",
+    "ratio",
+    "percentage",
+    "percent",
+    "value",
+    "mean",
+    "average",
+    "median",
+    "std",
+    "deviation",
+    "count",
+    "number",
+    "total",
+    "sum",
+    "difference",
+    "delta",
+    "metric",
 ];
 
 const STOPWORDS: &[&str] = &[
@@ -164,7 +192,13 @@ pub fn rerank_hits_by_coverage(
     let mut scored = hits
         .iter()
         .enumerate()
-        .map(|(index, hit)| (field_coverage(query, &hit.snippet, weights), index, hit.clone()))
+        .map(|(index, hit)| {
+            (
+                field_coverage(query, &hit.snippet, weights),
+                index,
+                hit.clone(),
+            )
+        })
         .collect::<Vec<_>>();
     scored.sort_by(|left, right| {
         right
@@ -172,7 +206,10 @@ pub fn rerank_hits_by_coverage(
             .total_cmp(&left.0)
             .then_with(|| left.1.cmp(&right.1))
     });
-    let mut ordered = scored.into_iter().map(|(_, _, hit)| hit).collect::<Vec<_>>();
+    let mut ordered = scored
+        .into_iter()
+        .map(|(_, _, hit)| hit)
+        .collect::<Vec<_>>();
     crate::rerank_hits::stamp_rank_scores(&mut ordered);
     ordered
 }
@@ -204,7 +241,11 @@ mod tests {
     #[test]
     fn numbers_and_metric_words_outweigh_generic_content() {
         let weights = FieldCoverageWeights::default();
-        let numeric = field_coverage("what f1 value does table 3 report", "F1 value: 87.5", &weights);
+        let numeric = field_coverage(
+            "what f1 value does table 3 report",
+            "F1 value: 87.5",
+            &weights,
+        );
         let prose = field_coverage(
             "what f1 value does table 3 report",
             "the report discusses several qualitative cases",
@@ -231,7 +272,11 @@ mod tests {
     #[test]
     fn ties_keep_the_incoming_order() {
         let weights = FieldCoverageWeights::default();
-        let hits = vec![hit("a", "same text"), hit("b", "same text"), hit("c", "same text")];
+        let hits = vec![
+            hit("a", "same text"),
+            hit("b", "same text"),
+            hit("c", "same text"),
+        ];
         let ordered = rerank_hits_by_coverage(&hits, "f1 value", &weights);
         assert_eq!(
             ordered
@@ -248,7 +293,10 @@ mod tests {
     #[test]
     fn the_matching_hit_moves_first() {
         let weights = FieldCoverageWeights::default();
-        let hits = vec![hit("a", "no fields here"), hit("b", "accuracy 91.2 percent")];
+        let hits = vec![
+            hit("a", "no fields here"),
+            hit("b", "accuracy 91.2 percent"),
+        ];
         let ordered = rerank_hits_by_coverage(&hits, "what accuracy percent", &weights);
         assert_eq!(ordered[0].snippet, "accuracy 91.2 percent");
     }
@@ -267,7 +315,11 @@ mod tests {
         plain.score = 0.95;
         let mut numeric = hit("b", "accuracy 91.2 percent");
         numeric.score = 0.10;
-        let ordered = rerank_hits_by_coverage(&[plain, numeric], "what accuracy percent", &FieldCoverageWeights::default());
+        let ordered = rerank_hits_by_coverage(
+            &[plain, numeric],
+            "what accuracy percent",
+            &FieldCoverageWeights::default(),
+        );
         assert!(ordered[0].score > ordered[1].score);
         let results = crate::retrieval_pipeline::results_from_hits(
             "what accuracy percent".to_string(),

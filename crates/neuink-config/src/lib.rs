@@ -993,19 +993,33 @@ mod rerank_settings_tests {
     }
 }
 
+fn default_unified_retrieval() -> bool {
+    true
+}
+
 /// Which retrieval path the assistant's library tool uses.
 ///
-/// The default stays on the batch path: the composed path changes document routing, runs
-/// the visual vote and applies the rerank ladder, so it is opt-in rather than a silent
-/// behaviour change for every existing user.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+/// The composed unified path (document routing, carrier binding, visual vote, rerank) is
+/// enabled by default for new workspaces; older settings files with `"unified": false`
+/// keep their explicit choice on deserialization.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(default)]
 pub struct RetrievalSettings {
     /// Use `search_unified` (document routing, carrier binding, visual vote, rerank).
+    #[serde(default = "default_unified_retrieval")]
     pub unified: bool,
     /// Opt-in BGE-M3 multi-vector pool. Omitted on older files, which stay single-vector.
     #[serde(default, skip_serializing_if = "MultivectorPoolSettings::is_default")]
     pub multivector: MultivectorPoolSettings,
+}
+
+impl Default for RetrievalSettings {
+    fn default() -> Self {
+        Self {
+            unified: default_unified_retrieval(),
+            multivector: MultivectorPoolSettings::default(),
+        }
+    }
 }
 
 impl RetrievalSettings {
@@ -1020,10 +1034,19 @@ mod retrieval_settings_tests {
     use serde_json;
 
     #[test]
-    fn the_composed_path_is_opt_in() {
+    fn the_composed_path_is_enabled_by_default() {
         let settings = RetrievalSettings::default();
-        assert!(!settings.unified);
+        assert!(settings.unified);
         assert!(settings.validate().is_ok());
+
+        // Missing field in JSON also defaults to the composed path.
+        let omitted: RetrievalSettings = serde_json::from_str("{}").expect("omitted");
+        assert!(omitted.unified);
+
+        // Existing settings files that explicitly opted out keep their choice.
+        let opted_out: RetrievalSettings =
+            serde_json::from_str(r#"{"unified":false}"#).expect("opted_out");
+        assert!(!opted_out.unified);
     }
 
     #[test]
@@ -1037,7 +1060,7 @@ mod retrieval_settings_tests {
         let decoded: RetrievalSettings = serde_json::from_str(&encoded).expect("decode");
         assert!(decoded.unified);
         assert!(!decoded.multivector.enabled);
-        // An older settings file without the field still loads.
+        // An older settings file without the multivector field still loads.
         let legacy: RetrievalSettings = serde_json::from_str(r#"{"unified":true}"#).expect("legacy");
         assert!(legacy.unified);
         assert!(!legacy.multivector.enabled);

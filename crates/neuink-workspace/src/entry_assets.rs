@@ -10,7 +10,7 @@
 //! Resolution rule: `SourceSegment::asset_path` is the ZIP-relative `images/...` path, so a
 //! stored asset is looked up by exactly that name.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
@@ -77,15 +77,27 @@ fn extension_of(relative: &str) -> String {
         .to_ascii_lowercase()
 }
 
+fn is_chart(kind: SegmentType) -> bool {
+    matches!(kind, SegmentType::Figure | SegmentType::Table)
+}
+
+/// First chart anchor wins. A later formula or paragraph does not hide a figure or table
+/// that points at the same crop.
 fn segment_anchors(segments: &[SourceSegment]) -> BTreeMap<String, (u32, SegmentType)> {
     let mut anchors = BTreeMap::new();
     for segment in segments {
         let Some(path) = segment.asset_path.as_ref() else {
             continue;
         };
-        anchors
-            .entry(path.clone())
-            .or_insert((segment.page_idx, segment.segment_type));
+        if path.trim().is_empty() {
+            continue;
+        }
+        match anchors.get(path) {
+            Some((_, kind)) if is_chart(*kind) => {}
+            _ => {
+                anchors.insert(path.clone(), (segment.page_idx, segment.segment_type));
+            }
+        }
     }
     anchors
 }
@@ -101,12 +113,9 @@ impl Workspace {
         scope: Option<&[EntryId]>,
     ) -> Result<Vec<EntryVisualAsset>, WorkspaceError> {
         let mut entries = self.list_entries()?;
-        entries.sort_by(|left, right| {
-            right
-                .updated_at
-                .cmp(&left.updated_at)
-                .then_with(|| left.id.as_str().cmp(right.id.as_str()))
-        });
+        // Identity order, so editing a note or the reading position cannot reshuffle
+        // which visual source is collected first.
+        entries.sort_by(|left, right| left.id.as_str().cmp(right.id.as_str()));
         if let Some(requested) = scope {
             let requested = requested
                 .iter()
@@ -130,12 +139,17 @@ impl Workspace {
             if !zip_path.is_file() {
                 continue;
             }
-            let anchors = self
-                .read_segments(&entry.id)
-                .map(|segments| segment_anchors(&segments))
-                .unwrap_or_default();
+            let segments = self.read_segments(&entry.id).unwrap_or_default();
+            // An empty segment list means the entry only stored a ZIP. Keep every image so
+            // those fixtures still build. A real segment list drops formula crops and
+            // images no figure or table points at.
+            let charts_only = !segments.is_empty();
+            let anchors = segment_anchors(&segments);
             for (relative_path, content_hash) in stored_images(&zip_path)? {
                 let anchor = anchors.get(&relative_path).copied();
+                if charts_only && !anchor.is_some_and(|(_, kind)| is_chart(kind)) {
+                    continue;
+                }
                 collected.push(EntryVisualAsset {
                     entry_id: entry.id.to_string(),
                     relative_path,
@@ -156,12 +170,37 @@ impl Workspace {
     ) -> Result<Vec<u8>, WorkspaceError> {
         let relative = asset_relative_path(asset_path)?
             .ok_or_else(|| WorkspaceError::AssetMissing(asset_path.to_string()))?;
+        self.entry_assets_bytes_batch(entry_id, &[relative.clone()])?
+            .remove(&relative)
+            .ok_or(WorkspaceError::AssetMissing(relative))
+    }
+
+    /// Bytes of many assets from one entry. The ZIP is opened once.
+    pub fn entry_assets_bytes_batch(
+        &self,
+        entry_id: &EntryId,
+        asset_paths: &[String],
+    ) -> Result<BTreeMap<String, Vec<u8>>, WorkspaceError> {
+        let mut pending = BTreeSet::new();
+        for asset_path in asset_paths {
+            let relative = asset_relative_path(asset_path)?
+                .ok_or_else(|| WorkspaceError::AssetMissing(asset_path.clone()))?;
+            pending.insert(relative);
+        }
+        if pending.is_empty() {
+            return Ok(BTreeMap::new());
+        }
         let zip_path = self.layout().entry_mineru_output_zip(entry_id);
         if !zip_path.is_file() {
-            return Err(WorkspaceError::AssetMissing(relative));
+            let missing = pending.into_iter().next().unwrap_or_default();
+            return Err(WorkspaceError::AssetMissing(missing));
         }
         let mut archive = open_archive(&zip_path)?;
+        let mut found = BTreeMap::new();
         for index in 0..archive.len() {
+            if pending.is_empty() {
+                break;
+            }
             let file = archive.by_index(index)?;
             if file.is_dir() {
                 continue;
@@ -169,12 +208,17 @@ impl Workspace {
             let Ok(Some(name)) = asset_relative_path(file.name()) else {
                 continue;
             };
-            if name != relative {
+            if !pending.contains(&name) {
                 continue;
             }
-            return read_bounded(file, &relative);
+            let bytes = read_bounded(file, &name)?;
+            pending.remove(&name);
+            found.insert(name, bytes);
         }
-        Err(WorkspaceError::AssetMissing(relative))
+        if let Some(missing) = pending.into_iter().next() {
+            return Err(WorkspaceError::AssetMissing(missing));
+        }
+        Ok(found)
     }
 }
 
@@ -274,7 +318,7 @@ mod tests {
             .expect("segments");
 
         let collected = workspace.collect_entry_visual_assets(None).expect("collect");
-        assert_eq!(collected.len(), 2);
+        assert_eq!(collected.len(), 1);
         let figure = collected
             .iter()
             .find(|asset| asset.relative_path == "images/fig1.jpg")
@@ -282,12 +326,74 @@ mod tests {
         assert_eq!(figure.page_idx, Some(4));
         assert_eq!(figure.segment_type, Some(SegmentType::Figure));
         assert_eq!(figure.content_hash.len(), 64);
-        // An image with no referencing segment keeps no anchor but is still listed.
-        let table = collected
-            .iter()
-            .find(|asset| asset.relative_path == "images/table1.png")
-            .expect("table asset");
-        assert_eq!(table.page_idx, None);
+    }
+
+    #[test]
+    fn an_empty_segment_list_keeps_every_zip_image() {
+        let zip = zip_with(&[
+            ("images/fig1.jpg", b"figure-one"),
+            ("images/logo.png", b"logo"),
+        ]);
+        let (_root, workspace, _entry_id) = workspace_with_zip(&zip);
+        let collected = workspace.collect_entry_visual_assets(None).expect("collect");
+        assert_eq!(
+            collected
+                .iter()
+                .map(|asset| asset.relative_path.as_str())
+                .collect::<Vec<_>>(),
+            ["images/fig1.jpg", "images/logo.png"]
+        );
+    }
+
+    #[test]
+    fn formula_crops_and_unanchored_images_are_dropped_when_segments_exist() {
+        let zip = zip_with(&[
+            ("images/fig1.jpg", b"figure"),
+            ("images/eq1.jpg", b"equation"),
+            ("images/logo.png", b"logo"),
+        ]);
+        let (_root, workspace, entry_id) = workspace_with_zip(&zip);
+        workspace
+            .write_segments(
+                &entry_id,
+                &[
+                    SourceSegment::new(SegmentType::Figure, 2, None, "chart".to_string())
+                        .with_asset_path(Some("images/fig1.jpg".to_string())),
+                    SourceSegment::new(SegmentType::Math, 2, None, "E=mc^2".to_string())
+                        .with_asset_path(Some("images/eq1.jpg".to_string())),
+                ],
+            )
+            .expect("segments");
+        let collected = workspace.collect_entry_visual_assets(None).expect("collect");
+        assert_eq!(
+            collected
+                .iter()
+                .map(|asset| asset.relative_path.as_str())
+                .collect::<Vec<_>>(),
+            ["images/fig1.jpg"]
+        );
+        assert_eq!(collected[0].segment_type, Some(SegmentType::Figure));
+    }
+
+    #[test]
+    fn a_batch_read_opens_one_zip_and_returns_each_requested_image() {
+        let (_root, workspace, entry_id) =
+            workspace_with_zip(&zip_with(&[("images/a.jpg", b"aaa"), ("images/b.png", b"bbb")]));
+        let found = workspace
+            .entry_assets_bytes_batch(
+                &entry_id,
+                &[
+                    "paper/images/b.png".to_string(),
+                    "images/a.jpg".to_string(),
+                ],
+            )
+            .expect("batch");
+        assert_eq!(found.get("images/a.jpg").map(Vec::as_slice), Some(b"aaa".as_slice()));
+        assert_eq!(found.get("images/b.png").map(Vec::as_slice), Some(b"bbb".as_slice()));
+        assert!(matches!(
+            workspace.entry_assets_bytes_batch(&entry_id, &["images/missing.jpg".to_string()]),
+            Err(crate::WorkspaceError::AssetMissing(_))
+        ));
     }
 
     #[test]
@@ -372,6 +478,40 @@ mod tests {
         assert!(asset_relative_path("/images/a.jpg").is_err());
         assert!(asset_relative_path("C:/images/a.jpg").is_err());
         assert!(asset_relative_path("images/../../a.jpg").is_err());
+    }
+
+    #[test]
+    fn collected_assets_follow_entry_id_and_ignore_a_later_edit() {
+        let root = tempfile::tempdir().expect("temp workspace");
+        let workspace = Workspace::create(root.path()).expect("create workspace");
+        let left = workspace.create_entry("Left").expect("entry");
+        let right = workspace.create_entry("Right").expect("entry");
+        for entry in [&left, &right] {
+            workspace
+                .write_mineru_output_zip(&entry.id, &zip_with(&[("images/a.jpg", b"pixels")]))
+                .expect("zip");
+        }
+        let (earlier, later) = if left.id.as_str() <= right.id.as_str() {
+            (&left, &right)
+        } else {
+            (&right, &left)
+        };
+        workspace
+            .update_entry_meta(
+                &later.id,
+                "Touched",
+                std::collections::BTreeMap::new(),
+                Vec::new(),
+            )
+            .expect("touch");
+        let collected = workspace.collect_entry_visual_assets(None).expect("collect");
+        assert_eq!(
+            collected
+                .iter()
+                .map(|asset| asset.entry_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![earlier.id.as_str(), later.id.as_str()]
+        );
     }
 }
 

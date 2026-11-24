@@ -145,7 +145,11 @@ pub fn document_head(
     // Required papers are a question constraint, not a compute budget. Retain all of
     // them even when pair scoring must be separately capped by the caller.
     let mandated_set: std::collections::BTreeSet<String> = named.iter().cloned().collect();
-    let cap = config.max_documents.min(in_scope_documents).max(mandated_set.len()).max(1);
+    let cap = config
+        .max_documents
+        .min(in_scope_documents)
+        .max(mandated_set.len())
+        .max(1);
     let mut truncated = false;
     let mut ranked_selected = ranked.len();
     let mut mandated_selected = named.len();
@@ -198,8 +202,11 @@ pub fn document_pairs(documents: usize) -> usize {
 /// Binary search avoids work proportional to the square root of an arbitrary usize budget.
 pub fn documents_for_pairs(max_pairs: usize) -> usize {
     let fits = |n: usize| {
-        let (a, b) = if n % 2 == 0 { (n / 2, n.saturating_sub(1)) }
-            else { (n, n.saturating_sub(1) / 2) };
+        let (a, b) = if n % 2 == 0 {
+            (n / 2, n.saturating_sub(1))
+        } else {
+            (n, n.saturating_sub(1) / 2)
+        };
         a.checked_mul(b).is_some_and(|pairs| pairs <= max_pairs)
     };
     let mut low = 1usize;
@@ -207,7 +214,11 @@ pub fn documents_for_pairs(max_pairs: usize) -> usize {
     while low < high {
         let distance = high - low;
         let middle = low + distance / 2 + distance % 2;
-        if fits(middle) { low = middle; } else { high = middle - 1; }
+        if fits(middle) {
+            low = middle;
+        } else {
+            high = middle - 1;
+        }
     }
     low
 }

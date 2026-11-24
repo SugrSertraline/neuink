@@ -41,13 +41,38 @@ const WORD_STOP: &[&str] = &[
     "under", "between",
 ];
 const GENERIC_TOPIC: &[&str] = &[
-    "question", "questions", "performance", "information", "different", "language", "example",
-    "description", "properties", "results", "result", "system", "method", "methods", "model",
-    "models", "dataset", "datasets", "approach", "approaches", "paper", "task", "tasks", "using",
-    "based", "other", "these", "those",
+    "question",
+    "questions",
+    "performance",
+    "information",
+    "different",
+    "language",
+    "example",
+    "description",
+    "properties",
+    "results",
+    "result",
+    "system",
+    "method",
+    "methods",
+    "model",
+    "models",
+    "dataset",
+    "datasets",
+    "approach",
+    "approaches",
+    "paper",
+    "task",
+    "tasks",
+    "using",
+    "based",
+    "other",
+    "these",
+    "those",
 ];
 
-const SYSTEM_PROMPT: &str = "You fill one JSON object. Copy the keys exactly. Do not add an explanation.";
+const SYSTEM_PROMPT: &str =
+    "You fill one JSON object. Copy the keys exactly. Do not add an explanation.";
 const PASSAGE_USER: &str = "Question: {question}\nChapter: {chapter}\nAnchor: {anchor}\nValid_Sentences: {valid}\nSentences:\n{sentences}\n\nReturn one JSON object with these keys: target_object, passage_object, dataset_setting_match, metric_target_match, scope_label, evidence_level, evidence_label, cited_sentences.\npassage_object is \"paper's own\", \"cited baseline\", \"other\", or \"unspecified\".\ndataset_setting_match and metric_target_match are each \"match\", \"conflict\", or \"unspecified\".\nscope_label A: same object, dataset, condition, and metric. A missing value is still A.\nscope_label B: a different object, dataset, condition, or metric, including a cited baseline when the question asks about this paper.\nscope_label T: the object or dataset is not named, and the anchor does not supply it.\nevidence_level L3: a number, a numbered finding, several named items, or a table or figure caption that names the asked object or metric.\nevidence_level L2: one concrete name or one mechanism outside introduction, related work, background, conclusion, and future work.\nevidence_level L1: a survey preview, or a qualitative claim without a number, a numbered item, or a specific name.\nevidence_level L0: a conflict, or no relevant statement.\nIf an anchor is present, the passage may use the anchor's object and dataset. A subclass, a data split, a new dataset item, or a parallel result is L3.\nevidence_label A: L2 or L3, and the cited sentence states the asked fact.\nevidence_label B: same scope, but the value or name is missing.\nevidence_label T: no asked fact.\ncited_sentences is a list of S numbers copied from Valid_Sentences when evidence_label is A. Use an empty list when evidence_label is B or T.";
 const MISSING_CHAPTER: &str = "(none)";
 const MISSING_ANCHOR: &str = "(none)";
@@ -187,7 +212,6 @@ impl PassageJudgment {
             api_error: false,
         }
     }
-
 }
 
 #[derive(Debug)]
@@ -242,12 +266,13 @@ impl HttpScopeJudge {
             return Err(ScopeJudgeError);
         }
         let https = endpoint.starts_with("https://");
-        let loopback = endpoint.starts_with("http://") && neuink_config::is_loopback_endpoint(&endpoint);
+        let loopback =
+            endpoint.starts_with("http://") && neuink_config::is_loopback_endpoint(&endpoint);
         if !https && !loopback {
             return Err(ScopeJudgeError);
         }
-        let mut builder = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_millis(timeout_ms.max(1)));
+        let mut builder =
+            reqwest::blocking::Client::builder().timeout(Duration::from_millis(timeout_ms.max(1)));
         if loopback {
             builder = builder.no_proxy();
         }
@@ -272,7 +297,12 @@ impl ScopeJudgeProvider for HttpScopeJudge {
         }
         let workers = self.max_concurrency.min(requests.len()).max(1);
         if workers == 1 {
-            return collapse_attempts(requests.iter().map(|request| self.judge_one(request)).collect());
+            return collapse_attempts(
+                requests
+                    .iter()
+                    .map(|request| self.judge_one(request))
+                    .collect(),
+            );
         }
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(workers)
@@ -376,7 +406,8 @@ fn scrub_labeled_decimal(chars: &mut [char]) {
                         && chars[digits..number_end].contains(&'.')
                     {
                         let whole = &chars[digits..number_end];
-                        if whole.ends_with(&['.', '0']) && !whole[..whole.len() - 2].contains(&'.') {
+                        if whole.ends_with(&['.', '0']) && !whole[..whole.len() - 2].contains(&'.')
+                        {
                             blank_span(chars, index, number_end);
                             index = number_end;
                             continue;
@@ -445,7 +476,9 @@ fn take_camel(chars: &[char], start: usize) -> Option<usize> {
         }
         let body = cursor + 1;
         let mut next = body;
-        while next < chars.len() && (chars[next].is_ascii_lowercase() || chars[next].is_ascii_digit()) {
+        while next < chars.len()
+            && (chars[next].is_ascii_lowercase() || chars[next].is_ascii_digit())
+        {
             next += 1;
         }
         if next == body {
@@ -631,9 +664,7 @@ pub fn lookup_sentence(text: &str, index: i64) -> Option<String> {
     if index < 1 {
         return None;
     }
-    split_sentences(text)
-        .into_iter()
-        .nth((index as usize) - 1)
+    split_sentences(text).into_iter().nth((index as usize) - 1)
 }
 
 fn is_survey(chapter: &str) -> bool {
@@ -760,9 +791,11 @@ fn resolve_probs(probs: Option<LetterProbs>, letter: Option<char>) -> LetterProb
     if let Some(probs) = probs {
         return probs;
     }
-    letter
-        .map(letter_probs)
-        .unwrap_or(LetterProbs { a: 0.0, b: 0.0, t: 0.0 })
+    letter.map(letter_probs).unwrap_or(LetterProbs {
+        a: 0.0,
+        b: 0.0,
+        t: 0.0,
+    })
 }
 
 fn confident(probs: LetterProbs) -> Option<char> {
@@ -823,19 +856,23 @@ pub fn decide(item: &ScopeItem) -> Option<ScopeDecision> {
     }
     let scope_incumbent_probs = resolve_probs(item.scope_incumbent_probs, item.scope_incumbent);
     let scope_challenger_probs = resolve_probs(item.scope_challenger_probs, item.scope_challenger);
-    let evidence_incumbent_probs = resolve_probs(item.evidence_incumbent_probs, item.evidence_incumbent);
-    let evidence_challenger_probs = resolve_probs(item.evidence_challenger_probs, item.evidence_challenger);
+    let evidence_incumbent_probs =
+        resolve_probs(item.evidence_incumbent_probs, item.evidence_incumbent);
+    let evidence_challenger_probs =
+        resolve_probs(item.evidence_challenger_probs, item.evidence_challenger);
     let incumbent_scope = confident(scope_incumbent_probs);
     let challenger_scope = confident(scope_challenger_probs);
     let incumbent_evidence = confident(evidence_incumbent_probs);
     let challenger_evidence = confident(evidence_challenger_probs);
-    if !citation_ok(item.text_incumbent.as_str(), item.cite_incumbent.as_deref(), incumbent_evidence)
-        || !citation_ok(
-            item.text_challenger.as_str(),
-            item.cite_challenger.as_deref(),
-            challenger_evidence,
-        )
-        || protected(item)
+    if !citation_ok(
+        item.text_incumbent.as_str(),
+        item.cite_incumbent.as_deref(),
+        incumbent_evidence,
+    ) || !citation_ok(
+        item.text_challenger.as_str(),
+        item.cite_challenger.as_deref(),
+        challenger_evidence,
+    ) || protected(item)
         || !known_level(item.level_incumbent.as_deref())
         || !known_level(item.level_challenger.as_deref())
     {
@@ -846,7 +883,12 @@ pub fn decide(item: &ScopeItem) -> Option<ScopeDecision> {
         incumbent_level = "L2".to_string();
     }
     let challenger_level = item.level_challenger.clone().unwrap_or_default();
-    if !challenger_ready(item, challenger_scope, challenger_evidence, &challenger_level) {
+    if !challenger_ready(
+        item,
+        challenger_scope,
+        challenger_evidence,
+        &challenger_level,
+    ) {
         return None;
     }
     if incumbent_scope == Some('A')
@@ -901,13 +943,20 @@ pub fn decide(item: &ScopeItem) -> Option<ScopeDecision> {
         challenger_uid: item.challenger_uid.clone(),
         incumbent_uid: item.incumbent_uid.clone(),
         path: path.to_string(),
-        min_score: if min_score.is_finite() { min_score } else { 0.0 },
+        min_score: if min_score.is_finite() {
+            min_score
+        } else {
+            0.0
+        },
     })
 }
 
 #[cfg(test)]
 pub fn apply_swap(uids: &[&str], position: i32, challenger_uid: &str) -> Vec<String> {
-    let mut updated = uids.iter().map(|uid| (*uid).to_string()).collect::<Vec<_>>();
+    let mut updated = uids
+        .iter()
+        .map(|uid| (*uid).to_string())
+        .collect::<Vec<_>>();
     if (position != 9 && position != 10) || updated.iter().any(|uid| uid == challenger_uid) {
         return updated;
     }
@@ -932,7 +981,9 @@ pub fn select_swaps(candidates: &[ScopeDecision]) -> Vec<ScopeDecision> {
     let mut used_positions = BTreeSet::new();
     for item in ranked {
         if used_positions.contains(&item.position)
-            || chosen.iter().any(|row: &ScopeDecision| row.challenger_uid == item.challenger_uid)
+            || chosen
+                .iter()
+                .any(|row: &ScopeDecision| row.challenger_uid == item.challenger_uid)
         {
             continue;
         }
@@ -991,7 +1042,11 @@ fn choose_anchor(challenger: &SearchHit, top8: &[SearchHit]) -> (String, String,
             continue;
         }
         let rank = offset + 1;
-        if best.as_ref().map(|current| rank < current.0).unwrap_or(true) {
+        if best
+            .as_ref()
+            .map(|current| rank < current.0)
+            .unwrap_or(true)
+        {
             best = Some((rank, hit.snippet.clone(), delta));
         }
     }
@@ -1074,7 +1129,11 @@ fn pending_pairs(hits: &[SearchHit], question: &str) -> (Vec<PendingPair>, Vec<S
             if item.text_incumbent.is_empty() || item.text_challenger.is_empty() {
                 continue;
             }
-            if over_budget(&item.text_incumbent, &item.text_challenger, &item.text_anchor) {
+            if over_budget(
+                &item.text_incumbent,
+                &item.text_challenger,
+                &item.text_anchor,
+            ) {
                 item.over_budget = true;
             }
             if item.over_budget || protected(&item) {
@@ -1115,7 +1174,10 @@ fn apply_hit_swaps(hits: &mut [SearchHit], swaps: &[ScopeDecision]) -> Vec<Scope
         if slot >= hits.len() {
             continue;
         }
-        let Some(index) = hits.iter().position(|hit| hit_key(hit) == swap.challenger_uid) else {
+        let Some(index) = hits
+            .iter()
+            .position(|hit| hit_key(hit) == swap.challenger_uid)
+        else {
             continue;
         };
         if index < 10 {
@@ -1365,7 +1427,9 @@ fn normalize_payload(payload: Option<&serde_json::Value>) -> PassageJudgment {
     let evidence_letter = evidence.chars().next().unwrap_or('T');
     let cites = if evidence_letter == 'A' {
         Some(parse_cite_numbers(
-            payload.get("cited_sentences").unwrap_or(&serde_json::Value::Null),
+            payload
+                .get("cited_sentences")
+                .unwrap_or(&serde_json::Value::Null),
         ))
     } else {
         Some(Vec::new())
@@ -1398,7 +1462,14 @@ fn user_prompt(request: &ScopeJudgeRequest) -> String {
                     request.chapter.as_str()
                 },
             ),
-            ("anchor", if anchor.is_empty() { MISSING_ANCHOR } else { anchor.as_str() }),
+            (
+                "anchor",
+                if anchor.is_empty() {
+                    MISSING_ANCHOR
+                } else {
+                    anchor.as_str()
+                },
+            ),
             ("valid", valid.as_str()),
             ("sentences", sentences.as_str()),
         ],
@@ -1494,7 +1565,10 @@ mod tests {
             split_sentences("Fig. 1 shows the lidar. The error is 0.47."),
             vec!["Fig. 1 shows the lidar.", "The error is 0.47."]
         );
-        assert_eq!(lookup_sentence("Alpha ended. Beta began.", 2).as_deref(), Some("Beta began."));
+        assert_eq!(
+            lookup_sentence("Alpha ended. Beta began.", 2).as_deref(),
+            Some("Beta began.")
+        );
         assert_eq!(
             metric_numbers("BERT reaches 84.6 F1 in 2019 and uses 3 seeds."),
             BTreeSet::from(["84.6".to_string()])
@@ -1514,7 +1588,9 @@ mod tests {
             question: "What F1 does HarborNet reach?".into(),
             chapter_incumbent: "Related Work".into(),
             chapter_challenger: "Results".into(),
-            text_incumbent: "The cited BuoyFormer model reaches 71.4 F1. That figure is from earlier work.".into(),
+            text_incumbent:
+                "The cited BuoyFormer model reaches 71.4 F1. That figure is from earlier work."
+                    .into(),
             text_challenger: "HarborNet reaches 84.6 F1 on the held-out week.".into(),
             level_incumbent: Some("L0".into()),
             level_challenger: Some("L3".into()),
@@ -1525,7 +1601,8 @@ mod tests {
 
         let coverage = ScopeItem {
             chapter_incumbent: "Introduction".into(),
-            text_incumbent: "We run a broad comparison and the method is competitive with prior systems.".into(),
+            text_incumbent:
+                "We run a broad comparison and the method is competitive with prior systems.".into(),
             level_incumbent: Some("L1".into()),
             cite_incumbent: Some(vec![]),
             ..scope.clone()
@@ -1551,7 +1628,8 @@ mod tests {
         let table = ScopeItem {
             question: "What are the industry classes defined in this paper?".into(),
             chapter_challenger: "Figures and Tables".into(),
-            text_challenger: "Table 1: Industry categories and number of users per category.".into(),
+            text_challenger: "Table 1: Industry categories and number of users per category."
+                .into(),
             cite_challenger: Some(vec![1]),
             level_challenger: Some("L3".into()),
             ..coverage.clone()
@@ -1662,7 +1740,11 @@ mod tests {
         assert!(decide(&anchored_body).is_none());
 
         let low = ScopeItem {
-            scope_challenger_probs: Some(LetterProbs { a: 0.70, b: 0.20, t: 0.10 }),
+            scope_challenger_probs: Some(LetterProbs {
+                a: 0.70,
+                b: 0.20,
+                t: 0.10,
+            }),
             ..scope
         };
         assert!(decide(&low).is_none());
@@ -1686,14 +1768,28 @@ mod tests {
             row(0.90, 10, 11, "c"),
         ]);
         assert_eq!(
-            chosen.iter().map(|item| item.challenger_uid.as_str()).collect::<Vec<_>>(),
+            chosen
+                .iter()
+                .map(|item| item.challenger_uid.as_str())
+                .collect::<Vec<_>>(),
             vec!["c", "a"]
         );
-        assert_eq!(apply_swap(&["p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "old", "ten"], 9, "c"), vec![
-            "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "c", "ten"
-        ]);
         assert_eq!(
-            apply_swap(&["p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "c", "ten"], 10, "c").last().map(String::as_str),
+            apply_swap(
+                &["p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "old", "ten"],
+                9,
+                "c"
+            ),
+            vec!["p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "c", "ten"]
+        );
+        assert_eq!(
+            apply_swap(
+                &["p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "c", "ten"],
+                10,
+                "c"
+            )
+            .last()
+            .map(String::as_str),
             Some("ten")
         );
     }
@@ -1701,12 +1797,18 @@ mod tests {
     #[test]
     fn a_bad_payload_or_an_out_of_range_cite_keeps_the_pair() {
         assert!(judgment_from_content("not json").level.is_none());
-        assert!(judgment_from_content("{\"scope_label\":\"maybe\"}").level.is_none());
+        assert!(judgment_from_content("{\"scope_label\":\"maybe\"}")
+            .level
+            .is_none());
         let parsed = judgment_from_content(
             "{\"scope_label\":\"A\",\"evidence_label\":\"A\",\"evidence_level\":\"L3\",\"cited_sentences\":[\"S99\"]}",
         );
         assert_eq!(parsed.cites.as_deref(), Some(&[99][..]));
-        assert!(!citation_ok("Alpha ended.", parsed.cites.as_deref(), Some('A')));
+        assert!(!citation_ok(
+            "Alpha ended.",
+            parsed.cites.as_deref(),
+            Some('A')
+        ));
         assert!(matches!(classify_status(500), Attempt::Fail));
         assert!(matches!(classify_status(429), Attempt::Retry));
         assert!(collapse_attempts(vec![Err(()), Err(()), Err(())]).is_err());
@@ -1718,13 +1820,30 @@ mod tests {
         ])
         .is_err());
         assert!(collapse_attempts(vec![Ok(PassageJudgment::blank())]).is_ok());
-        assert_eq!(chat_url("https://api.siliconflow.cn/v1"), "https://api.siliconflow.cn/v1/chat/completions");
+        assert_eq!(
+            chat_url("https://api.siliconflow.cn/v1"),
+            "https://api.siliconflow.cn/v1/chat/completions"
+        );
         assert_eq!(
             chat_url("https://host.example/v1/chat/completions"),
             "https://host.example/v1/chat/completions"
         );
-        assert!(HttpScopeJudge::new("http://example.com/v1".into(), "m".into(), "k".into(), 1000, 8).is_err());
-        assert!(HttpScopeJudge::new("https://api.siliconflow.cn/v1".into(), "m".into(), "k".into(), 1000, 8).is_ok());
+        assert!(HttpScopeJudge::new(
+            "http://example.com/v1".into(),
+            "m".into(),
+            "k".into(),
+            1000,
+            8
+        )
+        .is_err());
+        assert!(HttpScopeJudge::new(
+            "https://api.siliconflow.cn/v1".into(),
+            "m".into(),
+            "k".into(),
+            1000,
+            8
+        )
+        .is_ok());
     }
 
     fn hit_for(entry: &str, uid: &str, chapter: &str, snippet: &str, score: f32) -> SearchHit {
@@ -1770,7 +1889,8 @@ mod tests {
             &self,
             requests: &[ScopeJudgeRequest],
         ) -> Result<Vec<PassageJudgment>, ScopeJudgeError> {
-            self.calls.fetch_add(requests.len(), std::sync::atomic::Ordering::SeqCst);
+            self.calls
+                .fetch_add(requests.len(), std::sync::atomic::Ordering::SeqCst);
             if self.fail {
                 return Err(ScopeJudgeError);
             }
@@ -1821,9 +1941,15 @@ mod tests {
         ));
         let judge = Scripted {
             judgments: std::collections::BTreeMap::from([
-                ("s:entry:incumbent:s20".into(), labeled('B', 'T', "L0", vec![])),
+                (
+                    "s:entry:incumbent:s20".into(),
+                    labeled('B', 'T', "L0", vec![]),
+                ),
                 ("s:entry:kept:s21".into(), labeled('A', 'A', "L3", vec![1])),
-                ("s:entry:challenger:s30".into(), labeled('A', 'A', "L3", vec![1])),
+                (
+                    "s:entry:challenger:s30".into(),
+                    labeled('A', 'A', "L3", vec![1]),
+                ),
             ]),
             fail: false,
             calls: std::sync::atomic::AtomicUsize::new(0),
@@ -1843,8 +1969,18 @@ mod tests {
         let mut hits = (0..8)
             .map(|index| hit(&format!("e:s{index}"), "Experiments", "locked", 0.5))
             .collect::<Vec<_>>();
-        hits.push(hit("p9:s20", "Experiments", "AlphaNet reaches 11.1 F1.", 0.4));
-        hits.push(hit("p10:s21", "Experiments", "BetaNet reaches 22.2 F1.", 0.3));
+        hits.push(hit(
+            "p9:s20",
+            "Experiments",
+            "AlphaNet reaches 11.1 F1.",
+            0.4,
+        ));
+        hits.push(hit(
+            "p10:s21",
+            "Experiments",
+            "BetaNet reaches 22.2 F1.",
+            0.3,
+        ));
         hits.push(hit("c11:s30", "Results", "Gamma discusses the setup.", 0.2));
         let quiet = Scripted {
             judgments: std::collections::BTreeMap::new(),
@@ -1886,7 +2022,15 @@ mod tests {
     #[test]
     fn the_same_segment_uid_in_another_paper_does_not_collide() {
         let mut hits = (0..8)
-            .map(|index| hit_for("paper-a", &format!("a:s{index}"), "Experiments", "locked", 0.9))
+            .map(|index| {
+                hit_for(
+                    "paper-a",
+                    &format!("a:s{index}"),
+                    "Experiments",
+                    "locked",
+                    0.9,
+                )
+            })
             .collect::<Vec<_>>();
         hits.push(hit_for(
             "paper-a",

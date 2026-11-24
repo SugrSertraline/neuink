@@ -145,6 +145,10 @@ pub struct SearchSegmentsBatchItem {
     /// The caller's top_k, kept off the wire so the ladder can cut after a wider recall.
     #[serde(skip)]
     pub requested_top_k: usize,
+    /// Optional English translation kept off the wire so rerankers can use it for CJK queries
+    /// over English papers.
+    #[serde(skip)]
+    pub english_query: Option<String>,
 }
 
 /// Fixed, path-free codes. Raw backend errors can contain workspace paths, so they are dropped.
@@ -226,6 +230,8 @@ pub struct SearchIndexBuildStatus {
 struct CachedWorkspaceIndex {
     fingerprint: u64,
     index: Arc<MemorySearchIndex>,
+    surrounding_contexts: Arc<neuink_search::SegmentContextMap>,
+    visual_page_segments: Arc<neuink_search::VisualPageSegments>,
     last_used: Instant,
 }
 
@@ -252,7 +258,7 @@ static SEARCH_BUILD_STATUS: OnceLock<Mutex<HashMap<String, SearchIndexBuildStatu
 static SEMANTIC_BUILD_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 static SEMANTIC_AUTO_REBUILD_KEYS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
-pub fn spawn_search_cache_workers<R: tauri::Runtime>(_app: tauri::AppHandle<R>) {
+pub fn spawn_search_cache_workers<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
     // Keep cache eviction alive at startup. Legacy semantic snapshots are
     // rebuilt lazily in a detached worker on the first semantic request, so
     // keyword search remains available while the new index is prepared.
@@ -260,6 +266,47 @@ pub fn spawn_search_cache_workers<R: tauri::Runtime>(_app: tauri::AppHandle<R>) 
         .name("neuink-search-cache-cleanup".to_string())
         .spawn(clean_search_caches_loop)
         .ok();
+
+    // Warm configured local retrieval models (and installed on-demand local visual
+    // service) shortly after startup so the first assistant query avoids cold load.
+    thread::Builder::new()
+        .name("neuink-retrieval-prewarm".to_string())
+        .spawn(move || prewarm_retrieval_models(app))
+        .ok();
+}
+
+fn prewarm_retrieval_models<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+    use neuink_config::{
+        RerankMode, RerankTransport, TextEmbeddingProviderKind, VisualEmbeddingProviderKind,
+        VisualServiceStartup,
+    };
+
+    thread::sleep(Duration::from_millis(1500));
+    let Ok(saved) = crate::storage::read_settings(&app) else {
+        return;
+    };
+
+    if saved.text_model.provider == TextEmbeddingProviderKind::LocalOnnx {
+        if let Ok(provider) = text_provider_for_app(&app) {
+            if provider.status().available {
+                let _ = semantic_embedding_identity(provider.as_ref());
+                let _ = provider.embed(&[]);
+            }
+        }
+    }
+
+    if saved.rerank.mode == RerankMode::CrossEncoder
+        && saved.rerank.transport == RerankTransport::Local
+    {
+        let _ = resolve_rerank(&app);
+    }
+
+    if saved.visual.provider == VisualEmbeddingProviderKind::QwenLocal
+        && saved.visual.startup == VisualServiceStartup::OnDemand
+        && ready_visual_runtime(&app).is_some()
+    {
+        let _ = ensure_visual_service(&app);
+    }
 }
 
 #[tauri::command]
@@ -293,19 +340,18 @@ pub async fn search_segments<R: tauri::Runtime>(
     request: SearchSegmentsRequest,
 ) -> Result<SearchResults, String> {
     let provider = text_provider_for_app(&app)?;
+    let saved = crate::storage::read_settings(&app)?;
+    let multivector = saved.retrieval.multivector;
+    let (rerank, rerank_provider, scope_judge, listwise) = resolve_rerank(&app)?;
     tokio::task::spawn_blocking(move || {
-        run_search_bundle(
+        run_segments_single(
             provider,
-            request.root,
-            request.query,
-            request.english_query,
-            request.sub_queries,
-            request.scope_entry_ids,
-            request.mode,
-            request.top_k.unwrap_or(20).clamp(1, 20),
-            true,
-            request.section_filter,
-            parse_segment_types(&request.segment_types),
+            rerank,
+            rerank_provider,
+            scope_judge,
+            listwise,
+            multivector,
+            request,
         )
     })
     .await
@@ -329,6 +375,25 @@ struct PreparedSearch {
     surrounding_contexts: Arc<neuink_search::SegmentContextMap>,
     /// Zero-I/O page-to-segment map for within-paper visual sidecar evidence rescue.
     visual_page_segments: Arc<neuink_search::VisualPageSegments>,
+    /// Per-request query-vector memoization so routing, evidence, and chapter
+    /// supplementation never re-embed the same query string twice.
+    query_vectors: Mutex<HashMap<String, Vec<f32>>>,
+}
+
+impl PreparedSearch {
+    pub(super) fn embed_query(&self, text: &str) -> Result<Vec<f32>, neuink_search::SearchError> {
+        let key = text.trim();
+        if let Ok(cache) = self.query_vectors.lock() {
+            if let Some(vector) = cache.get(key) {
+                return Ok(vector.clone());
+            }
+        }
+        let vector = embed_query_vector(self.provider.as_ref(), key)?;
+        if let Ok(mut cache) = self.query_vectors.lock() {
+            cache.insert(key.to_string(), vector.clone());
+        }
+        Ok(vector)
+    }
 }
 
 fn prepare_search(
@@ -348,7 +413,7 @@ fn prepare_search(
         .cloned()
         .filter_map(search_document)
         .collect::<Vec<_>>();
-    let keyword = cached_index(
+    let (keyword, surrounding_contexts, visual_page_segments) = cached_workspace_bundle(
         root,
         &options,
         records_fingerprint(&records),
@@ -395,12 +460,9 @@ fn prepare_search(
                 .filter(|entry| seen.insert(entry.clone()))
                 .collect()
         },
-        surrounding_contexts: Arc::new(neuink_search::SegmentContextMap::from_documents(
-            &documents,
-        )),
-        visual_page_segments: Arc::new(neuink_search::VisualPageSegments::from_documents(
-            &documents,
-        )),
+        surrounding_contexts,
+        visual_page_segments,
+        query_vectors: Mutex::new(HashMap::new()),
     })
 }
 
@@ -419,7 +481,6 @@ fn run_single_query(
 ) -> Result<SearchResults, String> {
     let primary = primary.trim().to_string();
     let keyword = prepared.keyword.as_ref();
-    let provider = prepared.provider.as_ref();
     // A keyword query never uses the semantic index, even when a sibling task in
     // the same batch needed it and it was prepared.
     let semantic = prepared
@@ -458,7 +519,7 @@ fn run_single_query(
         let mut query = template.clone();
         query.text = text.clone();
         let vector = if semantic.is_some() {
-            embed_query_vector(provider, text).ok()
+            prepared.embed_query(text).ok()
         } else {
             None
         };
@@ -543,6 +604,69 @@ fn run_search_bundle(
     )
 }
 
+fn run_segments_single(
+    provider: Arc<dyn EmbeddingProvider>,
+    rerank: neuink_config::RerankSettings,
+    rerank_provider: Option<Arc<dyn neuink_search::RerankProvider>>,
+    scope_judge: Option<Arc<dyn neuink_search::ScopeJudgeProvider>>,
+    listwise: Option<Arc<dyn neuink_search::ListwiseRerankProvider>>,
+    multivector: neuink_config::MultivectorPoolSettings,
+    request: SearchSegmentsRequest,
+) -> Result<SearchResults, String> {
+    let primary = request.query.trim().to_string();
+    if primary.is_empty() {
+        return Err("query is required".into());
+    }
+    let requested_top_k = request.top_k.unwrap_or(20).clamp(1, 20);
+    let recall_limit =
+        rerank_stage::effective_recall_window(requested_top_k, &rerank, &multivector);
+    let pool_provider = provider.clone();
+    let prepared = prepare_search(
+        provider,
+        &request.root,
+        true,
+        request.mode != SearchMode::Keyword,
+    )?;
+    let recalled = run_single_query(
+        &prepared,
+        &primary,
+        request.english_query.as_deref(),
+        &request.sub_queries,
+        request.scope_entry_ids,
+        request.mode,
+        recall_limit,
+        true,
+        request.section_filter,
+        parse_segment_types(&request.segment_types),
+    )?;
+    let cache_root = WorkspaceLayout::new(request.root)
+        .cache_dir()
+        .join("search");
+    let (pooled, _) = multivector_stage::rescore_results_with_cache(
+        recalled,
+        &multivector,
+        pool_provider.as_ref(),
+        Some(&cache_root),
+    );
+    let (mut reranked, outcome) = unified::rerank_task_results_with_english(
+        pooled,
+        &primary,
+        request.english_query.as_deref(),
+        &rerank,
+        rerank_provider.as_deref(),
+        scope_judge.as_deref(),
+        listwise.as_deref(),
+        requested_top_k,
+    );
+    reranked.rerank_used = Some(outcome.used.to_string());
+    neuink_search::attach_surrounding_context(
+        &mut reranked,
+        &prepared.surrounding_contexts,
+        neuink_search::DEFAULT_SURROUNDING_CONTEXT_TOP_N,
+    );
+    Ok(reranked)
+}
+
 #[tauri::command]
 pub async fn search_segments_batch<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -613,7 +737,7 @@ fn resolve_rerank<R: tauri::Runtime>(
     let scope_judge = rerank_stage::scope_judge_for(&settings, assistant.as_ref())
         .map(|judge| Arc::new(judge) as Arc<dyn neuink_search::ScopeJudgeProvider>);
     let listwise = rerank_stage::listwise_reranker_for(&settings, assistant.as_ref())
-        .map(|reranker| Arc::new(reranker) as Arc<dyn neuink_search::ListwiseRerankProvider>);
+        .map(|reranker| reranker as Arc<dyn neuink_search::ListwiseRerankProvider>);
     Ok((settings, provider, scope_judge, listwise))
 }
 
@@ -666,9 +790,10 @@ fn apply_batch_rerank_with_cache(
                     ),
                     None => (results, None),
                 };
-                let (reranked, outcome) = unified::rerank_task_results(
+                let (reranked, outcome) = unified::rerank_task_results_with_english(
                     results,
                     &question,
+                    item.english_query.as_deref(),
                     settings,
                     provider,
                     scope_judge,
@@ -685,6 +810,7 @@ fn apply_batch_rerank_with_cache(
                     pool_used: pool.map(|mark| mark.used),
                     pool_reason: pool.and_then(|mark| mark.reason),
                     requested_top_k: item.requested_top_k,
+                    english_query: item.english_query,
                 }
             }
             None => item,
@@ -715,7 +841,19 @@ fn run_segments_batch(
         },
         |prepared, task| {
             let requested = task.top_k.unwrap_or(20).clamp(1, 20);
-            run_single_query(
+            let segment_types = parse_segment_types(&task.segment_types);
+            let scope_for_chapters: Vec<String> = if task.scope_entry_ids.is_empty() {
+                prepared.entries.clone()
+            } else {
+                task.scope_entry_ids
+                    .iter()
+                    .map(|id| id.as_str().to_string())
+                    .collect()
+            };
+            let section_filter_for_chapters = task.section_filter.clone();
+            let english_for_chapters = task.english_query.clone();
+            let query_for_chapters = task.query.clone();
+            let recalled = run_single_query(
                 prepared,
                 &task.query,
                 task.english_query.as_deref(),
@@ -725,11 +863,43 @@ fn run_segments_batch(
                 rerank_stage::effective_recall_window(requested, &rerank, &multivector),
                 true,
                 task.section_filter,
-                parse_segment_types(&task.segment_types),
-            )
+                segment_types.clone(),
+            )?;
+            let rerank_active =
+                rerank.mode == neuink_config::RerankMode::CrossEncoder || rerank.listwise.enabled;
+            let rerank_window = if rerank_active {
+                rerank_stage::recall_window(requested, &rerank)
+            } else {
+                0
+            };
+            if rerank_active && rerank_window >= 6 {
+                let chapter_query = english_for_chapters
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|eng| !eng.is_empty() && contains_cjk(&query_for_chapters))
+                    .unwrap_or(&query_for_chapters);
+                if let (Some(semantic), Ok(query_vec)) = (
+                    prepared.semantic.as_deref(),
+                    prepared.embed_query(chapter_query),
+                ) {
+                    return Ok(neuink_search::supplement_hits_from_chapters(
+                        recalled,
+                        semantic,
+                        &query_vec,
+                        &scope_for_chapters,
+                        &segment_types,
+                        section_filter_for_chapters.as_deref(),
+                        rerank_window,
+                        3,
+                        4,
+                        10,
+                    ));
+                }
+            }
+            Ok(recalled)
         },
     )?;
-    let cache_root = root.join(".neuink").join("cache");
+    let cache_root = WorkspaceLayout::new(root).cache_dir().join("search");
     let mut reranked = apply_batch_rerank_with_cache(
         items,
         &rerank,
@@ -790,6 +960,7 @@ fn collect_segments_batch<P>(
             }
             let task_id = task.task_id.clone();
             let requested_top_k = task.top_k.unwrap_or(20).clamp(1, 20);
+            let english_query = task.english_query.clone();
             match run(&prepared, task) {
                 Ok(results) => SearchSegmentsBatchItem {
                     task_id,
@@ -802,6 +973,7 @@ fn collect_segments_batch<P>(
                     pool_used: None,
                     pool_reason: None,
                     requested_top_k,
+                    english_query,
                 },
                 Err(_) => batch_error_item(task_id, BATCH_SEARCH_FAILED),
             }
@@ -820,6 +992,7 @@ fn batch_error_item(task_id: String, error: SearchSegmentsTaskError) -> SearchSe
         pool_used: None,
         pool_reason: None,
         requested_top_k: 0,
+        english_query: None,
     }
 }
 
@@ -983,6 +1156,7 @@ pub fn rebuild_search_index_impl(
         vec![search_scope_options(false), search_scope_options(true)]
     };
     let mut semantic_document_count = 0;
+    let mut shared_vectors: HashMap<String, Vec<f32>> = HashMap::new();
     for (options, include) in scopes {
         // Each scope must fingerprint the exact record set its searches use,
         // otherwise the disk snapshot never matches at query time.
@@ -1008,7 +1182,7 @@ pub fn rebuild_search_index_impl(
             documents.clone(),
         )?;
         let _ = keyword_index.generation();
-        let _ = cached_semantic_index(
+        let semantic_index = cached_semantic_index(
             &request.root,
             &options,
             semantic_fingerprint,
@@ -1020,8 +1194,10 @@ pub fn rebuild_search_index_impl(
             } else {
                 "global"
             }),
+            shared_vectors.clone(),
         )
         .map_err(|error| error.to_string())?;
+        shared_vectors.extend(semantic_index.export_vectors());
     }
 
     let status = get_search_index_status_impl(
@@ -1043,22 +1219,49 @@ fn cached_index(
     fingerprint: u64,
     documents: Vec<SearchDocument>,
 ) -> Result<Arc<MemorySearchIndex>, String> {
+    cached_workspace_bundle(root, options, fingerprint, documents).map(|(index, _, _)| index)
+}
+
+#[allow(clippy::type_complexity)]
+fn cached_workspace_bundle(
+    root: &PathBuf,
+    options: &WorkspaceSearchOptions,
+    fingerprint: u64,
+    documents: Vec<SearchDocument>,
+) -> Result<
+    (
+        Arc<MemorySearchIndex>,
+        Arc<neuink_search::SegmentContextMap>,
+        Arc<neuink_search::VisualPageSegments>,
+    ),
+    String,
+> {
     let cache_key = workspace_cache_key(root, options);
     let cache = SEARCH_INDEX_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
 
-    if let Some(index) = cache
+    if let Some(bundle) = cache
         .lock()
         .map_err(|_| "search cache lock is poisoned".to_string())?
         .get_mut(&cache_key)
         .filter(|cached| cached.fingerprint == fingerprint)
         .map(|cached| {
             cached.last_used = Instant::now();
-            cached.index.clone()
+            (
+                cached.index.clone(),
+                cached.surrounding_contexts.clone(),
+                cached.visual_page_segments.clone(),
+            )
         })
     {
-        return Ok(index);
+        return Ok(bundle);
     }
 
+    let surrounding_contexts = Arc::new(neuink_search::SegmentContextMap::from_documents(
+        &documents,
+    ));
+    let visual_page_segments = Arc::new(neuink_search::VisualPageSegments::from_documents(
+        &documents,
+    ));
     let index = Arc::new(MemorySearchIndex::default());
     index
         .replace_documents(documents)
@@ -1071,11 +1274,13 @@ fn cached_index(
         CachedWorkspaceIndex {
             fingerprint,
             index: index.clone(),
+            surrounding_contexts: surrounding_contexts.clone(),
+            visual_page_segments: visual_page_segments.clone(),
             last_used: Instant::now(),
         },
     );
     trim_workspace_cache(&mut cache);
-    Ok(index)
+    Ok((index, surrounding_contexts, visual_page_segments))
 }
 
 /// Files whose length or mtime changes when a model is replaced in place. The
@@ -1193,6 +1398,7 @@ fn cached_semantic_index(
     documents: &[SearchDocument],
     provider: Arc<dyn EmbeddingProvider>,
     progress_scope: Option<&str>,
+    seed_vectors: HashMap<String, Vec<f32>>,
 ) -> Result<Arc<PersistentSemanticSearchIndex>, neuink_search::SearchError> {
     let identity = semantic_embedding_identity(provider.as_ref());
     let cache_key = model_semantic_cache_key(root, options, include, identity.as_deref());
@@ -1238,12 +1444,13 @@ fn cached_semantic_index(
             ),
         );
     };
-    let index_result = PersistentSemanticSearchIndex::open_or_build_with_progress(
+    let index_result = PersistentSemanticSearchIndex::open_or_build_with_seed_and_progress(
         index_path,
         documents,
         provider.as_ref(),
         include,
         records_fingerprint,
+        seed_vectors,
         &progress,
     );
     let index = match index_result {
@@ -1337,9 +1544,13 @@ fn schedule_legacy_semantic_rebuild(
     let cache_dir = WorkspaceLayout::new(root.clone()).cache_dir();
     let identity = semantic_embedding_identity(provider.as_ref());
     let namespace = semantic_cache_namespace(root, options, include, identity.as_deref());
-    let index_path = semantic_index_path(cache_dir, &namespace);
+    let index_path = semantic_index_path(cache_dir.clone(), &namespace);
     let cache_status = read_semantic_disk_cache_status(&index_path);
-    if !should_schedule_legacy_semantic_rebuild(cache_status.as_ref(), provider.status().available)
+    let has_stale_sibling =
+        cache_status.is_none() && has_any_semantic_disk_snapshot(&cache_dir.join("search"));
+    let provider_ready = provider.status().available;
+    if !should_schedule_legacy_semantic_rebuild(cache_status.as_ref(), provider_ready)
+        && !(provider_ready && has_stale_sibling)
     {
         return;
     }
@@ -1380,6 +1591,7 @@ fn schedule_legacy_semantic_rebuild(
                 &documents,
                 provider,
                 Some(scope),
+                HashMap::new(),
             );
             if let Err(error) = result {
                 fail_search_build(&root, &error.to_string());
@@ -1403,7 +1615,23 @@ fn should_schedule_legacy_semantic_rebuild(
     provider_available: bool,
 ) -> bool {
     provider_available
-        && cache_status.is_some_and(|status| status.version != SEMANTIC_INDEX_FORMAT_VERSION)
+        && cache_status.is_some_and(|status| {
+            status.version != SEMANTIC_INDEX_FORMAT_VERSION
+                || status.representation_version != neuink_search::EMBEDDING_REPRESENTATION_VERSION
+        })
+}
+
+fn has_any_semantic_disk_snapshot(search_cache_dir: &std::path::Path) -> bool {
+    let Ok(entries) = fs::read_dir(search_cache_dir) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            return false;
+        };
+        name.starts_with("semantic-") && name.ends_with(".vectors.json")
+    })
 }
 
 /// `None` for an unknown model identity. Such entries are never stored or reused
@@ -2216,6 +2444,7 @@ mod tests {
                 ],
             }],
             warnings: Vec::new(),
+            rerank_used: None,
         };
 
         let filtered = filter_segment_search_results(results, 1);
@@ -2297,6 +2526,14 @@ mod tests {
         ));
         assert!(!super::should_schedule_legacy_semantic_rebuild(
             Some(&current),
+            true
+        ));
+        let stale_rep = super::SemanticDiskCacheStatus {
+            representation_version: neuink_search::EMBEDDING_REPRESENTATION_VERSION.saturating_sub(1),
+            ..current
+        };
+        assert!(super::should_schedule_legacy_semantic_rebuild(
+            Some(&stale_rep),
             true
         ));
         assert!(!super::should_schedule_legacy_semantic_rebuild(None, true));
@@ -2399,6 +2636,7 @@ mod tests {
             total_hit_count: 0,
             entries: Vec::new(),
             warnings: Vec::new(),
+            rerank_used: None,
         }
     }
 
@@ -2590,6 +2828,7 @@ mod tests {
             entries: vec!["entry-a".to_string(), "entry-b".to_string()],
             surrounding_contexts: Arc::new(neuink_search::SegmentContextMap::default()),
             visual_page_segments: Arc::new(neuink_search::VisualPageSegments::default()),
+            query_vectors: std::sync::Mutex::new(std::collections::HashMap::new()),
         }
     }
 
@@ -2881,6 +3120,7 @@ pub fn save_visual_embedding_settings<R: tauri::Runtime>(
     merged.validate()?;
     saved.visual = merged;
     crate::storage::write_settings(&app, &saved)?;
+    visual::invalidate_provider_cache();
     Ok(VisualEmbeddingSettingsState::from_settings(&saved.visual))
 }
 
@@ -2903,7 +3143,11 @@ pub async fn search_unified<R: tauri::Runtime>(
     let multivector = saved.retrieval.multivector;
     let (rerank_settings, rerank_provider, scope_judge, listwise) = resolve_rerank(&app)?;
     tokio::task::spawn_blocking(move || {
-        let visual_provider = visual::provider_for(&visual_settings);
+        let visual_provider = if visual::has_visual_snapshot(&request.root) {
+            visual::provider_for_query(&visual_settings)
+        } else {
+            visual::index_missing_provider()
+        };
         unified::run_unified_search(
             provider,
             visual_provider,
@@ -3824,8 +4068,7 @@ pub fn get_visual_runtime_state<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     id: String,
 ) -> Result<Option<crate::commands::search::visual_runtime::VisualRuntimeState>, String> {
-    let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
-    Ok(crate::commands::search::visual_runtime::load_state(&resource_dir, &id))
+    Ok(find_visual_runtime_state(&app, &id).map(|(_, state)| state))
 }
 
 /// One action: isolated Python environment, CPU inference dependencies and model weights.
@@ -3854,7 +4097,10 @@ pub async fn download_visual_weights<R: tauri::Runtime>(
     reuse_model_dir: Option<String>,
 ) -> Result<crate::commands::search::visual_runtime::VisualRuntimeState, String> {
     tokio::task::spawn_blocking(move || {
-        let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
+        let resource_dir = match find_visual_runtime_state(&app, &id) {
+            Some((dir, _)) => dir,
+            None => app.path().resource_dir().map_err(|error| error.to_string())?,
+        };
         let reuse = reuse_model_dir.map(std::path::PathBuf::from);
         crate::commands::search::visual_runtime::download_missing_weights(
             &resource_dir,
@@ -3915,18 +4161,22 @@ pub async fn start_visual_service<R: tauri::Runtime>(
     id: String,
 ) -> Result<u32, String> {
     tokio::task::spawn_blocking(move || {
+        let _start_guard = visual_runtime::start_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if visual_service_listening() {
+            visual::invalidate_provider_cache();
             return Ok(0);
         }
-        let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
         let script = visual_service_script(&app)?;
-        let state = visual_runtime::load_state(&resource_dir, &id)
+        let (_, state) = find_visual_runtime_state(&app, &id)
             .ok_or_else(|| "视觉服务尚未安装".to_string())?;
         let pid = visual_runtime::start_with_state(&state, &script)?;
         // Loading the 4 GB checkpoint takes tens of seconds; only report success once the
         // port answers, so the settings screen can show "running" instead of guessing.
         for _ in 0..180 {
             if visual_service_listening() {
+                visual::invalidate_provider_cache();
                 break;
             }
             std::thread::sleep(std::time::Duration::from_secs(1));
@@ -3977,28 +4227,27 @@ fn ensure_visual_service<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result
     if settings.provider != VisualEmbeddingProviderKind::QwenLocal {
         return Ok("远程视觉编码，无需本机服务".to_string());
     }
+    let _start_guard = visual_runtime::start_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let provider = visual::provider_for(&settings);
     if neuink_search::check_provider(provider.as_ref())
         .unavailable_reason
         .is_none()
     {
+        visual::invalidate_provider_cache();
         return Ok("视觉编码服务已在运行".to_string());
     }
     if settings.startup == VisualServiceStartup::Manual {
         return Err("service_unreachable：启动策略为手动，请先启动视觉服务".to_string());
     }
 
-    let Some((id, state)) = ready_visual_runtime(app) else {
+    let Some((_id, state)) = ready_visual_runtime(app) else {
         return Err(
             "service_unreachable：尚未安装视觉服务依赖与模型，请先在“视觉编码模型”里一键安装"
                 .to_string(),
         );
     };
-    let _id = id.to_string();
-    // The runtime state carries absolute paths, so the directory passed to `start` only has
-    // to satisfy its path resolution, not hold the weights.
-    let resource_dir = std::path::PathBuf::from(&state.env_dir);
-    let _resource_dir = resource_dir.parent().unwrap_or(&resource_dir).to_path_buf();
     let script = visual_service_script(app)?;
     let pid = visual_runtime::start_with_state(&state, &script)?;
     // Give the interpreter a moment to bind the port before the caller probes it.
@@ -4010,6 +4259,7 @@ fn ensure_visual_service<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result
             .unavailable_reason
             .is_none()
         {
+            visual::invalidate_provider_cache();
             return Ok(format!("视觉编码服务已自动启动（进程 {pid}）"));
         }
     }
@@ -4049,6 +4299,30 @@ fn visual_runtime_roots<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Vec<std
     roots
 }
 
+/// Looks up a prepared visual runtime state for `id` across every candidate resource layout,
+/// returning both the owning resource directory and the parsed state.
+fn find_visual_runtime_state_in_roots(
+    roots: &[std::path::PathBuf],
+    id: &str,
+) -> Option<(std::path::PathBuf, visual_runtime::VisualRuntimeState)> {
+    for root in roots {
+        let Some(parent) = root.parent() else {
+            continue;
+        };
+        if let Some(state) = visual_runtime::load_state(parent, id) {
+            return Some((parent.to_path_buf(), state));
+        }
+    }
+    None
+}
+
+fn find_visual_runtime_state<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    id: &str,
+) -> Option<(std::path::PathBuf, visual_runtime::VisualRuntimeState)> {
+    find_visual_runtime_state_in_roots(&visual_runtime_roots(app), id)
+}
+
 /// First root that actually contains a prepared model.
 fn ready_visual_runtime<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<(String, visual_runtime::VisualRuntimeState)> {
     for root in visual_runtime_roots(app) {
@@ -4070,6 +4344,53 @@ fn ready_visual_runtime<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<
         }
     }
     None
+}
+
+#[cfg(test)]
+mod visual_runtime_lookup_tests {
+    use super::*;
+
+    #[test]
+    fn find_visual_runtime_state_falls_back_to_nested_resources_layout() {
+        let base = std::env::temp_dir().join(format!(
+            "neuink-visual-lookup-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let nested_resources = base.join("resources");
+        let model_dir = nested_resources
+            .join("visual-service")
+            .join("qwen3-vl-embedding-2b");
+        std::fs::create_dir_all(&model_dir).expect("create dir");
+        let state = visual_runtime::VisualRuntimeState {
+            model_id: "qwen3-vl-embedding-2b".to_string(),
+            env_dir: "C:/fake/env".to_string(),
+            model_dir: "C:/fake/model".to_string(),
+            python: "C:/fake/env/python.exe".to_string(),
+            dependencies_installed: true,
+            model_present: true,
+            model_error: None,
+        };
+        std::fs::write(
+            model_dir.join("state.json"),
+            serde_json::to_vec(&state).expect("json"),
+        )
+        .expect("write state");
+
+        let roots = vec![
+            base.join("visual-service"),
+            nested_resources.join("visual-service"),
+        ];
+        let (found_parent, found_state) =
+            find_visual_runtime_state_in_roots(&roots, "qwen3-vl-embedding-2b")
+                .expect("should find nested state");
+        assert_eq!(found_parent, nested_resources);
+        assert!(found_state.dependencies_installed);
+        assert!(found_state.model_present);
+        std::fs::remove_dir_all(&base).ok();
+    }
 }
 
 

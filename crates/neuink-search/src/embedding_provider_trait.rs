@@ -107,7 +107,10 @@ pub trait EmbeddingProvider: Send + Sync {
     }
 
     /// Token-level vectors. Non-local providers fail closed.
-    fn encode_multivector_documents(&self, texts: &[String]) -> Result<Vec<MultivectorDocument>, String> {
+    fn encode_multivector_documents(
+        &self,
+        texts: &[String],
+    ) -> Result<Vec<MultivectorDocument>, String> {
         let _ = texts;
         Err("provider_unsupported".to_string())
     }

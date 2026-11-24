@@ -66,7 +66,9 @@ fn pages_regions_and_assets_are_encoded_then_ranked_from_one_snapshot() {
     // A parsed entry with a native PDF and two pages.
     let pdf_path = root.join("origin.pdf");
     std::fs::write(&pdf_path, b"%PDF-1.4\n%%EOF\n").expect("write pdf");
-    workspace.import_pdf(&entry.id, &pdf_path).expect("import pdf");
+    workspace
+        .import_pdf(&entry.id, &pdf_path)
+        .expect("import pdf");
     // Parse state follows the domain's transition table; the visual channel only accepts
     // a successfully parsed entry.
     for status in [
@@ -84,8 +86,10 @@ fn pages_regions_and_assets_are_encoded_then_ranked_from_one_snapshot() {
         .write_segments(
             &entry.id,
             &[
-                SourceSegment::new(SegmentType::Paragraph, 0, None, "page zero".to_string()),
-                SourceSegment::new(SegmentType::Paragraph, 1, None, "page one".to_string()),
+                SourceSegment::new(SegmentType::Figure, 0, None, "page zero".to_string())
+                    .with_asset_path(Some("images/fig1.jpg".to_string())),
+                SourceSegment::new(SegmentType::Table, 1, None, "page one".to_string())
+                    .with_asset_path(Some("images/table1.jpg".to_string())),
             ],
         )
         .expect("segments");
@@ -119,25 +123,28 @@ fn pages_regions_and_assets_are_encoded_then_ranked_from_one_snapshot() {
         PrepareVisualSearchIndexRequest { root: root.clone() },
     )
     .expect("prepare visual index");
-    // Two pages, five sources each (page + four crops), plus two MinerU assets.
+    // Both chart pages already have MinerU crops, so the PDF pages are not rendered again.
     assert_eq!(response.asset_count, 2);
-    assert_eq!(response.document_count, 12);
+    assert_eq!(response.document_count, 2);
     assert!(response.dimensions.unwrap_or_default() > 0);
 
     let mut channel = visual_channel(&root, provider);
     assert!(channel.status().is_ready(), "snapshot must reopen");
     let scores = channel
-        .recall("which value does the chart report?", &[entry.id.to_string()], 20)
+        .recall(
+            "which value does the chart report?",
+            &[entry.id.to_string()],
+            20,
+        )
         .expect("visual recall");
-    assert_eq!(scores.len(), 12);
-    assert!(scores.iter().any(|score| score.region.is_some()));
+    assert_eq!(scores.len(), 2);
+    assert!(scores.iter().all(|score| score.region.is_none()));
     assert!(scores
         .iter()
         .any(|score| score.parent_id.starts_with("asset:")));
 
     let parents = neuink_search::aggregate_parents(&scores);
-    // page:0, page:1 and the two assets: a region never adds a vote of its own.
-    assert_eq!(parents.len(), 4);
+    assert_eq!(parents.len(), 2);
 
     std::fs::remove_dir_all(&root).ok();
     let _ = VisualSourceKind::Page;

@@ -10,15 +10,17 @@
 //! model identity is used; anything else degrades to the text channel with a fixed
 //! reason, so an unprepared library never pays for a 500-asset encode.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use neuink_config::{VisualEmbeddingProviderKind, VisualEmbeddingSettings};
 use neuink_domain::EntryId;
 use neuink_search::{
     build_visual_index, check_provider, reopen_visual_index, visual_index_path, visual_namespace,
-    VisualChannelStatus, VisualEmbeddingProvider, VisualIndexDocument, VisualRecall, VisualScore,
+    visual_snapshot_keys, VisualChannelStatus, VisualEmbeddingProvider, VisualIndexDocument,
+    VisualRecall, VisualScore, VisualSearchIndex,
 };
 use neuink_workspace::{EntryVisualAsset, Workspace};
 use serde::{Deserialize, Serialize};
@@ -55,7 +57,9 @@ pub fn visual_index_status(root: &Path) -> Result<VisualIndexStatusResponse, Str
     if let Ok(entries) = std::fs::read_dir(&directory) {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
-            if !(name.starts_with("visual-") && name.ends_with(".vectors.json")) {
+            if !(name.starts_with("visual-")
+                && (name.ends_with(".vectors.bin") || name.ends_with(".vectors.json")))
+            {
                 continue;
             }
             snapshot_count += 1;
@@ -97,7 +101,7 @@ pub struct PrepareVisualSearchIndexResponse {
 pub struct VisualChannel {
     status: VisualChannelStatus,
     provider: Arc<dyn VisualEmbeddingProvider>,
-    index: Option<neuink_search::VisualSearchIndex>,
+    index: Option<Arc<VisualSearchIndex>>,
     identity: Option<String>,
 }
 
@@ -134,12 +138,262 @@ impl VisualRecall for VisualChannel {
     }
 }
 
+const VISUAL_PROVIDER_CACHE_TTL: Duration = Duration::from_secs(60);
+const VISUAL_UNAVAILABLE_CACHE_TTL: Duration = Duration::from_secs(30);
+const FAST_INDEX_MISSING_PROVIDER: &str = "visual-index-missing";
+
+/// Cheap local stat check (`cache/search/visual-*.vectors.{bin,json}`) used by query
+/// paths to avoid probing an offline visual sidecar when no visual index has been built.
+pub fn has_visual_snapshot(root: &Path) -> bool {
+    visual_index_status(root)
+        .map(|status| status.built)
+        .unwrap_or(false)
+}
+
+struct IndexMissingVisualProvider;
+
+impl VisualEmbeddingProvider for IndexMissingVisualProvider {
+    fn status(&self) -> neuink_search::VisualProviderStatus {
+        neuink_search::VisualProviderStatus::unavailable(
+            FAST_INDEX_MISSING_PROVIDER,
+            "视觉索引尚未构建。",
+        )
+    }
+
+    fn identity(&self) -> Option<String> {
+        None
+    }
+
+    fn dimensions(&self) -> Option<usize> {
+        None
+    }
+
+    fn embed_assets(
+        &self,
+        _assets: &[neuink_search::VisualAssetInput],
+        _on_progress: &dyn Fn(usize, usize),
+    ) -> neuink_search::SearchResult<Vec<Vec<f32>>> {
+        Err(neuink_search::SearchError::EmbeddingUnavailable(
+            "视觉索引尚未构建。".to_string(),
+        ))
+    }
+
+    fn embed_query_text(&self, _text: &str) -> neuink_search::SearchResult<Vec<f32>> {
+        Err(neuink_search::SearchError::EmbeddingUnavailable(
+            "视觉索引尚未构建。".to_string(),
+        ))
+    }
+}
+
+/// Sentinel provider used when a query workspace has no visual snapshot on disk,
+/// allowing `visual_channel` to report `index_missing` without any HTTP probe.
+pub fn index_missing_provider() -> Arc<dyn VisualEmbeddingProvider> {
+    Arc::new(IndexMissingVisualProvider)
+}
+
+/// Clears cached visual providers (both positive and negative entries).
+/// Called when visual settings change or the local visual sidecar is started.
+pub fn invalidate_provider_cache() {
+    if let Some(cache) = VISUAL_PROVIDER_CACHE.get() {
+        if let Ok(mut guard) = cache.lock() {
+            guard.clear();
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct ProviderCacheKey {
+    kind: &'static str,
+    endpoint: String,
+    api_key: String,
+    timeout_ms: u64,
+}
+
+struct ProviderCacheEntry {
+    provider: Arc<dyn VisualEmbeddingProvider>,
+    stored_at: Instant,
+}
+
+static VISUAL_PROVIDER_CACHE: OnceLock<Mutex<HashMap<ProviderCacheKey, ProviderCacheEntry>>> =
+    OnceLock::new();
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct VisualIndexCacheKey {
+    root: String,
+    namespace: String,
+    include_pages: bool,
+}
+
+struct VisualIndexCacheEntry {
+    /// Source fingerprint at store time. A query hit must match the workspace now.
+    fingerprint: String,
+    /// Snapshot mtime at store time. A missing file or a rewritten snapshot misses.
+    snapshot_mtime_ms: Option<u64>,
+    index: Arc<VisualSearchIndex>,
+}
+
+static VISUAL_INDEX_CACHE: OnceLock<Mutex<HashMap<VisualIndexCacheKey, VisualIndexCacheEntry>>> =
+    OnceLock::new();
+
+fn index_cache_key(root: &Path, namespace: &str, include_pages: bool) -> VisualIndexCacheKey {
+    VisualIndexCacheKey {
+        root: root.to_string_lossy().into_owned(),
+        namespace: namespace.to_string(),
+        include_pages,
+    }
+}
+
+/// Milliseconds since the Unix epoch for the binary snapshot, or the legacy JSON
+/// beside it. `None` when neither file is present, so a deleted snapshot cannot hit.
+fn snapshot_mtime_ms(path: &Path) -> Option<u64> {
+    file_mtime_ms(path).or_else(|| file_mtime_ms(&path.with_extension("json")))
+}
+
+fn file_mtime_ms(path: &Path) -> Option<u64> {
+    std::fs::metadata(path).ok().and_then(|metadata| {
+        metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_millis() as u64)
+    })
+}
+
+fn load_visual_index(
+    root: &Path,
+    namespace: &str,
+    include_pages: bool,
+    fingerprint: &str,
+    mtime_ms: Option<u64>,
+) -> Option<Arc<VisualSearchIndex>> {
+    let mtime_ms = mtime_ms?;
+    let cache = VISUAL_INDEX_CACHE.get()?.lock().ok()?;
+    cache
+        .get(&index_cache_key(root, namespace, include_pages))
+        .filter(|entry| {
+            entry.fingerprint == fingerprint && entry.snapshot_mtime_ms == Some(mtime_ms)
+        })
+        .map(|entry| Arc::clone(&entry.index))
+}
+
+fn store_visual_index(
+    root: &Path,
+    namespace: &str,
+    include_pages: bool,
+    fingerprint: &str,
+    path: &Path,
+    index: Arc<VisualSearchIndex>,
+) {
+    let Some(cache) = VISUAL_INDEX_CACHE
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .ok()
+    else {
+        return;
+    };
+    let mut cache = cache;
+    let snapshot_mtime_ms = snapshot_mtime_ms(path);
+    cache.insert(
+        index_cache_key(root, namespace, include_pages),
+        VisualIndexCacheEntry {
+            fingerprint: fingerprint.to_string(),
+            snapshot_mtime_ms,
+            index,
+        },
+    );
+}
+
 /// Builds the provider named by the settings. Both transports return the same trait
 /// object, so every caller below is provider-agnostic: local or remote is a settings
 /// change, never a code path.
+///
+/// A provider whose health check succeeded is reused for 60 seconds, so a search does
+/// not open `GET /health` on every question. An unavailable provider is not cached.
 pub fn provider_for(settings: &VisualEmbeddingSettings) -> Arc<dyn VisualEmbeddingProvider> {
+    let key = ProviderCacheKey {
+        kind: settings.provider.as_str(),
+        endpoint: settings.endpoint.clone().unwrap_or_default(),
+        api_key: settings.api_key.clone().unwrap_or_default(),
+        timeout_ms: settings.timeout_ms,
+    };
+    if let Some(cache) = VISUAL_PROVIDER_CACHE
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .ok()
+    {
+        if let Some(entry) = cache.get(&key) {
+            if entry.provider.status().available
+                && entry.stored_at.elapsed() < VISUAL_PROVIDER_CACHE_TTL
+            {
+                return Arc::clone(&entry.provider);
+            }
+        }
+    }
+    let provider = build_provider(settings);
+    if provider.status().available {
+        if let Some(mut cache) = VISUAL_PROVIDER_CACHE
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .ok()
+        {
+            cache.insert(
+                key,
+                ProviderCacheEntry {
+                    provider: Arc::clone(&provider),
+                    stored_at: Instant::now(),
+                },
+            );
+        }
+    }
+    provider
+}
+
+/// Query-path provider lookup. Unlike `provider_for` (which serves live status screens
+/// and startup polling), this caches unreachable states briefly (`30s`) so offline local
+/// sidecars do not stall repeated searches with loopback connection-refused retries.
+pub fn provider_for_query(settings: &VisualEmbeddingSettings) -> Arc<dyn VisualEmbeddingProvider> {
+    let key = ProviderCacheKey {
+        kind: settings.provider.as_str(),
+        endpoint: settings.endpoint.clone().unwrap_or_default(),
+        api_key: settings.api_key.clone().unwrap_or_default(),
+        timeout_ms: settings.timeout_ms,
+    };
+    if let Some(cache) = VISUAL_PROVIDER_CACHE
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .ok()
+    {
+        if let Some(entry) = cache.get(&key) {
+            let ttl = if entry.provider.status().available {
+                VISUAL_PROVIDER_CACHE_TTL
+            } else {
+                VISUAL_UNAVAILABLE_CACHE_TTL
+            };
+            if entry.stored_at.elapsed() < ttl {
+                return Arc::clone(&entry.provider);
+            }
+        }
+    }
+    let provider = build_provider(settings);
+    if let Some(mut cache) = VISUAL_PROVIDER_CACHE
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .ok()
+    {
+        cache.insert(
+            key,
+            ProviderCacheEntry {
+                provider: Arc::clone(&provider),
+                stored_at: Instant::now(),
+            },
+        );
+    }
+    provider
+}
+
+fn build_provider(settings: &VisualEmbeddingSettings) -> Arc<dyn VisualEmbeddingProvider> {
     let endpoint = settings.endpoint.clone().unwrap_or_default();
-    let timeout = std::time::Duration::from_millis(settings.timeout_ms.max(1));
+    let timeout = Duration::from_millis(settings.timeout_ms.max(1));
     match settings.provider {
         VisualEmbeddingProviderKind::QwenLocal => {
             Arc::new(QwenVisualServiceProvider::from_local(endpoint, timeout))
@@ -151,9 +405,11 @@ pub fn provider_for(settings: &VisualEmbeddingSettings) -> Arc<dyn VisualEmbeddi
         )),
         // A stored value this build no longer runs. It reports why instead of silently
         // searching text-only, so the settings screen can tell the user what to change.
-        VisualEmbeddingProviderKind::Retired => Arc::new(
-            neuink_search::NoVisualProvider::with_message("当前视觉编码器已停用，请改选 Qwen 服务。"),
-        ),
+        VisualEmbeddingProviderKind::Retired => {
+            Arc::new(neuink_search::NoVisualProvider::with_message(
+                "当前视觉编码器已停用，请改选 Qwen 服务。",
+            ))
+        }
     }
 }
 
@@ -169,6 +425,9 @@ pub(super) fn visual_channel(
         index: None,
         identity: None,
     };
+    if provider.status().provider == FAST_INDEX_MISSING_PROVIDER {
+        return unavailable(VISUAL_REASON_INDEX_MISSING);
+    }
     let check = check_provider(provider.as_ref());
     if check.unavailable_reason.is_some() {
         return unavailable(VISUAL_REASON_MODEL_UNAVAILABLE);
@@ -176,11 +435,29 @@ pub(super) fn visual_channel(
     let (Some(identity), Some(dimensions)) = (provider.identity(), provider.dimensions()) else {
         return unavailable(VISUAL_REASON_MODEL_UNAVAILABLE);
     };
-    // The document set must match what the snapshot was built with, so page sources are
-    // included exactly when this transport could have produced them.
     // Page sources need a rasterizer, not a particular transport: both the local service
     // and a remote API receive images from this process.
     let include_pages = super::page_render::available();
+    let namespace = visual_namespace(&identity, dimensions);
+    // Fingerprint and snapshot mtime are metadata stats. A hit must not unzip a
+    // MinerU archive or read the vector body.
+    let workspace = match Workspace::open(root) {
+        Ok(workspace) => workspace,
+        Err(_) => return unavailable(VISUAL_REASON_INDEX_MISSING),
+    };
+    let path = visual_index_path(&workspace.layout().cache_dir(), &namespace);
+    let fingerprint = sources_fingerprint(&workspace).ok();
+    let mtime_ms = snapshot_mtime_ms(&path);
+    if let Some(fp) = fingerprint.as_deref() {
+        if let Some(index) = load_visual_index(root, &namespace, include_pages, fp, mtime_ms) {
+            return VisualChannel {
+                status: VisualChannelStatus::Ready,
+                provider,
+                index: Some(index),
+                identity: Some(identity),
+            };
+        }
+    }
     let documents = match collect_assets(root, include_pages) {
         Ok(collected) => collected.documents,
         Err(_) => return unavailable(VISUAL_REASON_INDEX_MISSING),
@@ -188,19 +465,26 @@ pub(super) fn visual_channel(
     if documents.is_empty() {
         return unavailable(VISUAL_REASON_INDEX_MISSING);
     }
-    let workspace = match Workspace::open(root) {
-        Ok(workspace) => workspace,
-        Err(_) => return unavailable(VISUAL_REASON_INDEX_MISSING),
-    };
-    let namespace = visual_namespace(&identity, dimensions);
-    let path = visual_index_path(&workspace.layout().cache_dir(), &namespace);
     match reopen_visual_index(&path, &identity, dimensions, &documents) {
-        Ok(Some(index)) => VisualChannel {
-            status: VisualChannelStatus::Ready,
-            provider,
-            index: Some(index),
-            identity: Some(identity),
-        },
+        Ok(Some(index)) => {
+            let index = Arc::new(index);
+            if let Some(fp) = fingerprint.as_deref() {
+                store_visual_index(
+                    root,
+                    &namespace,
+                    include_pages,
+                    fp,
+                    &path,
+                    Arc::clone(&index),
+                );
+            }
+            VisualChannel {
+                status: VisualChannelStatus::Ready,
+                provider,
+                index: Some(index),
+                identity: Some(identity),
+            }
+        }
         _ => unavailable(VISUAL_REASON_INDEX_MISSING),
     }
 }
@@ -258,32 +542,78 @@ pub fn prepare_visual_index(
         .map(|document| document.entry_id.as_str())
         .collect::<std::collections::BTreeSet<_>>()
         .len();
-    // Bytes are read only here: the query path never touches the ZIP.
+    let existing_keys = visual_snapshot_keys(&path, &identity, dimensions);
+    // Bytes are read only for sources the snapshot does not already hold. One ZIP open
+    // covers every missing crop of a paper. The builder still looks each key up, so the
+    // bytes stay until that build finishes.
     let mut asset_bytes = BTreeMap::new();
+    let mut pending_assets: BTreeMap<EntryId, Vec<(String, String)>> = BTreeMap::new();
     for (entry_id, relative_path, key) in &asset_coordinates {
-        let bytes = workspace
-            .entry_asset_bytes(entry_id, relative_path)
+        if existing_keys.contains(key) {
+            continue;
+        }
+        pending_assets
+            .entry(entry_id.clone())
+            .or_default()
+            .push((relative_path.clone(), key.clone()));
+    }
+    for (entry_id, pending) in &pending_assets {
+        let paths = pending
+            .iter()
+            .map(|(relative_path, _)| relative_path.clone())
+            .collect::<Vec<_>>();
+        let loaded = workspace
+            .entry_assets_bytes_batch(entry_id, &paths)
             .map_err(|error| error.to_string())?;
-        asset_bytes.insert(key.clone(), bytes);
+        for (relative_path, key) in pending {
+            let bytes = loaded.get(relative_path).cloned().ok_or_else(|| {
+                format!("视觉索引缺少图像字节：{relative_path}")
+            })?;
+            asset_bytes.insert(key.clone(), bytes);
+        }
     }
     // Page and region vectors: rasterize the PDF in-process with the bound PDFium and let
     // build_visual_index embed the PNG bytes with everything else. The local service is
     // image-only now (its /embed_pages endpoint is deprecated), so the product owns
-    // rasterization for both local and remote transports.
+    // rasterization for both local and remote transports. A page whose keys are already
+    // in the snapshot is not rendered again. One PDF open covers that paper's pages.
     let precomputed: BTreeMap<String, Vec<f32>> = BTreeMap::new();
     if include_pages {
         for request in page_requests.values() {
+            let mut pending_pages = Vec::new();
             for page in &request.pages {
-                let crops = super::page_render::render_crops(
-                    &request.pdf_path,
-                    *page,
-                    (REGION_CROPS > 0).then_some(REGION_CROPS as usize),
-                )?;
-                for (index, bytes) in crops.into_iter().enumerate() {
-                    let region = if index == 0 { None } else { Some((index - 1) as u32) };
-                    let key = page_key(&documents, &request.entry_id, *page, region)
+                let expected_keys = (0..=REGION_CROPS)
+                    .map(|index| if index == 0 { None } else { Some(index - 1) })
+                    .filter_map(|region| page_key(&documents, &request.entry_id, *page, region))
+                    .collect::<Vec<_>>();
+                if !expected_keys.is_empty()
+                    && expected_keys.iter().all(|key| existing_keys.contains(key))
+                {
+                    continue;
+                }
+                pending_pages.push(*page);
+            }
+            if pending_pages.is_empty() {
+                continue;
+            }
+            let rendered = super::page_render::render_entry_pages(
+                &request.pdf_path,
+                &pending_pages,
+                (REGION_CROPS > 0).then_some(REGION_CROPS as usize),
+            )?;
+            for page in pending_pages {
+                let crops = rendered
+                    .get(&page)
+                    .ok_or_else(|| format!("视觉分页渲染没有返回第 {page} 页"))?;
+                for (index, bytes) in crops.iter().enumerate() {
+                    let region = if index == 0 {
+                        None
+                    } else {
+                        Some((index - 1) as u32)
+                    };
+                    let key = page_key(&documents, &request.entry_id, page, region)
                         .ok_or_else(|| "视觉分页渲染返回了未收集的页面或区域".to_string())?;
-                    asset_bytes.insert(key, bytes);
+                    asset_bytes.insert(key, bytes.clone());
                 }
             }
         }
@@ -329,7 +659,9 @@ pub fn prepare_visual_index(
                 .map(VisualIndexDocument::key)
                 .collect::<Vec<_>>();
             let pre_keys = precomputed.keys().take(3).cloned().collect::<Vec<_>>();
-            eprintln!("visual prepare: page_doc_keys={page_doc_keys:?} precomputed_keys={pre_keys:?}");
+            eprintln!(
+                "visual prepare: page_doc_keys={page_doc_keys:?} precomputed_keys={pre_keys:?}"
+            );
             eprintln!(
                 "visual prepare: docs={} assets={} precomputed={} page_entries={} unaccounted={:?}",
                 documents.len(),
@@ -341,14 +673,17 @@ pub fn prepare_visual_index(
         }
         error.to_string()
     })?;
-    let embedded_count = rebuilt
-        .documents()
-        .iter()
-        .filter(|document| {
-            asset_bytes.contains_key(&document.key()) || precomputed.contains_key(&document.key())
-        })
-        .count()
-        .min(documents.len());
+    let rebuilt = Arc::new(rebuilt);
+    if let Ok(fingerprint) = sources_fingerprint(&workspace) {
+        store_visual_index(
+            &request.root,
+            &namespace,
+            include_pages,
+            &fingerprint,
+            &path,
+            Arc::clone(&rebuilt),
+        );
+    }
     Ok(PrepareVisualSearchIndexResponse {
         provider: provider.status().provider,
         model_name: provider.status().model_name,
@@ -356,9 +691,9 @@ pub fn prepare_visual_index(
         identity,
         namespace,
         entry_count,
-        asset_count: asset_bytes.len(),
+        asset_count: asset_coordinates.len(),
         document_count: rebuilt.document_count(),
-        embedded_count,
+        embedded_count: rebuilt.embedded_count(),
     })
 }
 
@@ -397,11 +732,18 @@ static SOURCES_CACHE: OnceLock<Mutex<Option<CachedSources>>> = OnceLock::new();
 
 /// Fingerprint of everything the collected sources depend on.
 fn sources_fingerprint(workspace: &Workspace) -> Result<String, String> {
-    let entries = workspace.list_entries().map_err(|error| error.to_string())?;
+    let entries = workspace
+        .list_entries()
+        .map_err(|error| error.to_string())?;
     let mut hasher = blake3::Hasher::new();
     let mut ordered = entries
         .iter()
-        .map(|entry| (entry.id.to_string(), entry.pdf.as_ref().map(|pdf| pdf.content_hash.clone())))
+        .map(|entry| {
+            (
+                entry.id.to_string(),
+                entry.pdf.as_ref().map(|pdf| pdf.content_hash.clone()),
+            )
+        })
         .collect::<Vec<_>>();
     ordered.sort();
     for (id, pdf_hash) in ordered {
@@ -467,7 +809,10 @@ fn build_sources(workspace: &Workspace, fingerprint: String) -> Result<CachedSou
             .or_default()
             .push(asset);
     }
-    let entries = workspace.list_entries().map_err(|error| error.to_string())?;
+    let mut entries = workspace
+        .list_entries()
+        .map_err(|error| error.to_string())?;
+    entries.sort_by(|left, right| left.id.as_str().cmp(right.id.as_str()));
     let mut sources = Vec::with_capacity(entries.len());
     for entry in entries {
         let entry_id = entry.id.to_string();
@@ -481,12 +826,7 @@ fn build_sources(workspace: &Workspace, fingerprint: String) -> Result<CachedSou
                 return None;
             }
             let segments = workspace.read_segments(&entry.id).ok()?;
-            let mut pages = segments
-                .iter()
-                .map(|segment| segment.page_idx)
-                .collect::<Vec<_>>();
-            pages.sort_unstable();
-            pages.dedup();
+            let pages = pages_needing_pdf_fallback(&segments, &assets);
             (!pages.is_empty()).then(|| (pdf.content_hash.clone(), path, pages))
         });
         if pdf.is_none() && assets.is_empty() {
@@ -534,7 +874,12 @@ fn collect_assets(root: &PathBuf, include_pages: bool) -> Result<CollectedSource
         for page in page_list {
             documents.push(page_document(&entry.entry_id, pdf_hash, *page, None));
             for region in 0..REGION_CROPS {
-                documents.push(page_document(&entry.entry_id, pdf_hash, *page, Some(region)));
+                documents.push(page_document(
+                    &entry.entry_id,
+                    pdf_hash,
+                    *page,
+                    Some(region),
+                ));
             }
         }
         pages.insert(
@@ -584,6 +929,45 @@ fn page_key(
         .map(VisualIndexDocument::key)
 }
 
+/// Pages whose figure or table segments are not all backed by a MinerU crop.
+///
+/// A formula crop does not make a page visual. A page whose charts already have crops
+/// is not rendered again. A paper with no crops still renders each figure or table page.
+fn pages_needing_pdf_fallback(
+    segments: &[neuink_domain::SourceSegment],
+    assets: &[EntryVisualAsset],
+) -> Vec<u32> {
+    let crops = assets
+        .iter()
+        .map(|asset| asset.relative_path.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut by_page: BTreeMap<u32, Vec<&neuink_domain::SourceSegment>> = BTreeMap::new();
+    for segment in segments {
+        if !matches!(
+            segment.segment_type,
+            neuink_domain::SegmentType::Figure | neuink_domain::SegmentType::Table
+        ) {
+            continue;
+        }
+        by_page.entry(segment.page_idx).or_default().push(segment);
+    }
+    let mut pages = Vec::new();
+    for (page, group) in by_page {
+        let covered = group.iter().all(|segment| {
+            segment
+                .asset_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .is_some_and(|path| crops.contains(path))
+        });
+        if !covered {
+            pages.push(page);
+        }
+    }
+    pages
+}
+
 /// Crop count per page. Whole-page encoding is the default: the four geometric crops
 const REGION_CROPS: u32 = 0;
 
@@ -630,6 +1014,73 @@ fn query_cache() -> &'static Mutex<BTreeMap<String, Vec<f32>>> {
     CACHE.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
+struct InFlightQuery {
+    state: Mutex<Option<Result<Vec<f32>, String>>>,
+    done: Condvar,
+}
+
+impl InFlightQuery {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(None),
+            done: Condvar::new(),
+        }
+    }
+
+    fn finish(&self, outcome: Result<Vec<f32>, String>) {
+        if let Ok(mut guard) = self.state.lock() {
+            if guard.is_none() {
+                *guard = Some(outcome);
+            }
+            self.done.notify_all();
+        }
+    }
+
+    fn wait(&self) -> Result<Vec<f32>, String> {
+        let Ok(mut guard) = self.state.lock() else {
+            return Err("视觉查询等待锁异常".to_string());
+        };
+        while guard.is_none() {
+            guard = match self.done.wait(guard) {
+                Ok(next) => next,
+                Err(_) => return Err("视觉查询等待锁异常".to_string()),
+            };
+        }
+        guard
+            .clone()
+            .unwrap_or_else(|| Err("视觉查询未返回结果".to_string()))
+    }
+}
+
+fn in_flight_queries() -> &'static Mutex<HashMap<String, Arc<InFlightQuery>>> {
+    static IN_FLIGHT: OnceLock<Mutex<HashMap<String, Arc<InFlightQuery>>>> = OnceLock::new();
+    IN_FLIGHT.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+struct InFlightGuard {
+    key: String,
+    slot: Arc<InFlightQuery>,
+    completed: bool,
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        if let Ok(mut map) = in_flight_queries().lock() {
+            if let Some(current) = map.get(&self.key) {
+                if Arc::ptr_eq(current, &self.slot) {
+                    map.remove(&self.key);
+                }
+            }
+        }
+        if !self.completed {
+            self.slot
+                .finish(Err("视觉查询在编码完成前中止".to_string()));
+        }
+    }
+}
+
+/// Encodes `question` via `provider` with both result caching and single-flight
+/// deduplication across concurrent sub-tasks sharing the same routing question.
 fn query_vector(
     provider: &dyn VisualEmbeddingProvider,
     identity: &str,
@@ -641,14 +1092,56 @@ fn query_vector(
             return Ok(vector.clone());
         }
     }
-    let vector = provider.embed_query_text(question)?;
-    if let Ok(mut cache) = query_cache().lock() {
-        if cache.len() >= VISUAL_QUERY_CACHE_LIMIT {
-            cache.clear();
+
+    let (slot, is_leader) = {
+        let Ok(mut in_flight) = in_flight_queries().lock() else {
+            return provider.embed_query_text(question);
+        };
+        // Re-check cache while holding `in_flight` to avoid missing a just-completed leader.
+        if let Ok(cache) = query_cache().lock() {
+            if let Some(vector) = cache.get(&key) {
+                return Ok(vector.clone());
+            }
         }
-        cache.insert(key, vector.clone());
+        if let Some(existing) = in_flight.get(&key) {
+            (Arc::clone(existing), false)
+        } else {
+            let created = Arc::new(InFlightQuery::new());
+            in_flight.insert(key.clone(), Arc::clone(&created));
+            (created, true)
+        }
+    };
+
+    if !is_leader {
+        return slot
+            .wait()
+            .map_err(neuink_search::SearchError::EmbeddingUnavailable);
     }
-    Ok(vector)
+
+    let mut guard = InFlightGuard {
+        key: key.clone(),
+        slot: Arc::clone(&slot),
+        completed: false,
+    };
+    let result = provider.embed_query_text(question);
+    match result {
+        Ok(vector) => {
+            if let Ok(mut cache) = query_cache().lock() {
+                if cache.len() >= VISUAL_QUERY_CACHE_LIMIT {
+                    cache.clear();
+                }
+                cache.insert(key, vector.clone());
+            }
+            guard.completed = true;
+            slot.finish(Ok(vector.clone()));
+            Ok(vector)
+        }
+        Err(error) => {
+            guard.completed = true;
+            slot.finish(Err(error.to_string()));
+            Err(error)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -732,9 +1225,6 @@ mod tests {
         assert!(!channel.status().is_ready());
     }
 
-
-
-
     fn zip_with_images(names: &[&str]) -> Vec<u8> {
         use std::io::{Cursor, Write};
         use zip::{write::SimpleFileOptions, ZipWriter};
@@ -769,7 +1259,10 @@ mod tests {
 
         // Touching the archive is the event: the cached set must not be reused.
         workspace
-            .write_mineru_output_zip(&entry.id, &zip_with_images(&["images/a.jpg", "images/b.jpg"]))
+            .write_mineru_output_zip(
+                &entry.id,
+                &zip_with_images(&["images/a.jpg", "images/b.jpg"]),
+            )
             .expect("rewrite zip");
         let after = collect_assets(&root, false).expect("collect after change");
         assert_eq!(after.documents.len(), 2);
@@ -786,9 +1279,348 @@ mod tests {
         assert_eq!(page_key(&documents, "entry-1", 3, None), Some(page.key()));
         let crop = page_document("entry-1", "pdf-hash", 3, Some(2));
         let documents = vec![document_from_asset(&asset(Some(3))), crop.clone()];
-        assert_eq!(page_key(&documents, "entry-1", 3, Some(2)), Some(crop.key()));
+        assert_eq!(
+            page_key(&documents, "entry-1", 3, Some(2)),
+            Some(crop.key())
+        );
+    }
+
+    #[test]
+    fn collect_assets_skips_pure_text_pdf_pages_and_keeps_figure_table_pages() {
+        use neuink_domain::{SegmentType, SourceSegment};
+
+        let root = std::env::temp_dir().join(format!(
+            "neuink-visual-pages-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("root");
+        let workspace = Workspace::create(&root).expect("workspace");
+        let entry = workspace.create_entry("Paper").expect("entry");
+        let pdf_path = root.join("origin.pdf");
+        std::fs::write(&pdf_path, b"%PDF-1.4\n%%EOF\n").expect("pdf");
+        workspace.import_pdf(&entry.id, &pdf_path).expect("import");
+        for status in [
+            neuink_domain::PdfParseStatus::Queued,
+            neuink_domain::PdfParseStatus::Uploading,
+            neuink_domain::PdfParseStatus::Uploaded,
+            neuink_domain::PdfParseStatus::Parsing,
+            neuink_domain::PdfParseStatus::Succeeded,
+        ] {
+            workspace
+                .set_pdf_parse_state(&entry.id, status, None)
+                .expect("parse");
+        }
+        workspace
+            .write_segments(
+                &entry.id,
+                &[
+                    SourceSegment::new(SegmentType::Paragraph, 0, None, "plain text".to_string()),
+                    SourceSegment::new(SegmentType::Figure, 1, None, "a chart".to_string()),
+                ],
+            )
+            .expect("segments");
+
+        let collected = collect_assets(&root, true).expect("collect");
+        let pages = collected
+            .documents
+            .iter()
+            .filter(|document| document.kind == neuink_search::VisualSourceKind::Page)
+            .map(|document| document.page_idx)
+            .collect::<Vec<_>>();
+        assert_eq!(pages, vec![Some(1)]);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn a_page_with_mineru_crops_is_not_rendered_and_a_formula_page_is_not_visual() {
+        use neuink_domain::{SegmentType, SourceSegment};
+        use std::io::{Cursor, Write};
+        use zip::{write::SimpleFileOptions, ZipWriter};
+
+        let root = std::env::temp_dir().join(format!(
+            "neuink-visual-crop-fallback-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("root");
+        let workspace = Workspace::create(&root).expect("workspace");
+        let entry = workspace.create_entry("Paper").expect("entry");
+        let pdf_path = root.join("origin.pdf");
+        std::fs::write(&pdf_path, b"%PDF-1.4\n%%EOF\n").expect("pdf");
+        workspace.import_pdf(&entry.id, &pdf_path).expect("import");
+        for status in [
+            neuink_domain::PdfParseStatus::Queued,
+            neuink_domain::PdfParseStatus::Uploading,
+            neuink_domain::PdfParseStatus::Uploaded,
+            neuink_domain::PdfParseStatus::Parsing,
+            neuink_domain::PdfParseStatus::Succeeded,
+        ] {
+            workspace
+                .set_pdf_parse_state(&entry.id, status, None)
+                .expect("parse");
+        }
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        for (name, bytes) in [
+            ("images/fig.jpg", &b"figure"[..]),
+            ("images/eq.jpg", &b"equation"[..]),
+            ("images/logo.png", &b"logo"[..]),
+        ] {
+            writer
+                .start_file(name, SimpleFileOptions::default())
+                .expect("zip");
+            writer.write_all(bytes).expect("bytes");
+        }
+        let zip = writer.finish().expect("finish").into_inner();
+        workspace
+            .write_mineru_output_zip(&entry.id, &zip)
+            .expect("store zip");
+        workspace
+            .write_segments(
+                &entry.id,
+                &[
+                    SourceSegment::new(SegmentType::Math, 0, None, "formula".to_string())
+                        .with_asset_path(Some("images/eq.jpg".to_string())),
+                    SourceSegment::new(SegmentType::Figure, 1, None, "covered chart".to_string())
+                        .with_asset_path(Some("images/fig.jpg".to_string())),
+                    SourceSegment::new(SegmentType::Table, 2, None, "uncropped table".to_string()),
+                ],
+            )
+            .expect("segments");
+
+        let collected = collect_assets(&root, true).expect("collect");
+        let asset_paths = collected
+            .documents
+            .iter()
+            .filter(|document| document.kind != neuink_search::VisualSourceKind::Page)
+            .map(|document| document.source_id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(asset_paths, vec!["images/fig.jpg"]);
+        let pages = collected
+            .documents
+            .iter()
+            .filter(|document| document.kind == neuink_search::VisualSourceKind::Page)
+            .map(|document| document.page_idx)
+            .collect::<Vec<_>>();
+        assert_eq!(pages, vec![Some(2)]);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    struct FiniteProvider;
+
+    impl VisualEmbeddingProvider for FiniteProvider {
+        fn status(&self) -> neuink_search::VisualProviderStatus {
+            neuink_search::VisualProviderStatus {
+                available: true,
+                provider: "fake".to_string(),
+                model_name: Some("finite".to_string()),
+                dimensions: Some(4),
+                message: None,
+            }
+        }
+
+        fn identity(&self) -> Option<String> {
+            Some("finite-visual-cache-test".to_string())
+        }
+
+        fn dimensions(&self) -> Option<usize> {
+            Some(4)
+        }
+
+        fn embed_assets(
+            &self,
+            assets: &[neuink_search::VisualAssetInput],
+            on_progress: &dyn Fn(usize, usize),
+        ) -> neuink_search::SearchResult<Vec<Vec<f32>>> {
+            let vectors = assets
+                .iter()
+                .map(|_| vec![1.0, 0.0, 0.0, 0.0])
+                .collect::<Vec<_>>();
+            on_progress(vectors.len(), assets.len());
+            Ok(vectors)
+        }
+
+        fn embed_query_text(&self, _text: &str) -> neuink_search::SearchResult<Vec<f32>> {
+            Ok(vec![1.0, 0.0, 0.0, 0.0])
+        }
+    }
+
+    fn zip_with_image_bytes(bytes: &[u8]) -> Vec<u8> {
+        use std::io::{Cursor, Write};
+        use zip::{write::SimpleFileOptions, ZipWriter};
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        writer
+            .start_file("images/a.jpg", SimpleFileOptions::default())
+            .expect("start");
+        writer.write_all(bytes).expect("bytes");
+        writer.finish().expect("finish").into_inner()
+    }
+
+    #[test]
+    fn visual_index_cache_invalidates_when_snapshot_is_removed_or_source_changes() {
+        let root = std::env::temp_dir().join(format!(
+            "neuink-visual-index-cache-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("root");
+        let workspace = Workspace::create(&root).expect("workspace");
+        let entry = workspace.create_entry("Paper").expect("entry");
+        workspace
+            .write_mineru_output_zip(&entry.id, &zip_with_image_bytes(b"pixels-v1"))
+            .expect("zip");
+        let provider = Arc::new(FiniteProvider);
+        let prepared = prepare_visual_index(
+            provider.clone(),
+            PrepareVisualSearchIndexRequest { root: root.clone() },
+        )
+        .expect("prepare");
+        assert!(prepared.document_count >= 1);
+        let ready = visual_channel(&root, provider.clone());
+        assert!(ready.status().is_ready(), "{}", ready.status_code());
+
+        let snapshot = visual_index_path(
+            &workspace.layout().cache_dir(),
+            &prepared.namespace,
+        );
+        assert!(snapshot.is_file(), "snapshot {}", snapshot.display());
+        std::fs::remove_file(&snapshot).expect("delete snapshot");
+        let after_delete = visual_channel(&root, provider.clone());
+        assert_eq!(after_delete.status_code(), VISUAL_REASON_INDEX_MISSING);
+        assert!(!after_delete.status().is_ready());
+
+        prepare_visual_index(
+            provider.clone(),
+            PrepareVisualSearchIndexRequest { root: root.clone() },
+        )
+        .expect("reprepare");
+        assert!(visual_channel(&root, provider.clone()).status().is_ready());
+
+        workspace
+            .write_mineru_output_zip(&entry.id, &zip_with_image_bytes(b"pixels-v2-changed"))
+            .expect("rewrite zip");
+        let after_change = visual_channel(&root, provider.clone());
+        assert_eq!(after_change.status_code(), VISUAL_REASON_INDEX_MISSING);
+        assert!(!after_change.status().is_ready());
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn has_visual_snapshot_and_index_missing_fast_path_skip_network() {
+        let root = std::env::temp_dir().join(format!(
+            "neuink-visual-fast-path-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("root");
+        let _workspace = Workspace::create(&root).expect("workspace");
+        assert!(!has_visual_snapshot(&root));
+        let channel = visual_channel(&root, index_missing_provider());
+        assert_eq!(channel.status_code(), VISUAL_REASON_INDEX_MISSING);
+        assert!(!channel.status().is_ready());
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn provider_for_query_caches_unreachable_endpoint_until_invalidated() {
+        invalidate_provider_cache();
+        let settings = VisualEmbeddingSettings {
+            provider: VisualEmbeddingProviderKind::QwenLocal,
+            endpoint: Some("http://127.0.0.1:9".to_string()),
+            api_key: None,
+            timeout_ms: 500,
+            fusion: neuink_config::VisualFusionSettings::default(),
+            startup: neuink_config::VisualServiceStartup::Manual,
+        };
+        let first = provider_for_query(&settings);
+        assert!(!first.status().available);
+
+        let started = Instant::now();
+        let second = provider_for_query(&settings);
+        assert!(!second.status().available);
+        assert!(
+            started.elapsed() < Duration::from_millis(50),
+            "expected negative cache hit, took {:?}",
+            started.elapsed()
+        );
+        invalidate_provider_cache();
+    }
+
+    #[test]
+    fn query_vector_deduplicates_concurrent_identical_requests() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Barrier;
+
+        struct CountingSlowProvider {
+            calls: AtomicUsize,
+        }
+
+        impl VisualEmbeddingProvider for CountingSlowProvider {
+            fn status(&self) -> neuink_search::VisualProviderStatus {
+                neuink_search::VisualProviderStatus {
+                    available: true,
+                    provider: "counting".to_string(),
+                    model_name: Some("slow".to_string()),
+                    dimensions: Some(3),
+                    message: None,
+                }
+            }
+
+            fn identity(&self) -> Option<String> {
+                Some("single-flight-test".to_string())
+            }
+
+            fn dimensions(&self) -> Option<usize> {
+                Some(3)
+            }
+
+            fn embed_assets(
+                &self,
+                _assets: &[neuink_search::VisualAssetInput],
+                _on_progress: &dyn Fn(usize, usize),
+            ) -> neuink_search::SearchResult<Vec<Vec<f32>>> {
+                Ok(Vec::new())
+            }
+
+            fn embed_query_text(&self, _text: &str) -> neuink_search::SearchResult<Vec<f32>> {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(80));
+                Ok(vec![0.5, 0.5, 0.5])
+            }
+        }
+
+        let unique_identity = format!(
+            "single-flight-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        );
+        let provider = Arc::new(CountingSlowProvider {
+            calls: AtomicUsize::new(0),
+        });
+        let barrier = Arc::new(Barrier::new(4));
+        let mut handles = Vec::new();
+        for _ in 0..4 {
+            let p = Arc::clone(&provider);
+            let b = Arc::clone(&barrier);
+            let id = unique_identity.clone();
+            handles.push(std::thread::spawn(move || {
+                b.wait();
+                query_vector(p.as_ref(), &id, "shared routing question").expect("vector")
+            }));
+        }
+        for handle in handles {
+            assert_eq!(handle.join().expect("join"), vec![0.5, 0.5, 0.5]);
+        }
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
     }
 }
-
-
-

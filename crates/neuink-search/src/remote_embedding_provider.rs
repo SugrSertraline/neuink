@@ -143,9 +143,11 @@ impl RemoteEmbeddingProvider {
             )));
         }
         // `index` is optional in practice; when present it restores the input order.
-        if data.iter().enumerate().all(|(position, item)| {
-            item.index.map(|index| index == position).unwrap_or(true)
-        }) {
+        if data
+            .iter()
+            .enumerate()
+            .all(|(position, item)| item.index.map(|index| index == position).unwrap_or(true))
+        {
             // Already in order.
         } else {
             data.sort_by_key(|item| item.index);
@@ -239,10 +241,7 @@ fn normalize_endpoint(raw: &str) -> String {
 }
 
 fn is_loopback_url(url: &str) -> bool {
-    let without_scheme = url
-        .split_once("://")
-        .map(|(_, rest)| rest)
-        .unwrap_or(url);
+    let without_scheme = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
     let authority = without_scheme.split('/').next().unwrap_or(without_scheme);
     let host_port = authority.rsplit('@').next().unwrap_or(authority);
     let host = if let Some(rest) = host_port.strip_prefix('[') {
@@ -341,17 +340,15 @@ mod tests {
         assert_eq!(vectors[1].values, vec![0.4, 0.5, 0.6]);
         assert!(request.contains("\"model\":\"some-model\""));
         assert!(request.contains("first"));
-        assert_eq!(
-            provider.status().model_name.as_deref(),
-            Some("some-model")
-        );
+        assert_eq!(provider.status().model_name.as_deref(), Some("some-model"));
         assert_eq!(provider.status().dimensions, Some(3));
         assert!(provider.cache_identity().is_some());
     }
 
     #[test]
     fn an_endpoint_named_embeddings_is_used_as_is() {
-        let (endpoint, server) = serve_once("200 OK", r#"{"data":[{"embedding":[1.0],"index":0}]}"#);
+        let (endpoint, server) =
+            serve_once("200 OK", r#"{"data":[{"embedding":[1.0],"index":0}]}"#);
         let provider =
             RemoteEmbeddingProvider::new(format!("{endpoint}/embeddings/"), None, "m", 1, 5_000)
                 .expect("provider");
@@ -368,7 +365,8 @@ mod tests {
 
     #[test]
     fn a_dimension_mismatch_is_a_fixed_error() {
-        let (endpoint, server) = serve_once("200 OK", r#"{"data":[{"embedding":[1.0,2.0],"index":0}]}"#);
+        let (endpoint, server) =
+            serve_once("200 OK", r#"{"data":[{"embedding":[1.0,2.0],"index":0}]}"#);
         let provider =
             RemoteEmbeddingProvider::new(endpoint, None, "m", 3, 5_000).expect("provider");
         let error = provider
@@ -417,7 +415,11 @@ mod tests {
     #[test]
     fn an_empty_endpoint_or_model_is_rejected_at_construction() {
         assert!(RemoteEmbeddingProvider::new("", None, "m", 3, 1_000).is_err());
-        assert!(RemoteEmbeddingProvider::new("http://127.0.0.1:1/v1", None, "  ", 3, 1_000).is_err());
-        assert!(RemoteEmbeddingProvider::new("http://127.0.0.1:1/v1", None, "m", 0, 1_000).is_err());
+        assert!(
+            RemoteEmbeddingProvider::new("http://127.0.0.1:1/v1", None, "  ", 3, 1_000).is_err()
+        );
+        assert!(
+            RemoteEmbeddingProvider::new("http://127.0.0.1:1/v1", None, "m", 0, 1_000).is_err()
+        );
     }
 }

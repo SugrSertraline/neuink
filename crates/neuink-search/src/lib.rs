@@ -48,9 +48,9 @@ pub use colbert_head::{
 };
 pub use document_builder::{compose_search_document, SearchDocumentInput};
 pub use listwise_rerank::{
-    fuse_rankings_rrf, parse_ranked_ids, reorder_hits as reorder_listwise_hits,
-    single_paper_listwise_user_prompt, HttpListwiseReranker, ListwiseOrder, ListwisePromptStyle,
-    ListwiseRerankProvider,
+    fuse_pool_rrf_with_profile, fuse_rankings_rrf, parse_ranked_ids,
+    reorder_hits as reorder_listwise_hits, single_paper_listwise_user_prompt, HttpListwiseReranker,
+    ListwiseOrder, ListwisePromptStyle, ListwiseRerankProvider, PoolRrfProfile,
 };
 pub use multivector_index::{
     cache_path, rank_documents, read_cache, reorder_hits as reorder_multivector_hits, rescore_selection,
@@ -88,8 +88,9 @@ pub use rerank_hits::{
     stamp_rank_scores,
 };
 pub use structural_prior::{
-    apply_structural_soft_demotion, apply_structural_soft_demotion_head, format_structured_hit,
-    is_single_paper_hits, query_has_summary_intent, strip_passage_header,
+    apply_structural_soft_demotion, apply_structural_soft_demotion_head,
+    apply_structural_soft_demotion_head_with_related, format_structured_hit, is_single_paper_hits,
+    query_has_summary_intent, strip_passage_header,
 };
 pub use surrounding_context::{
     attach_surrounding_context, SegmentContextMap, DEFAULT_SURROUNDING_CONTEXT_TOP_N,
@@ -141,12 +142,12 @@ pub use visual_embedding::{
 };
 pub use visual_index::{
     build_visual_index, reopen_visual_index, visual_index_path, visual_namespace,
-    VisualIndexDocument, VisualSearchIndex, VisualSourceKind, VISUAL_EMBED_BATCH_SIZE,
-    VISUAL_INDEX_FILE_NAME, VISUAL_INDEX_FORMAT_VERSION,
+    visual_snapshot_keys, VisualIndexDocument, VisualSearchIndex, VisualSourceKind,
+    VISUAL_EMBED_BATCH_SIZE, VISUAL_INDEX_FILE_NAME, VISUAL_INDEX_FORMAT_VERSION,
 };
 pub use visual_evidence::{
-    apply_within_paper_visual_evidence, question_has_visual_intent, VisualPageSegments,
-    WithinPaperVisualOptions,
+    apply_within_paper_visual_evidence, question_has_visual_intent,
+    supplement_hits_from_visual_pages, CeConfidence, VisualPageSegments, WithinPaperVisualOptions,
 };
 pub use visual_sidecar::{
     aggregate_parents, fuse_entry_orders, parent_entry_order, ParentScore, VisualChannelStatus,

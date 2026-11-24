@@ -10,11 +10,32 @@
 //! a missing tool reports a fixed reason instead of failing silently.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
 use crate::commands::search::recommended_visual_models::{RecommendedVisualModel, RECOMMENDED_VISUAL};
+
+/// Process-wide guard serializing local visual service startup probes and process spawning
+/// so concurrent callers (startup prewarm, manual start, index preparation) never launch
+/// two competing 4 GB Python checkpoints.
+static VISUAL_START_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+pub fn start_lock() -> &'static Mutex<()> {
+    VISUAL_START_LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn hide_console(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    let _ = command;
+}
 
 /// CPU-only torch: the CUDA wheel is multiple gigabytes larger and these laptops have no GPU.
 const TORCH_INDEX: &str = "https://download.pytorch.org/whl/cpu";
@@ -49,7 +70,10 @@ fn find_uv() -> Option<PathBuf> {
             return Some(candidate);
         }
     }
-    let from_path = Command::new("uv").arg("--version").output();
+    let mut check_uv = Command::new("uv");
+    check_uv.arg("--version");
+    hide_console(&mut check_uv);
+    let from_path = check_uv.output();
     if from_path.map(|output| output.status.success()).unwrap_or(false) {
         return Some(PathBuf::from("uv"));
     }
@@ -103,9 +127,10 @@ pub fn install(
         .unwrap_or_else(|| dir.join("model"));
 
     // 1) Isolated environment.
-    let venv = Command::new(&uv)
-        .args(["venv", "--python", "3.11"])
-        .arg(&env_dir)
+    let mut venv_cmd = Command::new(&uv);
+    venv_cmd.args(["venv", "--python", "3.11"]).arg(&env_dir);
+    hide_console(&mut venv_cmd);
+    let venv = venv_cmd
         .output()
         .map_err(|error| format!("无法运行 uv：{error}"))?;
     if !venv.status.success() {
@@ -120,12 +145,15 @@ pub fn install(
     let python = env_dir.join("bin").join("python");
 
     // 2) Inference dependencies, CPU torch to stay within a sane download size.
-    let install = Command::new(&uv)
+    let mut install_cmd = Command::new(&uv);
+    install_cmd
         .args(["pip", "install", "--python"])
         .arg(&python)
         .arg("--extra-index-url")
         .arg(TORCH_INDEX)
-        .args(DEPENDENCIES)
+        .args(DEPENDENCIES);
+    hide_console(&mut install_cmd);
+    let install = install_cmd
         .output()
         .map_err(|error| format!("无法安装依赖：{error}"))?;
     let dependencies_installed = install.status.success();
@@ -187,6 +215,7 @@ fn run_download(
     if let Some(endpoint) = endpoint {
         command.env("HF_ENDPOINT", endpoint);
     }
+    hide_console(&mut command);
     let download = command
         .output()
         .map_err(|error| format!("无法运行下载器：{error}"))?;
@@ -281,11 +310,17 @@ pub fn start_with_state(state: &VisualRuntimeState, service_script: &Path) -> Re
     if !state.dependencies_installed || !state.model_present {
         return Err(REASON_MODEL_MISSING.to_string());
     }
-    let child = Command::new(&state.python)
+    let mut command = Command::new(&state.python);
+    command
         .arg(service_script)
         .args(["--port", "8765"])
         .env("NEUINK_QWEN_VL_MODEL", &state.model_dir)
         .env("NEUINK_TORCH_THREADS", "8")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    hide_console(&mut command);
+    let child = command
         .spawn()
         .map_err(|error| format!("无法启动视觉服务：{error}"))?;
     Ok(child.id())
@@ -313,6 +348,39 @@ mod tests {
         assert_eq!(loaded.model_dir, "model");
         assert!(load_state(&root, "unknown").is_none());
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn start_with_state_rejects_incomplete_runtime_before_spawning() {
+        let missing_model = VisualRuntimeState {
+            model_id: "qwen3-vl-embedding-2b".to_string(),
+            env_dir: "env".to_string(),
+            model_dir: "model".to_string(),
+            python: "python".to_string(),
+            dependencies_installed: true,
+            model_present: false,
+            model_error: None,
+        };
+        let err = start_with_state(&missing_model, Path::new("service.py"))
+            .expect_err("missing model must fail");
+        assert_eq!(err, REASON_MODEL_MISSING);
+
+        let missing_deps = VisualRuntimeState {
+            dependencies_installed: false,
+            model_present: true,
+            ..missing_model
+        };
+        let err = start_with_state(&missing_deps, Path::new("service.py"))
+            .expect_err("missing dependencies must fail");
+        assert_eq!(err, REASON_MODEL_MISSING);
+    }
+
+    #[test]
+    fn start_lock_reuses_one_process_wide_mutex() {
+        let first = start_lock();
+        let second = start_lock();
+        assert!(std::ptr::eq(first, second));
+        let _guard = first.lock().expect("acquire start lock");
     }
 }
 

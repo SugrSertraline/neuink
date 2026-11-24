@@ -10,8 +10,9 @@
 //! - documents with the same `entry|path|content_hash` reuse their vector, so a rebuild
 //!   after an unrelated edit embeds only the changed assets.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use neuink_domain::SegmentType;
@@ -21,9 +22,11 @@ use crate::visual_embedding::{VisualAssetInput, VisualEmbeddingProvider};
 use crate::visual_sidecar::VisualScore;
 use crate::{SearchError, SearchResult};
 
-pub const VISUAL_INDEX_FORMAT_VERSION: u32 = 2;
-pub const VISUAL_INDEX_FILE_NAME: &str = "visual-assets.vectors.json";
+pub const VISUAL_INDEX_FORMAT_VERSION: u32 = 3;
+pub const VISUAL_INDEX_FILE_NAME: &str = "visual-assets.vectors.bin";
 pub const VISUAL_EMBED_BATCH_SIZE: usize = 4;
+const VISUAL_SNAPSHOT_MAGIC: &[u8; 8] = b"NEVIS003";
+const LEGACY_JSON_FORMAT_VERSION: u32 = 2;
 
 /// Where a visual vector came from. Pages and their region crops come from the native
 /// PDF; figures and tables come from the MinerU parse. Both land in one snapshot so the
@@ -87,6 +90,22 @@ impl VisualIndexDocument {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+struct VisualSnapshotHeader {
+    identity: String,
+    dimensions: usize,
+    documents: Vec<VisualIndexDocument>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct LegacyVisualSnapshotV2 {
+    format_version: u32,
+    identity: String,
+    dimensions: usize,
+    documents: Vec<VisualIndexDocument>,
+    vectors: Vec<Vec<f32>>,
+}
+
+#[derive(Clone, Debug)]
 struct VisualSnapshot {
     format_version: u32,
     identity: String,
@@ -102,6 +121,8 @@ pub struct VisualSearchIndex {
     documents: Vec<VisualIndexDocument>,
     vectors: Vec<Vec<f32>>,
     path: Option<PathBuf>,
+    /// Sources this build sent to the encoder. A reopen did no encoding, so it is zero.
+    embedded_count: usize,
 }
 
 impl VisualSearchIndex {
@@ -115,6 +136,11 @@ impl VisualSearchIndex {
 
     pub fn document_count(&self) -> usize {
         self.documents.len()
+    }
+
+    /// Sources encoded by this build. Reopening a snapshot returns zero.
+    pub fn embedded_count(&self) -> usize {
+        self.embedded_count
     }
 
     pub fn documents(&self) -> &[VisualIndexDocument] {
@@ -153,7 +179,10 @@ impl VisualSearchIndex {
         let query = normalize(vector);
         let mut scores = Vec::new();
         for (document, stored) in self.documents.iter().zip(&self.vectors) {
-            if !allowed_entries.iter().any(|entry| entry == &document.entry_id) {
+            if !allowed_entries
+                .iter()
+                .any(|entry| entry == &document.entry_id)
+            {
                 continue;
             }
             if stored.len() != self.dimensions {
@@ -190,11 +219,7 @@ impl VisualSearchIndex {
 }
 
 fn normalize(vector: &[f32]) -> Vec<f32> {
-    let norm = vector
-        .iter()
-        .map(|value| value * value)
-        .sum::<f32>()
-        .sqrt();
+    let norm = vector.iter().map(|value| value * value).sum::<f32>().sqrt();
     if !norm.is_finite() || norm <= 1e-12 {
         return vec![0.0; vector.len()];
     }
@@ -204,7 +229,68 @@ fn normalize(vector: &[f32]) -> Vec<f32> {
 pub fn visual_index_path(cache_dir: &Path, namespace: &str) -> PathBuf {
     cache_dir
         .join("search")
-        .join(format!("visual-{namespace}.vectors.json"))
+        .join(format!("visual-{namespace}.vectors.bin"))
+}
+
+fn legacy_json_path(bin_path: &Path) -> PathBuf {
+    bin_path.with_extension("json")
+}
+
+/// Reads only the header of `.vectors.bin` and returns the keys already encoded.
+/// The vector body stays on disk. A missing binary file falls back to a v2 JSON snapshot.
+pub fn visual_snapshot_keys(path: &Path, identity: &str, dimensions: usize) -> BTreeSet<String> {
+    if let Some(header) = read_binary_header_only(path) {
+        if header.identity == identity && header.dimensions == dimensions {
+            return header
+                .documents
+                .into_iter()
+                .map(|document| document.key())
+                .collect();
+        }
+    }
+    read_snapshot(path)
+        .filter(|snapshot| snapshot.identity == identity && snapshot.dimensions == dimensions)
+        .map(|snapshot| {
+            snapshot
+                .documents
+                .into_iter()
+                .map(|document| document.key())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn read_binary_header_only(path: &Path) -> Option<VisualSnapshotHeader> {
+    let mut file = fs::File::open(path).ok()?;
+    let file_len = file.metadata().ok()?.len() as usize;
+    if file_len < 16 {
+        return None;
+    }
+    let mut prefix = [0u8; 16];
+    file.read_exact(&mut prefix).ok()?;
+    if &prefix[0..8] != VISUAL_SNAPSHOT_MAGIC {
+        return None;
+    }
+    let version = u32::from_le_bytes(prefix[8..12].try_into().ok()?);
+    if version != VISUAL_INDEX_FORMAT_VERSION {
+        return None;
+    }
+    let header_len = u32::from_le_bytes(prefix[12..16].try_into().ok()?) as usize;
+    if file_len < 16 + header_len {
+        return None;
+    }
+    let mut header_bytes = vec![0u8; header_len];
+    file.read_exact(&mut header_bytes).ok()?;
+    let header = serde_json::from_slice::<VisualSnapshotHeader>(&header_bytes).ok()?;
+    let expected_vector_bytes = header
+        .documents
+        .len()
+        .checked_mul(header.dimensions)?
+        .checked_mul(std::mem::size_of::<f32>())?;
+    if file_len != 16 + header_len + expected_vector_bytes {
+        return None;
+    }
+    Some(header)
 }
 
 /// Namespace from the model identity and dimensions only. A different model or a
@@ -219,7 +305,9 @@ pub fn visual_namespace(identity: &str, dimensions: usize) -> String {
 }
 
 /// Builds or extends the index. Stored vectors are reused by document key; only new or
-/// changed sources are embedded. A failed build leaves the previous snapshot untouched.
+/// changed sources are embedded. Each completed batch is checkpointed. A failure of the
+/// first batch leaves the previous snapshot untouched. Later batches keep what they
+/// already wrote, and the final snapshot drops vectors whose sources are gone.
 ///
 /// `precomputed` carries vectors the caller already has, for sources the product never
 /// holds as bytes: page and region vectors come from a service that rasterizes the PDF
@@ -234,14 +322,14 @@ pub fn build_visual_index(
     provider: &dyn VisualEmbeddingProvider,
     on_progress: &dyn Fn(usize, usize),
 ) -> SearchResult<VisualSearchIndex> {
-    let previous = read_snapshot(path)
+    let previous_entries = read_snapshot(path)
         .filter(|snapshot| snapshot.identity == identity && snapshot.dimensions == dimensions)
         .map(|snapshot| {
             snapshot
                 .documents
                 .into_iter()
                 .zip(snapshot.vectors)
-                .map(|(document, vector)| (document.key(), vector))
+                .map(|(document, vector)| (document.key(), (document, vector)))
                 .collect::<BTreeMap<_, _>>()
         })
         .unwrap_or_default();
@@ -252,9 +340,13 @@ pub fn build_visual_index(
             let key = document.key();
             precomputed
                 .get(&key)
-                .or_else(|| previous.get(&key))
-                .filter(|vector| vector.len() == dimensions)
                 .cloned()
+                .or_else(|| {
+                    previous_entries
+                        .get(&key)
+                        .map(|(_document, vector)| vector.clone())
+                })
+                .filter(|vector| vector.len() == dimensions && vector.iter().all(|v| v.is_finite()))
         })
         .collect();
 
@@ -265,6 +357,7 @@ pub fn build_visual_index(
         .collect::<Vec<_>>();
     let total = missing.len();
     let mut completed = 0usize;
+    let mut embedded_count = 0usize;
     for batch in missing.chunks(VISUAL_EMBED_BATCH_SIZE) {
         let inputs = batch
             .iter()
@@ -298,8 +391,22 @@ pub fn build_visual_index(
                     actual: vector.len(),
                 });
             }
+            if vector.iter().any(|value| !value.is_finite()) {
+                return Err(SearchError::EmbeddingUnavailable(
+                    "visual asset vector is not finite".to_string(),
+                ));
+            }
             vectors[*index] = Some(vector);
         }
+        embedded_count += batch.len();
+        write_checkpoint(
+            path,
+            identity,
+            dimensions,
+            &previous_entries,
+            documents,
+            &vectors,
+        )?;
         completed += batch.len();
         on_progress(completed, total);
     }
@@ -331,11 +438,15 @@ pub fn build_visual_index(
         documents: documents.to_vec(),
         vectors,
         path: Some(path.to_path_buf()),
+        embedded_count,
     })
 }
 
-/// Reads a snapshot that matches the current identity, dimensions and document set.
-/// Never embeds and never writes. `Ok(None)` means "no usable snapshot".
+/// Reads a snapshot that matches the current identity and dimensions.
+///
+/// Matching is by `document.key()`, not by list order. Sources that were removed are
+/// dropped. Sources that are not encoded yet are skipped. `Ok(None)` means nothing
+/// already encoded still applies. Never embeds and never writes.
 pub fn reopen_visual_index(
     path: &Path,
     identity: &str,
@@ -348,23 +459,162 @@ pub fn reopen_visual_index(
     if snapshot.format_version != VISUAL_INDEX_FORMAT_VERSION
         || snapshot.identity != identity
         || snapshot.dimensions != dimensions
-        || snapshot.documents != documents
     {
+        return Ok(None);
+    }
+    let stored = snapshot
+        .documents
+        .into_iter()
+        .zip(snapshot.vectors)
+        .map(|(document, vector)| (document.key(), vector))
+        .collect::<BTreeMap<_, _>>();
+    let mut kept_documents = Vec::new();
+    let mut kept_vectors = Vec::new();
+    for document in documents {
+        let Some(vector) = stored.get(&document.key()) else {
+            continue;
+        };
+        if vector.len() != dimensions || vector.iter().any(|value| !value.is_finite()) {
+            continue;
+        }
+        kept_documents.push(document.clone());
+        kept_vectors.push(vector.clone());
+    }
+    if kept_documents.is_empty() {
         return Ok(None);
     }
     Ok(Some(VisualSearchIndex {
         identity: snapshot.identity,
         dimensions: snapshot.dimensions,
-        documents: snapshot.documents,
-        vectors: snapshot.vectors,
+        documents: kept_documents,
+        vectors: kept_vectors,
         path: Some(path.to_path_buf()),
+        embedded_count: 0,
     }))
 }
 
+fn write_checkpoint(
+    path: &Path,
+    identity: &str,
+    dimensions: usize,
+    previous: &BTreeMap<String, (VisualIndexDocument, Vec<f32>)>,
+    documents: &[VisualIndexDocument],
+    vectors: &[Option<Vec<f32>>],
+) -> SearchResult<()> {
+    let mut merged = previous.clone();
+    for (document, vector) in documents.iter().zip(vectors) {
+        if let Some(vector) = vector {
+            merged.insert(document.key(), (document.clone(), vector.clone()));
+        }
+    }
+    let mut stored_documents = Vec::with_capacity(merged.len());
+    let mut stored_vectors = Vec::with_capacity(merged.len());
+    for (document, vector) in merged.into_values() {
+        stored_documents.push(document);
+        stored_vectors.push(vector);
+    }
+    write_snapshot(
+        path,
+        &VisualSnapshot {
+            format_version: VISUAL_INDEX_FORMAT_VERSION,
+            identity: identity.to_string(),
+            dimensions,
+            documents: stored_documents,
+            vectors: stored_vectors,
+        },
+    )
+}
+
+fn encode_binary_snapshot(snapshot: &VisualSnapshot) -> SearchResult<Vec<u8>> {
+    let header = VisualSnapshotHeader {
+        identity: snapshot.identity.clone(),
+        dimensions: snapshot.dimensions,
+        documents: snapshot.documents.clone(),
+    };
+    let header_bytes = serde_json::to_vec(&header)
+        .map_err(|error| SearchError::VectorIndexIo(error.to_string()))?;
+    let header_len = u32::try_from(header_bytes.len())
+        .map_err(|_| SearchError::VectorIndexIo("visual header too large".to_string()))?;
+    let vector_bytes_len = snapshot
+        .documents
+        .len()
+        .saturating_mul(snapshot.dimensions)
+        .saturating_mul(std::mem::size_of::<f32>());
+    let mut out = Vec::with_capacity(16 + header_bytes.len() + vector_bytes_len);
+    out.extend_from_slice(VISUAL_SNAPSHOT_MAGIC);
+    out.extend_from_slice(&snapshot.format_version.to_le_bytes());
+    out.extend_from_slice(&header_len.to_le_bytes());
+    out.extend_from_slice(&header_bytes);
+    for vector in &snapshot.vectors {
+        for value in vector {
+            out.extend_from_slice(&value.to_le_bytes());
+        }
+    }
+    Ok(out)
+}
+
+fn decode_binary_snapshot(bytes: &[u8]) -> Option<VisualSnapshot> {
+    if bytes.len() < 16 || &bytes[0..8] != VISUAL_SNAPSHOT_MAGIC {
+        return None;
+    }
+    let format_version = u32::from_le_bytes(bytes[8..12].try_into().ok()?);
+    if format_version != VISUAL_INDEX_FORMAT_VERSION {
+        return None;
+    }
+    let header_len = u32::from_le_bytes(bytes[12..16].try_into().ok()?) as usize;
+    let body_start = 16usize.checked_add(header_len)?;
+    if bytes.len() < body_start {
+        return None;
+    }
+    let header = serde_json::from_slice::<VisualSnapshotHeader>(&bytes[16..body_start]).ok()?;
+    let expected_floats = header.documents.len().checked_mul(header.dimensions)?;
+    let expected_bytes = expected_floats.checked_mul(std::mem::size_of::<f32>())?;
+    let body = &bytes[body_start..];
+    if body.len() != expected_bytes {
+        return None;
+    }
+    let mut vectors = Vec::with_capacity(header.documents.len());
+    if header.dimensions == 0 {
+        vectors.resize(header.documents.len(), Vec::new());
+    } else {
+        for doc_chunk in body.chunks_exact(header.dimensions * 4) {
+            let vector = doc_chunk
+                .chunks_exact(4)
+                .map(|bytes| f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+                .collect::<Vec<_>>();
+            vectors.push(vector);
+        }
+    }
+    if vectors.len() != header.documents.len() {
+        return None;
+    }
+    Some(VisualSnapshot {
+        format_version,
+        identity: header.identity,
+        dimensions: header.dimensions,
+        documents: header.documents,
+        vectors,
+    })
+}
+
 fn read_snapshot(path: &Path) -> Option<VisualSnapshot> {
-    let bytes = fs::read(path).ok()?;
-    let snapshot = serde_json::from_slice::<VisualSnapshot>(&bytes).ok()?;
-    (snapshot.format_version == VISUAL_INDEX_FORMAT_VERSION).then_some(snapshot)
+    if let Ok(bytes) = fs::read(path) {
+        if let Some(snapshot) = decode_binary_snapshot(&bytes) {
+            return Some(snapshot);
+        }
+    }
+    let legacy_path = legacy_json_path(path);
+    let bytes = fs::read(legacy_path).ok()?;
+    let legacy = serde_json::from_slice::<LegacyVisualSnapshotV2>(&bytes).ok()?;
+    (legacy.format_version == LEGACY_JSON_FORMAT_VERSION
+        && legacy.documents.len() == legacy.vectors.len())
+    .then(|| VisualSnapshot {
+        format_version: VISUAL_INDEX_FORMAT_VERSION,
+        identity: legacy.identity,
+        dimensions: legacy.dimensions,
+        documents: legacy.documents,
+        vectors: legacy.vectors,
+    })
 }
 
 fn write_snapshot(path: &Path, snapshot: &VisualSnapshot) -> SearchResult<()> {
@@ -372,16 +622,20 @@ fn write_snapshot(path: &Path, snapshot: &VisualSnapshot) -> SearchResult<()> {
         fs::create_dir_all(parent)
             .map_err(|error| SearchError::VectorIndexIo(error.to_string()))?;
     }
-    let bytes = serde_json::to_vec(snapshot)
-        .map_err(|error| SearchError::VectorIndexIo(error.to_string()))?;
-    let temporary = path.with_extension("vectors.json.tmp");
+    let bytes = encode_binary_snapshot(snapshot)?;
+    let temporary = path.with_extension("vectors.bin.tmp");
     fs::write(&temporary, bytes).map_err(|error| SearchError::VectorIndexIo(error.to_string()))?;
     fs::rename(&temporary, path).map_err(|error| SearchError::VectorIndexIo(error.to_string()))?;
+    let legacy = legacy_json_path(path);
+    if legacy != path && legacy.is_file() {
+        let _ = fs::remove_file(legacy);
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -485,7 +739,12 @@ mod tests {
         }
     }
 
-    fn page_document(entry: &str, page: u32, region: Option<u32>, hash: &str) -> VisualIndexDocument {
+    fn page_document(
+        entry: &str,
+        page: u32,
+        region: Option<u32>,
+        hash: &str,
+    ) -> VisualIndexDocument {
         VisualIndexDocument {
             entry_id: entry.to_string(),
             kind: if region.is_some() {
@@ -514,9 +773,18 @@ mod tests {
 
     #[test]
     fn namespace_separates_models_and_dimensions() {
-        assert_eq!(visual_namespace("model-a", 512), visual_namespace("model-a", 512));
-        assert_ne!(visual_namespace("model-a", 512), visual_namespace("model-b", 512));
-        assert_ne!(visual_namespace("model-a", 512), visual_namespace("model-a", 768));
+        assert_eq!(
+            visual_namespace("model-a", 512),
+            visual_namespace("model-a", 512)
+        );
+        assert_ne!(
+            visual_namespace("model-a", 512),
+            visual_namespace("model-b", 512)
+        );
+        assert_ne!(
+            visual_namespace("model-a", 512),
+            visual_namespace("model-a", 768)
+        );
     }
 
     #[test]
@@ -529,8 +797,17 @@ mod tests {
             b"image-a".to_vec(),
         )]);
         let provider = FakeProvider::new("model-a");
-        let built = build_visual_index(&path, "model-a", 4, &documents, &assets, &empty_precomputed(), &provider, &|_, _| {})
-            .expect("build");
+        let built = build_visual_index(
+            &path,
+            "model-a",
+            4,
+            &documents,
+            &assets,
+            &empty_precomputed(),
+            &provider,
+            &|_, _| {},
+        )
+        .expect("build");
         assert_eq!(built.document_count(), 1);
         assert_eq!(provider.calls(), 1);
 
@@ -555,7 +832,17 @@ mod tests {
             ("e1\u{1f}images/b.jpg\u{1f}h2".to_string(), b"b".to_vec()),
         ]);
         let provider = FakeProvider::new("model-a");
-        build_visual_index(&path, "model-a", 4, &first, &assets, &empty_precomputed(), &provider, &|_, _| {}).expect("build");
+        build_visual_index(
+            &path,
+            "model-a",
+            4,
+            &first,
+            &assets,
+            &empty_precomputed(),
+            &provider,
+            &|_, _| {},
+        )
+        .expect("build");
         assert_eq!(provider.calls(), 2);
 
         let second = vec![
@@ -563,8 +850,17 @@ mod tests {
             document("e1", "images/b.jpg", "h3"),
         ];
         assets.insert("e1\u{1f}images/b.jpg\u{1f}h3".to_string(), b"b2".to_vec());
-        let rebuilt = build_visual_index(&path, "model-a", 4, &second, &assets, &empty_precomputed(), &provider, &|_, _| {})
-            .expect("rebuild");
+        let rebuilt = build_visual_index(
+            &path,
+            "model-a",
+            4,
+            &second,
+            &assets,
+            &empty_precomputed(),
+            &provider,
+            &|_, _| {},
+        )
+        .expect("rebuild");
         assert_eq!(rebuilt.document_count(), 2);
         // Only the changed asset was embedded.
         assert_eq!(provider.calls(), 3);
@@ -576,8 +872,17 @@ mod tests {
         let path = visual_index_path(&dir, "ns");
         let documents = vec![document("e1", "images/a.jpg", "h1")];
         let assets = BTreeMap::from([("e1\u{1f}images/a.jpg\u{1f}h1".to_string(), b"a".to_vec())]);
-        build_visual_index(&path, "model-a", 4, &documents, &assets, &empty_precomputed(), &FakeProvider::new("model-a"), &|_, _| {})
-            .expect("build");
+        build_visual_index(
+            &path,
+            "model-a",
+            4,
+            &documents,
+            &assets,
+            &empty_precomputed(),
+            &FakeProvider::new("model-a"),
+            &|_, _| {},
+        )
+        .expect("build");
         assert!(reopen_visual_index(&path, "model-b", 4, &documents)
             .expect("reopen")
             .is_none());
@@ -598,8 +903,17 @@ mod tests {
             ("e3\u{1f}images/c.jpg\u{1f}h3".to_string(), b"cc".to_vec()),
         ]);
         let provider = FakeProvider::new("model-a");
-        let index = build_visual_index(&path, "model-a", 4, &documents, &assets, &empty_precomputed(), &provider, &|_, _| {})
-            .expect("build");
+        let index = build_visual_index(
+            &path,
+            "model-a",
+            4,
+            &documents,
+            &assets,
+            &empty_precomputed(),
+            &provider,
+            &|_, _| {},
+        )
+        .expect("build");
         let query = provider.embed_query_text("bb").expect("query");
 
         // No frozen scope means no results, never the whole library.
@@ -609,7 +923,13 @@ mod tests {
             .expect("search");
         assert_eq!(scoped.len(), 2);
         assert!(scoped.iter().all(|score| score.entry_id != "e3"));
-        assert_eq!(index.search(&query, &["e1".to_string()], 10).expect("search").len(), 1);
+        assert_eq!(
+            index
+                .search(&query, &["e1".to_string()], 10)
+                .expect("search")
+                .len(),
+            1
+        );
         let limited = index
             .search(&query, &["e1".to_string(), "e2".to_string()], 1)
             .expect("search");
@@ -626,16 +946,34 @@ mod tests {
         let path = visual_index_path(&dir, "ns");
         let documents = vec![document("e1", "images/a.jpg", "h1")];
         let assets = BTreeMap::from([("e1\u{1f}images/a.jpg\u{1f}h1".to_string(), b"a".to_vec())]);
-        build_visual_index(&path, "model-a", 4, &documents, &assets, &empty_precomputed(), &FakeProvider::new("model-a"), &|_, _| {})
-            .expect("first build");
+        build_visual_index(
+            &path,
+            "model-a",
+            4,
+            &documents,
+            &assets,
+            &empty_precomputed(),
+            &FakeProvider::new("model-a"),
+            &|_, _| {},
+        )
+        .expect("first build");
         let before = fs::read(&path).expect("snapshot bytes");
 
         let changed = vec![document("e1", "images/a.jpg", "h9")];
         let mut changed_assets = assets.clone();
         changed_assets.insert("e1\u{1f}images/a.jpg\u{1f}h9".to_string(), b"z".to_vec());
         let failing = FakeProvider::failing("model-a", 0);
-        assert!(build_visual_index(&path, "model-a", 4, &changed, &changed_assets, &empty_precomputed(), &failing, &|_, _| {})
-            .is_err());
+        assert!(build_visual_index(
+            &path,
+            "model-a",
+            4,
+            &changed,
+            &changed_assets,
+            &empty_precomputed(),
+            &failing,
+            &|_, _| {}
+        )
+        .is_err());
         assert_eq!(fs::read(&path).expect("snapshot bytes"), before);
     }
 
@@ -658,9 +996,18 @@ mod tests {
         // Page vectors are produced by the service that rasterizes the PDF, so the index
         // never sees those bytes.
         let mut precomputed = BTreeMap::new();
-        precomputed.insert("e1\u{1f}page:3\u{1f}p3".to_string(), vec![1.0, 0.0, 0.0, 0.0]);
-        precomputed.insert("e1\u{1f}page:3:r0\u{1f}p3r0".to_string(), vec![0.0, 1.0, 0.0, 0.0]);
-        precomputed.insert("e1\u{1f}page:3:r1\u{1f}p3r1".to_string(), vec![0.0, 0.0, 1.0, 0.0]);
+        precomputed.insert(
+            "e1\u{1f}page:3\u{1f}p3".to_string(),
+            vec![1.0, 0.0, 0.0, 0.0],
+        );
+        precomputed.insert(
+            "e1\u{1f}page:3:r0\u{1f}p3r0".to_string(),
+            vec![0.0, 1.0, 0.0, 0.0],
+        );
+        precomputed.insert(
+            "e1\u{1f}page:3:r1\u{1f}p3r1".to_string(),
+            vec![0.0, 0.0, 1.0, 0.0],
+        );
         let provider = FakeProvider::new("model-a");
         let index = build_visual_index(
             &path,
@@ -687,5 +1034,188 @@ mod tests {
         // The page votes once and the figure once, whatever the crop count.
         assert_eq!(parents.len(), 2);
         assert!(parents.iter().any(|parent| parent.parent_id == "page:3"));
+    }
+
+    #[test]
+    fn binary_snapshot_roundtrips_f32_vectors_and_reads_header_keys_only() {
+        let dir = temp_dir("binary");
+        let path = visual_index_path(&dir, "ns");
+        let documents = vec![
+            document("e1", "images/a.jpg", "h1"),
+            document("e2", "images/b.jpg", "h2"),
+        ];
+        let exact = vec![vec![1.5_f32, -0.25, 0.0, 3.25], vec![0.125, 2.0, -4.5, 0.5]];
+        let precomputed = BTreeMap::from([
+            (documents[0].key(), exact[0].clone()),
+            (documents[1].key(), exact[1].clone()),
+        ]);
+        let provider = FakeProvider::failing("model-a", 0);
+        let built = build_visual_index(
+            &path,
+            "model-a",
+            4,
+            &documents,
+            &BTreeMap::new(),
+            &precomputed,
+            &provider,
+            &|_, _| {},
+        )
+        .expect("build");
+        assert_eq!(provider.calls(), 0);
+        assert_eq!(built.embedded_count(), 0);
+        let bytes = fs::read(&path).expect("snapshot");
+        assert_eq!(&bytes[0..8], b"NEVIS003");
+        let header_len = u32::from_le_bytes(bytes[12..16].try_into().expect("len")) as usize;
+        assert_eq!(bytes.len(), 16 + header_len + documents.len() * 4 * 4);
+        assert_eq!(
+            visual_snapshot_keys(&path, "model-a", 4),
+            documents.iter().map(VisualIndexDocument::key).collect()
+        );
+        let reopened = reopen_visual_index(&path, "model-a", 4, &documents)
+            .expect("reopen")
+            .expect("snapshot");
+        assert_eq!(reopened.vectors, exact);
+        assert_eq!(reopened.embedded_count(), 0);
+    }
+
+    #[test]
+    fn reopen_matches_subset_and_reordered_documents_by_key_and_drops_removed() {
+        let dir = temp_dir("subset");
+        let path = visual_index_path(&dir, "ns");
+        let kept = document("e1", "images/a.jpg", "h1");
+        let dropped = document("e1", "images/b.jpg", "h2");
+        let documents = vec![kept.clone(), dropped.clone()];
+        let assets = BTreeMap::from([(kept.key(), b"a".to_vec()), (dropped.key(), b"b".to_vec())]);
+        build_visual_index(
+            &path,
+            "model-a",
+            4,
+            &documents,
+            &assets,
+            &empty_precomputed(),
+            &FakeProvider::new("model-a"),
+            &|_, _| {},
+        )
+        .expect("build");
+        let extra = document("e9", "images/c.jpg", "h9");
+        let reordered = vec![dropped.clone(), extra.clone(), kept.clone()];
+        let opened = reopen_visual_index(&path, "model-a", 4, &reordered)
+            .expect("reopen")
+            .expect("intersection");
+        assert_eq!(
+            opened
+                .documents
+                .iter()
+                .map(VisualIndexDocument::key)
+                .collect::<Vec<_>>(),
+            vec![dropped.key(), kept.key()]
+        );
+        assert!(reopen_visual_index(&path, "model-a", 4, &[extra])
+            .expect("reopen")
+            .is_none());
+
+        let survivor_assets = BTreeMap::from([(kept.key(), b"a".to_vec())]);
+        build_visual_index(
+            &path,
+            "model-a",
+            4,
+            &[kept.clone()],
+            &survivor_assets,
+            &empty_precomputed(),
+            &FakeProvider::failing("model-a", 0),
+            &|_, _| {},
+        )
+        .expect("trim");
+        assert_eq!(
+            visual_snapshot_keys(&path, "model-a", 4),
+            BTreeSet::from([kept.key()])
+        );
+    }
+
+    #[test]
+    fn a_mid_build_failure_persists_completed_batches_for_resume() {
+        let dir = temp_dir("resume");
+        let path = visual_index_path(&dir, "ns");
+        let documents = (0..5)
+            .map(|index| document("e1", &format!("images/{index}.jpg"), &format!("h{index}")))
+            .collect::<Vec<_>>();
+        let assets = documents
+            .iter()
+            .map(|document| (document.key(), document.source_id.clone().into_bytes()))
+            .collect::<BTreeMap<_, _>>();
+        let failing = FakeProvider::failing("model-a", VISUAL_EMBED_BATCH_SIZE);
+        assert!(build_visual_index(
+            &path,
+            "model-a",
+            4,
+            &documents,
+            &assets,
+            &empty_precomputed(),
+            &failing,
+            &|_, _| {},
+        )
+        .is_err());
+        let stored = visual_snapshot_keys(&path, "model-a", 4);
+        assert_eq!(stored.len(), VISUAL_EMBED_BATCH_SIZE);
+        assert!(!stored.contains(&documents[4].key()));
+
+        let retry = FakeProvider::new("model-a");
+        let built = build_visual_index(
+            &path,
+            "model-a",
+            4,
+            &documents,
+            &assets,
+            &empty_precomputed(),
+            &retry,
+            &|_, _| {},
+        )
+        .expect("resume");
+        assert_eq!(retry.calls(), 1);
+        assert_eq!(built.embedded_count(), 1);
+        assert_eq!(built.document_count(), 5);
+        assert_eq!(visual_snapshot_keys(&path, "model-a", 4).len(), 5);
+    }
+
+    #[test]
+    fn a_legacy_v2_json_snapshot_is_read_and_upgraded_to_binary() {
+        let dir = temp_dir("legacy");
+        let path = visual_index_path(&dir, "ns");
+        let document = document("e1", "images/a.jpg", "h1");
+        let vector = vec![0.25_f32, 0.5, 0.75, 1.0];
+        let legacy = LegacyVisualSnapshotV2 {
+            format_version: LEGACY_JSON_FORMAT_VERSION,
+            identity: "model-a".to_string(),
+            dimensions: 4,
+            documents: vec![document.clone()],
+            vectors: vec![vector.clone()],
+        };
+        let legacy_path = legacy_json_path(&path);
+        fs::create_dir_all(legacy_path.parent().expect("parent")).expect("dir");
+        fs::write(&legacy_path, serde_json::to_vec(&legacy).expect("json")).expect("write");
+        assert_eq!(
+            visual_snapshot_keys(&path, "model-a", 4),
+            BTreeSet::from([document.key()])
+        );
+        let reopened = reopen_visual_index(&path, "model-a", 4, &[document.clone()])
+            .expect("reopen")
+            .expect("legacy");
+        assert_eq!(reopened.vectors, vec![vector.clone()]);
+
+        let built = build_visual_index(
+            &path,
+            "model-a",
+            4,
+            &[document.clone()],
+            &BTreeMap::new(),
+            &BTreeMap::from([(document.key(), vector.clone())]),
+            &FakeProvider::failing("model-a", 0),
+            &|_, _| {},
+        )
+        .expect("upgrade");
+        assert_eq!(built.embedded_count(), 0);
+        assert!(path.is_file());
+        assert!(!legacy_path.exists());
+        assert_eq!(&fs::read(&path).expect("bin")[0..8], b"NEVIS003");
     }
 }

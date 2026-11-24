@@ -89,6 +89,30 @@ impl PersistentSemanticSearchIndex {
         fingerprint: u64,
         on_progress: &dyn Fn(usize, usize),
     ) -> SearchResult<Self> {
+        Self::open_or_build_with_seed_and_progress(
+            path,
+            documents,
+            provider,
+            include,
+            fingerprint,
+            HashMap::new(),
+            on_progress,
+        )
+    }
+
+    /// Like [`Self::open_or_build_with_progress`], but also accepts already-computed
+    /// `(stable_document_key, normalized_vector)` pairs produced by the exact same
+    /// provider (for example when building a `segments` index immediately after a
+    /// `global` index) so shared segments are reused instead of embedded twice.
+    pub fn open_or_build_with_seed_and_progress(
+        path: impl AsRef<Path>,
+        documents: &[SearchDocument],
+        provider: &dyn EmbeddingProvider,
+        include: &SearchInclude,
+        fingerprint: u64,
+        seed_vectors: HashMap<String, Vec<f32>>,
+        on_progress: &dyn Fn(usize, usize),
+    ) -> SearchResult<Self> {
         let path = path.as_ref();
         let identity = semantic_embedding_identity(provider);
         if let Some(identity) = identity.as_deref() {
@@ -101,10 +125,25 @@ impl PersistentSemanticSearchIndex {
             }
         }
 
-        let cached_vectors = Self::read_cached_vectors(path, identity.as_deref())?;
+        let mut cached_vectors = Self::read_cached_vectors(path, identity.as_deref())?;
+        let expected_dims = provider.status().dimensions;
+        for (id, vector) in seed_vectors {
+            if validate_embedding_vector(&vector, expected_dims).is_ok() {
+                cached_vectors.entry(id).or_insert(vector);
+            }
+        }
         let index = Self::build_reusing(documents, provider, include, cached_vectors, on_progress)?;
         index.persist(path, fingerprint)?;
         Ok(index)
+    }
+
+    /// Exports normalized document vectors keyed by `stable_document_key` so
+    /// narrower scopes built in the same pass can reuse them without re-embedding.
+    pub fn export_vectors(&self) -> HashMap<String, Vec<f32>> {
+        self.documents
+            .iter()
+            .map(|indexed| (indexed.id.clone(), indexed.vector.clone()))
+            .collect()
     }
 
     pub fn build(
@@ -230,7 +269,10 @@ impl PersistentSemanticSearchIndex {
                     source: indexed.document.source.clone(),
                     target: indexed.document.target.clone(),
                     title: indexed.document.title.clone(),
-                    snippet: make_semantic_snippet(&indexed.text_for_snippet),
+                    snippet: make_semantic_snippet(
+                        &indexed.text_for_snippet,
+                        indexed.document.source.segment_type,
+                    ),
                     score,
                     matched_terms: Vec::new(),
                     surrounding_context: None,
@@ -913,14 +955,9 @@ mod tests {
         let include = SearchInclude::default();
         let dir = test_cache_dir("prefix-roundtrip");
         let path = dir.join("semantic.json");
-        let index = PersistentSemanticSearchIndex::open_or_build(
-            &path,
-            &docs,
-            &unprefixed,
-            &include,
-            42,
-        )
-        .unwrap();
+        let index =
+            PersistentSemanticSearchIndex::open_or_build(&path, &docs, &unprefixed, &include, 42)
+                .unwrap();
         let unprefixed_id = super::semantic_embedding_identity(&unprefixed).unwrap();
         let reopened = PersistentSemanticSearchIndex::open_cached_with_identity(
             &path,
@@ -933,11 +970,7 @@ mod tests {
         assert!(reopened.is_some());
         let e5_id = super::semantic_embedding_identity(&e5).unwrap();
         assert!(PersistentSemanticSearchIndex::open_cached_with_identity(
-            &path,
-            &docs,
-            &include,
-            42,
-            &e5_id,
+            &path, &docs, &include, 42, &e5_id,
         )
         .unwrap()
         .is_none());
@@ -1016,6 +1049,7 @@ fn group_hits(
         total_hit_count,
         entries,
         warnings,
+        rerank_used: None,
     }
 }
 
@@ -1026,9 +1060,19 @@ fn dot_product(left: &[f32], right: &[f32]) -> f32 {
         .sum()
 }
 
-fn make_semantic_snippet(text: &str) -> String {
-    let clean = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    trim_chars(&clean, 0, 220)
+const SEMANTIC_SNIPPET_PARAGRAPH_CHARS: usize = 700;
+const SEMANTIC_SNIPPET_TABLE_CHARS: usize = 1600;
+
+fn make_semantic_snippet(text: &str, segment_type: Option<neuink_domain::SegmentType>) -> String {
+    let is_table = segment_type == Some(neuink_domain::SegmentType::Table)
+        || crate::result::contains_html_table(text);
+    let clean = crate::result::compact_html_table_if_present(text);
+    let limit = if is_table {
+        SEMANTIC_SNIPPET_TABLE_CHARS
+    } else {
+        SEMANTIC_SNIPPET_PARAGRAPH_CHARS
+    };
+    trim_chars(&clean, 0, limit)
 }
 
 fn trim_chars(text: &str, start: usize, len: usize) -> String {
@@ -1095,4 +1139,138 @@ fn tmp_path(path: &Path) -> PathBuf {
 
 fn io_error(error: std::io::Error) -> SearchError {
     SearchError::VectorIndexIo(error.to_string())
+}
+
+#[cfg(test)]
+mod seed_reuse_tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use neuink_domain::{EntryId, SegmentUid};
+
+    use super::*;
+    use crate::{
+        EmbeddingProviderStatus, SearchDocumentSource, SearchDocumentSourceKind, SearchTarget,
+        SearchTextSection,
+    };
+
+    struct CountingProvider {
+        calls: AtomicUsize,
+    }
+
+    impl EmbeddingProvider for CountingProvider {
+        fn status(&self) -> EmbeddingProviderStatus {
+            EmbeddingProviderStatus {
+                available: true,
+                provider: "test".to_string(),
+                model_name: Some("test-model".to_string()),
+                model_path: None,
+                dimensions: Some(4),
+                message: None,
+            }
+        }
+
+        fn cache_identity(&self) -> Option<String> {
+            Some("test-identity-v1".to_string())
+        }
+
+        fn embed(&self, inputs: &[EmbeddingInput]) -> SearchResult<Vec<crate::EmbeddingVector>> {
+            self.calls.fetch_add(inputs.len(), Ordering::SeqCst);
+            Ok(inputs
+                .iter()
+                .map(|input| {
+                    let seed = input.text.len() as f32 + 1.0;
+                    crate::EmbeddingVector::new(vec![seed, 1.0, 0.5, 0.25])
+                })
+                .collect())
+        }
+    }
+
+    #[test]
+    fn seeded_segments_scope_reuses_global_vectors_without_re_embedding() {
+        let dir = std::env::temp_dir().join(format!(
+            "neuink-seed-reuse-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let entry_id = EntryId::from_string("e1".to_string());
+        let seg_uid = SegmentUid::from_string("seg-1".to_string());
+        let entry_doc = SearchDocument {
+            entry_id: entry_id.clone(),
+            entry_title: "Paper One".to_string(),
+            source: SearchDocumentSource {
+                kind: SearchDocumentSourceKind::EntryTitle,
+                label: "title".to_string(),
+                field_name: Some("title".to_string()),
+                ..Default::default()
+            },
+            target: SearchTarget::Entry {
+                entry_id: entry_id.clone(),
+            },
+            title: "Paper One".to_string(),
+            sections: vec![SearchTextSection::body("Paper abstract body")],
+            boost: 1.0,
+        };
+        let seg_doc = SearchDocument {
+            entry_id: entry_id.clone(),
+            entry_title: "Paper One".to_string(),
+            source: SearchDocumentSource {
+                kind: SearchDocumentSourceKind::Segment,
+                label: "segment".to_string(),
+                segment_uid: Some(seg_uid.clone()),
+                page_idx: Some(1),
+                ..Default::default()
+            },
+            target: SearchTarget::Segment {
+                entry_id,
+                segment_uid: seg_uid,
+                page_idx: 1,
+            },
+            title: "Paper One".to_string(),
+            sections: vec![SearchTextSection::body(
+                "Segment content shared by global and segments scopes.",
+            )],
+            boost: 1.0,
+        };
+
+        let provider = CountingProvider {
+            calls: AtomicUsize::new(0),
+        };
+        let global_path = dir.join("global.vectors.json");
+        let global = PersistentSemanticSearchIndex::open_or_build_with_seed_and_progress(
+            &global_path,
+            &[entry_doc, seg_doc.clone()],
+            &provider,
+            &SearchInclude::default(),
+            101,
+            HashMap::new(),
+            &|_, _| {},
+        )
+        .unwrap();
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 2);
+
+        let segments_path = dir.join("segments.vectors.json");
+        let segments_include = SearchInclude {
+            entry_meta: false,
+            notes: true,
+            segments: true,
+        };
+        let segments = PersistentSemanticSearchIndex::open_or_build_with_seed_and_progress(
+            &segments_path,
+            &[seg_doc],
+            &provider,
+            &segments_include,
+            202,
+            global.export_vectors(),
+            &|_, _| {},
+        )
+        .unwrap();
+
+        // Zero additional embedding calls: the segment vector came straight from `global`.
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 2);
+        assert_eq!(segments.document_count(), 1);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

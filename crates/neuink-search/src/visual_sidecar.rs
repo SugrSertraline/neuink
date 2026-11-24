@@ -240,10 +240,8 @@ mod tests {
 
     #[test]
     fn equal_scores_order_by_identity() {
-        let parents = aggregate_parents(&[
-            score("b", "p1", None, 0.5),
-            score("a", "p2", None, 0.5),
-        ]);
+        let parents =
+            aggregate_parents(&[score("b", "p1", None, 0.5), score("a", "p2", None, 0.5)]);
         assert_eq!(parents[0].entry_id, "a");
         assert_eq!(parents[1].entry_id, "b");
     }

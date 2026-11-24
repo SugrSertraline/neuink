@@ -765,7 +765,8 @@ fn chapter_subtree_supplement_inserts_unseen_routed_chapter_hits_into_rerank_hea
             Ok(inputs
                 .iter()
                 .map(|input| {
-                    let values = if input.id.contains(":target-") || input.id.contains(":heading-") {
+                    let values = if input.id.contains(":target-") || input.id.contains(":heading-")
+                    {
                         vec![1.0, 0.0]
                     } else {
                         vec![0.0, 1.0]
@@ -820,4 +821,288 @@ fn chapter_subtree_supplement_inserts_unseen_routed_chapter_hits_into_rerank_hea
     assert!(!ids.iter().any(|id| id == "s:entry-out:target-out"));
     assert!(ids.iter().any(|id| id == "s:entry-a:seed-6"));
     assert_eq!(ids.len(), 7);
+}
+
+struct ScriptedEmbedder {
+    map: fn(&str) -> Vec<f32>,
+}
+
+impl crate::EmbeddingProvider for ScriptedEmbedder {
+    fn status(&self) -> crate::EmbeddingProviderStatus {
+        crate::EmbeddingProviderStatus {
+            available: true,
+            provider: "scripted".into(),
+            model_name: Some("scripted".into()),
+            model_path: None,
+            dimensions: Some(2),
+            message: None,
+        }
+    }
+
+    fn embed(
+        &self,
+        inputs: &[crate::EmbeddingInput],
+    ) -> crate::SearchResult<Vec<crate::EmbeddingVector>> {
+        Ok(inputs
+            .iter()
+            .map(|input| crate::EmbeddingVector {
+                values: (self.map)(&input.id),
+            })
+            .collect())
+    }
+}
+
+fn scripted_index(
+    documents: &[SearchDocument],
+    map: fn(&str) -> Vec<f32>,
+) -> crate::PersistentSemanticSearchIndex {
+    crate::PersistentSemanticSearchIndex::build(
+        documents,
+        &ScriptedEmbedder { map },
+        &crate::SearchInclude::default(),
+    )
+    .unwrap()
+}
+
+fn assert_unique(ids: &[String]) {
+    let mut sorted = ids.to_vec();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(sorted.len(), ids.len());
+}
+
+#[test]
+fn stage_one_tail_chapter_segment_is_promoted_into_the_rerank_head_without_duplication() {
+    fn vectors(id: &str) -> Vec<f32> {
+        if id.contains(":tail-gold:") {
+            vec![1.0, 0.0]
+        } else if id.contains(":pool-weak:") {
+            vec![0.6, 0.8]
+        } else {
+            vec![0.0, 1.0]
+        }
+    }
+    let mut docs: Vec<SearchDocument> = (1..=9)
+        .map(|index| document("entry-a", &format!("seed-{index:02}"), Some(("sec-intro", "Intro"))))
+        .collect();
+    docs.push(document(
+        "entry-a",
+        "tail-gold",
+        Some(("sec-exp", "Experiments")),
+    ));
+    docs.push(document(
+        "entry-a",
+        "pool-weak",
+        Some(("sec-exp", "Experiments")),
+    ));
+    let semantic = scripted_index(&docs, vectors);
+    let mut hits: Vec<SearchHit> = docs[..7].iter().map(|doc| hit(doc, 0.5)).collect();
+    hits.push(hit(&docs[9], 0.4));
+    hits.extend(docs[7..9].iter().map(|doc| hit(doc, 0.3)));
+    let enriched = crate::supplement_hits_from_chapters(
+        results(hits),
+        &semantic,
+        &[1.0, 0.0],
+        &["entry-a".to_string()],
+        &[],
+        None,
+        6,
+        1,
+        1,
+        10,
+    );
+    let ids = identities(&enriched);
+    let tail = "s:entry-a:tail-gold";
+    let position = ids.iter().position(|id| id == tail).unwrap();
+    assert!(position < 6, "tail rank was {}", position + 1);
+    assert_eq!(ids.iter().filter(|id| id.as_str() == tail).count(), 1);
+    assert!(!ids.iter().any(|id| id == "s:entry-a:pool-weak"));
+    assert_eq!(ids.len(), 10);
+    assert_unique(&ids);
+}
+
+#[test]
+fn references_are_not_supplemented_unless_the_section_filter_asks_for_them() {
+    fn vectors(id: &str) -> Vec<f32> {
+        if id.contains(":ref-") {
+            vec![1.0, 0.0]
+        } else if id.contains(":body-gold:") {
+            vec![0.6, 0.8]
+        } else {
+            vec![0.0, 1.0]
+        }
+    }
+    let mut reference = document("entry-a", "ref-en", Some(("sec-ref", "References")));
+    reference.source.section_role = Some(CanonicalSectionRole::References);
+    let mut reference_zh = document("entry-a", "ref-zh", Some(("sec-ref-zh", "参考文献")));
+    reference_zh.source.section_role = Some(CanonicalSectionRole::References);
+    let mut docs: Vec<SearchDocument> = (1..=6)
+        .map(|index| document("entry-a", &format!("seed-{index}"), Some(("sec-intro", "Intro"))))
+        .collect();
+    docs.push(reference);
+    docs.push(reference_zh);
+    docs.push(document(
+        "entry-a",
+        "body-gold",
+        Some(("sec-body", "Methods")),
+    ));
+    let semantic = scripted_index(&docs, vectors);
+    let seeds = results(docs[..6].iter().map(|doc| hit(doc, 0.5)).collect());
+    let plain = crate::supplement_hits_from_chapters(
+        seeds.clone(),
+        &semantic,
+        &[1.0, 0.0],
+        &["entry-a".to_string()],
+        &[],
+        None,
+        6,
+        3,
+        1,
+        10,
+    );
+    let plain_ids = identities(&plain);
+    assert!(!plain_ids.iter().any(|id| id.contains("ref-")));
+    assert!(plain_ids[..6].iter().any(|id| id == "s:entry-a:body-gold"));
+    assert_unique(&plain_ids);
+
+    let english = crate::supplement_hits_from_chapters(
+        seeds.clone(),
+        &semantic,
+        &[1.0, 0.0],
+        &["entry-a".to_string()],
+        &[],
+        Some("References"),
+        6,
+        3,
+        1,
+        10,
+    );
+    let english_ids = identities(&english);
+    assert!(english_ids[..6].iter().any(|id| id == "s:entry-a:ref-en"));
+    assert!(!english_ids.iter().any(|id| id == "s:entry-a:ref-zh"));
+    assert!(!english_ids.iter().any(|id| id == "s:entry-a:body-gold"));
+
+    let chinese = crate::supplement_hits_from_chapters(
+        seeds,
+        &semantic,
+        &[1.0, 0.0],
+        &["entry-a".to_string()],
+        &[],
+        Some("参考文献"),
+        6,
+        3,
+        1,
+        10,
+    );
+    let chinese_ids = identities(&chinese);
+    assert!(chinese_ids[..6].iter().any(|id| id == "s:entry-a:ref-zh"));
+    assert!(!chinese_ids.iter().any(|id| id == "s:entry-a:ref-en"));
+    assert!(!chinese_ids.iter().any(|id| id == "s:entry-a:body-gold"));
+}
+
+#[test]
+fn later_routed_papers_do_not_take_anchor_chapter_slots() {
+    fn cap_vectors(id: &str) -> Vec<f32> {
+        if id.contains(":p4-gold:") {
+            vec![1.0, 0.0]
+        } else if id.contains("-gold:") {
+            vec![0.5, 0.8660254037844386]
+        } else {
+            vec![0.0, 1.0]
+        }
+    }
+    fn decay_vectors(id: &str) -> Vec<f32> {
+        if id.contains(":p1-gold:") {
+            vec![0.9, 0.4358898943540673]
+        } else if id.contains(":p3-gold:") || id.contains(":p4-gold:") {
+            vec![1.0, 0.0]
+        } else {
+            vec![0.0, 1.0]
+        }
+    }
+    let routed = vec![
+        "paper-4".to_string(),
+        "paper-3".to_string(),
+        "paper-2".to_string(),
+        "paper-1".to_string(),
+    ];
+    let build = |map: fn(&str) -> Vec<f32>| {
+        let mut docs = Vec::new();
+        for paper in ["paper-1", "paper-2", "paper-3", "paper-4"] {
+            docs.push(document(
+                paper,
+                &format!("{paper}-intro"),
+                Some(("sec-intro", "Intro")),
+            ));
+            docs.push(document(
+                paper,
+                &format!("{paper}-gold").replace("paper-", "p"),
+                Some(("sec-gold", "Answer")),
+            ));
+        }
+        docs.push(document(
+            "paper-1",
+            "paper-1-fill-a",
+            Some(("sec-intro", "Intro")),
+        ));
+        docs.push(document(
+            "paper-1",
+            "paper-1-fill-b",
+            Some(("sec-intro", "Intro")),
+        ));
+        let semantic = scripted_index(&docs, map);
+        let order = [
+            "paper-1-intro",
+            "paper-2-intro",
+            "paper-3-intro",
+            "paper-4-intro",
+            "paper-1-fill-a",
+            "paper-1-fill-b",
+        ];
+        let hits = order
+            .iter()
+            .filter_map(|uid| docs.iter().find(|doc| doc.title == *uid))
+            .map(|doc| hit(doc, 0.4))
+            .collect::<Vec<_>>();
+        (semantic, results(hits))
+    };
+
+    let (semantic, hits) = build(cap_vectors);
+    let capped = crate::supplement_hits_from_chapters(
+        hits,
+        &semantic,
+        &[1.0, 0.0],
+        &routed,
+        &[],
+        None,
+        6,
+        3,
+        1,
+        10,
+    );
+    let capped_ids = identities(&capped);
+    assert!(capped_ids[..6].iter().any(|id| id == "s:paper-1:p1-gold"));
+    assert!(!capped_ids.iter().any(|id| id == "s:paper-4:p4-gold"));
+    assert_unique(&capped_ids);
+
+    let (semantic, hits) = build(decay_vectors);
+    let decayed = crate::supplement_hits_from_chapters(
+        hits,
+        &semantic,
+        &[1.0, 0.0],
+        &routed,
+        &[],
+        None,
+        6,
+        1,
+        1,
+        10,
+    );
+    let decayed_ids = identities(&decayed);
+    assert!(decayed_ids[..6]
+        .iter()
+        .any(|id| id == "s:paper-1:p1-gold"));
+    assert!(!decayed_ids.iter().any(|id| id == "s:paper-3:p3-gold"));
+    assert!(!decayed_ids.iter().any(|id| id == "s:paper-4:p4-gold"));
+    assert_unique(&decayed_ids);
 }

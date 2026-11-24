@@ -114,7 +114,11 @@ mod tests {
                 .enumerate()
                 .map(|(index, document)| RerankScore {
                     index,
-                    score: if document.contains("target") { 1.0 } else { 0.0 },
+                    score: if document.contains("target") {
+                        1.0
+                    } else {
+                        0.0
+                    },
                 })
                 .collect())
         }
@@ -165,7 +169,8 @@ mod tests {
         first.score = 0.95;
         let mut second = hit("b", "a target value");
         second.score = 0.10;
-        let ordered = rerank_hits_with_provider(&[first, second], "q", &KeywordReranker, 20).expect("rerank");
+        let ordered =
+            rerank_hits_with_provider(&[first, second], "q", &KeywordReranker, 20).expect("rerank");
         assert!(ordered[0].score > ordered[1].score);
         let results = crate::retrieval_pipeline::results_from_hits(
             "q".to_string(),
@@ -175,6 +180,9 @@ mod tests {
             Vec::new(),
         );
         let again = crate::retrieval_pipeline::ordered_hits(&results);
-        assert!(again[0].snippet.contains("target"), "score sort restored the old order");
+        assert!(
+            again[0].snippet.contains("target"),
+            "score sort restored the old order"
+        );
     }
 }

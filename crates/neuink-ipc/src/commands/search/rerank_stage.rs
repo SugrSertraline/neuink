@@ -5,6 +5,7 @@
 //! auditable instead of guessed: "text-only because the reranker was not installed" and
 //! "text-only because the reranker failed" must not look the same.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 #[cfg(feature = "local-embedding")]
@@ -13,8 +14,9 @@ use std::time::SystemTime;
 use neuink_config::{LlmApiProtocol, LlmProfile, RerankMode, RerankSettings};
 use neuink_search::{
     apply_structural_soft_demotion, apply_structural_soft_demotion_head, format_structured_hit,
-    fuse_rankings_rrf, is_single_paper_hits, refine_tail_with_scope_v6, reorder_listwise_hits,
-    rerank_hits_by_coverage, rerank_hits_with_provider_raw, rerank_hits_with_provider_structured,
+    fuse_pool_rrf_with_profile, fuse_rankings_rrf, is_single_paper_hits, refine_tail_with_scope_v6,
+    reorder_listwise_hits, PoolRrfProfile,
+    rerank_hits_by_coverage, rerank_hits_with_provider_raw,
     stamp_rank_scores, FieldCoverageWeights, HttpListwiseReranker, HttpScopeJudge,
     ListwisePromptStyle, ListwiseRerankProvider, RerankProvider, ScopeJudgeProvider,
     ScopeSwapSummary, SearchHit,
@@ -42,6 +44,8 @@ pub(super) struct RerankOutcome {
     pub used: &'static str,
     pub reason: Option<&'static str>,
     pub swaps: Vec<ScopeSwapSummary>,
+    /// Raw Cross-Encoder confidence. Set only after a successful encoder pass.
+    pub ce_confidence: Option<neuink_search::CeConfidence>,
 }
 
 impl RerankOutcome {
@@ -50,6 +54,7 @@ impl RerankOutcome {
             used,
             reason: None,
             swaps: Vec::new(),
+            ce_confidence: None,
         }
     }
 
@@ -58,6 +63,7 @@ impl RerankOutcome {
             used,
             reason: Some(reason),
             swaps: Vec::new(),
+            ce_confidence: None,
         }
     }
 }
@@ -151,11 +157,53 @@ pub(super) fn apply_rerank(
     apply_rerank_with_scope(hits, query, settings, provider, None, None, 0)
 }
 
+/// Chooses the effective query passed to Cross-Encoder / Heuristic / Listwise rerankers.
+/// When the user asks in Chinese (`question` contains CJK), an `english_query` is provided,
+/// and the recalled head passages are predominantly English (>70% Latin letters vs CJK),
+/// rerankers score against `english_query` to avoid cross-lingual scoring degradation
+/// (especially critical for local `bge-reranker-base` and English-vocabulary `heuristic`).
+pub(super) fn effective_rerank_query<'a>(
+    question: &'a str,
+    english_query: Option<&'a str>,
+    hits: &[SearchHit],
+) -> &'a str {
+    let Some(english) = english_query.map(str::trim).filter(|value| !value.is_empty()) else {
+        return question;
+    };
+    if !super::contains_cjk(question) {
+        return question;
+    }
+    let mut latin = 0usize;
+    let mut cjk = 0usize;
+    for hit in hits.iter().take(5) {
+        for ch in hit.snippet.chars() {
+            if ch.is_ascii_alphabetic() {
+                latin += 1;
+            } else if matches!(ch, '\u{3400}'..='\u{4dbf}' | '\u{4e00}'..='\u{9fff}') {
+                cjk += 1;
+            }
+        }
+    }
+    if latin > 0 && latin * 10 > (latin + cjk) * 7 {
+        english
+    } else {
+        question
+    }
+}
+
+fn combined_intent_query(question: &str, english_query: Option<&str>) -> String {
+    match english_query.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(english) if english != question.trim() => format!("{question} {english}"),
+        _ => question.to_string(),
+    }
+}
+
 /// Runs the ladder, then the optional v6 tail, then cuts back to the requested `top_k`.
 ///
 /// `top_k == 0` leaves the recalled list intact. That is what the older call sites use.
 /// Scope refine never fails the search: a missing judge or a failed batch keeps the
 /// cross-encoder order and records why.
+#[cfg(test)]
 pub(super) fn apply_rerank_with_scope(
     hits: Vec<SearchHit>,
     query: &str,
@@ -165,6 +213,55 @@ pub(super) fn apply_rerank_with_scope(
     listwise: Option<&dyn ListwiseRerankProvider>,
     top_k: usize,
 ) -> (Vec<SearchHit>, RerankOutcome) {
+    apply_rerank_with_scope_and_english(
+        hits,
+        query,
+        None,
+        settings,
+        provider,
+        scope_judge,
+        listwise,
+        top_k,
+    )
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn apply_rerank_with_scope_and_english(
+    hits: Vec<SearchHit>,
+    query: &str,
+    english_query: Option<&str>,
+    settings: &RerankSettings,
+    provider: Option<&dyn RerankProvider>,
+    scope_judge: Option<&dyn ScopeJudgeProvider>,
+    listwise: Option<&dyn ListwiseRerankProvider>,
+    top_k: usize,
+) -> (Vec<SearchHit>, RerankOutcome) {
+    apply_rerank_with_supplements(
+        hits,
+        query,
+        english_query,
+        settings,
+        provider,
+        scope_judge,
+        listwise,
+        top_k,
+        &HashSet::new(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn apply_rerank_with_supplements(
+    hits: Vec<SearchHit>,
+    query: &str,
+    english_query: Option<&str>,
+    settings: &RerankSettings,
+    provider: Option<&dyn RerankProvider>,
+    scope_judge: Option<&dyn ScopeJudgeProvider>,
+    listwise: Option<&dyn ListwiseRerankProvider>,
+    top_k: usize,
+    pre_ce_supplement_ids: &HashSet<String>,
+) -> (Vec<SearchHit>, RerankOutcome) {
     if hits.len() <= 1
         || (settings.mode == RerankMode::Off
             && !settings.listwise.enabled
@@ -173,44 +270,46 @@ pub(super) fn apply_rerank_with_scope(
         return (hits, RerankOutcome::plain(RERANK_OFF));
     }
     let stage1 = hits.clone();
+    let rerank_q = effective_rerank_query(query, english_query, &hits);
+    let intent_q = combined_intent_query(query, english_query);
     let mut soft_head: Option<usize> = None;
     let (mut ordered, mut outcome) = match settings.mode {
         RerankMode::Off => (hits, RerankOutcome::plain(RERANK_OFF)),
         RerankMode::Heuristic => (
-            rerank_hits_by_coverage(&hits, query, &FieldCoverageWeights::default()),
+            rerank_hits_by_coverage(&hits, rerank_q, &FieldCoverageWeights::default()),
             RerankOutcome::plain(RERANK_HEURISTIC),
         ),
         RerankMode::CrossEncoder => match provider {
             Some(provider) => {
-                // Keep raw cross-encoder scores when B0-sec-soft will run right after, so
-                // soft demotion scales with true scores rather than candidate count `N`.
-                let keep_raw_for_soft = settings.structural_soft_demotion
-                    && !settings.fuse_with_pool
-                    && !settings.scope_refine.enabled;
+                // Keep raw cross-encoder scores whenever B0-sec-soft will run right after
+                // (including when `fuse_with_pool` is also enabled), so soft demotion scales
+                // with true encoder score margins rather than candidate pool length `N`.
+                let keep_raw_for_soft =
+                    settings.structural_soft_demotion && !settings.scope_refine.enabled;
                 let head = encoder_head(settings);
-                let rerank_result = if keep_raw_for_soft {
-                    rerank_hits_with_provider_raw(
-                        &hits,
-                        query,
-                        provider,
-                        head,
-                        settings.structured_input,
-                    )
-                } else {
-                    rerank_hits_with_provider_structured(
-                        &hits,
-                        query,
-                        provider,
-                        head,
-                        settings.structured_input,
-                    )
-                };
+                let rerank_result = rerank_hits_with_provider_raw(
+                    &hits,
+                    rerank_q,
+                    provider,
+                    head,
+                    settings.structured_input,
+                );
                 match rerank_result {
                 Ok(mut ordered) => {
+                    let scored = ordered.len().min(head);
+                    let raw_scores = ordered
+                        .iter()
+                        .take(scored)
+                        .map(|hit| hit.score)
+                        .collect::<Vec<_>>();
+                    let ce_confidence = neuink_search::CeConfidence::from_raw_scores(&raw_scores);
                     if keep_raw_for_soft {
-                        soft_head = Some(ordered.len().min(head));
+                        soft_head = Some(scored);
+                    } else {
+                        stamp_rank_scores(&mut ordered);
                     }
                     let mut outcome = RerankOutcome::plain(RERANK_CROSS_ENCODER);
+                    outcome.ce_confidence = ce_confidence;
                     if settings.scope_refine.enabled && !settings.listwise.enabled && ordered.len() > 10 {
                         match scope_judge {
                             None => {
@@ -218,14 +317,16 @@ pub(super) fn apply_rerank_with_scope(
                                     RERANK_CROSS_ENCODER,
                                     REASON_SCOPE_REFINE_UNCONFIGURED,
                                 );
+                                outcome.ce_confidence = ce_confidence;
                             }
                             Some(judge) => {
-                                let report = refine_tail_with_scope_v6(&ordered, query, judge);
+                                let report = refine_tail_with_scope_v6(&ordered, rerank_q, judge);
                                 if report.errored {
                                     outcome = RerankOutcome::with_reason(
                                         RERANK_CROSS_ENCODER,
                                         REASON_SCOPE_REFINE_ERROR,
                                     );
+                                    outcome.ce_confidence = ce_confidence;
                                 } else {
                                     ordered = report.hits;
                                     stamp_rank_scores(&mut ordered);
@@ -233,6 +334,7 @@ pub(super) fn apply_rerank_with_scope(
                                         used: RERANK_CROSS_ENCODER_SCOPE_V6,
                                         reason: None,
                                         swaps: report.swaps,
+                                        ce_confidence: outcome.ce_confidence,
                                     };
                                 }
                             }
@@ -240,27 +342,38 @@ pub(super) fn apply_rerank_with_scope(
                     }
                     (ordered, outcome)
                 }
-                Err(_) => fall_back(hits, query, settings, REASON_PROVIDER_ERROR),
+                Err(_) => fall_back(hits, rerank_q, settings, REASON_PROVIDER_ERROR),
                 }
             }
-            None => fall_back(hits, query, settings, unavailable_reason(settings)),
+            None => fall_back(hits, rerank_q, settings, unavailable_reason(settings)),
         },
     };
-    if settings.fuse_with_pool && outcome.used == RERANK_CROSS_ENCODER {
-        ordered = fuse_rankings_rrf(&stage1, &ordered);
-        outcome.used = RERANK_POOL_RRF;
-    }
+    // Apply B0-sec-soft BEFORE optional pool RRF so soft demotion runs on raw Cross-Encoder
+    // scores (pool-length independent) rather than stamped linear rank scores `(N - r) / N`.
     if settings.structural_soft_demotion && outcome.used != RERANK_CROSS_ENCODER_SCOPE_V6 {
         ordered = match soft_head {
-            Some(head) => apply_structural_soft_demotion_head(&ordered, query, head),
-            None => apply_structural_soft_demotion(&ordered, query),
+            Some(head) => apply_structural_soft_demotion_head(&ordered, &intent_q, head),
+            None => apply_structural_soft_demotion(&ordered, &intent_q),
         };
         if outcome.used == RERANK_OFF {
             outcome.used = RERANK_STRUCTURAL_SOFT;
         }
     }
+    if settings.fuse_with_pool && outcome.used == RERANK_CROSS_ENCODER {
+        let profile = if is_single_paper_hits(&stage1) {
+            if pre_ce_supplement_ids.is_empty() {
+                PoolRrfProfile::pure_text_single()
+            } else {
+                PoolRrfProfile::supplemented_single()
+            }
+        } else {
+            PoolRrfProfile::multi_doc()
+        };
+        ordered = fuse_pool_rrf_with_profile(&stage1, &ordered, profile, pre_ce_supplement_ids);
+        outcome.used = RERANK_POOL_RRF;
+    }
     if settings.listwise.enabled && !settings.scope_refine.enabled {
-        outcome = apply_listwise(query, settings, listwise, &mut ordered, outcome);
+        outcome = apply_listwise(rerank_q, settings, listwise, &mut ordered, outcome);
     }
     (truncate_hits(ordered, top_k), outcome)
 }
@@ -277,6 +390,7 @@ fn apply_listwise(
             used: outcome.used,
             reason: Some(REASON_LISTWISE_UNCONFIGURED),
             swaps: outcome.swaps,
+            ce_confidence: outcome.ce_confidence,
         };
     };
     let head = ordered.len().min(settings.listwise.top_n.max(1));
@@ -319,12 +433,14 @@ fn apply_listwise(
                 used: listwise_used(outcome.used, fuse, single_paper),
                 reason: None,
                 swaps: outcome.swaps,
+                ce_confidence: outcome.ce_confidence,
             }
         }
         _ => RerankOutcome {
             used: outcome.used,
             reason: Some(REASON_LISTWISE_ERROR),
             swaps: outcome.swaps,
+            ce_confidence: outcome.ce_confidence,
         },
     }
 }
@@ -377,17 +493,51 @@ fn fall_back(
 /// A settings screen asks "is the model installed", not "does inference work". Loading a
 /// 279 MB ONNX graph takes seconds and is a live read that changes nothing about the
 /// answer, so presence is answered by the file layout that `LocalReranker` looks for.
+const RERANK_MODEL_CANDIDATES: [&str; 4] = [
+    "onnx/model_int8.onnx",
+    "onnx/model.onnx",
+    // Xenova exports name their int8 file this way; the loader accepts it.
+    "onnx/model_quantized.onnx",
+    "model.onnx",
+];
+
 pub fn reranker_model_present(model_dir: &Path) -> bool {
-    const CANDIDATES: [&str; 4] = [
-        "onnx/model_int8.onnx",
-        "onnx/model.onnx",
-        // Xenova exports name their int8 file this way; the loader accepts it.
-        "onnx/model_quantized.onnx",
-        "model.onnx",
-    ];
-    CANDIDATES
+    RERANK_MODEL_CANDIDATES
         .iter()
         .any(|relative| model_dir.join(relative).is_file())
+}
+
+#[cfg(feature = "local-embedding")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LocalModelFingerprint {
+    dir: PathBuf,
+    dir_modified: Option<SystemTime>,
+    model_file: Option<PathBuf>,
+    file_len: Option<u64>,
+    file_modified: Option<SystemTime>,
+}
+
+#[cfg(feature = "local-embedding")]
+fn local_model_fingerprint(model_dir: &Path) -> LocalModelFingerprint {
+    let dir_modified = std::fs::metadata(model_dir)
+        .and_then(|metadata| metadata.modified())
+        .ok();
+    let model_file = RERANK_MODEL_CANDIDATES
+        .iter()
+        .map(|relative| model_dir.join(relative))
+        .find(|path| path.is_file());
+    let (file_len, file_modified) = model_file
+        .as_deref()
+        .and_then(|path| std::fs::metadata(path).ok())
+        .map(|meta| (Some(meta.len()), meta.modified().ok()))
+        .unwrap_or((None, None));
+    LocalModelFingerprint {
+        dir: model_dir.to_path_buf(),
+        dir_modified,
+        model_file,
+        file_len,
+        file_modified,
+    }
 }
 
 pub fn reranker_for(model_dir: &Path) -> Option<Arc<dyn RerankProvider>> {
@@ -398,22 +548,20 @@ pub fn reranker_for(model_dir: &Path) -> Option<Arc<dyn RerankProvider>> {
     }
     #[cfg(feature = "local-embedding")]
     {
-        type Slot = Option<(PathBuf, Option<SystemTime>, Option<Arc<neuink_search::LocalReranker>>)>;
+        type Slot = Option<(LocalModelFingerprint, Option<Arc<neuink_search::LocalReranker>>)>;
         static CACHE: OnceLock<Mutex<Slot>> = OnceLock::new();
-        let modified = std::fs::metadata(model_dir)
-            .and_then(|metadata| metadata.modified())
-            .ok();
+        let fingerprint = local_model_fingerprint(model_dir);
         let mut cache = match CACHE.get_or_init(|| Mutex::new(None)).lock() {
             Ok(cache) => cache,
             Err(_) => return None,
         };
-        if let Some((cached_dir, cached_modified, loaded)) = cache.as_ref() {
-            if cached_dir == model_dir && *cached_modified == modified {
+        if let Some((cached_fp, loaded)) = cache.as_ref() {
+            if *cached_fp == fingerprint {
                 return loaded.clone().map(|value| value as Arc<dyn RerankProvider>);
             }
         }
         let loaded = neuink_search::LocalReranker::load(model_dir).ok().map(Arc::new);
-        *cache = Some((model_dir.to_path_buf(), modified, loaded.clone()));
+        *cache = Some((fingerprint, loaded.clone()));
         loaded.map(|value| value as Arc<dyn RerankProvider>)
     }
 }
@@ -931,9 +1079,7 @@ pub fn provider_for(
     local_dir: &Path,
 ) -> Option<Arc<dyn neuink_search::RerankProvider>> {
     match settings.transport {
-        neuink_config::RerankTransport::Local => {
-            reranker_for(local_dir)
-        }
+        neuink_config::RerankTransport::Local => reranker_for(local_dir),
         neuink_config::RerankTransport::Api => {
             let endpoint = settings.api_endpoint.clone()?;
             let model = settings.api_model.clone()?;
@@ -941,12 +1087,59 @@ pub fn provider_for(
                 .api_key
                 .clone()
                 .filter(|key| !key.trim().is_empty())?;
-            neuink_search::HttpReranker::new(endpoint, key, model, settings.api_style)
-                .ok()
-                .map(|reranker| reranker.with_instruction(settings.api_instruction.clone()))
-                .map(|reranker| Arc::new(reranker) as Arc<dyn neuink_search::RerankProvider>)
+            cached_http_reranker(
+                endpoint,
+                key,
+                model,
+                settings.api_style,
+                settings.api_instruction.clone(),
+            )
         }
     }
+}
+
+fn cached_http_reranker(
+    endpoint: String,
+    api_key: String,
+    model: String,
+    style: neuink_config::RemoteApiStyle,
+    instruction: Option<String>,
+) -> Option<Arc<dyn neuink_search::RerankProvider>> {
+    #[derive(PartialEq, Eq)]
+    struct Key {
+        endpoint: String,
+        api_key: String,
+        model: String,
+        style: neuink_config::RemoteApiStyle,
+        instruction: Option<String>,
+    }
+    static CACHE: OnceLock<Mutex<Option<(Key, Arc<dyn neuink_search::RerankProvider>)>>> =
+        OnceLock::new();
+    let fresh = || {
+        neuink_search::HttpReranker::new(endpoint.clone(), api_key.clone(), model.clone(), style)
+            .ok()
+            .map(|reranker| reranker.with_instruction(instruction.clone()))
+            .map(|reranker| Arc::new(reranker) as Arc<dyn neuink_search::RerankProvider>)
+    };
+    let key = Key {
+        endpoint: endpoint.clone(),
+        api_key: api_key.clone(),
+        model: model.clone(),
+        style,
+        instruction: instruction.clone(),
+    };
+    let cache = CACHE.get_or_init(|| Mutex::new(None));
+    let Ok(mut guard) = cache.lock() else {
+        return fresh();
+    };
+    if let Some((cached, provider)) = guard.as_ref() {
+        if *cached == key {
+            return Some(provider.clone());
+        }
+    }
+    let provider = fresh()?;
+    *guard = Some((key, provider.clone()));
+    Some(provider)
 }
 /// Builds the v6 judge from explicit overrides, then from an OpenAI-compatible assistant.
 ///
@@ -980,11 +1173,11 @@ pub fn scope_judge_for(
     cached_scope_judge(endpoint, model, key, scope.timeout_ms, scope.max_concurrency)
 }
 
-/// Builds the single-call listwise client. Scope refine wins the mutex and returns none.
+/// Builds the single-call listwise client (with TLS pool reuse). Scope refine wins the mutex.
 pub fn listwise_reranker_for(
     settings: &RerankSettings,
     assistant: Option<&LlmProfile>,
-) -> Option<HttpListwiseReranker> {
+) -> Option<Arc<HttpListwiseReranker>> {
     if !settings.listwise.enabled || settings.scope_refine.enabled {
         return None;
     }
@@ -1006,7 +1199,46 @@ pub fn listwise_reranker_for(
             }
         }
     }
-    HttpListwiseReranker::new(endpoint, model, key, listwise.timeout_ms).ok()
+    cached_listwise_reranker(endpoint, model, key, listwise.timeout_ms)
+}
+
+fn cached_listwise_reranker(
+    endpoint: String,
+    model: String,
+    api_key: String,
+    timeout_ms: u64,
+) -> Option<Arc<HttpListwiseReranker>> {
+    #[derive(PartialEq, Eq)]
+    struct Key {
+        endpoint: String,
+        model: String,
+        api_key: String,
+        timeout_ms: u64,
+    }
+    static CACHE: OnceLock<Mutex<Option<(Key, Arc<HttpListwiseReranker>)>>> = OnceLock::new();
+    let fresh = || {
+        HttpListwiseReranker::new(endpoint.clone(), model.clone(), api_key.clone(), timeout_ms)
+            .ok()
+            .map(Arc::new)
+    };
+    let key = Key {
+        endpoint: endpoint.clone(),
+        model: model.clone(),
+        api_key: api_key.clone(),
+        timeout_ms,
+    };
+    let cache = CACHE.get_or_init(|| Mutex::new(None));
+    let Ok(mut guard) = cache.lock() else {
+        return fresh();
+    };
+    if let Some((cached, client)) = guard.as_ref() {
+        if *cached == key {
+            return Some(client.clone());
+        }
+    }
+    let client = fresh()?;
+    *guard = Some((key, client.clone()));
+    Some(client)
 }
 
 fn cached_scope_judge(
@@ -1332,6 +1564,146 @@ mod scope_refine_tests {
         assert_eq!(outcome.reason, Some(REASON_SCOPE_REFINE_ERROR));
         assert_eq!(uid(&failed[8]), "p9");
         assert!(outcome.swaps.is_empty());
+    }
+
+    #[test]
+    fn cjk_query_uses_english_query_for_english_hits_while_keeping_cjk_summary_intent() {
+        struct CaptureQuery(Mutex<String>);
+        impl neuink_search::RerankProvider for CaptureQuery {
+            fn score(
+                &self,
+                query: &str,
+                documents: &[&str],
+            ) -> neuink_search::RerankResult<Vec<neuink_search::RerankScore>> {
+                *self.0.lock().unwrap() = query.to_string();
+                Ok(documents
+                    .iter()
+                    .enumerate()
+                    .map(|(index, _)| neuink_search::RerankScore {
+                        index,
+                        score: if index == 0 { 0.90 } else { 0.85 },
+                    })
+                    .collect())
+            }
+        }
+        let hits = vec![
+            hit("abs", "Abstract", "This paper introduces HarborNet for forecasting."),
+            hit("exp", "Experiments", "HarborNet achieves 84.6 F1 on the benchmark."),
+        ];
+        let mut settings = cross_settings(false);
+        settings.structural_soft_demotion = true;
+        let provider = CaptureQuery(Mutex::new(String::new()));
+        let (ordered, outcome) = apply_rerank_with_scope_and_english(
+            hits,
+            "整篇论文干什么了",
+            Some("What is HarborNet?"),
+            &settings,
+            Some(&provider),
+            None,
+            None,
+            10,
+        );
+        assert_eq!(outcome.used, RERANK_CROSS_ENCODER);
+        assert_eq!(*provider.0.lock().unwrap(), "What is HarborNet?");
+        // Because the original Chinese query asks "整篇论文干什么了", Abstract stays #1
+        // even though the English translation did not include the word "summary".
+        assert_eq!(uid(&ordered[0]), "abs");
+    }
+
+    #[test]
+    fn fuse_with_pool_applies_structural_soft_demotion_on_raw_ce_scores_before_pool_rrf() {
+        struct CloseMarginEncoder;
+        impl neuink_search::RerankProvider for CloseMarginEncoder {
+            fn score(
+                &self,
+                _query: &str,
+                documents: &[&str],
+            ) -> neuink_search::RerankResult<Vec<neuink_search::RerankScore>> {
+                Ok(documents
+                    .iter()
+                    .enumerate()
+                    .map(|(index, doc)| neuink_search::RerankScore {
+                        index,
+                        score: if doc.contains("Abstract") {
+                            0.90
+                        } else if doc.contains("Table 2") {
+                            0.85
+                        } else {
+                            0.10
+                        },
+                    })
+                    .collect())
+            }
+        }
+        let hits = vec![
+            hit("abs", "Abstract", "High-level overview of the paper."),
+            hit("exp", "Experiments", "Table 2 reports 91.4 F1."),
+            hit("other", "Related Work", "Prior work overview."),
+        ];
+        let mut settings = cross_settings(false);
+        settings.structural_soft_demotion = true;
+        settings.fuse_with_pool = true;
+        let (ordered, outcome) = apply_rerank_with_scope(
+            hits,
+            "What F1 does Table 2 report?",
+            &settings,
+            Some(&CloseMarginEncoder),
+            None,
+            None,
+            10,
+        );
+        assert_eq!(outcome.used, RERANK_POOL_RRF);
+        // Raw CE: Abstract 0.90*0.80=0.72 < Table 2 0.85 -> Table 2 wins CE head before RRF;
+        // stage1 had Abstract #1 / Table 2 #2, CE has Table 2 #1 / Abstract #2 -> equal RRF,
+        // and ties follow primary/secondary cleanly without N-dependent rank collapse.
+        assert_eq!(ordered.len(), 3);
+    }
+
+    #[test]
+    fn pool_rrf_keeps_ce_confidence_computed_from_raw_logits() {
+        struct LogitEncoder;
+        impl neuink_search::RerankProvider for LogitEncoder {
+            fn score(
+                &self,
+                _query: &str,
+                documents: &[&str],
+            ) -> neuink_search::RerankResult<Vec<neuink_search::RerankScore>> {
+                Ok(documents
+                    .iter()
+                    .enumerate()
+                    .map(|(index, _)| neuink_search::RerankScore {
+                        index,
+                        score: match index {
+                            0 => 2.2,
+                            1 => 0.4,
+                            _ => -1.0,
+                        },
+                    })
+                    .collect())
+            }
+        }
+        let hits = vec![
+            hit("a", "Experiments", "Table 2 reports 91.4 F1."),
+            hit("b", "Experiments", "Another measured result is 88.0."),
+            hit("c", "Experiments", "A third measured result is 70.1."),
+        ];
+        let mut settings = cross_settings(false);
+        settings.structural_soft_demotion = true;
+        settings.fuse_with_pool = true;
+        let (_, outcome) = apply_rerank_with_scope(
+            hits,
+            "What F1 does Table 2 report?",
+            &settings,
+            Some(&LogitEncoder),
+            None,
+            None,
+            10,
+        );
+        assert_eq!(outcome.used, RERANK_POOL_RRF);
+        let expected = neuink_search::CeConfidence::from_raw_scores(&[2.2, 0.4, -1.0]).unwrap();
+        assert_eq!(outcome.ce_confidence, Some(expected));
+        let stamped = neuink_search::CeConfidence::from_raw_scores(&[1.0, 2.0 / 3.0, 1.0 / 3.0]);
+        assert_ne!(outcome.ce_confidence, stamped);
     }
 }
 

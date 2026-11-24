@@ -12,6 +12,7 @@
 //! PDFium is not thread-safe: one instance is bound behind a mutex and every render runs
 //! inside that mutex.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
@@ -82,47 +83,71 @@ pub fn render_crops(
     page_index: u32,
     regions: Option<usize>,
 ) -> Result<Vec<Vec<u8>>, String> {
+    render_entry_pages(pdf_path, &[page_index], regions)?
+        .remove(&page_index)
+        .ok_or_else(|| "渲染结果为空".to_string())
+}
+
+/// Renders every requested page from one PDF open.
+///
+/// The map key is the page index. Each value is the full page, then the geometric crops
+/// when `regions` is set. An empty page list does not touch PDFium.
+pub fn render_entry_pages(
+    pdf_path: &Path,
+    pages: &[u32],
+    regions: Option<usize>,
+) -> Result<BTreeMap<u32, Vec<Vec<u8>>>, String> {
+    if pages.is_empty() {
+        return Ok(BTreeMap::new());
+    }
     let guard = slot().lock().map_err(|_| "PDFium 绑定锁被污染".to_string())?;
     let bound = guard.as_ref().ok_or_else(|| REASON_PDFIUM_UNAVAILABLE.to_string())?;
     let document = bound
         .pdfium
         .load_pdf_from_file(pdf_path, None)
         .map_err(|error| format!("无法打开 PDF：{error}"))?;
-    let page = document
-        .pages()
-        .get(page_index as i32)
-        .map_err(|error| format!("无法读取第 {page_index} 页：{error}"))?;
-    let image = page
-        .render_with_config(
-            &pdfium_render::prelude::PdfRenderConfig::new()
-                .set_target_width((612.0 * RENDER_DPI / 72.0) as i32)
-                .rotate_if_landscape(
-                    pdfium_render::prelude::PdfPageRenderRotation::None,
-                    true,
-                ),
-        )
-        .map_err(|error| format!("渲染失败：{error}"))?
-        .as_image()
-        .map_err(|error| format!("位图转换失败：{error}"))?;
-
-    let image = image.to_rgba8();
-    let mut out = Vec::with_capacity(1 + regions.unwrap_or(0));
-    out.push(encode_png(&image)?);
-    if let Some(count) = regions {
-        let width = image.width() as u32;
-        let height = image.height() as u32;
-        let boxes: [image::math::Rect; 4] = [
-            image::math::Rect { x: 0, y: 0, width, height: height / 2 },
-            image::math::Rect { x: 0, y: height / 2, width, height: height / 2 },
-            image::math::Rect { x: 0, y: 0, width: width / 2, height },
-            image::math::Rect { x: width / 2, y: 0, width: width / 2, height },
-        ];
-        for box_ in boxes.iter().take(count.min(boxes.len())) {
-            let cropped = image::imageops::crop_imm(&image, box_.x, box_.y, box_.width, box_.height);
-            out.push(encode_png(&cropped.to_image())?);
+    let mut ordered = pages.to_vec();
+    ordered.sort_unstable();
+    ordered.dedup();
+    let mut rendered = BTreeMap::new();
+    for page_index in ordered {
+        let page = document
+            .pages()
+            .get(page_index as i32)
+            .map_err(|error| format!("无法读取第 {page_index} 页：{error}"))?;
+        let image = page
+            .render_with_config(
+                &pdfium_render::prelude::PdfRenderConfig::new()
+                    .set_target_width((612.0 * RENDER_DPI / 72.0) as i32)
+                    .rotate_if_landscape(
+                        pdfium_render::prelude::PdfPageRenderRotation::None,
+                        true,
+                    ),
+            )
+            .map_err(|error| format!("渲染失败：{error}"))?
+            .as_image()
+            .map_err(|error| format!("位图转换失败：{error}"))?;
+        let image = image.to_rgba8();
+        let mut out = Vec::with_capacity(1 + regions.unwrap_or(0));
+        out.push(encode_png(&image)?);
+        if let Some(count) = regions {
+            let width = image.width();
+            let height = image.height();
+            let boxes: [image::math::Rect; 4] = [
+                image::math::Rect { x: 0, y: 0, width, height: height / 2 },
+                image::math::Rect { x: 0, y: height / 2, width, height: height / 2 },
+                image::math::Rect { x: 0, y: 0, width: width / 2, height },
+                image::math::Rect { x: width / 2, y: 0, width: width / 2, height },
+            ];
+            for box_ in boxes.iter().take(count.min(boxes.len())) {
+                let cropped =
+                    image::imageops::crop_imm(&image, box_.x, box_.y, box_.width, box_.height);
+                out.push(encode_png(&cropped.to_image())?);
+            }
         }
+        rendered.insert(page_index, out);
     }
-    Ok(out)
+    Ok(rendered)
 }
 
 fn encode_png(image: &image::RgbaImage) -> Result<Vec<u8>, String> {
@@ -136,6 +161,17 @@ fn encode_png(image: &image::RgbaImage) -> Result<Vec<u8>, String> {
 /// Resource directory the DLL is expected in, plus the platform library file name.
 pub fn default_dll_path(resource_dir: &Path) -> PathBuf {
     resource_dir.join(pdfium_render::prelude::Pdfium::pdfium_platform_library_name())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_empty_page_list_does_not_open_the_pdf() {
+        let rendered = render_entry_pages(Path::new("missing.pdf"), &[], None).expect("empty");
+        assert!(rendered.is_empty());
+    }
 }
 
 

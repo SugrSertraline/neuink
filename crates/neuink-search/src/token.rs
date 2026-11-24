@@ -170,7 +170,11 @@ pub fn tokenize(text: &str) -> Vec<String> {
     tokens
 }
 
-fn flush_latin_group(buffer: &mut String, hyphen_parts: &mut Vec<String>, tokens: &mut Vec<String>) {
+fn flush_latin_group(
+    buffer: &mut String,
+    hyphen_parts: &mut Vec<String>,
+    tokens: &mut Vec<String>,
+) {
     if !buffer.is_empty() {
         hyphen_parts.push(std::mem::take(buffer));
     }
@@ -178,9 +182,9 @@ fn flush_latin_group(buffer: &mut String, hyphen_parts: &mut Vec<String>, tokens
         return;
     }
     if hyphen_parts.len() >= 2 && hyphen_parts.len() <= 3 {
-        let keep_compound = hyphen_parts.iter().any(|part| {
-            part.len() == 1 || part.chars().any(|ch| ch.is_ascii_digit())
-        });
+        let keep_compound = hyphen_parts
+            .iter()
+            .any(|part| part.len() == 1 || part.chars().any(|ch| ch.is_ascii_digit()));
         if keep_compound {
             let compound = hyphen_parts
                 .iter()
@@ -308,7 +312,9 @@ mod tests {
 
     #[test]
     fn content_query_filters_english_stopwords_and_preserves_cjk_and_all_stopword_queries() {
-        let terms = super::tokenize_content_query("My brother and I want to know what accuracy bge-m3 gets");
+        let terms = super::tokenize_content_query(
+            "My brother and I want to know what accuracy bge-m3 gets",
+        );
         assert!(terms.contains(&"brother".to_string()));
         assert!(terms.contains(&"accuracy".to_string()));
         assert!(terms.contains(&"bge-m3".to_string()));
@@ -316,7 +322,10 @@ mod tests {
         assert!(!terms.contains(&"want".to_string()));
         assert!(!terms.contains(&"what".to_string()));
         // CJK tokens stay untouched.
-        assert_eq!(super::tokenize_content_query("关键词搜索"), vec!["关键", "搜索", "词搜", "键词"]);
+        assert_eq!(
+            super::tokenize_content_query("关键词搜索"),
+            vec!["关键", "搜索", "词搜", "键词"]
+        );
         // All-stopword query falls back to original tokens instead of emptying.
         assert!(!super::tokenize_content_query("what is it").is_empty());
     }

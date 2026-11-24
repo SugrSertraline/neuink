@@ -102,7 +102,11 @@ pub fn project_token(head: &LinearHead, token: &[f32]) -> Result<Vec<f32>, Strin
 }
 
 /// Skip CLS and keep tokens through EOS. `hidden` is one row per token, including CLS.
-pub fn project_colbert(head: &LinearHead, hidden: &[Vec<f32>], valid_len: usize) -> Result<Vec<Vec<f32>>, String> {
+pub fn project_colbert(
+    head: &LinearHead,
+    hidden: &[Vec<f32>],
+    valid_len: usize,
+) -> Result<Vec<Vec<f32>>, String> {
     if valid_len == 0 || valid_len > hidden.len() {
         return Err("colbert sequence length is outside the hidden states".to_string());
     }
@@ -114,7 +118,12 @@ pub fn project_colbert(head: &LinearHead, hidden: &[Vec<f32>], valid_len: usize)
 }
 
 /// ReLU sparse weights. Special token ids are dropped. Repeated ids keep the maximum.
-pub fn lexical_weights(head: &LinearHead, hidden: &[Vec<f32>], token_ids: &[u32], valid_len: usize) -> Result<Vec<(u32, f32)>, String> {
+pub fn lexical_weights(
+    head: &LinearHead,
+    hidden: &[Vec<f32>],
+    token_ids: &[u32],
+    valid_len: usize,
+) -> Result<Vec<(u32, f32)>, String> {
     if head.out_dim != 1 {
         return Err("sparse head must project to one value".to_string());
     }
@@ -197,7 +206,10 @@ fn header_matches(path: &Path, magic: &[u8; 8]) -> bool {
 fn load_head(path: &PathBuf, magic: &[u8; 8]) -> Result<LinearHead, String> {
     let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
     if bytes.len() < 16 || &bytes[..8] != magic {
-        return Err(format!("projection head header is not valid: {}", path.display()));
+        return Err(format!(
+            "projection head header is not valid: {}",
+            path.display()
+        ));
     }
     let in_dim = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
     let out_dim = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
@@ -238,7 +250,10 @@ fn l2_normalize(values: &mut [f32]) {
 }
 
 fn dot(left: &[f32], right: &[f32]) -> f32 {
-    left.iter().zip(right).map(|(left, right)| left * right).sum()
+    left.iter()
+        .zip(right)
+        .map(|(left, right)| left * right)
+        .sum()
 }
 
 #[cfg(test)]
@@ -306,12 +321,16 @@ mod tests {
         assert!(!status.sparse_present);
         assert_eq!(status.missing_reason(true), Some("sparse_head_missing"));
         assert!(status.missing_reason(false).is_none());
-        write_head(&dir.join(SPARSE_FILE), SPARSE_MAGIC, &LinearHead {
-            in_dim: 1,
-            out_dim: 1,
-            weight: vec![2.0],
-            bias: vec![0.5],
-        })
+        write_head(
+            &dir.join(SPARSE_FILE),
+            SPARSE_MAGIC,
+            &LinearHead {
+                in_dim: 1,
+                out_dim: 1,
+                weight: vec![2.0],
+                bias: vec![0.5],
+            },
+        )
         .expect("write");
         write_head(&dir.join(COLBERT_FILE), COLBERT_MAGIC, &identity_head()).expect("colbert");
         assert_eq!(load_colbert(&dir).expect("load colbert").in_dim, 2);

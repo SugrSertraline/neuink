@@ -152,6 +152,9 @@ impl Default for UnifiedPlan {
 #[derive(Clone, Debug, PartialEq)]
 pub struct UnifiedRequest {
     pub question: String,
+    /// Optional whole-question override used strictly for Stage-1 document routing and
+    /// visual voting when `question` is an evidence-layer sub-question.
+    pub routing_question: Option<String>,
     /// Optional English translation of `question` for cross-lingual retrieval.
     pub english_question: Option<String>,
     /// Evidence-layer sub-questions. Never affect routing.
@@ -240,13 +243,19 @@ pub fn run_unified(
     // Routing reads the whole question with no evidence-layer restriction: a
     // carrier narrows evidence, and a section filter must not decide which
     // documents can be routed.
+    let routing_text = request
+        .routing_question
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(question.as_str());
     let english_question = request
         .english_question
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty() && *value != question.as_str());
     let mut route_query = request.template.clone();
-    route_query.text = question.clone();
+    route_query.text = routing_text.to_string();
     route_query.limit = plan.limits.route_window.max(1);
     route_query.section_filter = None;
     route_query.segment_types.clear();
@@ -260,7 +269,7 @@ pub fn run_unified(
     let text_order = entry_order_from(&text_hits);
 
     let (visual_order, visual_parents) =
-        visual_vote(visual, &question, request, plan, &mut degradations)?;
+        visual_vote(visual, routing_text, request, plan, &mut degradations)?;
     let (mut routed, visual_gate_open) = match plan.visual_fusion {
         VisualFusionPolicy::Weighted { visual_weight } => (
             fuse_entry_orders(
@@ -273,7 +282,7 @@ pub fn run_unified(
             None,
         ),
         VisualFusionPolicy::AppendGated { gate } => {
-            let overlap = head_overlap(&text_hits, &question)
+            let overlap = head_overlap(&text_hits, routing_text)
                 .max(english_question.map_or(0, |eng| head_overlap(&text_hits, eng)));
             let gate_open = text_order.is_empty()
                 || text_order.len() < gate.min_head_entries
@@ -355,8 +364,8 @@ pub fn run_unified(
         .map(|entry| EntryId::from_string(entry.clone()))
         .collect::<Vec<_>>();
     let mut tasks = Vec::new();
-    for task_question in evidence_questions(request, plan) {
-        let task_english = if task_question == question {
+    for (index, task_question) in evidence_questions(request, plan).into_iter().enumerate() {
+        let task_english = if index == 0 || task_question == question {
             english_question
         } else {
             None
@@ -632,11 +641,7 @@ mod tests {
     }
 
     impl TextRecall for ScriptedText {
-        fn recall(
-            &mut self,
-            query: &SearchQuery,
-            _window: usize,
-        ) -> SearchResult<SearchResults> {
+        fn recall(&mut self, query: &SearchQuery, _window: usize) -> SearchResult<SearchResults> {
             self.calls.push(query.text.clone());
             let filter = query.section_filter.as_deref();
             let hits = self
@@ -689,6 +694,7 @@ mod tests {
     fn request(question: &str) -> UnifiedRequest {
         UnifiedRequest {
             question: question.to_string(),
+            routing_question: None,
             english_question: None,
             sub_questions: Vec::new(),
             mandated_entries: Vec::new(),
@@ -707,7 +713,11 @@ mod tests {
             calls: Vec<String>,
         }
         impl TextRecall for BilingualText {
-            fn recall(&mut self, query: &SearchQuery, _window: usize) -> SearchResult<SearchResults> {
+            fn recall(
+                &mut self,
+                query: &SearchQuery,
+                _window: usize,
+            ) -> SearchResult<SearchResults> {
                 self.calls.push(query.text.clone());
                 let hits = if query.text.contains("contrastive") {
                     vec![hit("paper-en", "s1", 0.9)]
@@ -735,7 +745,10 @@ mod tests {
         assert_eq!(output.routing.documents, ["paper-en"]);
         assert_eq!(output.tasks.len(), 1);
         assert_eq!(output.tasks[0].results.total_hit_count, 1);
-        assert!(text.calls.iter().any(|q| q == "contrastive learning accuracy"));
+        assert!(text
+            .calls
+            .iter()
+            .any(|q| q == "contrastive learning accuracy"));
     }
 
     #[test]
@@ -751,9 +764,7 @@ mod tests {
         assert_eq!(output.tasks.len(), 1);
         // The routing call carried no section or type restriction.
         assert_eq!(text.calls[0], "which method works?");
-        assert!(output
-            .degradations
-            .contains(&Degradation::VisualDisabled));
+        assert!(output.degradations.contains(&Degradation::VisualDisabled));
     }
 
     #[test]
@@ -785,6 +796,24 @@ mod tests {
         assert_eq!(plain.routing.documents, split.routing.documents);
         assert_eq!(split.tasks.len(), 2);
         assert_eq!(split.tasks[0].question, "which method is used?");
+    }
+
+    #[test]
+    fn routing_question_routes_documents_by_whole_question_while_retrieving_sub_question_evidence() {
+        let mut text = ScriptedText::new(&[("a", 3.0), ("b", 2.0), ("c", 1.0)]);
+        let mut visual = NoVisualChannel(VisualChannelStatus::Disabled);
+        let mut req = request("what dataset did Paper A use?");
+        req.routing_question = Some("compare Paper A and Paper B methods and datasets".to_string());
+        req.english_question = Some("Paper A dataset".to_string());
+        let output = run_unified(&mut text, &mut visual, &UnifiedPlan::default(), &req).unwrap();
+        assert_eq!(output.routing.documents, ["a", "b", "c"]);
+        assert_eq!(
+            text.calls[0],
+            "compare Paper A and Paper B methods and datasets"
+        );
+        assert_eq!(output.tasks.len(), 1);
+        assert_eq!(output.tasks[0].question, "what dataset did Paper A use?");
+        assert!(text.calls.iter().any(|c| c == "Paper A dataset"));
     }
 
     #[test]
@@ -820,8 +849,13 @@ mod tests {
     fn an_unavailable_visual_channel_degrades_and_keeps_text_order() {
         let mut text = ScriptedText::new(&[("a", 3.0), ("b", 2.0)]);
         let mut visual = NoVisualChannel(VisualChannelStatus::Unavailable("no index"));
-        let output = run_unified(&mut text, &mut visual, &UnifiedPlan::default(), &request("q"))
-            .unwrap();
+        let output = run_unified(
+            &mut text,
+            &mut visual,
+            &UnifiedPlan::default(),
+            &request("q"),
+        )
+        .unwrap();
         assert_eq!(output.routing.documents, ["a", "b"]);
         assert!(output
             .degradations
@@ -900,8 +934,13 @@ mod tests {
     fn no_routed_documents_returns_nothing_instead_of_widening() {
         let mut text = ScriptedText::new(&[]);
         let mut visual = NoVisualChannel(VisualChannelStatus::Disabled);
-        let output = run_unified(&mut text, &mut visual, &UnifiedPlan::default(), &request("q"))
-            .unwrap();
+        let output = run_unified(
+            &mut text,
+            &mut visual,
+            &UnifiedPlan::default(),
+            &request("q"),
+        )
+        .unwrap();
         assert!(output.routing.documents.is_empty());
         assert!(output.tasks.is_empty());
         assert!(output.degradations.contains(&Degradation::NoDocuments));
@@ -923,8 +962,13 @@ mod tests {
     fn an_empty_question_is_rejected() {
         let mut text = ScriptedText::new(&[("a", 1.0)]);
         let mut visual = NoVisualChannel(VisualChannelStatus::Disabled);
-        let error = run_unified(&mut text, &mut visual, &UnifiedPlan::default(), &request("  "))
-            .unwrap_err();
+        let error = run_unified(
+            &mut text,
+            &mut visual,
+            &UnifiedPlan::default(),
+            &request("  "),
+        )
+        .unwrap_err();
         assert!(matches!(error, SearchError::EmptyQuery));
     }
 
@@ -989,8 +1033,8 @@ mod tests {
             },
             ..UnifiedPlan::default()
         };
-        let output = run_unified(&mut text, &mut visual, &plan, &request("chart value axis"))
-            .expect("run");
+        let output =
+            run_unified(&mut text, &mut visual, &plan, &request("chart value axis")).expect("run");
         assert_eq!(output.routing.visual_gate_open, Some(false));
         assert_eq!(output.routing.documents, ["a", "b", "c"]);
         // The channel still ran; it simply was not allowed to append.
@@ -1062,8 +1106,8 @@ mod tests {
             },
             ..UnifiedPlan::default()
         };
-        let output = run_unified(&mut text, &mut visual, &plan, &request("chart value axis"))
-            .expect("run");
+        let output =
+            run_unified(&mut text, &mut visual, &plan, &request("chart value axis")).expect("run");
         assert_eq!(output.routing.visual_gate_open, Some(true));
         assert_eq!(output.routing.documents, ["a", "b", "c", "d"]);
     }
@@ -1086,8 +1130,7 @@ mod tests {
             visual_fusion: VisualFusionPolicy::Weighted { visual_weight: 5.0 },
             ..UnifiedPlan::default()
         };
-        let output = run_unified(&mut text, &mut visual, &plan, &request("chart"))
-            .expect("run");
+        let output = run_unified(&mut text, &mut visual, &plan, &request("chart")).expect("run");
         assert_eq!(output.routing.visual_gate_open, None);
         assert_eq!(output.routing.documents[0], "b");
     }

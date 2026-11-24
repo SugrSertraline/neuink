@@ -196,7 +196,10 @@ fn latin_tokens(text: &str) -> Vec<String> {
             continue;
         }
         let keeps_dot = *character == '.'
-            && current.chars().next_back().is_some_and(|last| last.is_ascii_digit())
+            && current
+                .chars()
+                .next_back()
+                .is_some_and(|last| last.is_ascii_digit())
             && characters
                 .get(index + 1)
                 .is_some_and(|next| next.is_ascii_digit());
@@ -307,7 +310,11 @@ fn unnumbered_mentions(text: &str) -> Vec<String> {
         if carrier_word(token).is_none() || label_in_same_token(token).is_some() {
             continue;
         }
-        if tokens.get(index + 1).and_then(|next| numeric_label(next)).is_none() {
+        if tokens
+            .get(index + 1)
+            .and_then(|next| numeric_label(next))
+            .is_none()
+        {
             words.push(token.trim_end_matches('.').to_string());
         }
     }
@@ -382,10 +389,7 @@ mod tests {
             double.unbound_reason(),
             Some(UnboundReason::MultipleCarriers)
         );
-        assert_eq!(
-            UnboundReason::MultipleCarriers.code(),
-            "carrier_multiple"
-        );
+        assert_eq!(UnboundReason::MultipleCarriers.code(), "carrier_multiple");
     }
 
     #[test]

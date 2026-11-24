@@ -201,6 +201,7 @@ impl SearchSnapshot {
                     title: indexed.document.title.clone(),
                     snippet: make_snippet(
                         &indexed.text_for_snippet,
+                        indexed.document.source.segment_type,
                         &normalized_query,
                         &candidate.matched_terms,
                     ),
@@ -247,6 +248,7 @@ impl SearchSnapshot {
             total_hit_count,
             entries,
             warnings,
+            rerank_used: None,
         })
     }
 }
@@ -381,9 +383,24 @@ fn cache_key(query: &SearchQuery, normalized_query: &str) -> String {
     )
 }
 
-fn make_snippet(text: &str, query: &str, terms: &BTreeSet<String>) -> String {
-    let clean = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if clean.chars().count() <= 220 {
+const SNIPPET_PARAGRAPH_CHARS: usize = 700;
+const SNIPPET_TABLE_CHARS: usize = 1600;
+
+fn make_snippet(
+    text: &str,
+    segment_type: Option<neuink_domain::SegmentType>,
+    query: &str,
+    terms: &BTreeSet<String>,
+) -> String {
+    let is_table = segment_type == Some(neuink_domain::SegmentType::Table)
+        || crate::result::contains_html_table(text);
+    let clean = crate::result::compact_html_table_if_present(text);
+    let limit = if is_table {
+        SNIPPET_TABLE_CHARS
+    } else {
+        SNIPPET_PARAGRAPH_CHARS
+    };
+    if clean.chars().count() <= limit {
         return clean;
     }
 
@@ -393,11 +410,13 @@ fn make_snippet(text: &str, query: &str, terms: &BTreeSet<String>) -> String {
         .or_else(|| terms.iter().find_map(|term| lower.find(term)));
 
     let Some(position) = position else {
-        return trim_chars(&clean, 0, 220);
+        return trim_chars(&clean, 0, limit);
     };
 
-    let start = position.saturating_sub(80);
-    let end = (position + 140).min(clean.len());
+    let before = limit / 3;
+    let after = limit.saturating_sub(before);
+    let start = position.saturating_sub(before);
+    let end = (position + after).min(clean.len());
     let start = floor_char_boundary(&clean, start);
     let end = ceil_char_boundary(&clean, end);
     let prefix = if start > 0 { "..." } else { "" };

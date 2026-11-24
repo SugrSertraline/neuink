@@ -20,6 +20,7 @@ product chain (backfill -> prepare -> dual-channel query) can be tested offline.
 Environment:
     NEUINK_QWEN_VL_MODEL   model directory containing scripts/qwen3_vl_embedding.py
     NEUINK_EMBED_DIM       output dimensions, default 2048
+    NEUINK_MAX_PIXELS      longest image budget, default 262144 (512 x 512)
 
 """
 from __future__ import annotations
@@ -36,6 +37,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 DEFAULT_DIM = int(os.environ.get("NEUINK_EMBED_DIM", "2048"))
+# 512 x 512. The old 65536 budget scaled an A4 page down to about 216 x 280 and
+# made table text unreadable. Override with NEUINK_MAX_PIXELS.
+DEFAULT_MAX_PIXELS = int(os.environ.get("NEUINK_MAX_PIXELS", "262144"))
 # Thread budget for CPU inference. A thin laptop with 8 physical cores should set this to
 # its core count; leaving it at the default lets torch take every logical CPU.
 TORCH_THREADS = int(os.environ.get("NEUINK_TORCH_THREADS", "0"))
@@ -106,11 +110,16 @@ class QwenEncoder:
 
         if TORCH_THREADS > 0:
             torch.set_num_threads(TORCH_THREADS)
-        self._embedder = Qwen3VLEmbedder(str(model_dir), min_pixels=256, max_pixels=65536)
+        self._embedder = Qwen3VLEmbedder(
+            str(model_dir), min_pixels=256, max_pixels=DEFAULT_MAX_PIXELS
+        )
         self.dimensions = DEFAULT_DIM
         self.model_name = model_dir.name
-        # Identity covers every inference input, so replaced weights invalidate vectors.
+        # Identity covers every inference input, so replaced weights or a new pixel
+        # budget invalidate vectors.
         hasher = hashlib.blake2b(digest_size=32)
+        hasher.update(b"max_pixels")
+        hasher.update(str(DEFAULT_MAX_PIXELS).encode())
         for name in ("model.safetensors", "config.json", "tokenizer.json", "preprocessor_config.json"):
             path = model_dir / name
             if path.is_file():

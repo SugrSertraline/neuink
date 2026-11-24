@@ -423,7 +423,7 @@ fn run() -> Result<(), String> {
     let scope_judge = rerank_stage::scope_judge_for(&rerank_settings, None)
         .map(|judge| Arc::new(judge) as Arc<dyn neuink_search::ScopeJudgeProvider>);
     let listwise = rerank_stage::listwise_reranker_for(&rerank_settings, None)
-        .map(|reranker| Arc::new(reranker) as Arc<dyn neuink_search::ListwiseRerankProvider>);
+        .map(|reranker| reranker as Arc<dyn neuink_search::ListwiseRerankProvider>);
     report.insert(
         "rerank".to_string(),
         serde_json::json!({
@@ -490,6 +490,7 @@ fn run() -> Result<(), String> {
         UnifiedSearchRequest {
             root: args.root.clone(),
             question: args.question.clone(),
+            routing_question: None,
             english_query: None,
             sub_questions: args.sub_questions.clone(),
             scope_entry_ids: args

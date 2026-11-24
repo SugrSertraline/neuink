@@ -43,6 +43,7 @@ fn item(task_id: &str, snippets: &[&str]) -> SearchSegmentsBatchItem {
         pool_used: None,
         pool_reason: None,
         requested_top_k: 0,
+        english_query: None,
     }
 }
 
@@ -89,6 +90,7 @@ fn a_failed_item_is_untouched_and_keeps_its_fixed_error() {
         pool_used: None,
         pool_reason: None,
         requested_top_k: 0,
+        english_query: None,
     };
     let applied = apply_batch_rerank(
         vec![item("t1", &["value 12"]), error_item],
