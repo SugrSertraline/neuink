@@ -625,6 +625,7 @@ mod tests {
         RerankSettings {
             mode,
             fallback_heuristic: fallback,
+            fuse_with_pool: false,
             structured_input: false,
             structural_soft_demotion: false,
             ..RerankSettings::default()
@@ -985,6 +986,14 @@ mod tests {
         assert_eq!(outcome.used, RERANK_CROSS_ENCODER);
         assert_eq!(outcome.reason, None);
         assert_eq!(ordered[0].snippet, "accuracy 91.2 percent");
+
+        let default_ce = RerankSettings {
+            mode: RerankMode::CrossEncoder,
+            ..RerankSettings::default()
+        };
+        let (_, default_outcome) = apply_rerank(hits(), "what accuracy", &default_ce, Some(&provider));
+        assert_eq!(default_outcome.used, RERANK_POOL_RRF);
+        assert_eq!(default_outcome.reason, None);
     }
 
     #[test]
@@ -1403,6 +1412,7 @@ mod scope_refine_tests {
     fn cross_settings(scope: bool) -> RerankSettings {
         let mut settings = RerankSettings {
             mode: RerankMode::CrossEncoder,
+            fuse_with_pool: false,
             ..RerankSettings::default()
         };
         settings.scope_refine = ScopeRefineSettings {

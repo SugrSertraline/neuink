@@ -40,7 +40,7 @@
 | 能力 | 默认 | 实测依据 | 降级 |
 |---|---|---|---|
 | BGE-M3 多向量池 `colbert` / `bge_m3_hybrid`（0.4/0.2/0.4） | 关 | QASPER Recall@30 +2.58~+3.33pp；DORIS C0 相对单向量 +4.52pp、相对 B0 +7.14pp；TREC-COVID 全库 C0-union 相对单向量 +6.86pp P@10 / +6.73pp nDCG@10 | `colbert_head_missing`、`sparse_head_missing`、`provider_unsupported`、`provider_error`，回退单向量 |
-| 远程重排 `api_instruction`；`fuse_with_pool` = RRF(第一阶段, 交叉编码器, k=60) | 指令留空不发字段；融合关 | Qwen3-Reranker-8B 加指令：TREC 2020 +2.41pp，DORIS 相对 B0 +10.24pp，TREC-COVID 相对 B0 +8.29pp。F1 = RRF(C0, Q0-inst) 是 DORIS 确认集 40.71% P@10 / 0.7164 nDCG@10 | 交叉编码器失败时不融合 |
+| 远程重排 `api_instruction`；`fuse_with_pool` = 分场景 DualRRF（`PoolRrfProfile`） | 指令留空不发字段；融合默认开（旧配置显式 `false` 保留） | 单篇纯文本/补充池与多篇均衡 DualRRF；Qwen3-Reranker-8B 加指令：TREC 2020 +2.41pp，DORIS 相对 B0 +10.24pp，TREC-COVID 相对 B0 +8.29pp。F1 = RRF(C0, Q0-inst) 是 DORIS 确认集 40.71% P@10 / 0.7164 nDCG@10 | 交叉编码器失败时不融合 |
 | 单次无锁 Top-25 Listwise，可选再与上游 RRF | 关，且与 scope v6 互斥 | 无重排 API 时 DORIS L1-C0 38.81% P@10 / 0.7060 nDCG@10；TREC-COVID Q0-inst → L1 → F2 85.14% P@10 / 0.8896 nDCG@10 | `listwise_unconfigured`、`listwise_error`，保留上游 |
 
 范围不超过 600 段时全量打分，更宽时只重打单向量前 100。同分按 `hit_identity` 升序。Listwise 沿用 1600 字句末截断；有效标签少于 `min(10, n)` 时保留原序。
@@ -290,3 +290,14 @@ cargo run -p neuink-ipc --bin retrieval-probe --features local-embedding -- `
 - 自检的重排项按后端输出：本地显示目录，API 显示地址与模型名。
 
 验证：`neuink-config` 16 项、`remote_reranking` 11 项、`commands::search` 53 项、前端 3139 项通过。
+
+### Post-CE 视觉融合 Condition C 加固（尺度不变 `gap_z` + Top-3 锁定）
+
+在无显式图表词、文本通道已有命中的场景下，原有绝对 sigmoid 阈值在不同 Cross-Encoder 底座（如 `bge-reranker-base` 全负 logit 与 `bge-reranker-v2-m3`）间存在标定漂移。现已改为：
+
+- **尺度不变模糊度门控**：`top1_gap_z = (s0 - s1) / std < 1.2`（对任意仿射缩放/平移不变），叠加 `best_anchor_cosine >= 0.32` 才开启 Condition C；
+- **硬锁 Top-3 文本结果**：`CONDITION_C_LOCK_HEAD = 3`，仅在第 4 名及之后做 `w_vis = 0.35`、`top_vis = 2`/篇（Top-2 论文锚定衰减）的视觉尾部救援，保证纯文本高置信头部零退化。
+
+端到端实测（真实 Rust 管线）：
+- **SPIQA test-A（80 篇 / 200 视觉题 + 40 纯文本对照，`bge-reranker-v2-m3`）**：单篇视觉 `R@5` `0.6750 → 0.8000`（`+12.50pp`）、`R@10` `0.7550 → 0.8400`（`+8.50pp`）；80 篇全库视觉 `R@5` `0.6200 → 0.7300`（`+11.00pp`）、`R@10` `0.6700 → 0.7950`（`+12.50pp`）；纯文本对照单篇 `R@1=0.9250, R@10=1.0000`、全库 `R@1=0.8500, R@10=1.0000`（`ΔR@1 = 0.00`）。
+- **QASPER-83（本机 `bge-reranker-base`）**：全集 `Recall@10` `0.6237 → 0.6586`（`+3.48pp`）、`nDCG@10` `0.4306 → 0.4470`（`+1.64pp`）；表格映射子集 `Table Recall@10` `0.4411 → 0.5752`（`+13.18pp`）；纯文本常规题 `ordinary_40` `P@1 / P@3 / P@10 / Hit@10` 全部 `0.00pp` 退化。

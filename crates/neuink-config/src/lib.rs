@@ -814,8 +814,10 @@ pub struct RerankSettings {
     /// Optional hosted rerank instruction. Blank or `None` omits the field.
     #[serde(default)]
     pub api_instruction: Option<String>,
-    /// After a successful cross-encoder, fuse it with the first-stage order.
-    #[serde(default)]
+    /// After a successful cross-encoder, fuse it with the first-stage order using
+    /// the scenario-aware `PoolRrfProfile` (two-profile single-paper / balanced multi-doc).
+    /// Enabled by default; existing settings files with `"fuse_with_pool": false` keep their choice.
+    #[serde(default = "default_true")]
     pub fuse_with_pool: bool,
     /// Prefix cross-encoder documents with clean `[Section] [Type]` tags (zero neighbor text).
     #[serde(default = "default_true")]
@@ -847,7 +849,7 @@ impl Default for RerankSettings {
             fallback_heuristic: true,
             scope_refine: ScopeRefineSettings::default(),
             api_instruction: None,
-            fuse_with_pool: false,
+            fuse_with_pool: true,
             structured_input: true,
             structural_soft_demotion: true,
             listwise: ListwiseRefineSettings::default(),
@@ -956,14 +958,20 @@ mod rerank_settings_tests {
     }
 
     #[test]
-    fn an_old_file_leaves_instruction_fusion_and_listwise_off() {
-        let settings: RerankSettings = serde_json::from_str(r#"{"mode":"cross_encoder"}"#).expect("legacy");
+    fn an_old_file_enables_pool_fusion_and_leaves_instruction_and_listwise_off() {
+        let settings: RerankSettings =
+            serde_json::from_str(r#"{"mode":"cross_encoder"}"#).expect("legacy");
         assert!(settings.api_instruction.is_none());
-        assert!(!settings.fuse_with_pool);
+        assert!(settings.fuse_with_pool);
         assert!(!settings.listwise.enabled);
         assert!(settings.listwise.fuse_rrf);
         assert_eq!(settings.listwise.top_n, 25);
         assert!(settings.validate().is_ok());
+
+        let opt_out: RerankSettings =
+            serde_json::from_str(r#"{"mode":"cross_encoder","fuse_with_pool":false}"#)
+                .expect("explicit opt-out");
+        assert!(!opt_out.fuse_with_pool);
     }
 
     #[test]
