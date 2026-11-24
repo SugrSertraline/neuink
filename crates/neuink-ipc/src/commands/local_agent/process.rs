@@ -54,6 +54,36 @@ pub async fn read_line(
     }
 }
 
+pub fn merge_loopback_no_proxy(
+    existing_upper: Option<&str>,
+    existing_lower: Option<&str>,
+) -> String {
+    let mut entries: Vec<String> = Vec::new();
+    for source in [existing_upper, existing_lower].into_iter().flatten() {
+        for item in source.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            if !entries.iter().any(|seen| seen.eq_ignore_ascii_case(item)) {
+                entries.push(item.to_string());
+            }
+        }
+    }
+    for host in ["127.0.0.1", "localhost", "::1"] {
+        if !entries.iter().any(|seen| seen.eq_ignore_ascii_case(host)) {
+            entries.push(host.to_string());
+        }
+    }
+    entries.join(",")
+}
+
+/// Ensure local agent processes bypass system/HTTP proxies when calling
+/// NeuInk's loopback MCP bridge (`http://127.0.0.1:<port>/mcp`), while keeping
+/// user proxy settings intact for upstream model APIs.
+pub fn apply_loopback_no_proxy(command: &mut tokio::process::Command) {
+    let upper = std::env::var("NO_PROXY").ok();
+    let lower = std::env::var("no_proxy").ok();
+    let merged = merge_loopback_no_proxy(upper.as_deref(), lower.as_deref());
+    command.env("NO_PROXY", &merged).env("no_proxy", &merged);
+}
+
 pub fn result_error(value: &Value) -> Option<String> {
     if value["is_error"] != true && value["subtype"].as_str() == Some("success") {
         return None;
@@ -170,6 +200,15 @@ mod tests {
             b"partial\n"
         );
     }
+    #[test]
+    fn merge_loopback_no_proxy_preserves_existing_and_deduplicates_loopback() {
+        assert_eq!(merge_loopback_no_proxy(None, None), "127.0.0.1,localhost,::1");
+        assert_eq!(
+            merge_loopback_no_proxy(Some("internal.corp, LOCALHOST "), Some("127.0.0.1, .local")),
+            "internal.corp,LOCALHOST,127.0.0.1,.local,::1"
+        );
+    }
+
     #[test]
     fn errors_do_not_leak_credentials_or_paths() {
         let value = serde_json::json!({"is_error":true,"result":"401 API key secret-private-path"});

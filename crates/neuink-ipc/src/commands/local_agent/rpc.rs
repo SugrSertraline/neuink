@@ -114,6 +114,7 @@ pub(super) async fn execute(
         return Err("任务已停止。".into());
     }
     let mut command = path.command();
+    process::apply_loopback_no_proxy(&mut command);
     command
         .arg(if provider == Provider::Codex {
             "app-server"

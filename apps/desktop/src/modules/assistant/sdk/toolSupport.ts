@@ -505,10 +505,12 @@ function sectionIdentity(entryId: string, source: SearchHit['source']) {
 export function formatSearchSegmentsOutput(
   results: SearchResults,
   addSource: (source: ConversationSourceLink) => number,
-  sectionFilter?: string | null
+  sectionFilter?: string | null,
+  options?: { preserveOrder?: boolean; limit?: number }
 ) {
-  // Hits arrive grouped by Entry, so re-rank globally with MMR and collapse
-  // segment notes/annotations that point at the same cited segment.
+  // Hits arrive grouped by Entry, so re-rank globally with MMR (or preserve global
+  // reranked score order when backend reranking already ran) and collapse segment
+  // notes/annotations that point at the same cited segment.
   const segmentHits = results.entries
     .flatMap((group) => group.hits)
     .filter((hit): hit is SearchHit & { target: { kind: 'segment'; entry_id: string; segment_uid: string; page_idx: number } } => hit.target.kind === 'segment')
@@ -521,7 +523,13 @@ export function formatSearchSegmentsOutput(
       // collapsing every section of the Entry onto one key.
       sectionKey: sectionIdentity(hit.target.entry_id, hit.source)
     }));
-  const evidence = selectDiverseEvidence(segmentHits, 12, 0.7, { sectionFilter })
+  const limit = options?.limit ?? 12;
+  const preserveOrder =
+    options?.preserveOrder ?? Boolean(results.rerank_used && results.rerank_used !== 'off');
+  const evidence = selectDiverseEvidence(segmentHits, limit, 0.7, {
+    sectionFilter,
+    preserveOrder
+  })
     .map(({ hit }) => {
       const source: ConversationSourceLink = {
         entry_id: hit.target.entry_id,
@@ -1539,7 +1547,7 @@ export function modelInputSchema(descriptor: AssistantToolDescriptor): JSONSchem
   describeProperty(objectSchema, 'section_filter', 'Optional section id or case-insensitive section path fragment.');
   describeProperty(objectSchema, 'segment_types', 'Optional segment types such as paragraph, table, figure, math, or heading.');
   describeProperty(objectSchema, 'entry_id', 'Required Entry id for explicit Entry or segment reads.');
-  describeProperty(objectSchema, 'segment_uid', 'Segment uid returned by search_segments.');
+  describeProperty(objectSchema, 'segment_uid', 'Segment uid returned by search_library or search_segments.');
   describeProperty(objectSchema, 'doc_id', 'Sciverse document id returned by search_sciverse_evidence.');
   describeProperty(objectSchema, 'offset', 'Optional Unicode character offset for Sciverse content.');
   describeProperty(objectSchema, 'limit', descriptor.name === 'search_papers'
@@ -1580,7 +1588,7 @@ export function toolDescription(descriptor: AssistantToolDescriptor) {
     return `${descriptor.description} Use this for find/locate questions and questions about experiments, methods, datasets, results, tables, figures, or conclusions. For a Chinese question about an English paper, fill english_query in the same call with concise English academic terms; use sub_queries for up to three focused variants.`;
   }
   if (descriptor.name === 'read_segment_content') {
-    return `${descriptor.description} Use this after search_segments when a snippet is not enough.`;
+    return `${descriptor.description} Use this after search_library when a snippet is not enough.`;
   }
   if (descriptor.name === 'read_entry_assistant_context') {
     return `${descriptor.description} Use this only for an explicitly selected, named, or confirmed Entry. Omit limit for the default 8000 characters; if supplied, limit must be between 100 and ${ENTRY_CONTEXT_MAX_CHARS}. Parsed text is returned in bounded chunks: when more is true, call this tool again with the returned next_read arguments. Read all chunks when full reading is requested; otherwise state partial coverage. Never read CLI tool-result files with native Read/shell to obtain the rest. If no parsed segments exist, the host reads up to the first 3 PDF text-layer pages automatically. Continue with read_pdf_pages / search_pdf_text; respect next_page and incomplete/OCR warnings.`;

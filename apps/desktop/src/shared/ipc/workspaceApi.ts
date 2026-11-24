@@ -99,6 +99,7 @@ export type SearchResults = {
   total_hit_count: number;
   entries: SearchEntryGroup[];
   warnings?: string[];
+  rerank_used?: string | null;
 };
 
 export type EmbeddingProviderStatus = {
@@ -1245,6 +1246,7 @@ export function searchSegmentsBatch(
 /** Composed retrieval: document routing, carrier binding, the visual vote, evidence. */
 export type UnifiedSearchRequest = {
   question: string;
+  routing_question?: string | null;
   english_query?: string | null;
   sub_questions?: string[];
   scope_entry_ids?: EntryId[];

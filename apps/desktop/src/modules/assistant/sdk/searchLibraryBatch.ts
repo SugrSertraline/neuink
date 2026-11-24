@@ -138,7 +138,11 @@ function outcomeFromUnified(
   try {
     const allowed = new Set(request.allowed_entry_ids);
     const restricted = restrictResults(merged, allowed);
-    const formatted = formatSearchSegmentsOutput(restricted, addSource, request.section_filter);
+    const reranked = response.tasks.some((task) => Boolean(task.rerank_used && task.rerank_used !== 'off'));
+    const formatted = formatSearchSegmentsOutput(restricted, addSource, request.section_filter, {
+      preserveOrder: reranked,
+      limit: Math.max(12, request.top_k)
+    });
     signal?.throwIfAborted();
     return {
       status: 'ok',
@@ -173,6 +177,7 @@ export function createSearchLibraryBatch({
           const response = await raceWithAbort(
             searchUnified(root, {
               question: request.query,
+              ...(request.routing_query ? { routing_question: request.routing_query } : {}),
               english_query: request.english_query,
               sub_questions: request.sub_queries ?? [],
               scope_entry_ids: request.scope_entry_ids ?? [],
@@ -182,7 +187,7 @@ export function createSearchLibraryBatch({
               mode: 'hybrid',
               top_k: request.top_k,
               head_units: unifiedRetrieval.headUnits,
-              max_documents: unifiedRetrieval.maxDocuments,
+              max_documents: request.max_documents ?? unifiedRetrieval.maxDocuments,
               bind_carriers: unifiedRetrieval.bindCarriers
             }),
             abortSignal
@@ -301,7 +306,11 @@ function outcomeFromItem(
   try {
     const allowed = new Set(request.allowed_entry_ids);
     const restricted = restrictResults(item.results, allowed);
-    const formatted = formatSearchSegmentsOutput(restricted, addSource, request.section_filter);
+    const reranked = Boolean(item.rerank_used && item.rerank_used !== 'off');
+    const formatted = formatSearchSegmentsOutput(restricted, addSource, request.section_filter, {
+      preserveOrder: reranked,
+      limit: Math.max(12, request.top_k)
+    });
     const warnings = [...formatted.modelOutput.warnings];
     const rerankCopy = item.rerank_reason ? UNIFIED_RERANK_COPY[item.rerank_reason] : undefined;
     if (rerankCopy && !warnings.includes(rerankCopy)) {

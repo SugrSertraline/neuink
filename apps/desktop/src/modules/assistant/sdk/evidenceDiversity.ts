@@ -24,6 +24,11 @@ export type DiversityCandidate = {
 export type DiversityOptions = {
   /** An explicit section filter makes same-section evidence intentional. */
   sectionFilter?: string | null;
+  /**
+   * When true, keep the backend reranker's exact global score order (after key and
+   * near-duplicate text deduplication) without MMR re-shuffling or same-section penalties.
+   */
+  preserveOrder?: boolean;
 };
 
 /** Non-finite backend scores count as 0 so they cannot poison min/max normalization. */
@@ -71,6 +76,21 @@ export function selectDiverseEvidence<T extends DiversityCandidate>(
   }
   const pool = [...unique.values()].map((candidate) => ({ candidate, terms: lexicalTerms(candidate.text) }));
   if (pool.length === 0 || limit <= 0) return [];
+
+  if (options.preserveOrder) {
+    const ordered = pool
+      .map((item, index) => ({ ...item, score: finiteScore(item.candidate.score), index }))
+      .sort((left, right) => right.score - left.score || left.index - right.index);
+    const selected: typeof ordered = [];
+    for (const item of ordered) {
+      if (selected.length >= limit) break;
+      const redundant = selected.some(
+        (chosen) => jaccardSimilarity(item.terms, chosen.terms) >= DUPLICATE_SIMILARITY
+      );
+      if (!redundant) selected.push(item);
+    }
+    return selected.map(({ candidate }) => candidate);
+  }
 
   const scores = pool.map(({ candidate }) => finiteScore(candidate.score));
   const max = Math.max(...scores);

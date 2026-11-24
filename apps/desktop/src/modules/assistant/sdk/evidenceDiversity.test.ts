@@ -76,4 +76,20 @@ describe('evidence diversity (MMR)', () => {
     ], 3);
     expect(selected.map((item) => item.key)).toEqual(['a', 'b', 'c']);
   });
+
+  it('preserves exact reranked score order and same-section evidence when preserveOrder is enabled', () => {
+    const selected = selectDiverseEvidence(
+      [
+        { ...candidate('r1', 1.0, 'method step one details'), sectionKey: 'paper-a::Methods' },
+        { ...candidate('r2', 0.5, 'method step two details'), sectionKey: 'paper-a::Methods' },
+        { ...candidate('r3', 1 / 3, 'method step three details'), sectionKey: 'paper-a::Methods' },
+        { ...candidate('r3-dup', 0.25, 'method step three details'), sectionKey: 'paper-a::Methods' },
+        { ...candidate('r4', 0.05, 'unrelated background overview'), sectionKey: 'paper-a::Intro' }
+      ],
+      3,
+      undefined,
+      { preserveOrder: true }
+    );
+    expect(selected.map((item) => item.key)).toEqual(['r1', 'r2', 'r3']);
+  });
 });

@@ -26,10 +26,14 @@ async fn fixture() -> (
     let server = tokio::spawn(serve(listener, bridge.clone()));
     (url, bridge, rx, cancel, server)
 }
+fn loopback_client() -> reqwest::Client {
+    reqwest::Client::builder().no_proxy().build().unwrap()
+}
+
 #[tokio::test]
 async fn protocol_authentication_and_catalog_are_real_http() {
     let (url, _, _, cancel, server) = fixture().await;
-    let client = reqwest::Client::new();
+    let client = loopback_client();
     assert_eq!(
         client
             .post(&url)
@@ -96,7 +100,7 @@ async fn tool_reply_is_single_use_and_cancellation_releases_pending_requests() {
     let (url, bridge, mut events, cancel, server) = fixture().await;
     let url2 = url.clone();
     let request = tokio::spawn(async move {
-        reqwest::Client::new().post(url2).bearer_auth("test-secret").json(&json!({"id":1,"method":"tools/call","params":{"name":"read_note","arguments":{"note_id":"a"}}})).send().await.unwrap().json::<Value>().await.unwrap()
+        loopback_client().post(url2).bearer_auth("test-secret").json(&json!({"id":1,"method":"tools/call","params":{"name":"read_note","arguments":{"note_id":"a"}}})).send().await.unwrap().json::<Value>().await.unwrap()
     });
     let Event::Tool { id, name, input } = events.recv().await.unwrap() else {
         panic!()
@@ -112,7 +116,7 @@ async fn tool_reply_is_single_use_and_cancellation_releases_pending_requests() {
         "read"
     );
     let waiting = tokio::spawn(async move {
-        let _ = reqwest::Client::new()
+        let _ = loopback_client()
             .post(url)
             .bearer_auth("test-secret")
             .json(

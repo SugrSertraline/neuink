@@ -75,14 +75,51 @@ describe('validatePlanningOutput', () => {
     expect(decomposedSingle.ok).toBe(false);
   });
 
-  it('accepts a single direct plan with no tasks', () => {
+  it('accepts a single direct plan with no tasks and optional top-level english_query', () => {
     const result = validatePlanningOutput({
       question_types: ['single'],
       scope_kind: 'unspecified',
       original_question: '论文 A 使用什么数据集？',
+      english_query: 'What dataset does Paper A use?',
       retrieval_tasks: []
     });
     expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.plan.english_query).toBe('What dataset does Paper A use?');
+    }
+  });
+
+  it('requires dependent_multihop plans to form a valid 2-hop DAG', () => {
+    const emptyDependent = validatePlanningOutput({
+      question_types: ['dependent_multihop'],
+      scope_kind: 'unspecified',
+      original_question: 'Q',
+      retrieval_tasks: []
+    });
+    expect(emptyDependent.ok).toBe(false);
+
+    const threeHop = validatePlanningOutput({
+      question_types: ['dependent_multihop'],
+      scope_kind: 'unspecified',
+      original_question: 'Q',
+      retrieval_tasks: [
+        { id: 'q1', question: 'hop 1', depends_on: [] },
+        { id: 'q2', question: 'hop 2', depends_on: ['q1'] },
+        { id: 'q3', question: 'hop 3', depends_on: ['q2'] }
+      ]
+    });
+    expect(threeHop.ok).toBe(false);
+
+    const validTwoHop = validatePlanningOutput({
+      question_types: ['dependent_multihop'],
+      scope_kind: 'unspecified',
+      original_question: 'Q',
+      retrieval_tasks: [
+        { id: 'q1', question: 'hop 1', depends_on: [] },
+        { id: 'q2', question: 'hop 2', depends_on: ['q1'] }
+      ]
+    });
+    expect(validTwoHop.ok).toBe(true);
   });
 });
 

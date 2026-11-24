@@ -2,6 +2,7 @@ import type { ConversationSourceLink } from '@/shared/ipc/assistantApi';
 import { conversationSourceKey } from '@/shared/ipc/assistantApi';
 import { AgentStoppedError } from '../agent-core/agent';
 import {
+  splitTwoHopTasks,
   type DegradationReason,
   type DependencyEvidenceItem,
   type DependentTaskResolution,
@@ -39,6 +40,8 @@ export type TaskEvidence = {
 export type TaskSearchRequest = {
   task_id: string;
   query: string;
+  /** Whole frozen user question used strictly for Stage-1 document routing when `query` is a decomposed sub-question. */
+  routing_query?: string | null;
   english_query: string | null;
   sub_queries: string[];
   section_filter: string | null;
@@ -50,6 +53,8 @@ export type TaskSearchRequest = {
   /** Entries this task may report evidence for. Results outside this set are dropped before formatting. */
   allowed_entry_ids: string[];
   top_k: number;
+  /** Optional document routing cap override (for example widened under `global` aggregation intent). */
+  max_documents?: number;
 };
 
 export type TaskSearchOutcome =
@@ -157,6 +162,43 @@ function scopeHintFor(scope: { libraryScope: boolean; scopeKind: ScopeKind; coun
   return `${scope.scopeKind}: ${scope.count} entr${scope.count === 1 ? 'y' : 'ies'}`;
 }
 
+function normalizePaperTitleForMatch(raw: string): string {
+  return raw
+    .trim()
+    .replace(/\.pdf$/i, '')
+    .toLowerCase()
+    .replace(/[\s\-_:：,，.。;；()（）[\]【】"'“”‘’]+/g, ' ')
+    .trim();
+}
+
+/**
+ * Deterministically resolves named papers from `libraryEntries` mentioned inside
+ * `texts` (or planner `unresolved_targets` under full-library scope, where the paper
+ * list is withheld from the planner prompt).
+ */
+export function matchNamedLibraryEntries(
+  texts: ReadonlyArray<string | undefined | null>,
+  libraryEntries: ReadonlyArray<LibraryEntryRef>
+): string[] {
+  const haystacks = texts
+    .filter((text): text is string => Boolean(text && text.trim()))
+    .map(normalizePaperTitleForMatch)
+    .filter((text) => text.length >= 2);
+  if (haystacks.length === 0 || libraryEntries.length === 0) return [];
+  const matched: string[] = [];
+  for (const entry of libraryEntries) {
+    const normTitle = normalizePaperTitleForMatch(entry.title);
+    if (normTitle.length < 3) continue;
+    const hit = haystacks.some(
+      (hay) => hay === normTitle || hay.includes(normTitle) || (hay.length >= 4 && normTitle.includes(hay))
+    );
+    if (hit && !matched.includes(entry.id)) {
+      matched.push(entry.id);
+    }
+  }
+  return matched;
+}
+
 export type DependentTaskResolveInput = {
   originalQuestion: string;
   task: RetrievalTask;
@@ -164,22 +206,42 @@ export type DependentTaskResolveInput = {
   abortSignal?: AbortSignal;
 };
 
+const PROSE_CONJUNCTION_RE =
+  /\b(both|and|or|vs\.?|versus|compared|between|according|reported|while|whereas)\b|以及|并且|对比|比较/i;
+
+function isCompactAtomicConstraint(item: string): boolean {
+  const trimmed = item.trim();
+  if (trimmed.length < 2 || trimmed.length > 32) return false;
+  if (PROSE_CONJUNCTION_RE.test(trimmed)) return false;
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  if (words.length > 3) return false;
+  return true;
+}
+
 /**
- * Splits a dependent plan into strictly 2 hops (`hop1` with empty `depends_on`,
- * `hop2` depending only on `hop1`). Returns `null` for empty, cyclic, or >2-hop plans.
+ * Appends compact, atomic planner-extracted constraints (short entity/benchmark/year anchors)
+ * omitted from `question`, while rejecting verbose multi-clause prose constraints that cause
+ * cross-entity pollution across decomposed sub-tasks (Track B MultiHopRAG ablation).
  */
-function splitTwoHopTasks(plan: PlanningOutput): { hop1: RetrievalTask[]; hop2: RetrievalTask[] } | null {
-  if (plan.retrieval_tasks.length < 2) return null;
-  const hop1 = plan.retrieval_tasks.filter((task) => task.depends_on.length === 0);
-  if (hop1.length === 0) return null;
-  const hop1Ids = new Set(hop1.map((task) => task.id));
-  const hop2 = plan.retrieval_tasks.filter(
-    (task) => task.depends_on.length > 0 && task.depends_on.every((dep) => hop1Ids.has(dep))
-  );
-  if (hop2.length === 0 || hop1.length + hop2.length !== plan.retrieval_tasks.length) {
-    return null;
-  }
-  return { hop1, hop2 };
+export function injectMissingConstraints(question: string, constraints: ReadonlyArray<string>): string {
+  const base = question.trim();
+  if (!base || constraints.length === 0) return base;
+  const lowerBase = base.toLowerCase();
+  const baseTokens = new Set(lowerBase.match(/[a-z0-9]+/g) ?? []);
+  const missing = constraints
+    .map((item) => item.trim())
+    .filter((item) => {
+      if (!isCompactAtomicConstraint(item)) return false;
+      const lowerItem = item.toLowerCase();
+      if (lowerBase.includes(lowerItem)) return false;
+      const itemTokens = lowerItem.match(/[a-z0-9]+/g) ?? [];
+      if (itemTokens.length > 0) {
+        const matched = itemTokens.filter((tok) => baseTokens.has(tok)).length;
+        if (matched / itemTokens.length >= 0.5) return false;
+      }
+      return true;
+    });
+  return missing.length > 0 ? `${base} (${missing.join(', ')})` : base;
 }
 
 /**
@@ -187,12 +249,13 @@ function splitTwoHopTasks(plan: PlanningOutput): { hop1: RetrievalTask[]; hop2: 
  * without a valid 2-hop split (or without a hop-2 resolver) runs the original question once.
  */
 function tasksToRun(plan: PlanningOutput, trimmed: string, options: SearchOptions): RetrievalTask[] {
+  const topLevelEnglish = options.english_query?.trim() || plan.english_query?.trim() || undefined;
   const directTask: RetrievalTask = {
     id: 'direct',
     question: trimmed,
     constraints: [],
     depends_on: [],
-    english_query: options.english_query?.trim() || undefined,
+    english_query: topLevelEnglish,
     target_entry_ids: []
   };
   const hasDependency = plan.question_types.includes('dependent_multihop') ||
@@ -313,10 +376,24 @@ export async function runSearchLibrary({
     question_types: planQuestions
   };
 
+  // In full-library mode the planner is not given the library paper list, so it may place
+  // a named paper into `unresolved_targets`. Resolve any target that matches a real entry
+  // in `libraryEntries` before deciding whether clarification is needed.
+  const resolvedFromUnresolved = new Set<string>();
+  const remainingUnresolved: string[] = [];
+  for (const targetName of resolution.plan.unresolved_targets) {
+    const matchedIds = libraryScope ? matchNamedLibraryEntries([targetName], libraryEntries) : [];
+    if (matchedIds.length > 0) {
+      for (const id of matchedIds) resolvedFromUnresolved.add(id);
+    } else {
+      remainingUnresolved.push(targetName);
+    }
+  }
+
   // A named paper the planner could not bind is not searched by a fallback. The whole run stops
   // for clarification, so no direct batch searches the library in its place.
-  if (resolution.plan.unresolved_targets.length > 0) {
-    const message = `以下论文未在当前范围内找到，未检索：${resolution.plan.unresolved_targets.join('、')}。请明确要检索的论文后再试。`;
+  if (remainingUnresolved.length > 0) {
+    const message = `以下论文未在当前范围内找到，未检索：${remainingUnresolved.join('、')}。请明确要检索的论文后再试。`;
     return {
       modelOutput: {
         kind: 'search_library',
@@ -353,18 +430,47 @@ export async function runSearchLibrary({
       const allowed = targets.length > 0 ? targets : allowedIds;
       // Library scope sends [] so the backend searches the whole library. The allowed set still bounds the results.
       const scopeIds = targets.length > 0 ? targets : libraryScope ? [] : allowedIds;
+      const mandatedIds = targets.length > 0
+        ? targets
+        : libraryScope
+          ? [
+              ...new Set([
+                ...resolvedFromUnresolved,
+                ...matchNamedLibraryEntries(
+                  [task.question, task.english_query, ...task.constraints, trimmed],
+                  libraryEntries
+                )
+              ])
+            ].filter((id) => allowedSet.has(id))
+          : [];
+      const isCrossOrMultiHop =
+        planQuestions.includes('cross_paper') || planQuestions.includes('dependent_multihop');
+      const effectiveQuery = isCrossOrMultiHop
+        ? task.question.trim()
+        : injectMissingConstraints(task.question, task.constraints ?? []);
+      const isGlobal = planQuestions.includes('global');
+      const taskTopK = isGlobal ? Math.max(topK, 12) : topK;
+      // Intent-aware document routing (Track B MultiHopRAG ablation):
+      // - `cross_paper` / `dependent_multihop` tasks route documents independently per atomic
+      //   sub-task so the weaker side of a comparison is never starved (+11.34pp AllDoc@20).
+      // - `multi_target` / `global` tasks keep whole-question routing so aspects stay anchored
+      //   to the full query topic.
+      const needsWholeQuestionRouting =
+        !isCrossOrMultiHop && targets.length !== 1 && effectiveQuery !== trimmed;
       pending.push({ task, targets, allowed });
       requests.push({
         task_id: task.id,
-        query: task.question,
+        query: effectiveQuery,
+        ...(needsWholeQuestionRouting ? { routing_query: trimmed } : {}),
         english_query: task.english_query ?? null,
         sub_queries: options.sub_queries ?? [],
         section_filter: options.section_filter ?? null,
         segment_types: options.segment_types ?? [],
         scope_entry_ids: scopeIds,
-        mandated_entry_ids: targets,
+        mandated_entry_ids: mandatedIds,
         allowed_entry_ids: allowed,
-        top_k: topK
+        top_k: taskTopK,
+        ...(isGlobal ? { max_documents: 30 } : {})
       });
     }
     if (requests.length === 0) return;
@@ -474,7 +580,7 @@ export async function runSearchLibrary({
     await runBatchTasks(orderedTasks);
   }
 
-  const taskResults = orderedTasks.map((task) => results.get(task.id)!);
+  const taskResults = dedupeCrossTaskEvidence(orderedTasks.map((task) => results.get(task.id)!));
   const idsWithStatus = (status: TaskStatus) => taskResults.filter((task) => task.status === status).map((task) => task.task_id);
   const evidenceCount = taskResults.reduce((total, task) => total + task.evidence.length, 0);
 
@@ -497,4 +603,38 @@ export async function runSearchLibrary({
   const summary = `Retrieved ${evidenceCount} evidence item${evidenceCount === 1 ? '' : 's'} across ${taskResults.length} task${taskResults.length === 1 ? '' : 's'}: ${idsWithStatus('retrieved').length} with evidence, ${idsWithStatus('empty').length} empty, ${idsWithStatus('failed').length} failed.`;
 
   return { modelOutput, sources, summary };
+}
+
+const MAX_EVIDENCE_SNIPPET_CHARS = 1800;
+
+/**
+ * Prevents multi-task `search_library` calls from sending identical long snippets and
+ * surrounding contexts to the LLM multiple times across overlapping sub-tasks.
+ * The first occurrence keeps its full `snippet` and `surrounding_context`; subsequent
+ * tasks keep the item and its `[S#]` marker with a compact back-reference.
+ */
+function dedupeCrossTaskEvidence(taskResults: TaskResult[]): TaskResult[] {
+  const seenSegments = new Map<string, string>();
+  return taskResults.map((task) => ({
+    ...task,
+    evidence: task.evidence.map((item) => {
+      const key = `${item.entry_id}:${item.segment_uid}`;
+      const priorMarker = seenSegments.get(key);
+      if (priorMarker) {
+        const { surrounding_context: _omitCtx, ...rest } = item;
+        return {
+          ...rest,
+          snippet: `(same segment as ${priorMarker}; see earlier task)`
+        };
+      }
+      seenSegments.set(key, item.marker);
+      if (item.snippet && item.snippet.length > MAX_EVIDENCE_SNIPPET_CHARS) {
+        return {
+          ...item,
+          snippet: `${item.snippet.slice(0, MAX_EVIDENCE_SNIPPET_CHARS).trimEnd()}...`
+        };
+      }
+      return item;
+    })
+  }));
 }

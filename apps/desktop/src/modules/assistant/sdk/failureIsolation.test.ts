@@ -318,7 +318,19 @@ describe('SDK failure results reach the model through production wiring', () => 
     });
     const provider = model([{ call: { name: 'search_segments', args: { query: 'participants' } } },
       { text: '关键词检索的片段显示 42 participants [S1]。' }]);
-    const result = await answerWithGroundedAgent(options());
+    const baseOptions = options();
+    const legacySettings = {
+      ...DEFAULT_AGENT_RUNTIME_SETTINGS,
+      mainAssistant: {
+        ...DEFAULT_AGENT_RUNTIME_SETTINGS.mainAssistant,
+        enabledToolIds: DEFAULT_AGENT_RUNTIME_SETTINGS.mainAssistant.enabledToolIds.filter((id) => id !== 'search_library')
+      }
+    };
+    const result = await answerWithGroundedAgent({
+      ...baseOptions,
+      runtimeSettings: legacySettings,
+      activeExecution: { agent: legacySettings.mainAssistant }
+    });
     expect(result.agentLoopState?.status).toBe('completed');
     expect(result.toolEvents).toContainEqual(expect.objectContaining({ toolName: 'search_segments', status: 'done' }));
     expect(result.sources[0]).toMatchObject({ segment_uid: 's1', quote: '42 participants.' });

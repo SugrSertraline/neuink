@@ -145,6 +145,30 @@ describe('runSearchLibrary scope handling', () => {
     await run({ scopeRequest: { kind: 'explicit_single', entry_ids: ['b'] }, usePlanning: false, searchBatch });
     expect(searchBatch.mock.calls[0][0][0].scope_entry_ids).toEqual(['b']);
   });
+
+  it('binds named library papers into mandated_entry_ids and resolves known unresolved_targets under full-library scope', async () => {
+    const searchBatch = batchReturning(() => okOutcome('a', 's'));
+    const result = await run({
+      question: '对比 Paper A 与 Paper B 的实验结果',
+      plan: async () =>
+        planned(
+          multiTaskPlan({
+            original_question: '对比 Paper A 与 Paper B 的实验结果',
+            unresolved_targets: ['Paper A'],
+            retrieval_tasks: [
+              { id: 'q1', question: 'Paper A 的实验结果是什么？', constraints: [], depends_on: [], target_entry_ids: [] },
+              { id: 'q2', question: 'Paper B 的实验结果是什么？', constraints: [], depends_on: [], target_entry_ids: [] }
+            ]
+          })
+        ),
+      searchBatch
+    });
+    expect(result.modelOutput.status).toBe('searched');
+    expect(searchBatch).toHaveBeenCalledTimes(1);
+    const reqs = searchBatch.mock.calls[0][0];
+    expect(reqs[0].scope_entry_ids).toEqual([]);
+    expect(reqs[0].mandated_entry_ids).toEqual(['a', 'b']);
+  });
 });
 
 describe('runSearchLibrary task binding and statuses', () => {
@@ -291,11 +315,242 @@ describe('runSearchLibrary batching, options and sources', () => {
   });
 
   it('adds a global incompleteness warning', async () => {
+    const searchBatch = batchReturning(() => okOutcome('a', 's'));
     const result = await run({
       plan: async () => planned(multiTaskPlan({ question_types: ['global'], retrieval_tasks: [] })),
-      searchBatch: batchReturning(() => okOutcome('a', 's'))
+      searchBatch
     });
     expect(result.modelOutput.warnings.join(' ')).toContain('不代表穷尽覆盖');
+    expect(searchBatch.mock.calls[0][0][0]).toMatchObject({ top_k: 12, max_documents: 30 });
+  });
+
+  it('propagates top-level english_query on single plans, injects missing constraints, and sets routing_query on decomposed tasks', async () => {
+    const searchBatch = batchReturning(() => okOutcome('a', 's'));
+    await run({
+      question: '整篇论文干什么了',
+      plan: async () => planned({
+        question_types: ['single'],
+        scope_kind: 'explicit_single',
+        original_question: '整篇论文干什么了',
+        english_query: 'What is the main contribution and overview of this paper?',
+        retrieval_tasks: [],
+        unresolved_targets: []
+      }),
+      searchBatch
+    });
+    expect(searchBatch.mock.calls[0][0][0]).toMatchObject({
+      task_id: 'direct',
+      query: '整篇论文干什么了',
+      english_query: 'What is the main contribution and overview of this paper?'
+    });
+
+    searchBatch.mockClear();
+    await run({
+      question: '比较 HiKEY 在 M3DocVQA 上的方法与消融结果',
+      plan: async () => planned({
+        question_types: ['multi_target'],
+        scope_kind: 'unspecified',
+        original_question: '比较 HiKEY 在 M3DocVQA 上的方法与消融结果',
+        retrieval_tasks: [
+          { id: 'q1', question: '采用了什么核心方法？', constraints: ['HiKEY'], depends_on: [], target_entry_ids: [] },
+          { id: 'q2', question: '消融实验结果如何？', constraints: ['HiKEY', 'M3DocVQA'], depends_on: [], target_entry_ids: [] }
+        ],
+        unresolved_targets: []
+      }),
+      searchBatch
+    });
+    const decomposedReqs = searchBatch.mock.calls[0][0];
+    expect(decomposedReqs[0]).toMatchObject({
+      task_id: 'q1',
+      query: '采用了什么核心方法？ (HiKEY)',
+      routing_query: '比较 HiKEY 在 M3DocVQA 上的方法与消融结果'
+    });
+    expect(decomposedReqs[1]).toMatchObject({
+      task_id: 'q2',
+      query: '消融实验结果如何？ (HiKEY, M3DocVQA)',
+      routing_query: '比较 HiKEY 在 M3DocVQA 上的方法与消融结果'
+    });
+  });
+
+  it('uses per-task independent routing and skips verbose prose constraints on cross_paper plans', async () => {
+    const searchBatch = batchReturning(() => okOutcome('a', 's'));
+    await run({
+      question: 'Compare The Verge and TechCrunch coverage of the trial',
+      plan: async () => planned({
+        question_types: ['cross_paper'],
+        scope_kind: 'unspecified',
+        original_question: 'Compare The Verge and TechCrunch coverage of the trial',
+        retrieval_tasks: [
+          {
+            id: 'q1',
+            question: 'What did The Verge report about the trial?',
+            constraints: ['reported by both The Verge and TechCrunch', 'TechCrunch'],
+            depends_on: [],
+            target_entry_ids: []
+          },
+          {
+            id: 'q2',
+            question: 'What did TechCrunch report about the trial?',
+            constraints: ['reported by both The Verge and TechCrunch'],
+            depends_on: [],
+            target_entry_ids: []
+          }
+        ],
+        unresolved_targets: []
+      }),
+      searchBatch
+    });
+    const reqs = searchBatch.mock.calls[0][0];
+    expect(reqs[0].query).toBe('What did The Verge report about the trial?');
+    expect(reqs[0].routing_query).toBeUndefined();
+    expect(reqs[1].query).toBe('What did TechCrunch report about the trial?');
+    expect(reqs[1].routing_query).toBeUndefined();
+  });
+
+  it('deduplicates repeated segment bodies across overlapping sub-tasks while keeping citation markers', async () => {
+    const sharedOutcome = () => ({
+      status: 'ok' as const,
+      mode: 'hybrid',
+      evidence: [{
+        entry_id: 'a',
+        entry_title: 'Paper A',
+        segment_uid: 'seg-table-1',
+        page: 5,
+        score: 0.95,
+        snippet: 'Table 1 full metrics: HiKEY 84.9 vs MultiDocFusion 83.0.',
+        surrounding_context: '[Prev] Table 1 summary paragraph.',
+        marker: '[S1]'
+      }],
+      sources: [{ entry_id: 'a', entry_title: 'Paper A', page_idx: 4, segment_uid: 'seg-table-1', quote: 'Table 1' }],
+      warnings: []
+    });
+    const result = await run({
+      plan: async () => planned({
+        question_types: ['multi_target'],
+        scope_kind: 'unspecified',
+        original_question: QUESTION,
+        retrieval_tasks: [
+          { id: 't1', question: '主表指标？', constraints: [], depends_on: [], target_entry_ids: [] },
+          { id: 't2', question: '基线对比？', constraints: [], depends_on: [], target_entry_ids: [] }
+        ],
+        unresolved_targets: []
+      }),
+      searchBatch: batchReturning(sharedOutcome)
+    });
+    const [t1, t2] = result.modelOutput.task_results;
+    expect(t1.evidence[0].snippet).toContain('HiKEY 84.9');
+    expect(t1.evidence[0].surrounding_context).toContain('Table 1 summary');
+    expect(t2.evidence[0].marker).toBe('[S1]');
+    expect(t2.evidence[0].snippet).toBe('(same segment as [S1]; see earlier task)');
+    expect(t2.evidence[0].surrounding_context).toBeUndefined();
+  });
+
+  it('enforces frozen scope isolation, independent routing, and cross-task dedup on cross_paper comparisons', async () => {
+    const searchBatch = vi.fn(async (requests: TaskSearchRequest[]): Promise<TaskSearchItem[]> =>
+      requests.map((req) => {
+        if (req.task_id === 'q1') {
+          return {
+            task_id: 'q1',
+            outcome: {
+              status: 'ok',
+              mode: 'hybrid',
+              evidence: [
+                {
+                  entry_id: 'a',
+                  entry_title: 'Paper A',
+                  segment_uid: 'seg-a1',
+                  page: 2,
+                  score: 0.94,
+                  snippet: 'Paper A achieves 84.9 accuracy on M3DocVQA.',
+                  surrounding_context: '[Prev] Evaluation setup.',
+                  marker: '[S1]'
+                },
+                // Out-of-scope leak that must be stripped by frozenScope ['a', 'b'].
+                {
+                  entry_id: 'c',
+                  entry_title: 'Paper C (out of scope)',
+                  segment_uid: 'seg-c-leak',
+                  page: 1,
+                  score: 0.99,
+                  snippet: 'Leaked out-of-scope paper.',
+                  marker: '[S2]'
+                }
+              ],
+              sources: [
+                { entry_id: 'a', entry_title: 'Paper A', page_idx: 1, segment_uid: 'seg-a1', quote: '84.9 accuracy' },
+                { entry_id: 'c', entry_title: 'Paper C', page_idx: 0, segment_uid: 'seg-c-leak', quote: 'Leaked' }
+              ],
+              warnings: []
+            }
+          };
+        }
+        return {
+          task_id: 'q2',
+          outcome: {
+            status: 'ok',
+            mode: 'hybrid',
+            evidence: [
+              // Same segment as q1 (should dedupe body while preserving citation marker)
+              {
+                entry_id: 'a',
+                entry_title: 'Paper A',
+                segment_uid: 'seg-a1',
+                page: 2,
+                score: 0.88,
+                snippet: 'Paper A achieves 84.9 accuracy on M3DocVQA.',
+                surrounding_context: '[Prev] Evaluation setup.',
+                marker: '[S1]'
+              },
+              {
+                entry_id: 'b',
+                entry_title: 'Paper B',
+                segment_uid: 'seg-b1',
+                page: 4,
+                score: 0.91,
+                snippet: 'Paper B achieves 81.2 accuracy on M3DocVQA.',
+                marker: '[S2]'
+              }
+            ],
+            sources: [
+              { entry_id: 'a', entry_title: 'Paper A', page_idx: 1, segment_uid: 'seg-a1', quote: '84.9 accuracy' },
+              { entry_id: 'b', entry_title: 'Paper B', page_idx: 3, segment_uid: 'seg-b1', quote: '81.2 accuracy' }
+            ],
+            warnings: []
+          }
+        };
+      })
+    );
+
+    const result = await run({
+      question: '对比 Paper A 和 Paper B 在 M3DocVQA 上的准确率',
+      frozenScope: { intent: 'selection', entry_ids: ['a', 'b'] },
+      plan: async () => planned({
+        question_types: ['cross_paper'],
+        scope_kind: 'explicit_multi',
+        original_question: '对比 Paper A 和 Paper B 在 M3DocVQA 上的准确率',
+        retrieval_tasks: [
+          { id: 'q1', question: 'Paper A 在 M3DocVQA 上的准确率？', constraints: [], depends_on: [], target_entry_ids: ['a'] },
+          { id: 'q2', question: 'Paper B 在 M3DocVQA 上的准确率？', constraints: [], depends_on: [], target_entry_ids: ['a', 'b'] }
+        ],
+        unresolved_targets: []
+      }),
+      searchBatch
+    });
+
+    const reqs = searchBatch.mock.calls[0][0];
+    expect(reqs[0].routing_query).toBeUndefined();
+    expect(reqs[1].routing_query).toBeUndefined();
+    expect(reqs[0].allowed_entry_ids).toEqual(['a']);
+    expect(reqs[1].allowed_entry_ids).toEqual(['a', 'b']);
+
+    const [t1, t2] = result.modelOutput.task_results;
+    expect(t1.evidence.map((e) => e.segment_uid)).toEqual(['seg-a1']);
+    expect(t1.warnings.join(' ')).toContain('已忽略');
+    expect(t2.evidence.map((e) => e.segment_uid)).toEqual(['seg-a1', 'seg-b1']);
+    expect(t2.evidence[0].snippet).toBe('(same segment as [S1]; see earlier task)');
+    expect(t2.evidence[0].surrounding_context).toBeUndefined();
+    expect(t2.evidence[1].snippet).toContain('81.2 accuracy');
+    expect(result.sources.map((s) => ('segment_uid' in s ? s.segment_uid : ''))).toEqual(['seg-a1', 'seg-b1']);
   });
 });
 

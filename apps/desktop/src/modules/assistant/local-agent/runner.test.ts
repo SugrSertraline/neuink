@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { runLocalAgent } from '@/shared/ipc/localAgentApi';
-import { getAssistantContextSnapshot, invokeAssistantTool, loadAgentRuntimeSettings, listTools } from '@/shared/ipc/assistantApi';
-import { readNote } from '@/shared/ipc/workspaceApi';
+import { getAssistantContextSnapshot, getEntryOutlineTool, invokeAssistantTool, loadAgentRuntimeSettings, listTools, readEntryAssistantContext } from '@/shared/ipc/assistantApi';
+import { readNote, searchSegmentsBatch, searchUnified } from '@/shared/ipc/workspaceApi';
 import { DEFAULT_AGENT_RUNTIME_SETTINGS } from '@/shared/lib/agentRuntimeSettings';
 import { setLocalAgentEnabled } from '@/shared/lib/localAgentSettings';
 import { runLocalAgentHarness } from './runner';
@@ -14,8 +14,8 @@ import { inspectPdfText } from '@/shared/ipc/pdfTextApi';
 vi.mock('@/shared/ipc/agentExecutionApi', () => ({ saveAgentExecution: vi.fn(async (_root, record) => ({ ...record, revision: record.revision + 1 })), readAgentExecution: vi.fn() }));
 vi.mock('@/shared/ipc/localAgentApi', () => ({runLocalAgent:vi.fn()}));
 vi.mock('@/shared/ipc/assistantApi', async original => ({...await original<typeof import('@/shared/ipc/assistantApi')>(),
-  getAssistantContextSnapshot:vi.fn(), loadAgentRuntimeSettings:vi.fn(), listTools:vi.fn(), invokeAssistantTool:vi.fn()}));
-vi.mock('@/shared/ipc/workspaceApi', () => ({readNote:vi.fn()}));
+  getAssistantContextSnapshot:vi.fn(), getEntryOutlineTool:vi.fn(), readEntryAssistantContext:vi.fn(), loadAgentRuntimeSettings:vi.fn(), listTools:vi.fn(), invokeAssistantTool:vi.fn()}));
+vi.mock('@/shared/ipc/workspaceApi', () => ({readNote:vi.fn(), searchSegmentsBatch:vi.fn(), searchUnified:vi.fn()}));
 vi.mock('@/shared/ipc/pdfTextApi', async original => ({...await original<typeof import('@/shared/ipc/pdfTextApi')>(),inspectPdfText:vi.fn()}));
 const session = {type:'local-agent',provider:'claude',sessionId:'550e8400-e29b-41d4-a716-446655440000',initialized:false} as const;
 function options(extra:Partial<RunAssistantHarnessOptions> = {}): RunAssistantHarnessOptions {
@@ -351,5 +351,137 @@ describe('Claude integration with production NeuInk tools', () => {
     });
     await expect(runLocalAgentHarness(options({requestToolApproval:requestToolApproval('fixture','c1'),requestUserInput:requestUserInput('fixture','c1')}),session,vi.fn())).rejects.toThrow('CLI disconnected');
     await vi.waitFor(() => {expect(getToolApprovals()).toHaveLength(0);expect(getUserInputs()).toHaveLength(0);});
+  });
+  it('routes single-paper local-agent questions through search_library with an outline instead of preloading full paper text', async () => {
+    vi.mocked(getEntryOutlineTool).mockResolvedValue({
+      entry_id: 'entry1',
+      entry_title: 'Entry',
+      compact_summary: '1. Introduction\n2. Method\n3. Experiments',
+      sections: []
+    } as never);
+    vi.mocked(runLocalAgent).mockImplementation(async request => {
+      const payload = JSON.parse(request.prompt) as {
+        context: { documentOutline?: string };
+        pinnedEvidence: string;
+        instructions: string;
+      };
+      expect(payload.context.documentOutline).toContain('2. Method');
+      expect(payload.pinnedEvidence).not.toContain('preloaded by the host');
+      expect(payload.instructions).toContain('call search_library first');
+      expect(payload.instructions).toContain('batch multiple follow-up reads in one parallel turn');
+      expect(payload.instructions).not.toContain('TOOL_NO_PUBLIC_PDF');
+      expect(payload.instructions).not.toContain('raw Mermaid code fence');
+      return { result: '已通过检索作答。' };
+    });
+    await runLocalAgentHarness(
+      options({ question: '这篇论文的方法是怎么设计的', currentNote: null }),
+      { ...session, provider: 'codex' },
+      vi.fn()
+    );
+    expect(readEntryAssistantContext).not.toHaveBeenCalled();
+    expect(getEntryOutlineTool).toHaveBeenCalledWith({ entryId: 'entry1', root: 'C:/fixture' });
+  });
+  it('gives decomposition rules directly to local agent and executes planned_tasks without spawning a second local agent', async () => {
+    const fakeResults = {
+      query: '这篇论文对比 SOTA 提升多少',
+      mode: 'hybrid',
+      index_generation: 1,
+      total_hit_count: 1,
+      rerank_used: 'cross_encoder',
+      entries: [{
+        entry_id: 'entry1',
+        entry_title: 'Entry',
+        hit_count: 1,
+        hits: [{
+          entry_id: 'entry1',
+          entry_title: 'Entry',
+          title: 'Results',
+          snippet: 'HiKEY improves Recall by +4.5 points over strongest baseline.',
+          score: 0.92,
+          matched_terms: ['HiKEY'],
+          source: { kind: 'segment', label: 'segment', segment_uid: 'seg1', page_idx: 4 },
+          target: { kind: 'segment', entry_id: 'entry1', segment_uid: 'seg1', page_idx: 4 }
+        }]
+      }],
+      warnings: []
+    };
+    vi.mocked(searchSegmentsBatch).mockImplementation(async (_root, tasks) =>
+      tasks.map(task => ({ task_id: task.task_id, status: 'ok', results: fakeResults })) as never
+    );
+    vi.mocked(searchUnified).mockResolvedValue({
+      results: fakeResults,
+      degradations: [],
+      visual_status: 'ok',
+      rerank_used: 'cross_encoder',
+      rerank_reason: null,
+      pool_reason: null
+    } as never);
+
+    vi.mocked(runLocalAgent).mockImplementation(async (request, _signal, _event, handle) => {
+      const payload = JSON.parse(request.prompt) as { instructions: string };
+      expect(payload.instructions).toContain('planned_tasks');
+      expect(payload.instructions).toContain('multi_target');
+      expect(payload.instructions).toContain('cross_paper');
+      const searchOut = await call(
+        handle,
+        'search_library',
+        {
+          question: '这篇文章对比SOTA的提升是多少',
+          question_types: ['multi_target'],
+          top_k: 18,
+          planned_tasks: [
+            {
+              id: 't1',
+              question: '摘要中报告的 HiKEY 相对基线提升是多少？',
+              english_query: 'HiKEY abstract performance improvement over baselines'
+            },
+            {
+              id: 't2',
+              question: '主结果表中 HiKEY 与最强基线在各数据集上的数值是多少？',
+              english_query: 'HiKEY main results table strongest baseline M3DocVQA FRAMES'
+            }
+          ]
+        },
+        'call-search-1'
+      );
+      expect(searchOut.isError).not.toBe(true);
+      expect((searchOut.value.planning as { status: string }).status).toBe('planned');
+      expect((searchOut.value.task_results as Array<{ task_id: string }>).map(t => t.task_id)).toEqual(['t1', 't2']);
+      return { result: '依据检索结果回答。[S1]' };
+    });
+
+    const result = await runLocalAgentHarness(
+      options({
+        question: '这篇文章对比SOTA的提升是多少',
+        currentNote: null,
+        profiles: [],
+        availableEntries: [{ id: 'entry1', title: 'Entry', description: '', updatedAt: '' }],
+        retrievalScope: { entry_ids: ['entry1'], entry_titles: ['Entry'], tag_ids: [], tag_names: [] }
+      }),
+      { ...session, provider: 'codex' },
+      vi.fn()
+    );
+    // Crucial: zero nested local-agent cold-starts!
+    expect(runLocalAgent).toHaveBeenCalledTimes(1);
+    const batchCalls = vi.mocked(searchSegmentsBatch).mock.calls;
+    const unifiedCalls = vi.mocked(searchUnified).mock.calls;
+    if (unifiedCalls.length > 0) {
+      expect(unifiedCalls).toHaveLength(2);
+      expect(unifiedCalls[0][1]).toMatchObject({
+        top_k: 12,
+        english_query: 'HiKEY abstract performance improvement over baselines'
+      });
+      expect(unifiedCalls[1][1]).toMatchObject({
+        top_k: 12,
+        english_query: 'HiKEY main results table strongest baseline M3DocVQA FRAMES'
+      });
+    } else {
+      expect(batchCalls[0][1]).toHaveLength(2);
+      expect(batchCalls[0][1][0]).toMatchObject({
+        top_k: 12,
+        english_query: 'HiKEY abstract performance improvement over baselines'
+      });
+    }
+    expect(result.answer).toContain('依据检索结果回答');
   });
 });

@@ -424,6 +424,9 @@ async function executeAssistantHarness(options: RunAssistantHarnessOptions): Pro
       summary: 'Agent reached a terminal response for this turn.',
       toolName: plan.executionMode === 'plan' ? 'agent.plan' : 'agent.loop'
     });
+    if (grounded.turnDurationsMs?.length) {
+      agentRun.turnDurationsMs = grounded.turnDurationsMs;
+    }
     if (!streamedAnswer) onDelta?.(grounded.answer);
     return {
       ...grounded,

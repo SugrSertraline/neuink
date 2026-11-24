@@ -45,6 +45,47 @@ it('does not advertise disabled research tools or import capabilities', () => {
   expect(enabled).toContain('did not download or add papers');
 });
 
+it('slims unrelated tool essays for focused parsed-paper QA while preserving them when requested', () => {
+  const fullTools = [
+    'present_diagram',
+    'read_pdf_pages',
+    'search_pdf_text',
+    'read_segment_content',
+    'search_papers',
+    'search_web',
+    'read_webpage',
+    'import_papers',
+    'search_library',
+    'note_propose_create',
+    'note_propose_patch'
+  ];
+  const focused = buildToolNotes(fullTools, undefined, null, null, {
+    focusedParsedPaper: true,
+    hasSelectedNote: false,
+    question: '这篇论文比SOTA提升了多少'
+  });
+  expect(focused).toContain('Parsed paper retrieval');
+  expect(focused).toContain('batch multiple follow-up reads in one parallel turn');
+  expect(focused).not.toContain('TOOL_NO_PUBLIC_PDF');
+  expect(focused).not.toContain('raw Mermaid code fence');
+  expect(focused).not.toContain('Unparsed PDFs:');
+  expect(focused).not.toContain('In Markdown note proposals');
+
+  const withDiagram = buildToolNotes(fullTools, undefined, null, null, {
+    focusedParsedPaper: true,
+    hasSelectedNote: false,
+    question: '请画一张这篇论文的架构流程图'
+  });
+  expect(withDiagram).toContain('call present_diagram');
+
+  const withNote = buildToolNotes(fullTools, undefined, null, null, {
+    focusedParsedPaper: true,
+    hasSelectedNote: true,
+    question: '总结并写入当前笔记'
+  });
+  expect(withNote).toContain('In Markdown note proposals');
+});
+
 describe('buildSelectedMarkdownContext', () => {
   beforeEach(() => vi.mocked(readNote).mockReset());
 

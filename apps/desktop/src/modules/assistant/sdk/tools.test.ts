@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_AGENT_RUNTIME_SETTINGS } from '@/shared/lib/agentRuntimeSettings';
-import type { ScopeSnapshot } from '@/shared/ipc/assistantApi';
+import { listTools, type ScopeSnapshot } from '@/shared/ipc/assistantApi';
 import { readNote, searchSegmentsBatch } from '@/shared/ipc/workspaceApi';
 import { createAgentLoopState, AgentLoopGuard } from '../agent-core';
 import {
@@ -132,6 +132,25 @@ describe('search_library tool wiring', () => {
     const output = await execute({ question: '论文 A？', use_planning: false }, { toolCallId: 'search-2', messages: [] } as never) as Record<string, unknown>;
     expect(output.status).toBe('needs_clarification');
     expect(searchSegmentsBatch).not.toHaveBeenCalled();
+  });
+
+  it('hides legacy search_segments from the model whenever search_library is enabled', async () => {
+    vi.mocked(listTools).mockResolvedValueOnce([
+      {
+        name: 'search_segments',
+        description: 'Legacy segment search',
+        parameters_schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] }
+      }
+    ]);
+    const runtime = await createAssistantTools({
+      activeExecution: { agent: DEFAULT_AGENT_RUNTIME_SETTINGS.mainAssistant },
+      root: 'C:/workspace',
+      scope,
+      retrievalScope: scope,
+      runtimeSettings: DEFAULT_AGENT_RUNTIME_SETTINGS
+    });
+    expect(runtime.tools.search_library).toBeDefined();
+    expect(runtime.tools.search_segments).toBeUndefined();
   });
 });
 
@@ -270,5 +289,28 @@ describe('model-driven side-effect tools', () => {
     }, options);
 
     expect(proposals[0]?.beforeMarkdown).toContain('Old text');
+  });
+
+  it('accepts top-level target_entry_ids as a scope_entry_ids alias on search_library', async () => {
+    const runtime = await createAssistantTools({
+      activeExecution: { agent: DEFAULT_AGENT_RUNTIME_SETTINGS.mainAssistant },
+      availableEntries: [{ description: '', id: 'entry-allowed', title: 'Allowed Paper', updatedAt: '' }],
+      invocationPlan: {
+        enabledToolIds: ['search_library'], mainAssistantId: 'main-assistant',
+        missing: [], mode: 'agent_execute', rationale: '', subagentTasks: [],
+        writePolicy: 'proposal_only'
+      },
+      retrievalScope: {
+        entry_ids: ['entry-allowed'],
+        entry_titles: ['Allowed Paper'],
+        scope_intent: 'selection',
+        tag_ids: [],
+        tag_names: []
+      },
+      root: 'C:/workspace', scope, runtimeSettings: DEFAULT_AGENT_RUNTIME_SETTINGS
+    });
+    const schema = (runtime.tools.search_library.inputSchema as { jsonSchema?: { properties?: Record<string, unknown> } }).jsonSchema;
+    expect(schema?.properties).toHaveProperty('target_entry_ids');
+    expect(schema?.properties).toHaveProperty('scope_entry_ids');
   });
 });

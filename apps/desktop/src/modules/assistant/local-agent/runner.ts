@@ -1,7 +1,8 @@
 import { asSchema } from 'ai';
 import { runLocalAgent } from '@/shared/ipc/localAgentApi';
 import { readLocalAgentEnabled } from '@/shared/lib/localAgentSettings';
-import { loadAgentRuntimeSettings, getAssistantContextSnapshot, readEntryAssistantContext } from '@/shared/ipc/assistantApi';
+import { readUnifiedRetrieval } from '@/shared/lib/retrievalMode';
+import { loadAgentRuntimeSettings, getAssistantContextSnapshot, getEntryOutlineTool } from '@/shared/ipc/assistantApi';
 import { normalizeAgentRuntimeSettings, readAgentRuntimeSettings } from '@/shared/lib/agentRuntimeSettings';
 import type { AssistantNoteProposal, AssistantEntryMetaProposal, AssistantTagProposal } from '@/shared/types/assistant';
 import type { RunAssistantHarnessOptions } from '../harness/engine';
@@ -36,7 +37,7 @@ import { buildDirectExecution, executionModeInstructions } from '../runtime/exec
 import { createCompiledTaskState, transitionTaskState } from '../runtime/taskState';
 import { createAgentRun, finishAgentRun } from '../harness/runState';
 import { verifyHarnessResult, AssistantVerificationError } from '../harness/verification';
-import { PAPER_PRESENTATION_INSTRUCTIONS, paperRecords, presentedPaperRecords } from '../research/paperPresentation';
+import { paperRecords, presentedPaperRecords } from '../research/paperPresentation';
 import { LocalAgentCheckpoint } from './checkpoint';
 import { parsedEntryReadingNotice } from '../sdk/entryContext';
 
@@ -59,6 +60,8 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
     if (!options.conversationId) throw new Error('请先创建对话。');
     const runId = crypto.randomUUID();
     const execution = options.execution;
+    const agentRun = createAgentRun(execution?.record.id ?? `local-${runId}`);
+    const turnDurationsMs: number[] = [];
     const budget = options.budget ?? new RunBudget();
     const savedSession = execution?.get<LocalAgentSession>('local:session');
     if (savedSession && savedSession.provider !== session.provider) throw new Error('请切换回原任务使用的本地 Agent 后继续。');
@@ -99,35 +102,33 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
         page_idx:segment.page_idx, segment_uid:segment.segment_uid, quote:segment.text});
       return `[S${marker}] ${segment.entry_title}, p.${segment.page_idx + 1}\n${segment.text}`;
     }).join('\n\n');
-    // Preload the focused paper so a question about it does not cost one model round trip
-    // per 12k-char tool page. Sources join the ledger, keeping [S#] citations valid.
-    const preloadTarget = snapshot.active_entry
+    // Provide only a compact document outline (matching the built-in SDK path in `qna.ts`)
+    // instead of preloading truncated full paper text, so local agents route single-paper
+    // questions through `search_library` (dense + BM25 + cross-encoder rerank + visual rescue).
+    const outlineTarget = snapshot.active_entry
       ? { id: snapshot.active_entry.entry_id, title: snapshot.active_entry.entry_title }
       : options.currentEntry ? { id: options.currentEntry.id, title: options.currentEntry.title } : null;
-    let preloadedPaper = '';
-    if (preloadTarget) {
+    let compactOutline = '';
+    if (outlineTarget) {
       try {
-        const preloaded = await readEntryAssistantContext({ entryId: preloadTarget.id, root: options.root });
-        if (preloaded.markdown.trim() && preloaded.sources.length > 0) {
-          const originalToMarker = new Map<number, number>();
-          preloaded.sources.forEach((source, index) => originalToMarker.set(index + 1, ledger.add(source)));
-          preloadedPaper = preloaded.markdown.replace(/\[S(\d+)]/g, (full, digits: string) => {
-            const marker = originalToMarker.get(Number(digits));
-            return marker === undefined ? full : `[S${marker}]`;
-          }).trim();
-        }
+        const outline = await getEntryOutlineTool({ entryId: outlineTarget.id, root: options.root });
+        compactOutline = outline.compact_summary?.trim() ?? '';
       } catch {
-        // Preloading is an optimisation; the agent tools remain the fallback when it fails.
+        // Outline is an optional context hint; retrieval tools remain available.
       }
     }
     const browserTabTarget = options.currentSurface?.kind === 'browser' ? options.currentSurface.browserTab : null;
     const restoredState = execution?.get<ToolRuntimeState>('tools:local');
+    const unifiedRetrieval = (await readUnifiedRetrieval()) ? {} : null;
     const runtime = await createAssistantTools({ execution, budget, plan,
       restoredState: restoredState && { ...restoredState, readNotes: [] }, retrievalScope:options.retrievalScope, root:options.root, scope:options.scope, abortSignal:options.abortSignal,
       activeExecution:{agent:main}, runtimeSettings, currentEntry:options.currentEntry, currentNote:options.currentNote,
       contextSnapshot:snapshot, assistantContext:options.assistantContext, availableEntries:options.availableEntries,
       browserTabTarget,
       conversationHistory:options.conversationHistory, sourceLedger:ledger, profiles:options.profiles,
+      defaultProfile:options.profiles?.[0],
+      unifiedRetrieval,
+      callerPlansRetrieval:!(options.profiles && options.profiles.length > 0),
       applicationActions:options.applicationActions, onCreateEntry:options.onCreateEntry,
       onNoteProposal:proposal => proposals.push(proposal), onToolEvent:emit,
       onEntryMetaProposal:proposal => entryMetaProposals.push(proposal),
@@ -166,6 +167,7 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
     for (;;) {
       budget.turn();
       await checkpoint.save();
+      const turnStartedAt = Date.now();
       const result = await runLocalAgent({ runId: crypto.randomUUID(), root:options.root, conversationId:options.conversationId, sessionId:session.sessionId,
         provider:session.provider, resume:session.initialized, tools,
         prompt: JSON.stringify({ request:options.question, correction,
@@ -184,17 +186,33 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
             segmentUid:options.currentSurface.segmentUid
           } : null, browser:web.browser, active_entry:snapshot.active_entry, active_note:snapshot.active_note && {
             entry_id:snapshot.active_note.entry_id, note_id:snapshot.active_note.note_id, note_title:snapshot.active_note.note_title},
-            document:snapshot.document && {entry_id:snapshot.document.entry_id, entry_title:snapshot.document.entry_title}, warnings:snapshot.warnings},
+            document:snapshot.document && {entry_id:snapshot.document.entry_id, entry_title:snapshot.document.entry_title},
+            documentOutline:compactOutline || undefined, warnings:snapshot.warnings},
           selectedNotes:selected.text.slice(0,36_000), selectedNotesTruncated:selected.text.length > 36_000,
-          pinnedEvidence:[preloadedPaper ? `The current paper parsed text (preloaded by the host; [S#] markers are valid citations):\n${preloadedPaper}` : '',pinned.text,pinnedSnapshot].filter(Boolean).join('\n\n').slice(0,preloadedPaper ? 80_000 : 32_000),
+          pinnedEvidence:[pinned.text,pinnedSnapshot].filter(Boolean).join('\n\n').slice(0,32_000),
           targets:{entry:options.currentEntry,note:options.currentNote,mentions:options.composerSnapshot?.mentions,scope:options.scope},
           catalog:{entries:options.availableEntries,notes:options.availableNotes,tags:options.availableTags},
           priorProposalDecisions:(options.conversationHistory ?? []).flatMap(message => (message.note_proposals ?? []).map(p => ({id:p.id,status:p.status}))),
           agentInstructions:main.systemPrompt,
           instructions:[
             'The user can switch reading tabs without starting a new conversation. Preserve prior discussion, but resolve "this paper", "this note" and "the current page" using this request\'s frozen context and targets, not a previous turn or native session memory. The host has already resolved any explicitly pinned reading target. Explicit references to earlier documents and requests to compare them still apply; read their evidence again when needed. Null current targets mean no target is selected: never silently restore the previous one. If the intended target remains ambiguous, ask. A tab change during execution does not retarget this frozen request. Treat historical source markers as historical; only this task\'s retrieved or explicitly recovered markers are valid for new citations.',
-            buildToolNotes(runtime.toolNames,plan,{agent:main},invocationPlan),web.instructions,USER_INPUT_INSTRUCTIONS,
-            executionModeInstructions(plan.executionMode!),PAPER_PRESENTATION_INSTRUCTIONS,preloadedPaper ? 'The current paper parsed text is preloaded in pinnedEvidence with valid [S#] citations. Answer directly from it; do not call read_entry_assistant_context again unless the user asks for content outside this paper.' : '',
+            buildToolNotes(runtime.toolNames, plan, { agent: main }, invocationPlan, {
+              focusedParsedPaper: Boolean(compactOutline),
+              hasSelectedNote: Boolean(options.currentNote || snapshot.active_note || selected.text),
+              question: options.question
+            }),web.instructions,USER_INPUT_INSTRUCTIONS,
+            executionModeInstructions(plan.executionMode!),
+            runtime.toolNames.includes('search_library')
+              ? [
+                  'Paper retrieval: Parsed paper text is not preloaded in pinnedEvidence (only a compact outline may be attached). For questions about parsed papers—including the focused single paper—call search_library first to retrieve grounded passages, tables, and visual evidence with [S#] citations before answering; use read_segment_content or read_entry_assistant_context only when you need expanded reading beyond retrieved snippets, and batch multiple follow-up reads in one parallel turn rather than reading one page or segment per turn.',
+                  'Retrieval planning rules (apply directly in your search_library arguments so the host executes your plan in one batch without spawning a second planner):',
+                  '- single: one focused question -> do not split; pass question (and english_query when asking in Chinese about English papers).',
+                  '- multi_target: multiple distinct aspects (e.g., abstract gains + main table metrics + baseline numbers) -> set question_types: ["multi_target"] and pass 2–4 focused items in planned_tasks (each with question, english_query, and preserved constraints).',
+                  '- cross_paper: comparison across multiple papers -> set question_types: ["cross_paper"], create one task per paper-and-dimension in planned_tasks, and bind each task with target_entry_ids from the allowed catalog.',
+                  '- global: exhaustive inventory across a whole paper or corpus (e.g., all experiments/tables) -> set question_types: ["global"] and decompose by major section/module in planned_tasks.',
+                  '- dependent_multihop: when hop-2 depends on an entity discovered in hop-1, call search_library for hop-1 first, then call search_library again with the concrete entities discovered.'
+                ].join('\n')
+              : '',
             TOOL_FAILURE_INSTRUCTIONS,...runtime.availabilityNotes].join('\n\n') }) }, options.abortSignal,
         event => { if (event.type === 'message') stream.consume(event.value); },
         async event => {
@@ -243,6 +261,7 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
             return {isError:true,content:[{type:'text',text:message}]};
           }
         });
+      turnDurationsMs.push(Math.max(0, Date.now() - turnStartedAt));
       options.abortSignal?.throwIfAborted();
       await checkpoint.settled();
       session = {...session,initialized:true}; onSession(session);
@@ -290,7 +309,10 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
     const proposalIds = [...(grounded.noteProposals ?? []),...entryMetaProposals,...tagProposals].map(p => p.id);
     const task = createCompiledTaskState({ conversationId:options.conversationId, request:options.question, spec:plan });
     grounded.taskState = transitionTaskState(task, proposalIds.length ? 'awaiting_approval' : plan.executionMode === 'plan' ? 'awaiting_user' : 'completed', 'verify', proposalIds);
-    grounded.agentRun = finishAgentRun(createAgentRun(execution?.record.id ?? `local-${runId}`),'succeeded');
+    if (turnDurationsMs.length > 0) {
+      agentRun.turnDurationsMs = turnDurationsMs;
+    }
+    grounded.agentRun = finishAgentRun(agentRun, 'succeeded');
     return grounded;
   } finally {
     // A crashed CLI or a lost IPC channel must release host approval/question
@@ -300,7 +322,7 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
 }
 
 const PAPER_READ_NAMES = new Set(['read_entry_assistant_context', 'read_pdf_pages', 'search_pdf_text',
-  'read_segment_content', 'search_segments']);
+  'read_segment_content', 'search_segments', 'search_library']);
 const NOTE_READ_NAMES = new Set(['read_note', 'read_current_note']);
 const EXTERNAL_NEUINK_READ = /^(?:codex|claude|opencode)\.mcp__neuink__(.+)$/;
 

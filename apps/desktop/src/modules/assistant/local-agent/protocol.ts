@@ -5,7 +5,7 @@ import { CLAUDE_CODE_DISPLAY_NAME } from '@/shared/lib/localAgentSettings';
 import { ReasoningBlocks } from './reasoningBlocks';
 
 const object = (value: unknown): Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
-const NEUINK_READ = /^mcp__neuink__(?:read_entry_assistant_context|read_pdf_pages|search_pdf_text|read_segment_content|search_segments|read_note|read_current_note)$/;
+const NEUINK_READ = /^mcp__neuink__(?:read_entry_assistant_context|read_pdf_pages|search_pdf_text|read_segment_content|search_segments|search_library|read_note|read_current_note)$/;
 function readTarget(name: string, input: unknown) {
   if (!NEUINK_READ.test(name)) return undefined;
   const value = object(input);

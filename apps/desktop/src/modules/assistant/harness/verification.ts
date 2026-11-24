@@ -68,7 +68,7 @@ export function verifyHarnessResult({
   }
   if (plan.needsSegmentSearch && grounded.sources.length === 0 &&
     snapshot.pinned_segments.length === 0 &&
-    !toolEvents.some((event) => event.toolName === 'search_segments')) {
+    !toolEvents.some((event) => event.toolName === 'search_segments' || event.toolName === 'search_library')) {
     warnings.push('The plan requested segment search, but no search evidence was produced.');
   }
   if (plan.deliverables.includes('chat_answer') &&

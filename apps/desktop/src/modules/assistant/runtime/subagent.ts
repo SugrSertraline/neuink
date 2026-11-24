@@ -13,6 +13,7 @@ import { citationCorrection, hasReturnedExternalCitation, returnedExternalCitati
 import { SourceLedger } from './sourceLedger';
 import { bindExecutionIdentity, canReplayAssistantTool, type DurableExecution } from './durableExecution';
 import type { ToolRuntimeState } from '../sdk/tools';
+import type { UnifiedRetrievalConfig } from '../sdk/searchLibraryBatch';
 import type { ModelMessage } from 'ai';
 
 export type RunSubagentTaskOptions = {
@@ -35,6 +36,7 @@ export type RunSubagentTaskOptions = {
   runtimeSettings: AgentRuntimeSettings;
   scope: ScopeSnapshot;
   settings: LlmProfile;
+  unifiedRetrieval?: UnifiedRetrievalConfig | null;
 };
 export type SubagentTaskResult = {
   answer: string;

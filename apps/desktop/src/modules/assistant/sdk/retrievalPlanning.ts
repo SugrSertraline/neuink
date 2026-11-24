@@ -65,6 +65,9 @@ export const planningOutputSchema = z.object({
   // host-resolved scope; a model must never be able to widen the frozen scope.
   scope_kind: z.enum(SCOPE_KINDS).default('unspecified'),
   original_question: z.string().trim().min(1),
+  // Optional English academic query for top-level single Chinese questions (where
+  // retrieval_tasks is empty).
+  english_query: z.string().trim().min(1).optional(),
   retrieval_tasks: z.array(retrievalTaskSchema).max(MAX_RETRIEVAL_TASKS).default([]),
   // Named papers the question refers to that are not among the listed selected papers.
   unresolved_targets: z.array(z.string().trim().min(1).max(120)).max(MAX_RETRIEVAL_TASKS).default([]),
@@ -72,6 +75,26 @@ export const planningOutputSchema = z.object({
 });
 
 export type PlanningOutput = z.infer<typeof planningOutputSchema>;
+
+/**
+ * Splits a dependent plan into strictly 2 hops (`hop1` with empty `depends_on`,
+ * `hop2` depending only on `hop1`). Returns `null` for empty, cyclic, or >2-hop plans.
+ */
+export function splitTwoHopTasks(
+  plan: Pick<PlanningOutput, 'retrieval_tasks'>
+): { hop1: RetrievalTask[]; hop2: RetrievalTask[] } | null {
+  if (plan.retrieval_tasks.length < 2) return null;
+  const hop1 = plan.retrieval_tasks.filter((task) => task.depends_on.length === 0);
+  if (hop1.length === 0) return null;
+  const hop1Ids = new Set(hop1.map((task) => task.id));
+  const hop2 = plan.retrieval_tasks.filter(
+    (task) => task.depends_on.length > 0 && task.depends_on.every((dep) => hop1Ids.has(dep))
+  );
+  if (hop2.length === 0 || hop1.length + hop2.length !== plan.retrieval_tasks.length) {
+    return null;
+  }
+  return { hop1, hop2 };
+}
 
 export type PlanningValidation =
   | { ok: true; plan: PlanningOutput }
@@ -119,11 +142,18 @@ export function validatePlanningOutput(value: unknown, hostQuestion?: string): P
 
   const types = new Set(parsedPlan.question_types);
   const decomposes = [...types].some((type) => DECOMPOSITION_TYPES.has(type));
+  const hasDependency = types.has('dependent_multihop') ||
+    parsedPlan.retrieval_tasks.some((task) => task.depends_on.length > 0);
   if (types.size === 1 && types.has('single') && parsedPlan.retrieval_tasks.length > 0) {
     issues.push('single-question plans must reuse the original question without decomposition');
   }
   if (decomposes && !types.has('single') && parsedPlan.retrieval_tasks.length === 0) {
     issues.push('decomposition plans require at least one retrieval task');
+  }
+  if (hasDependency && !splitTwoHopTasks(parsedPlan)) {
+    issues.push(
+      'dependent_multihop plans require a valid 2-hop DAG: at least one hop-1 task with empty depends_on and at least one hop-2 task depending only on hop-1 tasks (no cycles or >2 hops)'
+    );
   }
   if (hostQuestion !== undefined && parsedPlan.original_question !== hostQuestion.trim()) {
     issues.push('original_question must repeat the frozen user question exactly');
@@ -171,8 +201,8 @@ export const PLANNER_SYSTEM_PROMPT = [
   'original_question must copy the frozen user question exactly. Never rewrite it.',
   'When a task concerns one listed selected paper, set target_entry_ids to that paper id. Use only ids from the selected paper list; never invent ids.',
   'If the question names a paper that is not in the selected list, put its name in unresolved_targets and do not create a task for it.',
-  'Optionally give each task an English english_query for an academic search when the task is in Chinese.',
-  'Return JSON only: question_types, scope_kind, original_question, retrieval_tasks (id, question, constraints, depends_on, english_query, target_entry_ids), unresolved_targets, and optional synthesis_task.'
+  'Optionally give the top-level plan (for single questions) and each task an English english_query for an academic search when the question is in Chinese.',
+  'Return JSON only: question_types, scope_kind, original_question, optional english_query, retrieval_tasks (id, question, constraints, depends_on, english_query, target_entry_ids), unresolved_targets, and optional synthesis_task.'
 ].join('\n');
 
 export function buildPlannerPrompt(input: {

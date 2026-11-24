@@ -371,6 +371,7 @@ export type AssistantAgentRunNode = {
 export type AssistantAgentRun = {
   executionId?: string;
   modelUsage?: { turns: number; toolCalls: number; inputTokens: number; outputTokens: number };
+  turnDurationsMs?: number[];
   durationMs?: number;
   endedAt?: string;
   id: string;

@@ -163,6 +163,7 @@ export type AssistantToolTraceEvent = {
   recovered?: boolean;
   diagram?: import('@/modules/assistant/sdk/diagramArtifact').AssistantDiagramArtifact;
   researchPapers?: import('./researchApi').ResearchPaper[];
+  durationMs?: number;
   error?: string;
   id: string;
   input?: unknown;
