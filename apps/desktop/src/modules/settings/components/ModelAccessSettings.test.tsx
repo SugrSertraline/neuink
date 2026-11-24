@@ -198,8 +198,10 @@ describe('ModelAccessSettings', () => {
       .getAllByRole('link')
       .map((element) => element.getAttribute('href') ?? '');
     expect(links).toContain('https://huggingface.co/Xenova/bge-m3');
-    expect(links).toContain('https://huggingface.co/google/siglip2-base-patch16-224');
-    expect(links).toContain('https://huggingface.co/google/siglip2-base-patch16-224');
+    expect(screen.getByTestId('channel-overview').textContent).toContain('文本检索器');
+    expect(screen.getByTestId('channel-overview').textContent).toContain('视觉编码服务');
+    expect(screen.getByTestId('channel-overview').textContent).toContain('Reranker');
+    expect(screen.queryByTestId('recommended-visual-siglip2-base-patch16-224')).toBeNull();
   });
 
   it('saves a custom directory and warns that the index must be rebuilt', async () => {

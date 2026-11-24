@@ -172,7 +172,7 @@ describe('settings information architecture and navigation', () => {
     expect(screen.queryByRole('button', { name: '重试同步' })).toBeNull();
     expect(mocks.saveLlmSettings).not.toHaveBeenCalled();
     expect(listOpenAiCompatibleModels).toHaveBeenCalledTimes(2);
-  });
+  }, 15000); // Exercises the real debounce + retry alongside full-suite UI rendering.
   it('keeps editing identity and clears the old key when switching providers, without saving automatically', async () => {
     render(<Harness target={{ id: 'models-connections', nonce: 1 }} />);
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }));

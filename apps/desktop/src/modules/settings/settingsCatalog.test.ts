@@ -6,8 +6,11 @@ describe('settings discovery', () => {
   it('hides advanced assistant configuration from navigation and all settings searches', () => {
     expect(SETTINGS_CATEGORIES.find(item => item.id === 'models')?.tabs).toEqual(['models']);
     expect(SETTINGS_CATEGORIES.find(item => item.id === 'external-tools')?.tabs).toEqual(['external-tools']);
-    for (const query of ['主助手', '子助手', 'MCP', 'Skills']) expect(searchSettings(query)).toEqual([]);
+    for (const query of ['主助手', '子助手', 'MCP', 'Skills', '检索路径']) expect(searchSettings(query)).toEqual([]);
     expect(searchSettings('sciverse').map(item => item.id)).toEqual(['tools-services']);
+    expect(searchSettings('文本检索器')[0]?.id).toBe('tools-model-access');
+    expect(searchSettings('视觉编码服务')[0]?.id).toBe('tools-visual');
+    expect(searchSettings('Reranker')[0]?.id).toBe('tools-rerank');
   });
   it.each([['main-agent', 'models'], ['subagents', 'models'], ['removed-page', 'appearance']])('redirects the saved hidden page %s to %s', (saved, expected) => {
     window.localStorage.setItem('neuink.settings.lastTab', saved);

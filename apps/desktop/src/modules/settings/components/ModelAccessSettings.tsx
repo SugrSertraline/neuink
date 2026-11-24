@@ -5,65 +5,49 @@ import {
   getVisualEmbeddingSettings,
   getVisualRuntimeState,
   getVisualServiceStatus,
-  installRecommendedRerankModel,
   installRecommendedTextModel,
-  downloadVisualWeights,
-  installVisualRuntime,
-  listRecommendedRerankModels,
   listRecommendedTextModels,
-  listRecommendedVisualModels,
   listTextModels,
   rebuildSearchIndex,
   runRetrievalSelfCheck,
   saveTextModelSettings,
-  startVisualService,
   testTextEmbeddingConnection,
-  type RecommendedRerankModelState,
   type RecommendedTextModelState,
-  type RecommendedVisualModel,
   type RerankSettingsState,
-  type VisualRuntimeState,
-  type VisualEmbeddingSettingsState,
-  type VisualServiceStatus,
   type RetrievalCheck,
   type TextEmbeddingProbeState,
   type TextEmbeddingProviderKind,
   type TextModelChoice,
   type TextModelSettingsInput,
-  type TextModelSettingsState
+  type TextModelSettingsState,
+  type VisualEmbeddingSettingsState,
+  type VisualRuntimeState,
+  type VisualServiceStatus
 } from '@/shared/ipc/workspaceApi';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { SettingsGroup, SettingRow, SettingSelect } from './SettingsPrimitives';
 
-const VISUAL_MODEL = {
-  label: 'Qwen3-VL-Embedding-2B',
-  href: 'https://huggingface.co/Qwen/Qwen3-VL-Embedding-2B'
-};
-
 const CHECK_LABEL: Record<RetrievalCheck['name'], string> = {
-  text_model: '文本嵌入模型',
+  text_model: '文本检索器',
   library: '资料库',
   visual_model: '视觉编码服务',
-  rerank: '重排'
+  rerank: 'Reranker'
 };
 
 /**
- * Model access in three blocks — text, visual, rerank — plus one button that answers the
- * only question that matters on a fresh machine: does retrieval actually work here.
+ * Text retriever configuration plus the compact 3-channel overview and one-click self-check.
+ * Visual encoding service and Reranker live in their own sibling sections below.
  */
 export function ModelAccessSettings({ active, root }: { active: boolean; root: string }) {
   const [choices, setChoices] = useState<TextModelChoice[]>([]);
   const [state, setState] = useState<TextModelSettingsState | null>(null);
   const [recommended, setRecommended] = useState<RecommendedTextModelState[]>([]);
-  const [rerankModels, setRerankModels] = useState<RecommendedRerankModelState[]>([]);
-  const [visualModels, setVisualModels] = useState<RecommendedVisualModel[]>([]);
-  const [runtimes, setRuntimes] = useState<Record<string, VisualRuntimeState | null>>({});
+  const [visualRuntime, setVisualRuntime] = useState<VisualRuntimeState | null>(null);
   const [serviceStatus, setServiceStatus] = useState<VisualServiceStatus | null>(null);
   const [rerankState, setRerankState] = useState<RerankSettingsState | null>(null);
   const [visualState, setVisualState] = useState<VisualEmbeddingSettingsState | null>(null);
-  const [startingService, setStartingService] = useState(false);
-  const [reuseDirs, setReuseDirs] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<string>('');
   const [custom, setCustom] = useState('');
   const [provider, setProvider] = useState<TextEmbeddingProviderKind>('local_onnx');
@@ -71,7 +55,6 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
   const [apiKey, setApiKey] = useState('');
   const [apiModel, setApiModel] = useState('');
   const [apiDimensions, setApiDimensions] = useState('');
-  const [timeoutMs, setTimeoutMs] = useState('60000');
   const [probe, setProbe] = useState<TextEmbeddingProbeState | null>(null);
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -82,36 +65,28 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
   const [checking, setChecking] = useState(false);
 
   const reload = async () => {
-    const [models, current, textRecommended, rerankRecommended, visualRecommended, service, rerank, visual] =
-      await Promise.all([
-        listTextModels(),
-        getTextModelSettings(),
-        listRecommendedTextModels(),
-        listRecommendedRerankModels(),
-        listRecommendedVisualModels(),
-        getVisualServiceStatus().catch(() => null),
-        getRerankSettings().catch(() => null),
-        getVisualEmbeddingSettings().catch(() => null)
-      ]);
-    const runtimeStates = await Promise.all(
-      visualRecommended.map(async (model) => [model.id, await getVisualRuntimeState(model.id)] as const)
-    );
+    const [models, current, textRecommended, service, rerank, visual, runtime] = await Promise.all([
+      listTextModels(),
+      getTextModelSettings(),
+      listRecommendedTextModels(),
+      getVisualServiceStatus().catch(() => null),
+      getRerankSettings().catch(() => null),
+      getVisualEmbeddingSettings().catch(() => null),
+      getVisualRuntimeState('qwen3-vl-embedding-2b').catch(() => null)
+    ]);
     setChoices(models);
     setState(current);
     setRecommended(textRecommended);
-    setRerankModels(rerankRecommended);
-    setVisualModels(visualRecommended);
-    setRuntimes(Object.fromEntries(runtimeStates));
     setServiceStatus(service);
     setRerankState(rerank);
     setVisualState(visual);
+    setVisualRuntime(runtime);
     setSelected(current.model_dir ?? models.find((model) => model.bundled)?.path ?? '');
     setCustom(current.model_dir ?? '');
     setProvider(current.provider);
     setEndpoint(current.endpoint ?? '');
     setApiModel(current.model ?? '');
     setApiDimensions(current.dimensions ? String(current.dimensions) : '');
-    setTimeoutMs(String(current.timeout_ms));
     setApiKey('');
   };
 
@@ -139,38 +114,21 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
         setRebuildNote('模型已下载并验证；点“应用模型”后重建索引即可使用。');
       }
     } catch (cause) {
-      // Tauri rejects command errors with the backend string, not an Error instance;
-      // showing the generic copy would hide why the install stopped.
       setError(cause instanceof Error ? cause.message : String(cause) || '未能安装推荐模型。');
     } finally {
       setInstalling(null);
     }
   };
 
-  const installRerank = async (id: string) => {
-    setInstalling(id);
-    setError(null);
-    try {
-      await installRecommendedRerankModel(id);
-      await reload();
-      setRebuildNote('重排模型已下载并验证打分；在“重排”设置里选择它即可。');
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause) || '未能安装重排模型。');
-    } finally {
-      setInstalling(null);
-    }
-  };
-
-  /** One payload shape for both saving and the live probe. */
   const textModelPayload = (): TextModelSettingsInput => ({
     provider,
     model_dir: provider === 'local_onnx' ? selected || null : state?.model_dir ?? null,
     endpoint: provider === 'api' ? endpoint.trim() || null : state?.endpoint ?? null,
-    // Write-only: omit the key to keep the stored one; the backend merges it back in.
     ...(provider === 'api' && apiKey ? { api_key: apiKey } : {}),
     model: provider === 'api' ? apiModel.trim() || null : state?.model ?? null,
     dimensions: provider === 'api' ? Number(apiDimensions) || null : state?.dimensions ?? null,
-    timeout_ms: Math.min(600000, Math.max(1, Math.round(Number(timeoutMs) || 60000)))
+    // Keep existing persisted timeout rather than exposing an engineering timeout field.
+    timeout_ms: state?.timeout_ms ?? 60000
   });
 
   const apply = async () => {
@@ -220,75 +178,13 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
     }
   };
 
-  const installRuntime = async (id: string) => {
-    setInstalling(id);
-    setError(null);
-    setRebuildNote(null);
-    try {
-      const reuse = reuseDirs[id]?.trim();
-      const state = await installVisualRuntime(id, reuse ? reuse : null);
-      setRuntimes({ ...runtimes, [id]: state });
-      setRebuildNote(
-        state.dependencies_installed && state.model_present
-          ? '视觉服务已就绪：' + state.model_dir + '。点“启动服务”即可。'
-          : '依赖已安装，但权重缺失' + (state.model_error ? '：' + state.model_error : '') + '。'
-      );
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause);
-      setError(
-        message.includes("uv_missing")
-          ? "未找到 uv（Python 环境管理器），请先安装 uv 后重试。"
-          : `安装失败：${message}`
-      );
-    } finally {
-      setInstalling(null);
-    }
-  };
-
-  const downloadWeights = async (id: string) => {
-    setInstalling(id);
-    setError(null);
-    setRebuildNote(null);
-    try {
-      const reuse = reuseDirs[id]?.trim();
-      const state = await downloadVisualWeights(id, reuse ? reuse : null);
-      setRuntimes({ ...runtimes, [id]: state });
-      setRebuildNote('权重已下载：' + state.model_dir + '。点“启动服务”即可。');
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause);
-      setError('权重下载失败：' + message);
-      const fresh = await getVisualRuntimeState(id).catch(() => null);
-      if (fresh) setRuntimes({ ...runtimes, [id]: fresh });
-    } finally {
-      setInstalling(null);
-    }
-  };
-  const startService = async (id: string) => {
-    setError(null);
-    setStartingService(true);
-    try {
-      const pid = await startVisualService(id);
-      const status = await getVisualServiceStatus().catch(() => null);
-      if (status) setServiceStatus(status);
-      setRebuildNote(
-        status?.running
-          ? '视觉服务运行中' + (status.dimensions ? '（' + status.dimensions + ' 维）' : '') + '，地址 http://127.0.0.1:8765。'
-          : pid === 0
-            ? '视觉服务已在运行（http://127.0.0.1:8765）。'
-            : '视觉服务已启动（进程 ' + pid + '），地址 http://127.0.0.1:8765。'
-      );
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "未能启动视觉服务。");
-    } finally {
-      setStartingService(false);
-    }
-  };
-
   const check = async () => {
     setChecking(true);
     setError(null);
     try {
-      setChecks(await runRetrievalSelfCheck(root));
+      const results = await runRetrievalSelfCheck(root);
+      setChecks(results);
+      await reload().catch(() => undefined);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '自检失败。');
     } finally {
@@ -306,125 +202,114 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
   return (
     <SettingsGroup
       id="tools-model-access"
-      title="模型与接入"
-      description="文本、视觉、重排三条通道各自的模型来源与一键安装，以及一次点击完成的本机自检。"
+      title="文本检索器"
+      description="配置本地 ONNX 或 OpenAI 兼容文本嵌入模型，并查看全部三条检索通道状态。"
+      action={
+        <Button size="sm" variant="outline" disabled={checking || !root} onClick={() => void check()}>
+          {checking ? '自检中…' : '一键自检'}
+        </Button>
+      }
     >
       {error && <p role="alert" className="mt-2 text-xs leading-5 text-destructive">{error}</p>}
 
-      <div className="mt-2 flex items-baseline justify-between gap-2">
-        <p className="text-xs font-medium text-foreground">通道总览</p>
-        <Button size="sm" disabled={checking || !root} onClick={() => void check()}>
-          {checking ? '自检中…' : '一键自检'}
-        </Button>
-      </div>
-      <table className="mt-1 w-full border-collapse text-xs leading-5" data-testid="channel-overview">
-        <thead>
-          <tr className="text-left text-muted-foreground">
-            <th className="w-16 py-1 font-normal">通道</th>
-            <th className="w-24 py-1 font-normal">后端</th>
-            <th className="py-1 font-normal">当前状态</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr className="border-t border-border align-top">
-            <td className="py-1 text-foreground">
-              <a className="underline-offset-2 hover:underline" href="#channel-text">
-                文本嵌入
-              </a>
-            </td>
-            <td className="py-1 text-muted-foreground">{provider === 'api' ? '远程 API' : '本地 ONNX'}</td>
-            <td className={`py-1 ${state?.available ? 'text-muted-foreground' : 'text-warning'}`}>
-              {state?.available
-                ? `${state.loaded_model_name ?? '未知模型'}${state.loaded_dimensions ? ` · ${state.loaded_dimensions} 维` : ''}`
-                : (state?.message ?? '未检测到可用模型')}
-            </td>
-          </tr>
-          <tr className="border-t border-border align-top">
-            <td className="py-1 text-foreground">
-              <a className="underline-offset-2 hover:underline" href="#channel-visual">
-                视觉编码
-              </a>
-            </td>
-            <td className="py-1 text-muted-foreground">
-              {visualState?.provider === 'qwen_api' ? '远程 API' : '本机服务'}
-            </td>
-            <td className={`py-1 ${serviceStatus?.running || visualState?.provider === 'qwen_api' ? 'text-muted-foreground' : 'text-warning'}`}>
-              {visualState?.provider === 'qwen_api'
-                ? visualState.endpoint
-                  ? `已配置 ${visualState.endpoint}`
-                  : '未填写地址与密钥'
-                : serviceStatus?.running
-                  ? `服务运行中${serviceStatus.dimensions ? ` · ${serviceStatus.dimensions} 维` : ''}`
-                  : runtimes['qwen3-vl-embedding-2b']?.dependencies_installed
-                    ? '服务未运行（按需启动）'
-                    : '运行时未安装'}
-            </td>
-          </tr>
-          <tr className="border-t border-border align-top">
-            <td className="py-1 text-foreground">
-              <a className="underline-offset-2 hover:underline" href="#channel-rerank">
-                重排
-              </a>
-            </td>
-            <td className="py-1 text-muted-foreground">
-              {rerankState?.mode === 'cross_encoder'
-                ? rerankState.transport === 'api'
-                  ? '远程 API'
-                  : '本地 ONNX'
-                : rerankState?.mode === 'heuristic'
-                  ? '字段覆盖'
-                  : '关闭'}
-            </td>
-            <td className="py-1 text-muted-foreground">
-              {rerankState?.mode === 'cross_encoder'
-                ? rerankState.transport === 'api'
-                  ? rerankState.api_endpoint
-                    ? `已配置 · ${rerankState.api_model ?? '缺模型名'}`
-                    : '未填写地址'
-                  : rerankState.model_present
-                    ? '本地模型已就绪'
-                    : '未选择可用的模型目录'
-                : '融合序直接输出'}
-            </td>
-          </tr>
-        </tbody>
-      </table>
-
-      {checks && (
-        <table className="mt-2 w-full border-collapse text-xs leading-5" data-testid="self-check-results">
+      <div className="mt-2 overflow-hidden rounded-md border border-border">
+        <table className="w-full border-collapse text-xs leading-5" data-testid="channel-overview">
           <thead>
-            <tr className="text-left text-muted-foreground">
-              <th className="w-12 py-1 font-normal">结果</th>
-              <th className="w-24 py-1 font-normal">项目</th>
-              <th className="py-1 font-normal">说明</th>
-              <th className="w-14 py-1 text-right font-normal">耗时</th>
+            <tr className="bg-muted/40 text-left text-muted-foreground">
+              <th className="w-24 px-3 py-1.5 font-medium">通道</th>
+              <th className="w-24 px-3 py-1.5 font-medium">后端</th>
+              <th className="px-3 py-1.5 font-medium">当前状态</th>
             </tr>
           </thead>
           <tbody>
-            {checks.map((result) => (
-              <tr key={result.name} className="border-t border-border align-top">
-                <td className={`py-1 ${result.ok ? 'text-foreground' : 'text-destructive'}`}>
-                  {result.ok ? '通过' : '未通过'}
-                </td>
-                <td className="py-1 text-foreground">{CHECK_LABEL[result.name]}</td>
-                <td className="py-1 text-muted-foreground">{result.detail}</td>
-                <td className="py-1 text-right text-muted-foreground">{result.ms} ms</td>
-              </tr>
-            ))}
+            <tr className="border-t border-border align-top">
+              <td className="px-3 py-1.5 font-medium text-foreground">文本检索器</td>
+              <td className="px-3 py-1.5 text-muted-foreground">{provider === 'api' ? '远程 API' : '本地 ONNX'}</td>
+              <td className={`px-3 py-1.5 ${state?.available ? 'text-muted-foreground' : 'text-warning'}`}>
+                {state?.available
+                  ? `${state.loaded_model_name ?? '未知模型'}${state.loaded_dimensions ? ` · ${state.loaded_dimensions} 维` : ''}`
+                  : (state?.message ?? '未检测到可用模型')}
+              </td>
+            </tr>
+            <tr className="border-t border-border align-top">
+              <td className="px-3 py-1.5 font-medium text-foreground">视觉编码服务</td>
+              <td className="px-3 py-1.5 text-muted-foreground">
+                {visualState?.provider === 'qwen_api' ? '远程 API' : '本地服务'}
+              </td>
+              <td
+                className={`px-3 py-1.5 ${
+                  serviceStatus?.running || visualState?.provider === 'qwen_api'
+                    ? 'text-muted-foreground'
+                    : 'text-warning'
+                }`}
+              >
+                {visualState?.provider === 'qwen_api'
+                  ? visualState.endpoint
+                    ? `已配置 ${visualState.endpoint}`
+                    : '未填写地址与密钥'
+                  : serviceStatus?.running
+                    ? `服务运行中${serviceStatus.dimensions ? ` · ${serviceStatus.dimensions} 维` : ''}`
+                    : visualRuntime?.dependencies_installed && visualRuntime?.model_present
+                      ? '已就绪（未启动）'
+                      : '未安装'}
+              </td>
+            </tr>
+            <tr className="border-t border-border align-top">
+              <td className="px-3 py-1.5 font-medium text-foreground">Reranker</td>
+              <td className="px-3 py-1.5 text-muted-foreground">
+                {rerankState?.mode === 'cross_encoder'
+                  ? rerankState.transport === 'api'
+                    ? '远程 API'
+                    : '本地 ONNX'
+                  : '关闭'}
+              </td>
+              <td className="px-3 py-1.5 text-muted-foreground">
+                {rerankState?.mode === 'cross_encoder'
+                  ? rerankState.transport === 'api'
+                    ? rerankState.api_endpoint
+                      ? `已配置 · ${rerankState.api_model ?? '缺模型名'}`
+                      : '未填写地址'
+                    : rerankState.model_present
+                      ? '本地模型已就绪'
+                      : '未检测到本地模型'
+                  : '未启用'}
+              </td>
+            </tr>
           </tbody>
         </table>
+      </div>
+
+      {checks && (
+        <div className="mt-2 overflow-hidden rounded-md border border-border">
+          <table className="w-full border-collapse text-xs leading-5" data-testid="self-check-results">
+            <thead>
+              <tr className="bg-muted/40 text-left text-muted-foreground">
+                <th className="w-14 px-3 py-1.5 font-medium">结果</th>
+                <th className="w-24 px-3 py-1.5 font-medium">项目</th>
+                <th className="px-3 py-1.5 font-medium">说明</th>
+                <th className="w-16 px-3 py-1.5 text-right font-medium">耗时</th>
+              </tr>
+            </thead>
+            <tbody>
+              {checks.map((result) => (
+                <tr key={result.name} className="border-t border-border align-top">
+                  <td className={`px-3 py-1.5 font-medium ${result.ok ? 'text-foreground' : 'text-destructive'}`}>
+                    {result.ok ? '通过' : '未通过'}
+                  </td>
+                  <td className="px-3 py-1.5 text-foreground">{CHECK_LABEL[result.name]}</td>
+                  <td className="px-3 py-1.5 text-muted-foreground">{result.detail}</td>
+                  <td className="px-3 py-1.5 text-right text-muted-foreground">{result.ms} ms</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
-      <section id="channel-text" className="mt-3 scroll-mt-2 border-t border-border pt-2">
-        <p className="text-xs font-medium text-foreground">文本嵌入模型</p>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-          本地 ONNX 权重，或 OpenAI 兼容的 <code className="font-mono">/embeddings</code> 接口；两种方式共用同一套向量索引与检索管线。
-        </p>
-      </section>
       <SettingSelect
         id="tools-text-provider"
         label="编码方式"
-        description="本地 ONNX 权重，或 OpenAI 兼容的 /embeddings 接口；两种方式共用同一套向量索引与检索管线。"
+        description="本地 ONNX 权重，或 OpenAI 兼容的 /embeddings 接口。"
         disabled={!state || busy}
         value={provider}
         options={[
@@ -451,11 +336,11 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
           <SettingRow
             id="tools-text-model-custom"
             label="自定义模型目录"
-            description="目录内需有 neuink-embedding.json 与任一 ONNX 权重文件（model.onnx / model_int8.onnx / model_quantized.onnx）。"
+            description="目录内需有 neuink-embedding.json 与 ONNX 权重文件。"
           >
             <Input
               aria-label="文本嵌入模型目录"
-              className="w-full min-w-0"
+              className="w-full min-w-0 font-mono text-xs"
               disabled={busy}
               value={custom}
               onChange={(event) => {
@@ -474,7 +359,7 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
           >
             <Input
               aria-label="文本嵌入 API 地址"
-              className="w-full min-w-0"
+              className="w-full min-w-0 font-mono text-xs"
               disabled={busy}
               value={endpoint}
               onChange={(event) => setEndpoint(event.target.value)}
@@ -483,14 +368,14 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
           <SettingRow
             id="tools-text-api-key"
             label="访问密钥"
-            description="只写字段：不填则保留已保存的密钥；保存后不再回传明文。"
+            description="只写字段：不填则保留已保存的密钥。"
           >
             <Input
               aria-label="文本嵌入 API 密钥"
               type="password"
-              className="w-full min-w-0"
+              className="w-full min-w-0 font-mono text-xs"
               disabled={busy}
-              placeholder={state?.has_api_key ? "已保存（留空不修改）" : "尚未设置"}
+              placeholder={state?.has_api_key ? '已保存（留空不修改）' : '尚未设置'}
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
             />
@@ -498,11 +383,11 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
           <SettingRow
             id="tools-text-api-model"
             label="模型名称"
-            description="请求体中的 model 字段，例如 text-embedding-3-small；不写死任何厂商模型。"
+            description="请求体中的 model 字段，例如 text-embedding-3-small。"
           >
             <Input
               aria-label="文本嵌入 API 模型"
-              className="w-full min-w-0"
+              className="w-full min-w-0 font-mono text-xs"
               disabled={busy}
               value={apiModel}
               onChange={(event) => setApiModel(event.target.value)}
@@ -511,7 +396,7 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
           <SettingRow
             id="tools-text-api-dimensions"
             label="向量维度"
-            description="服务端输出的维度；返回向量会按该维度校验，不匹配即报错。"
+            description="服务端输出维度；返回向量按该维度校验。"
           >
             <Input
               aria-label="文本嵌入 API 维度"
@@ -524,29 +409,14 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
               onChange={(event) => setApiDimensions(event.target.value)}
             />
           </SettingRow>
-          <SettingRow
-            id="tools-text-api-timeout"
-            label="超时（毫秒）"
-            description="单次请求超时，上限 600000。"
-          >
-            <Input
-              aria-label="文本嵌入 API 超时"
-              type="number"
-              min={1}
-              max={600000}
-              className="w-28"
-              disabled={busy}
-              value={timeoutMs}
-              onChange={(event) => setTimeoutMs(event.target.value)}
-            />
-          </SettingRow>
         </>
       )}
+
       {state && (
-        <p className="text-xs leading-5 text-muted-foreground" data-testid="text-model-status">
+        <p className="mt-1 text-xs leading-5 text-muted-foreground" data-testid="text-model-status">
           {state.available
-            ? '当前加载：' + (state.loaded_model_name ?? '未知模型') + (state.loaded_dimensions ? '，' + state.loaded_dimensions + ' 维' : '') + '（' + state.resolved_dir + '）'
-            : '模型不可用：' + (state.message ?? '未检测到可用模型')}
+            ? `当前加载：${state.loaded_model_name ?? '未知模型'}${state.loaded_dimensions ? `，${state.loaded_dimensions} 维` : ''}（${state.resolved_dir}）`
+            : `模型不可用：${state.message ?? '未检测到可用模型'}`}
         </p>
       )}
       <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -567,192 +437,70 @@ export function ModelAccessSettings({ active, root }: { active: boolean; root: s
           连接正常：{probe.provider} · {probe.model_name ?? '未知模型'} · {probe.dimensions} 维 · {probe.latency_ms} ms
         </p>
       )}
-      {provider === 'local_onnx' && recommended.length > 0 && (
-        <ul className="mt-2 space-y-1">
-          {recommended.map((entry) => (
-            <li
-              key={entry.model.id}
-              className="flex flex-wrap items-baseline gap-x-2 text-xs leading-5 text-muted-foreground"
-              data-testid={`recommended-${entry.model.id}`}
-            >
-              <span className="font-medium text-foreground">{entry.model.display_name}</span>
-              <span>
-                {entry.model.dimensions} 维 · {entry.model.onnx_megabytes} MB ·{" "}
-                {entry.model.pooling.toUpperCase()} 池化 · {entry.model.languages} · {entry.model.license}
-              </span>
-              {entry.installed ? (
-                <span className="text-foreground">已安装</span>
-              ) : entry.model.directly_installable ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={installing !== null}
-                  onClick={() => void installText(entry.model.id)}
-                >
-                  {installing === entry.model.id ? '下载中…' : '一键安装'}
-                </Button>
-              ) : (
-                <span>需自行导出</span>
-              )}
-              <a className="underline" href={entry.model.homepage} target="_blank" rel="noreferrer">
-                模型页
-              </a>
-              <span className="basis-full">{entry.model.note}</span>
-              {entry.model.export_hint && (
-                <code className="basis-full select-all font-mono text-[11px] leading-4 text-muted-foreground">
-                  {entry.model.export_hint}
-                </code>
-              )}
-            </li>
-          ))}
-        </ul>
+      {rebuildNote && (
+        <p className="mt-1 text-xs leading-5 text-muted-foreground" data-testid="text-model-note">
+          {rebuildNote}
+        </p>
       )}
 
-      <div className="mt-3 border-t border-border pt-2" id="channel-visual">
-        <p className="text-xs font-medium text-foreground">视觉编码模型</p>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-          视觉通道是一个本机 Python 服务：页面与区域由应用内 PDFium 渲染，服务只负责编码，依赖只剩 torch / transformers / qwen-vl-utils / pillow。
-          一键安装会把隔离环境与权重准备到下面给出的路径；也可以用「已有权重目录」复用本机权重。
-        </p>
-        <ul className="mt-1 space-y-1">
-          {visualModels.map((model) => (
-            <li
-              key={model.id}
-              className="flex flex-wrap items-baseline gap-x-2 text-xs leading-5 text-muted-foreground"
-              data-testid={`recommended-visual-${model.id}`}
-            >
-              <span className="font-medium text-foreground">{model.display_name}</span>
-              <span>
-                {model.dimensions} 维 · {model.weights_megabytes} MB
-              </span>
-              <a className="underline" href={model.homepage} target="_blank" rel="noreferrer">
-                模型页
-              </a>
-              <span className="basis-full">{model.note}</span>
-              <span className="basis-full">
-                建议安装路径：<code className="select-all font-mono text-[11px]">{model.install_path}</code>
-              </span>
-              <span className="basis-full flex flex-wrap items-center gap-x-2 gap-y-1">
-                <Input
-                  aria-label={`${model.display_name} 本地模型目录（可选）`}
-                  className="h-7 w-72 min-w-0 font-mono text-[11px]"
-                  placeholder="已有权重目录（留空则下载）"
-                  value={reuseDirs[model.id] ?? ""}
-                  onChange={(event) =>
-                    setReuseDirs({ ...reuseDirs, [model.id]: event.target.value })
-                  }
-                />
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={installing !== null}
-                  onClick={() => void installRuntime(model.id)}
-                >
-                  {installing === model.id ? "安装中…" : "一键安装依赖与模型"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={!runtimes[model.id]?.dependencies_installed || checking || startingService || (model.id === 'qwen3-vl-embedding-2b' && serviceStatus?.running)}
-                  onClick={() => void startService(model.id)}
-                >
-                  {startingService
-                    ? '启动中…'
-                    : model.id === 'qwen3-vl-embedding-2b' && serviceStatus?.running
-                      ? '服务运行中'
-                      : '启动服务'}
-                </Button>
-                {model.id === 'qwen3-vl-embedding-2b' && (serviceStatus || startingService) && (
-                  <span data-testid="visual-service-status">
-                    {startingService
-                      ? '服务启动中…'
-                      : serviceStatus?.running
-                        ? '服务运行中' +
-                          (serviceStatus.dimensions ? '（' + serviceStatus.dimensions + ' 维）' : '')
-                        : '服务未运行'}
-                  </span>
-                )}
-                {runtimes[model.id]?.dependencies_installed && !runtimes[model.id]?.model_present && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={installing !== null}
-                    onClick={() => void downloadWeights(model.id)}
-                  >
-                    {installing === model.id ? '下载中…' : '下载权重'}
-                  </Button>
-                )}
-                <span data-testid={`visual-runtime-${model.id}`}>
-                  {runtimes[model.id]?.dependencies_installed
-                    ? runtimes[model.id]?.model_present
-                      ? '已就绪：' + runtimes[model.id]?.model_dir
-                      : '依赖已装，权重缺失' +
-                        (runtimes[model.id]?.model_error
-                          ? '：' + runtimes[model.id]?.model_error
-                          : '')
-                    : "未安装"}
-                </span>
-              </span>
-              {model.install_commands.length > 0 && (
-                <details className="basis-full">
-                  <summary className="cursor-pointer select-none">手动步骤（备用）</summary>
-                  <code className="mt-1 block select-all whitespace-pre-wrap font-mono text-[11px] leading-4">
-                    {model.install_commands.join("\n")}
-                  </code>
-                </details>
-              )}
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      {rerankModels.length > 0 && (
-        <div className="mt-3 border-t border-border pt-2" id="channel-rerank">
-          <p className="text-xs font-medium text-foreground">重排模型</p>
-          <ul className="mt-1 space-y-1">
-            {rerankModels.map((entry) => (
+      {provider === 'local_onnx' && recommended.length > 0 && (
+        <div className="mt-3 overflow-hidden rounded-md border border-border">
+          <div className="bg-muted/40 px-3 py-1.5 text-xs font-medium text-muted-foreground">
+            可下载的文本嵌入模型
+          </div>
+          <ul className="divide-y divide-border">
+            {recommended.map((entry) => (
               <li
                 key={entry.model.id}
-                className="flex flex-wrap items-baseline gap-x-2 text-xs leading-5 text-muted-foreground"
-                data-testid={`recommended-rerank-${entry.model.id}`}
+                className="px-3 py-2.5 text-xs leading-5"
+                data-testid={`recommended-${entry.model.id}`}
               >
-                <span className="font-medium text-foreground">{entry.model.display_name}</span>
-                <span>{entry.model.onnx_megabytes} MB</span>
-                {entry.installed ? (
-                  <span className="text-foreground">已安装</span>
-                ) : (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={installing !== null}
-                    onClick={() => void installRerank(entry.model.id)}
-                  >
-                    {installing === entry.model.id ? '下载中…' : '一键安装'}
-                  </Button>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <span className="text-[13px] font-medium text-foreground">{entry.model.display_name}</span>
+                    <span className="text-muted-foreground">
+                      {entry.model.dimensions} 维 · {entry.model.onnx_megabytes} MB · {entry.model.pooling.toUpperCase()} · {entry.model.languages}
+                    </span>
+                    <a
+                      className="text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                      href={entry.model.homepage}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      模型页
+                    </a>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {entry.installed ? (
+                      <Badge variant="secondary">已安装</Badge>
+                    ) : entry.model.directly_installable ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={installing !== null}
+                        onClick={() => void installText(entry.model.id)}
+                      >
+                        {installing === entry.model.id ? '下载中…' : '一键安装'}
+                      </Button>
+                    ) : (
+                      <Badge variant="outline">需手动导出</Badge>
+                    )}
+                  </div>
+                </div>
+                <p className="mt-1 text-muted-foreground">{entry.model.note}</p>
+                {entry.model.export_hint && (
+                  <details className="mt-1.5 text-muted-foreground">
+                    <summary className="cursor-pointer select-none hover:text-foreground">查看导出命令</summary>
+                    <code className="mt-1 block select-all whitespace-pre-wrap rounded bg-muted px-2 py-1.5 font-mono text-[11px] leading-4 text-foreground">
+                      {entry.model.export_hint}
+                    </code>
+                  </details>
                 )}
-                <a className="underline" href={entry.model.homepage} target="_blank" rel="noreferrer">
-                  模型页
-                </a>
-                <span className="basis-full">{entry.model.note}</span>
               </li>
             ))}
           </ul>
         </div>
       )}
-
-      {rebuildNote && (
-        <p className="mt-2 text-xs leading-5 text-muted-foreground" data-testid="text-model-note">
-          {rebuildNote}
-        </p>
-      )}
     </SettingsGroup>
   );
 }
-
-
-
-
-
-
-
-
