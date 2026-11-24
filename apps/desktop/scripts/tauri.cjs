@@ -26,9 +26,6 @@ function allResourceArguments(args, options = {}) {
     ...options.browserReader, command: args[0], log: options.log ?? console.log,
   }));
   config.bundle.resources.push(...readerLicenseResourcePaths(options.readerLicenses));
-  if (process.platform === 'darwin' && process.arch === 'x64' && process.env.NEUINK_MACOS_INTEL_RUNTIME) {
-    config.bundle.macOS = require('./macos-intel-runtime.cjs').bundleConfig(process.env.NEUINK_MACOS_INTEL_RUNTIME);
-  }
   const result = [...selected];
   result[configAt + 1] = JSON.stringify(config);
   return result;

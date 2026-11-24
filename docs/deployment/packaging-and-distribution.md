@@ -2,7 +2,7 @@
 
 > 当前版本：0.1.3（预览版）
 >
-> 状态：Tauri 与 Windows Actions 构建流程已配置；云端运行结果以 Actions 为准。签名、应用内自动更新及 macOS 验收尚未完成。
+> 状态：Tauri 与 Windows Actions 构建流程已配置；云端运行结果以 Actions 为准。当前仅发布 Windows x64；签名和应用内自动更新尚未完成。
 
 ## 1. 当前构建
 
@@ -26,9 +26,9 @@ apps/desktop/src-tauri/tauri.conf.json
 
 - `productName`：Neuink；
 - `identifier`：`com.neuink.workspace`；
-- `targets`：`all`；
+- `targets`：`["nsis"]`（Windows 安装包）；
 - 包含 `resources/embedding-models/default/**/*`；
-- 使用仓库内 Windows/macOS 图标资源。
+- 使用仓库内 Windows 图标资源。
 
 Windows x64 免安装 ZIP 使用：
 
@@ -67,7 +67,7 @@ apps/desktop/src-tauri/resources/embedding-models/default/
 
 Windows x64 的 `prepare:browser-reader` 从官方固定地址显式下载并校验 Python 嵌入运行时、yt-dlp／EJS wheel 与 QuickJS-NG；不使用系统 Python，不包含官方 yt-dlp.exe。版本和 SHA256 在 `apps/desktop/scripts/browser-reader-lock.json`。运行时约 34 MiB，原始许可证及捆绑组件声明保留在 `resources/browser-reader`；原版 Readability、PDF.js 和 subtp 的许可另随 `resources/reader-licenses` 携带。
 
-`npm --workspace apps/desktop run verify:browser-reader` 检查文件集、哈希及离线版本。`tauri.cjs` 的 dev/build/bundle 入口与便携脚本共用资源校验和复制，Windows x64 发行缺组件时明确失败，开发模式只警告；应用不会后台下载安装。视频仅读公开简介和可用字幕，没有音视频下载、自动播放、登录 cookies 或付费转写。其它平台暂不提供该视频运行时，普通网页／PDF 的读取逻辑独立保留。
+`npm --workspace apps/desktop run verify:browser-reader` 检查文件集、哈希及离线版本。`tauri.cjs` 的 dev/build/bundle 入口与便携脚本共用资源校验和复制，Windows x64 发行缺组件时明确失败，开发模式只警告；应用不会后台下载安装。视频仅读公开简介和可用字幕，没有音视频下载、自动播放、登录 cookies 或付费转写。普通网页／PDF 的读取逻辑独立保留。
 
 ## 4. 发布前检查
 
@@ -90,7 +90,7 @@ Windows x64 的 `prepare:browser-reader` 从官方固定地址显式下载并校
 - 指向 `main` 的 PR 运行验证和原生编译检查，不上传发行包或生成 Release。官网 PR 也仅面向 `main`，手动选择其他分支不会构建或部署官网。
 - 分支名称不会自动建立 GitHub 的 PR 审批保护；合并仍需遵守人工确认约定。不要把 `beta` 的开发进度自动合入 `main`。
 
-工作流：`.github/workflows/windows-portable.yml`（沿用文件名，展示名 Desktop portable），Windows 2022、macOS 15 arm64 和 macOS 15 Intel runner；Node 24、Rust 1.96.0。
+工作流：`.github/workflows/windows-portable.yml`（展示名 Desktop portable (Windows x64)），使用 Windows 2022 runner；Node 24、Rust 1.96.0。
 
 - PR 到 main：前端、打包脚本与 Rust 测试、前端编译，只读权限，不创建发布。
 - main 提交／在 main 手动 Run workflow：验证成功后构建 Windows x64 便携 ZIP，上传保留 14 天的 commit 标记 Artifact。
@@ -106,19 +106,11 @@ embedding 由 `embedding-resources.cjs` 从 Hugging Face 固定 revision 下载�
 
 首次启用：将流程提交推送到 main，等待 Actions 全部成功，再下载测试。需要正式更新 Releases 时创建新的版本标签，不修改旧标签、不覆盖 Beta 1 附件。公共下载推荐链接到 Releases 列表；预发布不会必然成为 `/releases/latest`。
 
-版本门禁：`release-version.cjs` 在构建前检查根目录/桌面端 package.json、npm lock 中的对应版本、Tauri 配置和 Rust workspace 版本一致。标签必须与完整版本严格对应，包括 beta 后缀：发布 `v0.1.0-beta.2` 前，以上版本必须同步为 `0.1.0-beta.2`，并更新 Cargo.lock 后提交。当前 `0.1.3` 不会被自动改版本或以其他版本标签冒名发布。Windows/Mac 附件准备时再次校验。
+版本门禁：`release-version.cjs` 在构建前检查根目录/桌面端 package.json、npm lock 中的对应版本、Tauri 配置和 Rust workspace 版本一致。标签必须与完整版本严格对应，包括 beta 后缀：发布 `v0.1.0-beta.2` 前，以上版本必须同步为 `0.1.0-beta.2`，并更新 Cargo.lock 后提交。当前 `0.1.3` 不会被自动改版本或以其他版本标签冒名发布。Windows 附件准备时再次校验。
 
-### macOS 预览包
+### 支持平台
 
-Intel 使用固定 ONNX Runtime 1.24.4 源码提交构建共享库（对应当前 ort-sys API 24），因为上游不再提供该目标的预编译档案。仅 Intel job 构建该依赖；最低 macOS 13.3。运行库及许可证随 app 打包，链接到包内 Frameworks，不依赖用户安装 Homebrew 或构建机器目录。打包时校验链接路径、架构及签名；完整云端构建与实机运行仍需分别验收。Apple Silicon 沿用依赖提供的预编译运行库。
-
-macOS job 使用 GitHub 的真实 Mac runner 编译，不在 Windows 上伪造交叉构建。Apple Silicon 对应 `aarch64-apple-darwin`，Intel 对应 `x86_64-apple-darwin`。PR 会检查两种目标；主分支与标签还构建 `.app`。
-
-Mac 在原生 `cargo check` 前无条件运行 `prepare:resources`。全新 checkout 缺少演示素材时也生成 `included:false` 状态文件，避免被 Git 忽略的本地生成文件造成云端检查失败；PR 路径同样准备。
-
-embedding 使用 HTTPS curl 下载并校验后安装。Tauri 将 embedding、许可证及可用的演示素材纳入 `Contents/Resources`；不复制 Windows DLL、WebView2 或 Python EXE。打包脚本检查资源、演示状态、Mach-O 架构与签名，用 `ditto` 保留执行权限和符号链接，生成 `Neuink-macos-{arm64,x64}.app.zip`，附独立元数据及 SHA256。三个平台成功后才创建统一 Release 草稿。
-
-Mac 包仅 ad-hoc 签名，不是 Developer ID 签名，也未 notarization；正式分发仍需开发者身份、公证与实机验收。Gatekeeper 可能阻止运行，不建议关闭系统安全防护。Windows 内嵌网页和视频字幕运行时尚未移植，元数据明确为 false。其余功能也需实机验收，不能由脚本测试推断功能完全对等。
+当前只提供 Windows x64 发行包。macOS 构建、打包脚本和公开下载入口已停止维护，不再生成 Mac 发行附件；历史 macOS 附件也不会进入新的发布流程。
 
 ## 6. 七牛 CDN 自动同步
 
@@ -141,7 +133,7 @@ Mac 包仅 ad-hoc 签名，不是 Developer ID 签名，也未 notarization；�
 4. 先上传并核验 `releases/<版本标签>/` 下的版本副本，再由七牛在桶内复制到根目录的同名固定下载文件，避免再次传输完整安装包；复制前后均检查文件信息。刷新 URL 缓存后，最后写入 `releases/latest.json`。
 5. ZIP 以 CDN 实际返回的 ETag、长度核验；小文件下载实际内容，按字节长度和 SHA256 核验，兼容 CDN 分块传输或压缩响应。ZIP 的 SHA256 在上传前校验，上传及 CDN 响应则核对本地计算的七牛分块 ETag；不把 CDN 的 ETag 当作 SHA256。
 
-只处理已知的 Windows / macOS ZIP、版本信息和校验文件，不上传整个构建目录。Windows 三个文件必需；macOS 可缺席，但出现某个平台的任一附件时必须包含完整三件套。未包含的平台保留原下载文件，`latest.json` 只列本次发布的平台。
+只处理 Windows x64 ZIP、版本信息和校验文件，不上传整个构建目录；这三个文件必须齐全。历史 macOS 附件不再上传或更新，`latest.json` 只列本次发布的 Windows 文件。
 
 已有版本副本只能重用相同内容，不能用不同字节覆盖。固定下载文件按顺序更新，跨文件没有原子事务；失败时不会报告成功，也不会先发布最新清单。重新运行可继续完成已有副本和固定链接的更新。
 
@@ -175,10 +167,9 @@ npm test --prefix .github/qiniu
 ## 7. 尚未完成
 
 - Windows 代码签名和 SmartScreen 验收；
-- macOS codesign、notarization 和实际 bundle 验收；
 - 首次云端完整构建和 Release 草稿人工验收（不能由本地测试代替）；
 - Tauri updater、stable/preview 渠道和回滚；
 - 安装包体积基准；
 - 自动化全新机器冒烟测试。
 
-这些完成前不能把“正式跨平台发行”标记为已完成。
+这些完成前不能把“Windows 正式发行准备”标记为已完成。
