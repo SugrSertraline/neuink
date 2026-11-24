@@ -125,16 +125,19 @@ impl VisualPageSegments {
     }
 }
 
-/// Scale-invariant confidence summary of the top-2 raw Cross-Encoder scores.
+/// Scale-invariant confidence summary of a Cross-Encoder head.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CeConfidence {
     pub top1_prob: f32,
     pub margin_prob: f32,
+    /// Scale- and shift-invariant top-1 lead: `(raw[0] - raw[1]) / std(raw)`.
+    pub top1_gap_z: f32,
 }
 
 impl CeConfidence {
     /// `scores` are in rank order. Values outside `[0, 1]` are sigmoid-normalized.
     /// Calibrated probabilities in that range are kept as they are.
+    /// `top1_gap_z` uses the raw finite scores, sorted so an unsorted slice still works.
     pub fn from_raw_scores(scores: &[f32]) -> Option<Self> {
         let finite = scores
             .iter()
@@ -144,10 +147,12 @@ impl CeConfidence {
         if finite.is_empty() {
             return None;
         }
+        let top1_gap_z = population_top1_gap_z(&finite);
         let needs_sigmoid = finite.iter().any(|score| *score < 0.0 || *score > 1.0);
         let probs = if needs_sigmoid {
             finite
-                .into_iter()
+                .iter()
+                .copied()
                 .map(sigmoid_clamped)
                 .collect::<Vec<_>>()
         } else {
@@ -162,7 +167,34 @@ impl CeConfidence {
         Some(Self {
             top1_prob,
             margin_prob,
+            top1_gap_z,
         })
+    }
+}
+
+/// Population `(s0 - s1) / std`. One score cannot show ambiguity.
+fn population_top1_gap_z(raw: &[f32]) -> f32 {
+    if raw.len() < 2 {
+        return f32::INFINITY;
+    }
+    let mut ordered = raw.to_vec();
+    ordered.sort_by(|left, right| right.total_cmp(left));
+    let lead = ordered[0] - ordered[1];
+    let count = raw.len() as f32;
+    let mean = raw.iter().copied().sum::<f32>() / count;
+    let variance = raw
+        .iter()
+        .map(|score| {
+            let delta = score - mean;
+            delta * delta
+        })
+        .sum::<f32>()
+        / count;
+    let std = variance.sqrt();
+    if std < 1e-4 {
+        0.0
+    } else {
+        (lead / std).max(0.0)
     }
 }
 
@@ -171,14 +203,14 @@ fn sigmoid_clamped(value: f32) -> f32 {
     1.0 / (1.0 + (-clamped).exp())
 }
 
-/// Full Post-CE visual RRF when the encoder is this unsure.
-const CONDITION_C_FULL_MAX_TOP1_PROB: f32 = 0.60;
-const CONDITION_C_FULL_MAX_MARGIN_PROB: f32 = 0.25;
-/// Head-protected visual RRF while confidence stays below the pure-text lock.
-const CONDITION_C_PROTECTED_MAX_TOP1_PROB: f32 = 0.98;
-const CONDITION_C_PROTECTED_MAX_MARGIN_PROB: f32 = 0.55;
+/// Scale-invariant CE ambiguity gate for Condition C (`(s0 - s1) / std`).
+const CONDITION_C_MAX_GAP_Z: f32 = 1.2;
+/// Minimum anchored visual parent cosine required to open Condition C.
+const CONDITION_C_MIN_VISUAL_COSINE: f32 = 0.32;
+/// Leading text hits locked untouched when Condition C runs without explicit visual intent.
+const CONDITION_C_LOCK_HEAD: usize = 3;
 const CONDITION_C_VISUAL_WEIGHT: f32 = 0.35;
-const CONDITION_C_TOP_VISUAL_PER_PAPER: usize = 3;
+const CONDITION_C_TOP_VISUAL_PER_PAPER: usize = 2;
 
 /// Configuration for within-paper visual evidence fusion.
 #[derive(Clone, Copy, Debug)]
@@ -319,11 +351,13 @@ pub fn apply_within_paper_visual_evidence(
     let visual_intent = question_has_visual_intent(question, english_question, binding);
     let weak_text = text_hits.is_empty()
         || max_head_overlap(&text_hits, question, english_question) <= options.max_snippet_overlap;
-    let condition_c = if visual_intent {
+    let anchor_cosine = best_anchor_cosine(visual_parents, &anchor_documents);
+    let condition_c = if visual_intent || text_hits.is_empty() {
         None
     } else {
-        options.ce_confidence.filter(|_| {
-            best_anchor_cosine(visual_parents, &anchor_documents) >= MIN_VISUAL_PARENT_COSINE
+        options.ce_confidence.filter(|confidence| {
+            confidence.top1_gap_z < CONDITION_C_MAX_GAP_Z
+                && anchor_cosine >= CONDITION_C_MIN_VISUAL_COSINE
         })
     };
     if !visual_intent && !weak_text && condition_c.is_none() {
@@ -335,7 +369,7 @@ pub fn apply_within_paper_visual_evidence(
     let generation = results.index_generation;
     let warnings = results.warnings.clone();
 
-    if let Some(confidence) = condition_c {
+    if condition_c.is_some() {
         let visual_lists = condition_c_visual_lists(
             &anchor_documents,
             &page_votes,
@@ -344,51 +378,36 @@ pub fn apply_within_paper_visual_evidence(
             segment_types,
             section_filter,
         );
-        if !visual_lists.is_empty() {
-            let tier1 = confidence.top1_prob < CONDITION_C_FULL_MAX_TOP1_PROB
-                && confidence.margin_prob < CONDITION_C_FULL_MAX_MARGIN_PROB;
-            let tier2 = !tier1
-                && confidence.top1_prob < CONDITION_C_PROTECTED_MAX_TOP1_PROB
-                && confidence.margin_prob < CONDITION_C_PROTECTED_MAX_MARGIN_PROB
-                && !text_hits.is_empty();
-            if tier1 {
-                let hits = fuse_condition_c(&text_hits, &visual_lists, options);
-                return (
-                    results_from_hits(query, mode, generation, hits, warnings),
-                    true,
-                );
-            }
-            if tier2 {
-                let locked = text_hits[0].clone();
-                let locked_id = hit_identity(&locked);
-                let tail = text_hits
+        let lock_len = text_hits.len().min(CONDITION_C_LOCK_HEAD);
+        let locked = text_hits[..lock_len].to_vec();
+        let locked_ids = locked.iter().map(hit_identity).collect::<BTreeSet<_>>();
+        let tail = text_hits
+            .iter()
+            .skip(lock_len)
+            .filter(|hit| !locked_ids.contains(&hit_identity(hit)))
+            .cloned()
+            .collect::<Vec<_>>();
+        let visual_tail = visual_lists
+            .iter()
+            .filter_map(|(decay, hits)| {
+                let hits = hits
                     .iter()
-                    .skip(1)
-                    .filter(|hit| hit_identity(hit) != locked_id)
+                    .filter(|hit| !locked_ids.contains(&hit_identity(hit)))
                     .cloned()
                     .collect::<Vec<_>>();
-                let visual_tail = visual_lists
-                    .iter()
-                    .filter_map(|(decay, hits)| {
-                        let hits = hits
-                            .iter()
-                            .filter(|hit| hit_identity(hit) != locked_id)
-                            .cloned()
-                            .collect::<Vec<_>>();
-                        (!hits.is_empty()).then_some((*decay, hits))
-                    })
-                    .collect::<Vec<_>>();
-                let mut fused_tail = fuse_condition_c(&tail, &visual_tail, options);
-                fused_tail.retain(|hit| hit_identity(hit) != locked_id);
-                let mut combined = Vec::with_capacity(1 + fused_tail.len());
-                combined.push(locked);
-                combined.extend(fused_tail);
-                crate::stamp_rank_scores(&mut combined);
-                return (
-                    results_from_hits(query, mode, generation, combined, warnings),
-                    true,
-                );
-            }
+                (!hits.is_empty()).then_some((*decay, hits))
+            })
+            .collect::<Vec<_>>();
+        if !visual_tail.is_empty() {
+            let mut fused_tail = fuse_condition_c(&tail, &visual_tail, options);
+            fused_tail.retain(|hit| !locked_ids.contains(&hit_identity(hit)));
+            let mut combined = locked;
+            combined.extend(fused_tail);
+            crate::stamp_rank_scores(&mut combined);
+            return (
+                results_from_hits(query, mode, generation, combined, warnings),
+                true,
+            );
         }
     }
     if !visual_intent && !weak_text {
@@ -630,7 +649,7 @@ fn is_figure_or_table(hit: &SearchHit) -> bool {
     )
 }
 
-/// Figure/Table hits inside the anchor papers, at most three per paper.
+/// Figure/Table hits inside the anchor papers, at most two per paper.
 /// The decay is `1 / (1 + 0.5 * doc_rank)`.
 fn condition_c_visual_lists(
     anchor_documents: &[String],
@@ -1624,11 +1643,12 @@ mod tests {
         }
     }
 
-    fn with_confidence(top1: f32, margin: f32) -> WithinPaperVisualOptions {
+    fn with_gap(gap_z: f32) -> WithinPaperVisualOptions {
         WithinPaperVisualOptions {
             ce_confidence: Some(CeConfidence {
-                top1_prob: top1,
-                margin_prob: margin,
+                top1_prob: 0.5,
+                margin_prob: 0.1,
+                top1_gap_z: gap_z,
             }),
             ..WithinPaperVisualOptions::default()
         }
@@ -1673,45 +1693,25 @@ mod tests {
         let only_prob = 1.0 / (1.0 + (-1.5_f32).exp());
         assert!((only.top1_prob - only_prob).abs() < 1e-5);
         assert_eq!(only.margin_prob, only.top1_prob);
-    }
-
-    #[test]
-    fn condition_c_tier1_low_confidence_allows_visual_to_claim_rank_one() {
-        let docs = vec![
-            seg_doc(
-                "e1",
-                "p1",
-                1,
-                SegmentType::Paragraph,
-                "optimizer learning rate schedule for adamw training runs",
-            ),
-            seg_doc("e1", "fig", 4, SegmentType::Figure, "Figure 4 latency."),
-        ];
-        let segments = VisualPageSegments::from_documents(&docs);
-        let hits = vec![
-            seg_hit(
-                "e1",
-                "p1",
-                1,
-                SegmentType::Paragraph,
-                "optimizer learning rate schedule for adamw training runs",
-                0.9,
-            ),
-            seg_hit("e1", "fig", 4, SegmentType::Figure, "Figure 4 latency.", 0.4),
-        ];
-        let (fused, applied) = apply_c(
-            hits,
-            &[parent("e1", 4, 0.80, Some(SegmentType::Figure))],
-            &segments,
-            &["e1"],
-            with_confidence(0.40, 0.10),
+        assert!(only.top1_gap_z.is_infinite());
+        let base = [1.5_f32, 0.2, -0.4, -1.1];
+        let shifted = base.map(|score| score + 3.7);
+        let scaled = base.map(|score| score * 2.5 + 4.0);
+        let shuffled = [-0.4_f32, 1.5, -1.1, 0.2];
+        let gap = CeConfidence::from_raw_scores(&base).unwrap().top1_gap_z;
+        assert!((CeConfidence::from_raw_scores(&shifted).unwrap().top1_gap_z - gap).abs() < 1e-4);
+        assert!((CeConfidence::from_raw_scores(&scaled).unwrap().top1_gap_z - gap).abs() < 1e-4);
+        assert!((CeConfidence::from_raw_scores(&shuffled).unwrap().top1_gap_z - gap).abs() < 1e-4);
+        assert_eq!(
+            CeConfidence::from_raw_scores(&[0.2, 0.2, 0.2])
+                .unwrap()
+                .top1_gap_z,
+            0.0
         );
-        assert!(applied);
-        assert_eq!(uid_of(&fused[0]), "fig");
     }
 
     #[test]
-    fn condition_c_tier2_moderate_confidence_locks_rank_one_and_promotes_visual_into_top_five() {
+    fn condition_c_locks_the_top_three_and_places_the_figure_at_rank_four_or_five() {
         let mut docs = vec![seg_doc(
             "e1",
             "p0",
@@ -1755,12 +1755,14 @@ mod tests {
             &[parent("e1", 4, 0.80, Some(SegmentType::Figure))],
             &segments,
             &["e1"],
-            with_confidence(0.80, 0.30),
+            with_gap(0.40),
         );
         assert!(applied);
         assert_eq!(uid_of(&fused[0]), "p0");
+        assert_eq!(uid_of(&fused[1]), "p1");
+        assert_eq!(uid_of(&fused[2]), "p2");
         let fig_at = fused.iter().position(|hit| uid_of(hit) == "fig").unwrap();
-        assert!((1..5).contains(&fig_at), "figure landed at {fig_at}");
+        assert!((3..5).contains(&fig_at), "figure landed at {fig_at}");
     }
 
     #[test]
@@ -1792,7 +1794,45 @@ mod tests {
             &[parent("e1", 4, 0.80, Some(SegmentType::Figure))],
             &segments,
             &["e1"],
-            with_confidence(0.99, 0.10),
+            with_gap(2.0),
+        );
+        assert!(!applied);
+        assert_eq!(uid_of(&fused[0]), "p1");
+        assert_eq!(fused[0].score, 0.9);
+    }
+
+    #[test]
+    fn condition_c_low_visual_cosine_stays_strict_noop() {
+        let docs = vec![
+            seg_doc(
+                "e1",
+                "p1",
+                1,
+                SegmentType::Paragraph,
+                "optimizer learning rate schedule for adamw training runs",
+            ),
+            seg_doc("e1", "fig", 4, SegmentType::Figure, "Figure 4 latency."),
+        ];
+        let segments = VisualPageSegments::from_documents(&docs);
+        let hits = vec![
+            seg_hit(
+                "e1",
+                "p1",
+                1,
+                SegmentType::Paragraph,
+                "optimizer learning rate schedule for adamw training runs",
+                0.9,
+            ),
+            seg_hit("e1", "p2", 1, SegmentType::Paragraph, "background paragraph", 0.5),
+            seg_hit("e1", "p3", 1, SegmentType::Paragraph, "another paragraph", 0.4),
+            seg_hit("e1", "fig", 4, SegmentType::Figure, "Figure 4 latency.", 0.2),
+        ];
+        let (fused, applied) = apply_c(
+            hits,
+            &[parent("e1", 4, 0.25, Some(SegmentType::Figure))],
+            &segments,
+            &["e1"],
+            with_gap(0.40),
         );
         assert!(!applied);
         assert_eq!(uid_of(&fused[0]), "p1");
@@ -1820,15 +1860,15 @@ mod tests {
                 "paper b background paragraph",
                 0.9,
             ),
-            seg_hit("b", "figb", 2, SegmentType::Figure, "Figure B curve.", 0.5),
             seg_hit(
                 "a",
                 "fill",
                 1,
                 SegmentType::Paragraph,
                 "extra filler paragraph",
-                0.4,
+                0.8,
             ),
+            seg_hit("b", "figb", 2, SegmentType::Figure, "Figure B curve.", 0.5),
             seg_hit("a", "figa", 4, SegmentType::Figure, "Figure A curve.", 0.3),
         ];
         let (fused, applied) = apply_c(
@@ -1839,9 +1879,12 @@ mod tests {
             ],
             &segments,
             &["a", "b"],
-            with_confidence(0.40, 0.10),
+            with_gap(0.40),
         );
         assert!(applied);
+        assert_eq!(uid_of(&fused[0]), "pa");
+        assert_eq!(uid_of(&fused[1]), "pb");
+        assert_eq!(uid_of(&fused[2]), "fill");
         let fig_a = fused.iter().position(|hit| uid_of(hit) == "figa").unwrap();
         let fig_b = fused.iter().position(|hit| uid_of(hit) == "figb").unwrap();
         assert!(fig_a < fig_b, "fig A at {fig_a}, fig B at {fig_b}");

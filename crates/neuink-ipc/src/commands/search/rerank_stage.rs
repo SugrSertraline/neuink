@@ -1702,6 +1702,12 @@ mod scope_refine_tests {
         assert_eq!(outcome.used, RERANK_POOL_RRF);
         let expected = neuink_search::CeConfidence::from_raw_scores(&[2.2, 0.4, -1.0]).unwrap();
         assert_eq!(outcome.ce_confidence, Some(expected));
+        let top_two = neuink_search::CeConfidence::from_raw_scores(&[2.2, 0.4]).unwrap();
+        assert!((expected.top1_gap_z - top_two.top1_gap_z).abs() > 1e-3);
+        assert_eq!(
+            outcome.ce_confidence.unwrap().top1_gap_z,
+            expected.top1_gap_z
+        );
         let stamped = neuink_search::CeConfidence::from_raw_scores(&[1.0, 2.0 / 3.0, 1.0 / 3.0]);
         assert_ne!(outcome.ce_confidence, stamped);
     }
