@@ -36,7 +36,12 @@ function Session({ storageKey, children }: { storageKey: string; children: React
   return <Context.Provider value={{ overrides, update: (uid, patch) => {
     const next = { ...overrides, ...read(storageKey) };
     if (patch === null) delete next[uid];
-    else next[uid] = { ...next[uid], ...patch };
+    else {
+      const merged = { ...next[uid], ...patch };
+      for (const key of Object.keys(patch) as Array<keyof ReflowContentOverrides>) if (patch[key] === undefined) delete merged[key];
+      if (Object.keys(merged).length) next[uid] = merged;
+      else delete next[uid];
+    }
     setOverrides(next);
     try {
       localStorage.setItem(storageKey, JSON.stringify(next));

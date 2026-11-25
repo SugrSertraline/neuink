@@ -1,4 +1,5 @@
-import { useId, type ReactNode } from 'react';
+import { forwardRef, useId, type ReactNode } from 'react';
+import { ChevronDown } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -13,25 +14,40 @@ export function SettingsPage({ tab, title, description, children }: { tab: Setti
   </TabsContent>;
 }
 
-export function SettingsGroup({ id, title, description, children, action }: { id?: string; title: string; description?: string; children: ReactNode; action?: ReactNode }) {
+export function SettingsGroup({ id, title, description, children, action }: { id?: string; title?: string; description?: string; children: ReactNode; action?: ReactNode }) {
   return <section data-setting-id={id} tabIndex={id ? -1 : undefined} className="settings-group">
-    <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-semibold">{title}</h3>{action}</div>
+    {(title || action) && <div className="flex flex-wrap items-center justify-between gap-2">{title && <h3 className="text-sm font-semibold">{title}</h3>}{action}</div>}
     {description && <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>}
     <div className="mt-2">{children}</div>
   </section>;
 }
 
+/** Native disclosure keeps forms mounted and excludes collapsed controls from keyboard navigation. */
+export const SettingsDisclosure = forwardRef<HTMLDetailsElement, {
+  id?: string; title: string; description?: string; status: string; attention?: boolean; children: ReactNode;
+}>(function SettingsDisclosure({ id, title, description, status, attention, children }, ref) {
+  return <details ref={ref} data-setting-id={id} className="group min-w-0 border-b border-border last:border-b-0">
+    <summary className="flex min-h-12 min-w-0 cursor-pointer list-none items-center gap-3 rounded-sm px-3 py-2 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+      <ChevronDown aria-hidden className="size-4 shrink-0 -rotate-90 group-open:rotate-0" />
+      <span className="flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden"><span className="min-w-0 shrink truncate text-[13px] font-medium" title={title}>{title}</span>
+        {description && <span className="min-w-0 truncate text-xs text-muted-foreground" title={description}>{description}</span>}</span>
+      <span className={`shrink-0 text-xs ${attention ? 'text-warning' : 'text-muted-foreground'}`}>{status}</span>
+    </summary>
+    <div className="min-w-0 border-t border-border px-3 py-3">{children}</div>
+  </details>;
+});
+
 /** Settings are always expanded; the surrounding settings viewport owns scrolling. */
 export function SettingsServiceSection({ id, title, description, status, children }: {
   id?: string; title: string; description: string; status: string; children: ReactNode;
 }) {
-  return <section data-setting-id={id} tabIndex={id ? -1 : undefined} className="settings-service">
-    <div className="flex flex-wrap items-center gap-3 py-3">
+  return <section data-setting-id={id} aria-label={title} tabIndex={id ? -1 : undefined} className="settings-service">
+    <div className="flex flex-wrap items-center gap-3 border-b border-border bg-muted/30 px-3 py-2.5">
       <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium">{title}</span>
         <span className="mt-1 block text-xs leading-5 text-muted-foreground">{description}</span></span>
-      <span className="shrink-0 text-xs text-muted-foreground">{status}</span>
+      <span className="shrink-0 rounded border border-border bg-background px-2 py-0.5 text-[11px] text-muted-foreground">{status}</span>
     </div>
-    <div className="min-w-0 pb-3">{children}</div>
+    <div className="min-w-0 p-3">{children}</div>
   </section>;
 }
 

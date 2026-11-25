@@ -132,6 +132,21 @@ describe('image detail interactions', () => {
     await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
 
+  it('closes with one outside click after dragging, without a leftover pointer capture', async () => {
+    const { viewport, trigger } = openImage();
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+    fireEvent.click(screen.getByRole('button', { name: '原始大小' }));
+    dragFromCenter(viewport, 100, 50);
+    fireEvent.pointerUp(viewport, { pointerId: 7 });
+    const backdrop = document.querySelector('[data-slot="dialog-overlay"]')!;
+    fireEvent.pointerDown(backdrop, { button: 0 });
+    fireEvent.pointerUp(backdrop, { button: 0 });
+    fireEvent.click(backdrop, { button: 0 });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(captured.size).toBe(0);
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
   it('keeps very tall images fully visible at fit and bounds repeated wheel zoom', () => {
     const { viewport, img } = openImage(true, 200, 10000);
     expect(img.style.height).toBe('400px');

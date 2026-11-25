@@ -37,12 +37,12 @@ export function returnedExternalCitationUrls(observations: readonly Observation[
         const result = object(row);
         if (typeof result.content === 'string' && result.content.trim()) add(result.url);
       }
-    } else if (observation.toolName === 'search_papers') {
+    } else if (observation.toolName === 'search_papers' || observation.toolName === 'arxiv_search') {
       for (const row of Array.isArray(output.papers) ? output.papers.slice(0, 100) : []) {
         const paper = object(row);
         if (typeof paper.title === 'string' && paper.title.trim()) { add(paper.url); add(paper.pdf_url); }
       }
-    } else if (observation.toolName === 'task.run_subagent') {
+    } else if (observation.toolName === 'task_run_subagent') {
       // Host-owned metadata collected from the child's real tool observations.
       for (const url of Array.isArray(output.externalSourceUrls) ? output.externalSourceUrls : []) add(url);
     }

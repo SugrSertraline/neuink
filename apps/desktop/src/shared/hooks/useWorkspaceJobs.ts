@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { listJobs, type Job, type JobEvent, type JobScope } from '@/shared/ipc/workspaceApi';
 import { compareJobTimes, isRunningJob, mergeBackgroundJobs, recentBackgroundJobs } from '@/shared/lib/backgroundJobs';
+import { sameWorkspacePath } from '@/shared/lib/workspacePath';
 
 export function useWorkspaceJobs(root: string | null) {
   const [snapshot, setSnapshot] = useState<{ root: string | null; jobs: Job[] }>({ root: null, jobs: [] });
@@ -74,5 +75,5 @@ function filterJobsForRoot(jobs: Job[], root: string) {
 
 function jobMatchesRoot(job: Job, root: string) {
   const scope: JobScope | null = job.scope;
-  return scope?.root === root;
+  return Boolean(scope && sameWorkspacePath(scope.root, root));
 }

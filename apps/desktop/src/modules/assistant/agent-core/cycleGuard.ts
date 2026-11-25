@@ -1,12 +1,22 @@
 import type { AgentLoopState } from './state';
 import { AgentLocalLimitError, AgentToolNotExecutedError } from './agent';
+import { canonicalAssistantToolId } from '@/shared/lib/assistantToolNames';
 
 const MAX_IDENTICAL_CALLS = 2;
 const MAX_IDENTICAL_FAILURES = 2;
 const RECENT_FINGERPRINT_LIMIT = 12;
 
 export class AgentLoopGuard {
-  constructor(readonly state: AgentLoopState) {}
+  constructor(readonly state: AgentLoopState) {
+    // Resume counters under the new IDs without granting another attempt after a rename.
+    state.recentToolFingerprints = state.recentToolFingerprints.map(canonicalFingerprint);
+    const failures: Record<string, number> = {};
+    for (const [fingerprint, count] of Object.entries(state.failedToolFingerprints)) {
+      const key = canonicalFingerprint(fingerprint);
+      failures[key] = (failures[key] ?? 0) + count;
+    }
+    state.failedToolFingerprints = failures;
+  }
 
   startTurn() {
     this.state.turnCount += 1;
@@ -78,6 +88,11 @@ export class AgentLoopGuardError extends Error {
 
 export function toolFingerprint(toolName: string, input: unknown) {
   return `${toolName}:${stableStringify(input)}`;
+}
+
+function canonicalFingerprint(value: string): string {
+  const split = value.indexOf(':');
+  return split < 0 ? value : canonicalAssistantToolId(value.slice(0, split)) + value.slice(split);
 }
 
 function stableStringify(value: unknown): string {

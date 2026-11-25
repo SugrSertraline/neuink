@@ -8,7 +8,8 @@ import {
   StickyNote,
   Tags
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { subscribeEditRecovery, editRecoveryVersion, recoveryState } from '@/shared/lib/editRecovery';
 
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from './EntryDisplay';
@@ -29,10 +30,16 @@ import { EntryContentHeader } from './EntryContentHeader';
 import { ReaderSection, ReaderSurfaceBody } from './ReaderSurfacePrimitives';
 import { ReadingExportDialog } from '../export/ReadingExportDialog';
 import { ReaderSurfaceFrame } from './ReaderSurfaceFrame';
+import { EntryTitleConsistency } from './EntryTitleConsistency';
+import { ZoteroOrganizationInfo } from '@/modules/library/components/ZoteroOrganizationInfo';
+import { SourceLocalCopyControl } from '@/modules/import/SourceLocalCopyProvider';
 
 export function EntryOverview({
   entry,
   onUpdateEntry,
+  onRefreshEntries,
+  titleCheckReloadKey = 0,
+  editRequestId,
   sourceBacklinksBySegmentUid,
   tags,
   workspaceRoot,
@@ -41,6 +48,7 @@ export function EntryOverview({
   onAttachPdf,
   onCreatePdfVersion,
   onImportMineruClientResult,
+  onReplaceReadingPdf,
   onReparsePdf,
   onApplyEntryTagPaths,
   onOpenContent
@@ -50,6 +58,9 @@ export function EntryOverview({
     entryId: string,
     request: { fields: Record<string, string>; tagPaths: string[]; title: string }
   ) => Promise<unknown> | unknown;
+  onRefreshEntries?: () => Promise<void>;
+  titleCheckReloadKey?: number;
+  editRequestId?: string;
   sourceBacklinksBySegmentUid: SourceBacklinksBySegmentUid;
   tags: TagMeta[];
   workspaceRoot?: string | null;
@@ -57,7 +68,12 @@ export function EntryOverview({
   onApplyEntryTagPaths?: (entryId: string, tagPaths: string[]) => Promise<unknown> | unknown;
   onOpenContent: (contentId: 'pdf' | 'reflow' | 'segment-notes' | 'source-links') => void;
 } & EntryPdfHandlers) {
-  const [editOpen, setEditOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(Boolean(editRequestId));
+  useEffect(() => { if (editRequestId) setEditOpen(true); }, [editRequestId]);
+  useSyncExternalStore(subscribeEditRecovery, editRecoveryVersion, editRecoveryVersion);
+  const recoveryStore = workspaceRoot ? recoveryState(workspaceRoot) : null;
+  const requestedDraft = recoveryStore?.requested ? recoveryStore.drafts.get(recoveryStore.requested) : undefined;
+  useEffect(() => { if (requestedDraft?.kind === 'entry' && requestedDraft.ownerId === entry.id) setEditOpen(true); }, [requestedDraft?.key, entry.id]);
   const editButton = useRef<HTMLButtonElement>(null);
   const wasEditing = useRef(false);
   useEffect(() => {
@@ -111,8 +127,11 @@ export function EntryOverview({
         <section className="entry-overview-summary rounded-lg border bg-card px-5 py-5">
           {appearance === 'atelier' ? <div className="entry-overview-cover"><BookCover id={entry.id} title={entry.title} topic={visibleTagPaths[0]?.split('/').pop() || '研究札记'} mode="overview"/></div> : null}
           <div className="entry-overview-summary-content min-w-0 flex-1">
-          <h1 className="entry-overview-breakable mt-1 text-xl font-semibold leading-8 text-foreground">
-            {entry.title}
+          <h1 className="mt-1 flex min-w-0 items-start gap-1 text-xl font-semibold leading-8 text-foreground">
+            <span className="entry-overview-breakable min-w-0 flex-1">{entry.title}</span>
+            {onRefreshEntries ? <EntryTitleConsistency entryId={entry.id} entryTitle={entry.title}
+              pdfFileName={entry.pdfFileName} parsed={entry.status === 'Parsed'} root={workspaceRoot ?? null}
+              reloadKey={titleCheckReloadKey} onRefreshEntries={onRefreshEntries} /> : null}
           </h1>
           <div className="mt-3">
             {description ? (
@@ -174,6 +193,11 @@ export function EntryOverview({
         </ReaderSection>
 
         <EntryTagRecommendations entry={entry} workspaceRoot={workspaceRoot ?? null} onApplyEntryTagPaths={onApplyEntryTagPaths} />
+        <SourceLocalCopyControl entry={entry} />
+
+        {entry.sourceInfo?.zotero_organization?.length ? <div className="border-b border-border py-3"><ZoteroOrganizationInfo key={entry.id}
+          organization={entry.sourceInfo.zotero_organization} tags={tags} tagPaths={tagPaths}
+          onAddTagPath={path => onApplyEntryTagPaths ? onApplyEntryTagPaths(entry.id, [path]) : onUpdateEntry(entry.id, { title: entry.title, fields: entry.fields, tagPaths: [...new Set([...tagPaths, path])] })} /></div> : null}
 
         {customFields.length > 0 ? (
           <ReaderSection className="entry-overview-section" title="条目属性" description="创建或编辑条目时保存的补充信息">
@@ -189,7 +213,7 @@ export function EntryOverview({
         ) : null}
 
         <ReaderSection className="entry-overview-section" title="文件与时间">
-          <div className="mb-4"><EntryPdfActions key={`${workspaceRoot}:${entry.id}`} entry={entry} onFetchPdf={onFetchPdf} onAttachPdf={onAttachPdf} onCreatePdfVersion={onCreatePdfVersion} onImportMineruClientResult={onImportMineruClientResult} onReparsePdf={onReparsePdf} /></div>
+          <div className="mb-4"><EntryPdfActions key={`${workspaceRoot}:${entry.id}`} entry={entry} onFetchPdf={onFetchPdf} onAttachPdf={onAttachPdf} onCreatePdfVersion={onCreatePdfVersion} onImportMineruClientResult={onImportMineruClientResult} onReplaceReadingPdf={onReplaceReadingPdf} onReparsePdf={onReparsePdf} /></div>
           <dl className="entry-overview-fields grid gap-x-8 gap-y-4">
             <OverviewField label="原始 PDF" value={entry.pdfFileName ?? '未导入'} />
             <OverviewField label="创建时间" value={formatOverviewDate(entry.createdAt)} />

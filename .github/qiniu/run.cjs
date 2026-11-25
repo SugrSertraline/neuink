@@ -39,7 +39,7 @@ async function run(env = process.env) {
     if (env.PUBLISH_TRANSPORT === 'fetch') {
       for (const file of files) file.sourceUrl = `https://github.com/${repository}/releases/download/${tag}/${file.name}`;
     }
-    console.log(`Verified ${tag} from main commit ${commit}: ${files.length} release files`);
+    console.log(`Verified ${tag} from source commit ${commit}: ${files.length} release files`);
     result = action === 'verify' ? { verified: true, tag, commit }
       : await publish({ storage: createStorage(env), files, release, directory, archiveOnly: action === 'archive' });
   }

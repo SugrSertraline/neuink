@@ -3,6 +3,7 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { droppedPdfFiles, usePdfDropImport } from './usePdfDropImport';
+import { DuplicatePdfError, PdfDuplicateCancelledError } from '@/shared/lib/pdfDuplicate';
 
 type DropPayload =
   | { type: 'enter' | 'over' | 'leave'; position: { x: number; y: number } }
@@ -30,7 +31,7 @@ function emit(payload: DropPayload) {
 function options(createEntry = vi.fn(async () => ({ createdWithPdf: true, entryId: 'entry', parseSubmissionFailed: false }))) {
   return {
     workspaceRoot: 'C:\\library', workspaceReady: true, parserEndpoint: 'https://parser.example', parserApiKey: 'test-key',
-    createEntry, notify: vi.fn(() => 'pending'), dismiss: vi.fn()
+    createEntry, onMineruSourceDrop: vi.fn(), notify: vi.fn(() => 'pending'), dismiss: vi.fn()
   };
 }
 
@@ -82,6 +83,40 @@ it('imports dropped PDFs sequentially and reports partial failure', async () => 
   expect(mock.unlisten).toHaveBeenCalledOnce();
 });
 
+it('skips equal-content PDFs in a drop batch and names the existing entry', async () => {
+  const createEntry = vi.fn()
+    .mockResolvedValueOnce({ createdWithPdf: true, entryId: 'existing' })
+    .mockRejectedValueOnce(new DuplicatePdfError({ entryId: 'existing', title: '已有论文', fileName: 'paper.pdf', contentHash: 'hash', inTrash: false }));
+  const configured = options(createEntry);
+  const view = renderHook(() => usePdfDropImport(configured));
+  await act(async () => {});
+  act(() => emit({ type: 'drop', position: { x: 10, y: 10 }, paths: ['first.pdf', 'renamed.pdf'] }));
+  await waitFor(() => expect(view.result.current.progress).toBeNull());
+  expect(createEntry).toHaveBeenCalledTimes(2);
+  expect(configured.notify).toHaveBeenLastCalledWith(expect.objectContaining({
+    title: '发现本地已有 PDF',
+    description: expect.stringContaining('内容重复 1 个：renamed → 已有论文')
+  }));
+  view.unmount();
+});
+
+it('continues the drop batch after the user declines one duplicate', async () => {
+  const duplicate = { entryId: 'existing', title: '已有论文', fileName: 'original.pdf', contentHash: 'same-hash', inTrash: false };
+  const createEntry = vi.fn()
+    .mockRejectedValueOnce(new PdfDuplicateCancelledError(duplicate))
+    .mockResolvedValueOnce({ createdWithPdf: true, entryId: 'new' });
+  const configured = options(createEntry);
+  const view = renderHook(() => usePdfDropImport(configured));
+  await act(async () => {});
+  act(() => emit({ type: 'drop', position: { x: 10, y: 10 }, paths: ['same.pdf', 'different.pdf'] }));
+  await waitFor(() => expect(view.result.current.progress).toBeNull());
+  expect(createEntry).toHaveBeenCalledTimes(2);
+  expect(configured.notify).toHaveBeenLastCalledWith(expect.objectContaining({
+    description: expect.stringContaining('成功 1 个；内容重复 1 个：same → 已有论文')
+  }));
+  view.unmount();
+});
+
 it('leaves the existing create-entry drop zone alone', async () => {
   const configured = options();
   const zone = document.createElement('div');
@@ -94,10 +129,27 @@ it('leaves the existing create-entry drop zone alone', async () => {
   expect(view.result.current.dragActive).toBe(false);
   act(() => emit({ type: 'drop', position: { x: 20, y: 20 }, paths: ['result.zip'] }));
   expect(configured.createEntry).not.toHaveBeenCalled();
+  expect(configured.onMineruSourceDrop).not.toHaveBeenCalled();
+  // A PDF dropped inside the MinerU zone belongs to the panel, not to a standalone import.
   act(() => emit({ type: 'drop', position: { x: 20, y: 20 }, paths: ['paper.pdf'] }));
-  await waitFor(() => expect(configured.createEntry).toHaveBeenCalledOnce());
+  act(() => emit({ type: 'drop', position: { x: 20, y: 20 }, paths: ['result.rar', 'original.pdf'] }));
+  act(() => emit({ type: 'drop', position: { x: 20, y: 20 }, paths: ['C:\\results\\paper', 'original.pdf'] }));
+  await act(async () => {});
+  expect(configured.createEntry).not.toHaveBeenCalled();
+  expect(configured.onMineruSourceDrop).not.toHaveBeenCalled();
   view.unmount();
   zone.remove();
+});
+
+it('opens the MinerU creation flow for a dropped archive or result directory', async () => {
+  const configured = options();
+  const view = renderHook(() => usePdfDropImport(configured));
+  await act(async () => {});
+  act(() => emit({ type: 'drop', position: { x: 10, y: 10 }, paths: ['C:\\results\\paper.rar'] }));
+  act(() => emit({ type: 'drop', position: { x: 10, y: 10 }, paths: ['C:\\results\\paper'] }));
+  expect(configured.onMineruSourceDrop.mock.calls.map(([path]) => path)).toEqual(['C:\\results\\paper.rar', 'C:\\results\\paper']);
+  expect(configured.createEntry).not.toHaveBeenCalled();
+  view.unmount();
 });
 
 it('does not import without a ready workspace or while another batch is pending', async () => {

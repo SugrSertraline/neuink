@@ -15,7 +15,7 @@ export function MermaidDiagramPreview({
 }) {
   const id = useId().replace(/:/g, '-');
   const [renderState, setRenderState] = useState<
-    | { status: 'error'; message: string }
+    | { status: 'error' }
     | { status: 'loading' }
     | { status: 'ready'; svg: string }
   >({ status: 'loading' });
@@ -29,11 +29,10 @@ export function MermaidDiagramPreview({
           setRenderState({ status: 'ready', svg });
         }
       },
-      (caught) => {
+      () => {
         if (!cancelled) {
           setRenderState({
             status: 'error',
-            message: caught instanceof Error ? caught.message : String(caught),
           });
         }
       },
@@ -54,9 +53,9 @@ export function MermaidDiagramPreview({
 
   if (renderState.status === 'error') {
     return (
-      <pre className={cn('whitespace-pre-wrap break-words rounded-md border border-destructive/30 bg-destructive/5 p-3 font-mono text-xs text-destructive', className)}>
-        Mermaid 渲染失败：{renderState.message}
-      </pre>
+      <div role="status" className={cn('rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive', className)}>
+        渲染失败
+      </div>
     );
   }
 
@@ -71,3 +70,4 @@ export function MermaidDiagramPreview({
     />
   );
 }
+

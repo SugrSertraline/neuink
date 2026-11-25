@@ -161,6 +161,23 @@ describe('ChatMessage performance boundaries', () => {
     expect(getByText('隐藏的长思考')).toBeTruthy();
   });
 
+  it('shows a compaction checkpoint as a visible memory marker, not an empty reply', () => {
+    const message = { ...createMessage(), content: '' };
+    message.parts = [{ type: 'memory', memory: { summary: '较早的对话已整理为摘要', decisions: [], entities: [], open_items: [],
+      user_preferences: [], last_user_goal: '', message_count: 4, source_count: 1, pending_proposal_count: 0, updated_at: '' } }];
+    const { getByText, queryByRole, queryByText } = render(
+      <AssistantReplyActionsContext.Provider value={{ root: 'root', openReply: vi.fn(), openSource: vi.fn(), addSciverseSource: vi.fn() }}>
+        <ChatMessage message={message} streaming={false} onOpenSource={() => undefined} />
+      </AssistantReplyActionsContext.Provider>,
+    );
+    // The summary is the message itself, so it is not hidden behind "展开执行详情" and no reply is offered.
+    expect(getByText('较早的对话已整理为摘要')).toBeTruthy();
+    expect(queryByRole('button', { name: '展开执行详情' })).toBeNull();
+    expect(queryByRole('button', { name: '展开阅读' })).toBeNull();
+    expect(queryByRole('status')).toBeNull();
+    expect(queryByText('正在处理')).toBeNull();
+  });
+
   it('shows one compact status for an empty streaming response and none for plain completed text', () => {
     const message = { ...createMessage(), content: '' };
     const { getByRole, queryByRole, rerender } = render(<ChatMessage message={message} streaming onOpenSource={() => undefined} />);
@@ -281,7 +298,8 @@ describe('ChatMessage performance boundaries', () => {
     expect(getByText('Sciverse 检索记录 · 1 组（含未引用候选及不同版本）')).toBeTruthy();
     expect(getByRole('button', { name: 'S1 · p.1' })).toBeTruthy();
     expect(getByRole('button', { name: 'S2 · p.2' })).toBeTruthy();
-    expect(getAllByRole('button', { name: '一键加入文库' })).toHaveLength(1);
+    fireEvent.click(getByText('检索候选（1）'));
+    await waitFor(() => expect(getAllByRole('button', { name: '一键加入文库' })).toHaveLength(1));
 
     fireEvent.click(getByRole('button', { name: '一键加入文库' }));
     expect(onAddSciverseSource).not.toHaveBeenCalled();
@@ -344,7 +362,7 @@ describe('ChatMessage performance boundaries', () => {
     expect(queryByRole('button', { name: 'S1 · Sciverse 来源' })).toBeNull();
   });
 
-  it('keeps uncited agentic-search papers available as an import list', () => {
+  it('keeps uncited agentic-search papers available after opening the candidate list', async () => {
     const message = createMessage();
     message.content = '正文只引用第一篇 [S1]。';
     message.source_links = [{
@@ -378,7 +396,9 @@ describe('ChatMessage performance boundaries', () => {
       />,
     );
 
-    expect(queryByText('Uncited search result')).toBeTruthy();
+    expect(queryByText('Uncited search result')).toBeNull();
+    fireEvent.click(getByText('检索候选（2）'));
+    await waitFor(() => expect(queryByText('Uncited search result')).toBeTruthy());
     fireEvent.click(getByRole('button', { name: '查看来源 · 1 处引用' }));
     expect(getByText('Sciverse 检索记录 · 2 组（含未引用候选及不同版本）')).toBeTruthy();
     expect(getAllByRole('button', { name: 'Uncited search result' })).toHaveLength(2); // Candidate row and evidence detail.

@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import type { ReactElement } from 'react';
+import { cloneElement, type ReactElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -23,8 +23,8 @@ describe('ReaderToolbar', () => {
       pdfSentenceHoverEnabled: true,
       pdfSentenceHoverShowOriginal: true,
       pdfSentenceHoverShowTranslation: true,
-      pdfHoverPreviewFontSize: 'standard' as const,
-      pdfHoverPreviewSize: 'standard' as const,
+      pdfHoverPreviewFontSize: 100,
+      pdfHoverPreviewSize: 100,
       hoverPreviewShowAnnotation: true,
       inlineAnnotationHoverEnabled: true,
       paperReferenceHoverEnabled: true,
@@ -75,6 +75,19 @@ describe('ReaderToolbar', () => {
     };
   }
 
+  it('adjusts preview sizes by one percent in the reader and restores defaults without changing content switches', () => {
+    const onChange = vi.fn();
+    const ui = renderWithTooltipProvider(<HoverPreviewControls preferences={buildPreferences()} onChange={onChange} />);
+    fireEvent.click(screen.getByRole('button', { name: '悬停配置' }));
+    fireEvent.change(screen.getByRole('slider', { name: '预览文字大小' }), { target: { value: '113' } });
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ pdfHoverPreviewFontSize: 113, pdfHoverPreviewSize: 100 }));
+    ui.rerender(<TooltipProvider><HoverPreviewControls preferences={buildPreferences({ pdfHoverPreviewFontSize: 113 })} onChange={onChange} /></TooltipProvider>);
+    fireEvent.change(screen.getByRole('slider', { name: '预览卡片大小' }), { target: { value: '97' } });
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ pdfHoverPreviewFontSize: 113, pdfHoverPreviewSize: 97 }));
+    fireEvent.click(screen.getByRole('button', { name: '恢复默认大小' }));
+    expect(onChange).toHaveBeenLastCalledWith(buildPreferences());
+  });
+
   it('changes inline and segment annotation switches independently', () => {
     const onChange = vi.fn();
     renderWithTooltipProvider(<HoverPreviewControls preferences={buildPreferences()} onChange={onChange} />);
@@ -89,29 +102,19 @@ describe('ReaderToolbar', () => {
       inlineAnnotationHoverEnabled: true, hoverPreviewShowAnnotation: false,
     }));
   });
-  it('keeps whole-sentence hover independent of the PDF preview switch', () => {
+  it('nests separate source and translation modes under their visibility switches', () => {
+    HTMLElement.prototype.scrollIntoView = vi.fn();
     const onChange = vi.fn();
     const ui = renderWithTooltipProvider(<HoverPreviewControls preferences={buildPreferences()} onChange={onChange} />);
     fireEvent.click(screen.getByRole('button', { name: '悬停配置' }));
-    fireEvent.click(screen.getByRole('switch', { name: '整句悬停' }));
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ pdfSentenceHoverEnabled: false, hoverPreviewEnabled: true }));
+    expect(screen.queryByRole('switch', { name: '整句悬停' })).toBeNull();
+    fireEvent.click(screen.getByRole('switch', { name: '解析后原文逐句显示' }));
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ pdfSentenceHoverShowOriginal: false, pdfSentenceHoverShowTranslation: true }));
     ui.rerender(<TooltipProvider><HoverPreviewControls preferences={buildPreferences({ hoverPreviewEnabled: false })} onChange={onChange} /></TooltipProvider>);
-    const sentenceSwitch = screen.getByRole('switch', { name: '整句悬停' }) as HTMLButtonElement;
-    expect(sentenceSwitch.disabled).toBe(false);
-    fireEvent.click(sentenceSwitch);
-    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ pdfSentenceHoverEnabled: false, hoverPreviewEnabled: false }));
-  });
-  it('configures sentence original and translation independently from block preview', () => {
-    const onChange = vi.fn();
-    renderWithTooltipProvider(<HoverPreviewControls preferences={buildPreferences({ hoverPreviewEnabled: false })} onChange={onChange} />);
-    fireEvent.click(screen.getByRole('button', { name: '悬停配置' }));
-    const sentenceTranslation = screen.getByRole('switch', { name: '逐句译文' }) as HTMLButtonElement;
-    expect(sentenceTranslation.disabled).toBe(false);
-    fireEvent.click(sentenceTranslation);
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
-      hoverPreviewEnabled: false, pdfSentenceHoverShowOriginal: true, pdfSentenceHoverShowTranslation: false,
-    }));
-    expect((screen.getByRole('switch', { name: '整段译文' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('switch', { name: '译文逐句显示' }) as HTMLButtonElement).disabled).toBe(true);
+    ui.rerender(<TooltipProvider><HoverPreviewControls preferences={buildPreferences({ hoverPreviewShowTranslation: false })} onChange={onChange} /></TooltipProvider>);
+    expect((screen.getByRole('switch', { name: '译文逐句显示' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('译文已关闭')).toBeTruthy();
   });
   it('changes reference hover without changing segment or annotation preview', () => {
     const onChange = vi.fn();
@@ -123,26 +126,34 @@ describe('ReaderToolbar', () => {
     }));
   });
 
-  it('lets the PDF reader save or discard recommendations that are already on the entry', () => {
+  it.each([false, true])('shows pending recommendations directly in the PDF toolbar and filters applied tags (compact=%s)', compact => {
     const onApply = vi.fn();
     const onDiscard = vi.fn();
     const onToggle = vi.fn();
     const existing = { path: '已有标签', confidence: 0.9, reason: '相关', dimension: '主题', source: 'existing' as const };
-    renderWithTooltipProvider(<ReaderToolbar entry={{ ...buildEntry(), tags: ['已有标签'] }} pageCount={1} segmentCount={1}
-      readerPreferences={buildPreferences()} zoom={1} recommendedTags={[existing]} selectedRecommendedTagPaths={['已有标签']}
+    const pending = { ...existing, path: '新标签' };
+    const toolbar = <ReaderToolbar entry={{ ...buildEntry(), tags: ['已有标签'] }} pageCount={1} segmentCount={1}
+      readerPreferences={buildPreferences()} zoom={1} recommendedTags={[existing, pending]} selectedRecommendedTagPaths={['已有标签', '新标签']}
       tagSuggestionBusy={false} tagSuggestionsOpen translation={null} translationBusy={false}
       onApplyRecommendedTags={onApply} onDismissRecommendedTags={onDiscard} onRecommendedTagToggle={onToggle}
       onTagSuggestionsOpenChange={vi.fn()} onExportTranslation={vi.fn()} onPauseTranslation={vi.fn()}
-      onOpenTranslationTask={vi.fn()} onReaderPreferencesChange={vi.fn()} onZoomIn={vi.fn()} onZoomReset={vi.fn()} onZoomOut={vi.fn()} />);
-    const option = screen.getByRole('button', { name: /已有标签/ });
+      onOpenTranslationTask={vi.fn()} onReaderPreferencesChange={vi.fn()} onZoomIn={vi.fn()} onZoomReset={vi.fn()} onZoomOut={vi.fn()} />;
+    const view = renderWithTooltipProvider(compact ? <ReadingSessionContext.Provider value={{ active: true, onReady: vi.fn() }}>{toolbar}</ReadingSessionContext.Provider> : toolbar);
+    expect(screen.getByRole('button', { name: '推荐标签 1 项' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '已有标签' })).toBeNull();
+    const option = screen.getByRole('button', { name: '新标签' });
     expect((option as HTMLButtonElement).disabled).toBe(false);
     expect(option.getAttribute('aria-pressed')).toBe('true');
     fireEvent.click(option);
-    expect(onToggle).toHaveBeenCalledWith(existing);
-    fireEvent.click(screen.getByRole('button', { name: '保存推荐' }));
+    expect(onToggle).toHaveBeenCalledWith(pending);
+    expect(screen.getByText('已选 1 项')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '确认添加' }));
     expect(onApply).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByRole('button', { name: '丢弃推荐' }));
+    fireEvent.click(screen.getByRole('button', { name: '不接受' }));
     expect(onDiscard).toHaveBeenCalledOnce();
+    const reviewed = cloneElement(toolbar, { showTagSuggestionsInReader: false });
+    view.rerender(<TooltipProvider>{compact ? <ReadingSessionContext.Provider value={{ active: true, onReady: vi.fn() }}>{reviewed}</ReadingSessionContext.Provider> : reviewed}</TooltipProvider>);
+    expect(screen.queryByRole('button', { name: /推荐标签/ })).toBeNull();
   });
 
   it('uses a single compact row in parallel reading and keeps navigation, search, zoom and export operable', () => {
@@ -261,7 +272,7 @@ describe('ReaderToolbar', () => {
 
     expect(screen.getByText('PDF 内容')).toBeTruthy();
     expect(screen.getByText('相对论笔记')).toBeTruthy();
-    expect(screen.getByText('einstein-paper.pdf')).toBeTruthy();
+    expect(screen.getByTitle('einstein-paper.pdf')).toBeTruthy();
     expect(screen.getByText('86 个区域')).toBeTruthy();
     expect(screen.getByText('/ 12')).toBeTruthy();
     expect(screen.getByText('已解析')).toBeTruthy();
@@ -371,7 +382,7 @@ describe('ReaderToolbar', () => {
     );
 
     const mode = screen.getByRole('button', { name: '译文' });
-    expect(mode.closest('.entry-content-header-actions')).toBeTruthy();
+    expect(mode.closest('.pdf-reader-display-controls')).toBeTruthy();
     expect(screen.queryByLabelText('阅读视图设置')).toBeNull();
     fireEvent.click(mode);
     expect(mode.getAttribute('aria-pressed')).toBe('true');

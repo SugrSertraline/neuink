@@ -4,6 +4,7 @@ import { assistantErrorDiagnostic, ASSISTANT_TOOL_PENDING } from '@/shared/lib/a
 import { describeAssistantReadFailure, safeAssistantReadFailure } from '@/shared/lib/assistantReadFailure';
 import { AgentStoppedError, AgentToolNotExecutedError } from '../agent-core/agent';
 import { AgentLoopGuardError } from '../agent-core/cycleGuard';
+import { arxivGateMessage, safeArxivGateMessage } from '@/shared/lib/arxivGateStatus';
 import { createAgentToolFailure, isAgentToolFailure, type AgentToolNotExecutedCode } from '../agent-core/toolFailure';
 
 const DOCUMENT_READ_TOOLS = new Set(['read_browser_tab', 'read_pdf_pages', 'search_pdf_text']);
@@ -46,7 +47,7 @@ export function toolPreflight<T>(check: () => T, code: AgentToolNotExecutedCode 
 export function safeToolErrorEvent(event: AssistantToolTraceEvent): AssistantToolTraceEvent {
   return event.status === 'error'
     ? { ...event, summary: ASSISTANT_TOOL_PENDING,
-      error: safeAssistantReadFailure(event.error) ?? assistantErrorDiagnostic(event.error) }
+      error: safeArxivGateMessage(event.error) ?? safeAssistantReadFailure(event.error) ?? assistantErrorDiagnostic(event.error) }
     : event;
 }
 
@@ -80,7 +81,8 @@ export function trackToolFailures(
         const result = await execute(input, options);
         activeSignal?.throwIfAborted();
         if (isAgentToolFailure(result)) {
-          report({ id: options.toolCallId, toolName: name, status: 'error', error: result.message });
+          report({ id: options.toolCallId, toolName: name, status: 'error', arxivGate: result.arxivGate,
+            error: result.arxivGate ? arxivGateMessage(result.arxivGate) : result.message });
         } else assertSuccessfulToolResult(result);
         return result;
       } catch (error) {

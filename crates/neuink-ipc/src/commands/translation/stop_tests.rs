@@ -37,10 +37,10 @@ fn stop_persists_distinct_status_and_keeps_completed_translation_for_resume() {
             entry_id: entry.id.clone(),
             force: false,
             job_total: 2,
-            profile: serde_json::from_value(
+            client: serde_json::from_value::<LlmProfile>(
                 json!({"id":"test","name":"test","base_url":"http://localhost/v1","model":"test"}),
             )
-            .unwrap(),
+            .unwrap().into(),
             root: temp.path().to_path_buf(),
             selected_segment_uids: None,
             strategy: RunTranslationStrategy::Resume,
@@ -125,10 +125,10 @@ fn paused_force_task_reopens_with_exact_remaining_scope_and_cancel_removes_only_
         control: Arc::new(TranslationTaskControl::default()),
         entry_id: entry.id.clone(),
         root: temp.path().into(),
-        profile: serde_json::from_value(
+        client: serde_json::from_value::<LlmProfile>(
             json!({"id":"profile","name":"test","base_url":"http://localhost/v1","model":"test"}),
         )
-        .unwrap(),
+        .unwrap().into(),
         force: true,
         job_total: 2,
         selected_segment_uids: Some(

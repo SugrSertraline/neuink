@@ -40,11 +40,12 @@ export function formatLastRead(value?: string | null) {
 
 export function buildReadingOverview(
   entries: LibraryEntry[],
-  readingStates: Record<string, EntryReadingState>
+  readingStates: Record<string, EntryReadingState>,
+  throughDate = new Date()
 ) {
   const states = entries.map((entry) => readingStates[entry.id]).filter(Boolean);
   const days = Array.from({ length: 7 }, (_, index) => {
-    const date = new Date();
+    const date = new Date(throughDate);
     date.setHours(0, 0, 0, 0);
     date.setDate(date.getDate() - (6 - index));
     const dateKey = formatLocalDate(date);

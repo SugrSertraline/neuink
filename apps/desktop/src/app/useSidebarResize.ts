@@ -2,11 +2,11 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type Poin
 import { WORKSPACE_SPLIT_STANDARD_MIN_WIDTH } from './workspaceSplit';
 
 type Options = { width: number; min: number; max: number; enabled: boolean; onCommit: (width: number) => void;
-  containerRef?: MutableRefObject<HTMLElement | null>; liveResize?: boolean };
+  containerRef?: MutableRefObject<HTMLElement | null>; liveResize?: boolean; onCollapse?: () => void };
 
 const LIVE_WIDTH_PROPERTY = '--app-sidebar-live-width';
 
-export function useSidebarResize({ width, min, max, enabled, onCommit, containerRef, liveResize = false }: Options) {
+export function useSidebarResize({ width, min, max, enabled, onCommit, containerRef, liveResize = false, onCollapse }: Options) {
   // Readers normally use a guide-only drag. Visible native webpages also need
   // actual layout changes, but neither path should update App state per frame.
   const previewRef = useRef<HTMLDivElement | null>(null);
@@ -68,6 +68,7 @@ export function useSidebarResize({ width, min, max, enabled, onCommit, container
   const effectiveWidth = clamp(width);
   const cancel = useRef<(() => void) | null>(null);
   const latest = useRef(onCommit); latest.current = onCommit;
+  const collapse = useRef(onCollapse); collapse.current = onCollapse;
   useEffect(() => () => cancel.current?.(), []);
   useEffect(() => { cancel.current?.(); }, [enabled, width, min, maxWidth, container, liveResize]);
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
@@ -80,6 +81,7 @@ export function useSidebarResize({ width, min, max, enabled, onCommit, container
     const layoutWidth = container?.offsetWidth ?? 0;
     const scale = layoutWidth ? (container!.getBoundingClientRect().width / layoutWidth) || 1 : 1;
     const startX = event.clientX;
+    const startY = event.clientY;
     const pointerId = event.pointerId;
     const oldCursor = document.body.style.cursor, oldSelection = document.body.style.userSelect;
     const oldLiveWidth = container?.style.getPropertyValue(LIVE_WIDTH_PROPERTY) ?? '';
@@ -91,7 +93,7 @@ export function useSidebarResize({ width, min, max, enabled, onCommit, container
     const move = (next: globalThis.PointerEvent) => {
       if (next.pointerId !== pointerId) return;
       const distance = next.clientX - startX;
-      if (!moved && Math.abs(distance) < 4) return;
+      if (!moved && Math.hypot(distance, next.clientY - startY) < 4) return;
       if (!moved) {
         moved = true;
         document.body.style.cursor = 'col-resize';
@@ -137,6 +139,7 @@ export function useSidebarResize({ width, min, max, enabled, onCommit, container
         preview.style.removeProperty('--app-sidebar-preview-width');
       }
       if (save && moved) latest.current(nextWidth);
+      if (save && !moved) collapse.current?.();
     };
     const up = (next: globalThis.PointerEvent) => { if (next.pointerId === pointerId) finish(true); };
     const cancelled = (next: globalThis.PointerEvent) => { if (next.pointerId === pointerId) finish(false); };
@@ -153,6 +156,12 @@ export function useSidebarResize({ width, min, max, enabled, onCommit, container
     handle.addEventListener('lostpointercapture', cancelled);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (enabled && collapse.current && ['Enter', ' '].includes(event.key)) {
+      event.preventDefault();
+      cancel.current?.();
+      if (!event.repeat) collapse.current();
+      return;
+    }
     if (!enabled || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
     event.preventDefault();
     cancel.current?.();

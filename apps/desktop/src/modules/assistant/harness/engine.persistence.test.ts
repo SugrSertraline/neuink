@@ -47,6 +47,15 @@ beforeEach(() => {
 });
 
 describe('real harness wiring (only model and IPC transports are replaced)', () => {
+  it('does not compact merely because a roomy conversation exceeds 8000 characters', async () => {
+    const history = [
+      { role: 'user' as const, message_id: 'old-user', content: 'a'.repeat(4_500), created_at: '', source_links: [] },
+      { role: 'assistant' as const, message_id: 'old-assistant', content: 'b'.repeat(4_500), created_at: '', source_links: [] }
+    ];
+    const result = await runAssistantHarness({ ...options, conversationHistory: history });
+    expect(result.conversationMemory).toBeUndefined();
+    expect(generateText).not.toHaveBeenCalled();
+  });
   it('keeps provider billing failures actionable without persisting the remote error body', async () => {
     const model = scriptedModel([]);
     model.doStream = vi.fn().mockRejectedValue(Object.assign(new Error('private-provider-body'), { statusCode: 402 }));

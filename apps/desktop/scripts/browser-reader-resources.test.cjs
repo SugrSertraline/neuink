@@ -32,11 +32,18 @@ function packaging(t, source) {
   for (const name of ['onnx/model.onnx', 'tokenizer.json', 'config.json', 'special_tokens_map.json', 'tokenizer_config.json']) {
     fs.writeFileSync(path.join(modelSource, name), 'fixture');
   }
+  const researchSource = path.join(root, 'research'); fs.mkdirSync(researchSource);
+  const archive = Buffer.from('research fixture');
+  fs.writeFileSync(path.join(researchSource, 'component.zip'), archive);
+  fs.writeFileSync(path.join(researchSource, 'manifest.json'), JSON.stringify({
+    ...require('../resources/research/component-lock.json'), size: archive.length, sha256: sha256(archive),
+  }));
   return {
     source: path.join(root, 'missing-onboarding'), modelSource,
     manifestPath: path.join(root, 'onboarding-availability.json'),
     config: { bundle: { resources: ['resources/embedding-models/default/**/*'] } },
     browserReader: { source, platform: 'win32', arch: 'x64' }, log: () => {},
+    research: { source: researchSource, platform: 'win32' },
   };
 }
 
@@ -153,6 +160,7 @@ test('Tauri dev/build/bundle include the verified runtime while preserving exist
     const config = JSON.parse(args[args.indexOf('--config') + 1]);
     assert.deepEqual(config.bundle.resources, [
       'resources/embedding-models/default/**/*', 'resources/browser-reader/**/*', 'resources/reader-licenses/**/*',
+      'resources/research-component/component.zip', 'resources/research-component/manifest.json',
     ]);
   }
 });
@@ -163,7 +171,7 @@ test('Tauri help never requires runtime assets; a missing build runtime cannot b
   assert.throws(() => allResourceArguments(['build'], options), /prepare:browser-reader/);
   const dev = allResourceArguments(['dev'], options);
   assert.deepEqual(JSON.parse(dev[dev.indexOf('--config') + 1]).bundle.resources,
-    ['resources/embedding-models/default/**/*', 'resources/reader-licenses/**/*']);
+    ['resources/embedding-models/default/**/*', 'resources/reader-licenses/**/*', 'resources/research-component/component.zip', 'resources/research-component/manifest.json']);
 });
 
 test('download verifies bytes before publishing, reuses exact cache and never trusts a corrupt cache', async t => {

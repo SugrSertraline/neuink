@@ -1,0 +1,58 @@
+import { useRef, useState } from 'react';
+import { Clock3, FileScan, LoaderCircle, RotateCcw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { TooltipIconButton } from '@/shared/components/TooltipIconButton';
+import { useToast } from '@/shared/hooks/useToast';
+import type { LibraryEntry } from './LibrarySidebar';
+
+export type PdfParseAction = {
+  configured: boolean;
+  disabled?: boolean;
+  onStart: (entryId: string) => Promise<void> | void;
+  onConfigure: () => void;
+};
+
+/** Submission is local; persisted entry status and the existing queue own parsing progress. */
+export function PdfParseButton({ entry, action, iconOnly = false, panel = false }: { entry: LibraryEntry; action: PdfParseAction; iconOnly?: boolean; panel?: boolean }) {
+  const { notify } = useToast();
+  const pending = useRef(false);
+  const [busy, setBusy] = useState(false);
+  if (!entry.pdfFileName || entry.status === 'Parsed') return null;
+  const queued = entry.status === 'Queued';
+  const running = entry.status === 'Uploading' || entry.status === 'Parsing';
+  const label = busy ? '正在提交…' : queued ? '等待解析' : running ? '解析中…'
+    : entry.status === 'Failed' ? '重试解析' : '开始解析';
+  const start = async () => {
+    if (pending.current || queued || running || action.disabled) return;
+    if (!action.configured) {
+      action.onConfigure();
+      notify({ title: '请先选择解析方式', description: '可导入 MinerU 客户端解析结果，或配置解析服务后开始解析。' });
+      return;
+    }
+    pending.current = true;
+    setBusy(true);
+    try {
+      await action.onStart(entry.id);
+      notify({ title: '已加入解析队列', description: `“${entry.title}”的进度可在条目库查看。` });
+    } catch (error) {
+      notify({ tone: 'danger', title: '开始解析失败', description: error instanceof Error ? error.message : String(error) });
+    } finally {
+      pending.current = false;
+      setBusy(false);
+    }
+  };
+  const Icon = busy || running ? LoaderCircle : queued ? Clock3 : entry.status === 'Failed' ? RotateCcw : FileScan;
+  if (panel) return <Button type="button" size="sm" variant="ghost" className="w-full justify-start gap-2 px-2 text-foreground" disabled={action.disabled || busy || queued || running} onClick={() => void start()}><Icon aria-hidden="true" className={busy || running ? 'size-4 animate-spin motion-reduce:animate-none' : 'size-4'} />{label}</Button>;
+  if (iconOnly) {
+    return <TooltipIconButton label={label} tooltip={!action.configured && !queued && !running ? `${label} · 先选择解析方式` : label}
+      variant="ghost" className="text-muted-foreground hover:text-foreground" disabled={action.disabled || busy || queued || running}
+      onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); void start(); }}>
+      <Icon aria-hidden="true" className={busy || running ? 'size-4 animate-spin motion-reduce:animate-none' : 'size-4'} />
+    </TooltipIconButton>;
+  }
+  return <Button type="button" size="xs" variant="outline" className="shrink-0 whitespace-nowrap"
+    disabled={action.disabled || busy || queued || running}
+    title={!action.configured && !queued && !running ? '先选择解析方式' : `${label}：${entry.title}`}
+    onPointerDown={event => event.stopPropagation()}
+    onClick={event => { event.stopPropagation(); void start(); }}>{label}</Button>;
+}

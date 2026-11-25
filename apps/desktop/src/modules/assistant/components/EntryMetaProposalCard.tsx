@@ -22,20 +22,21 @@ export function EntryMetaProposalCard({
 }) {
   const debug = useAssistantDebug();
   return (
-    <div className="rounded-md border bg-muted/20 p-2">
-      <div className="flex items-center gap-1.5">
-        <PencilLine className="text-primary" size={13} aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate font-medium">
-          编辑条目元数据：{proposal.entryTitle}
+    <article aria-label="条目元数据修改提案" className="entry-meta-proposal w-full min-w-0 max-w-full rounded-md border bg-muted/20 p-2 [overflow-wrap:anywhere]">
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-2 gap-y-1">
+        <span className="flex min-w-0 items-center gap-1.5 font-medium">
+          <PencilLine className="shrink-0 text-primary" size={13} aria-hidden="true" />
+          编辑条目元数据
         </span>
         <ProposalStatus proposal={proposal} deciding={deciding} />
       </div>
+      <p className="mt-1 text-xs text-muted-foreground">条目：{proposal.entryTitle}</p>
 
       {proposal.rationale ? (
         <p className="mt-1 text-[11px] text-muted-foreground">{proposal.rationale}</p>
       ) : null}
 
-      <div className="mt-2 grid gap-1.5">
+      <div className="mt-2 grid min-w-0 grid-cols-1 gap-1.5">
         {proposal.fields.includes('title') ? (
           <MetadataDiff
             after={proposal.afterTitle}
@@ -56,7 +57,7 @@ export function EntryMetaProposalCard({
         <div className="mt-2 flex flex-wrap gap-1">
           {proposal.sources.map((source) => (
             <button
-              className="rounded-md border px-1.5 py-0.5 text-[11px] text-primary hover:bg-muted"
+              className="max-w-full rounded-md border px-1.5 py-0.5 text-[11px] text-primary hover:bg-muted"
               key={`${proposal.id}:${source.entryId}:${source.segmentUid}`}
               title={source.quote}
               type="button"
@@ -75,14 +76,14 @@ export function EntryMetaProposalCard({
       ) : null}
 
       {proposal.error ? (
-        <p className="mt-1 break-words text-[11px] text-destructive">{formatAssistantError(proposal.error, { debug, fallback: ASSISTANT_ACTION_INCOMPLETE })}</p>
+        <p className="mt-1 text-[11px] text-destructive">{formatAssistantError(proposal.error, { debug, fallback: ASSISTANT_ACTION_INCOMPLETE })}</p>
       ) : null}
 
       {proposal.status === 'applying' && !deciding ? <p className="mt-1 text-[11px] text-warning">上次提交结果待核对，不会自动重试。请检查条目后再生成新提案。</p> : null}
       {proposal.status === 'pending' ? (
-        <div className="mt-2 flex justify-end gap-1">
+        <div className="entry-meta-proposal-actions mt-2 flex min-w-0 flex-wrap justify-end gap-1">
           <Button
-            disabled={disabled || !onReject || proposal.status !== 'pending'}
+            disabled={disabled || deciding || !onReject}
             size="xs"
             type="button"
             variant="ghost"
@@ -92,7 +93,7 @@ export function EntryMetaProposalCard({
             拒绝
           </Button>
           <Button
-            disabled={disabled || !onApply || proposal.status !== 'pending'}
+            disabled={disabled || deciding || !onApply}
             size="xs"
             type="button"
             onClick={() => onApply?.(proposal)}
@@ -106,7 +107,7 @@ export function EntryMetaProposalCard({
           </Button>
         </div>
       ) : null}
-    </div>
+    </article>
   );
 }
 
@@ -116,13 +117,13 @@ function MetadataDiff({ after, before, label }: {
   label: string;
 }) {
   return (
-    <div className="grid gap-1 rounded-sm border bg-background p-1.5">
+    <section aria-label={`${label}修改对比`} className="grid min-w-0 grid-cols-1 gap-1 rounded-sm border bg-background p-1.5">
       <div className="text-[10px] font-medium text-muted-foreground">{label}</div>
-      <div className="grid gap-1 sm:grid-cols-2">
+      <div className="entry-meta-proposal-diff grid min-w-0 grid-cols-1 gap-1">
         <DiffValue label="− 修改前" text={before} />
         <DiffValue after label="+ 修改后" text={after} />
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -136,14 +137,14 @@ function DiffValue({ after = false, label, text }: {
       <div className={after ? 'text-[10px] text-primary' : 'text-[10px] text-muted-foreground'}>
         {label}
       </div>
-      <div className="whitespace-pre-wrap break-words text-[11px]">{text || '(empty)'}</div>
+      <div className="whitespace-pre-wrap text-[11px]">{text || '（空）'}</div>
     </div>
   );
 }
 
 function ProposalStatus({ proposal, deciding }: { proposal: AssistantEntryMetaProposal; deciding: boolean }) {
   if (deciding) {
-    return <span className="flex items-center gap-1 text-[10px] text-muted-foreground"><Loader2 className="animate-spin" size={13} aria-hidden="true" />正在提交</span>;
+    return <span className="flex max-w-full shrink-0 items-center gap-1 text-[10px] text-muted-foreground"><Loader2 className="shrink-0 animate-spin" size={13} aria-hidden="true" />正在提交</span>;
   }
-  return <span className="text-[10px] text-muted-foreground">{{ pending: '待确认', applying: '待核对结果', applied: '已应用', rejected: '已拒绝', error: '未完成，请核对' }[proposal.status]}</span>;
+  return <span className="max-w-full shrink-0 text-[10px] text-muted-foreground">{{ pending: '待确认', applying: '待核对结果', applied: '已应用', rejected: '已拒绝', error: '未完成，请核对' }[proposal.status]}</span>;
 }

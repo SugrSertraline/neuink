@@ -5,7 +5,7 @@ use std::{
 };
 
 use neuink_config::LlmProfile;
-use neuink_domain::{build_document_outline, EntryId, NoteId, SegmentUid, TagId, TagMeta};
+use neuink_domain::{build_document_outline, EntryId, SegmentUid, TagId, TagMeta};
 use neuink_search::SearchMode;
 use neuink_workspace::Workspace;
 use serde::{Deserialize, Serialize};
@@ -26,9 +26,11 @@ mod note_apply_content;
 #[cfg(test)]
 mod note_apply_recovery_tests;
 mod note_apply_store;
+pub(crate) mod research_note;
 #[cfg(test)]
 mod note_apply_tests;
 mod tag_recommendations;
+pub(crate) mod workspace_context;
 
 pub use note_apply::{ApplyNoteProposalRequest, ApplyNoteProposalResponse};
 
@@ -155,81 +157,6 @@ pub struct TagRecommendation {
 pub struct AnalyzeEntryTagsResponse {
     pub recommendations: Vec<TagRecommendation>,
     pub policy_version: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct AssistantActiveNoteRef {
-    pub entry_id: EntryId,
-    pub note_id: NoteId,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct AssistantPinnedSegmentRef {
-    pub entry_id: EntryId,
-    pub segment_uid: SegmentUid,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct AssistantContextSnapshotRequest {
-    pub root: PathBuf,
-    pub active_entry_id: Option<EntryId>,
-    pub active_note: Option<AssistantActiveNoteRef>,
-    #[serde(default)]
-    pub pinned_segments: Vec<AssistantPinnedSegmentRef>,
-    #[serde(default)]
-    pub document_char_budget: Option<usize>,
-    #[serde(default)]
-    pub note_char_budget: Option<usize>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct AssistantEntrySnapshot {
-    pub entry_id: EntryId,
-    pub entry_title: String,
-    pub has_pdf: bool,
-    pub parse_status: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct AssistantNoteSnapshot {
-    pub entry_id: EntryId,
-    pub entry_title: String,
-    pub note_id: NoteId,
-    pub note_title: String,
-    pub markdown: String,
-    pub markdown_char_count: usize,
-    pub source_link_count: usize,
-    pub truncated: bool,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct AssistantDocumentSnapshot {
-    pub entry_id: EntryId,
-    pub entry_title: String,
-    pub markdown: String,
-    pub markdown_char_count: usize,
-    pub sources: Vec<EntryAssistantSource>,
-    pub truncated: bool,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct AssistantPinnedSegmentSnapshot {
-    pub entry_id: EntryId,
-    pub entry_title: String,
-    pub segment_uid: SegmentUid,
-    pub page_idx: u32,
-    pub text: String,
-    pub text_char_count: usize,
-    pub truncated: bool,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct AssistantContextSnapshotResponse {
-    pub active_entry: Option<AssistantEntrySnapshot>,
-    pub active_note: Option<AssistantNoteSnapshot>,
-    pub document: Option<AssistantDocumentSnapshot>,
-    pub pinned_segments: Vec<AssistantPinnedSegmentSnapshot>,
-    pub warnings: Vec<String>,
 }
 
 #[tauri::command]
@@ -458,7 +385,6 @@ pub fn prune_agent_runs(
 pub fn load_prompt(request: LoadPromptRequest) -> Result<String, String> {
     match request.name.as_str() {
         "qna_system" => Ok(include_str!("../../prompts/qna_system.md").to_string()),
-        "qna_user" => Ok(include_str!("../../prompts/qna_user.md").to_string()),
         "ask_segment" => Ok(include_str!("../../prompts/ask_segment.md").to_string()),
         "assistant_router" => Ok(include_str!("../../prompts/assistant_router.md").to_string()),
         _ => Err(format!("unknown prompt: {}", request.name)),
@@ -698,117 +624,6 @@ fn windows_explorer_path(path: &std::path::Path) -> String {
     }
 }
 
-#[tauri::command]
-pub fn get_assistant_context_snapshot(
-    request: AssistantContextSnapshotRequest,
-) -> Result<AssistantContextSnapshotResponse, String> {
-    let workspace = Workspace::open(&request.root).map_err(|error| error.to_string())?;
-    let mut warnings = Vec::new();
-    let document_budget = clamp_context_budget(request.document_char_budget, 240_000);
-    let note_budget = clamp_context_budget(request.note_char_budget, 64_000);
-
-    let active_entry = request.active_entry_id.as_ref().and_then(|entry_id| {
-        match workspace.read_entry(entry_id) {
-            Ok(entry) => Some(AssistantEntrySnapshot {
-                entry_id: entry.id,
-                entry_title: entry.title,
-                has_pdf: entry.pdf.is_some(),
-                parse_status: entry
-                    .pdf
-                    .as_ref()
-                    .map(|pdf| format!("{:?}", pdf.parse.status)),
-            }),
-            Err(error) => {
-                warnings.push(format!("active entry unavailable: {error}"));
-                None
-            }
-        }
-    });
-
-    let active_note = request.active_note.as_ref().and_then(|note_ref| {
-        let entry = match workspace.read_entry(&note_ref.entry_id) {
-            Ok(entry) => entry,
-            Err(error) => {
-                warnings.push(format!("active note entry unavailable: {error}"));
-                return None;
-            }
-        };
-        let note = match workspace.read_note(&note_ref.entry_id, &note_ref.note_id) {
-            Ok(note) => note,
-            Err(error) => {
-                warnings.push(format!("active note unavailable: {error}"));
-                return None;
-            }
-        };
-        let source_link_count = note.links.len();
-        let (markdown, markdown_char_count, truncated) =
-            trim_to_char_budget(note.markdown, note_budget);
-        Some(AssistantNoteSnapshot {
-            entry_id: note_ref.entry_id.clone(),
-            entry_title: entry.title,
-            note_id: note.note_id,
-            note_title: note.title,
-            markdown,
-            markdown_char_count,
-            source_link_count,
-            truncated,
-        })
-    });
-
-    let document = request.active_entry_id.as_ref().and_then(|entry_id| {
-        match read_entry_assistant_context_from_workspace(&workspace, entry_id.clone()) {
-            Ok(context) => {
-                if context.has_pdf && context.parsed_segment_count == 0 {
-                    warnings.push("PDF 尚未完整解析；可使用 read_entry_assistant_context、read_pdf_pages 或 search_pdf_text 读取文字层，扫描页需 OCR。".to_string());
-                }
-                if context.markdown.trim().is_empty() {
-                    return None;
-                }
-                let (markdown, markdown_char_count, truncated) =
-                    trim_to_char_budget(context.markdown, document_budget);
-                Some(AssistantDocumentSnapshot {
-                    entry_id: context.entry_id,
-                    entry_title: context.entry_title,
-                    markdown,
-                    markdown_char_count,
-                    sources: context.sources,
-                    truncated,
-                })
-            }
-            Err(error) => {
-                warnings.push(format!("entry document context unavailable: {error}"));
-                None
-            }
-        }
-    });
-
-    let mut pinned_segments = Vec::new();
-    for pinned in request.pinned_segments {
-        match read_segment_content_from_workspace(&workspace, pinned.entry_id, pinned.segment_uid) {
-            Ok(segment) => {
-                let (text, text_char_count, truncated) = trim_to_char_budget(segment.text, 8_000);
-                pinned_segments.push(AssistantPinnedSegmentSnapshot {
-                    entry_id: segment.entry_id,
-                    entry_title: segment.entry_title,
-                    segment_uid: segment.segment_uid,
-                    page_idx: segment.page_idx,
-                    text,
-                    text_char_count,
-                    truncated,
-                });
-            }
-            Err(error) => warnings.push(format!("pinned segment unavailable: {error}")),
-        }
-    }
-
-    Ok(AssistantContextSnapshotResponse {
-        active_entry,
-        active_note,
-        document,
-        pinned_segments,
-        warnings,
-    })
-}
 
 fn read_segment_content_from_workspace(
     workspace: &Workspace,

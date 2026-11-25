@@ -29,8 +29,8 @@ export function FittedTranslation({ fontSize, children, missing = false }: { fon
     void document.fonts?.ready.then(fit);
     return () => { alive = false; observer?.disconnect(); };
   }, [fontSize, children]);
-  return <div ref={ref} className="translation-replacement-preview pointer-events-auto min-h-0 min-w-0 flex-1 overflow-hidden font-sans"
+  return <div ref={ref} data-reading-selection-source className="translation-replacement-preview pointer-events-auto min-h-0 min-w-0 flex-1 overflow-hidden font-sans"
     title={missing ? '缺少翻译' : '译文；悬停可查看完整内容'}
-    onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}
+    onClick={event => event.stopPropagation()}
     style={{ fontSize, lineHeight: 1.25 }}>{children}</div>;
 }

@@ -6,10 +6,29 @@ import {
   hasUnsavedEntrySegmentEditors,
   registerSegmentEditorCloseHandler,
   saveSegmentEditorsBeforeClose,
+  saveEntrySegmentEditorsBeforeCopy,
   setSegmentEditorDirty
 } from './segmentEditorDirtyRegistry';
 
 describe('segmentEditorDirtyRegistry', () => {
+  it('saves the source entry across nested readers before copying and leaves unrelated edits alone', async () => {
+    const scopes = ['pdf:copy-source/editor', 'tag-reading:tag/reflow:copy-source', 'pdf:copy-source-other'];
+    const saves = scopes.map(() => vi.fn(async () => true));
+    const unregister = scopes.map((scope, i) => registerSegmentEditorCloseHandler(scope, 'note', { discard: vi.fn(), save: saves[i] }));
+    scopes.forEach(scope => setSegmentEditorDirty(scope, 'note', true));
+    expect(await saveEntrySegmentEditorsBeforeCopy('copy-source')).toBe(true);
+    expect(saves[0]).toHaveBeenCalledOnce(); expect(saves[1]).toHaveBeenCalledOnce(); expect(saves[2]).not.toHaveBeenCalled();
+    expect(hasUnsavedSegmentEditors(scopes[2])).toBe(true);
+    scopes.forEach(scope => discardSegmentEditorsBeforeClose(scope)); unregister.forEach(fn => fn());
+  });
+  it('blocks copying if a source editor cannot save', async () => {
+    const scope = 'entry-overview:copy-failure';
+    const unregister = registerSegmentEditorCloseHandler(scope, 'fields', { discard: vi.fn(), save: async () => false });
+    setSegmentEditorDirty(scope, 'fields', true);
+    expect(await saveEntrySegmentEditorsBeforeCopy('copy-failure')).toBe(false);
+    expect(hasUnsavedEntrySegmentEditors('copy-failure')).toBe(true);
+    discardSegmentEditorsBeforeClose(scope); unregister();
+  });
   it('aggregates both nested readers without touching another tag workspace', async () => {
     const a = 'tag-reading:tag/pdf:entry-a'; const b = 'tag-reading:tag/reflow:entry-b';
     const other = 'tag-reading:other/pdf:entry-a';

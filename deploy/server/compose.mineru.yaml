@@ -1,0 +1,17 @@
+# Optional overlay for an existing, locally administered MinerU container.
+# Attach that container to NEUINK_MINERU_NETWORK with alias "mineru" first.
+services:
+  app:
+    environment:
+      NEUINK_PARSE_ENABLED: "true"
+      NEUINK_PARSE_UPSTREAM: http://mineru:8000
+      NEUINK_PARSE_POLL_MS: ${NEUINK_PARSE_POLL_MS:-3000}
+      NEUINK_PARSE_MAX_BYTES: ${NEUINK_PARSE_MAX_BYTES:-268435456}
+    networks:
+      - default
+      - mineru_internal
+
+networks:
+  mineru_internal:
+    external: true
+    name: ${NEUINK_MINERU_NETWORK:?Set the dedicated Docker network name}

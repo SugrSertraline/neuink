@@ -147,6 +147,7 @@ impl Workspace {
                 }
             }
         }
+        self.append_daily_note_catalog(&mut catalog.notes, &mut catalog.errors)?;
         let sources = catalog
             .notes
             .iter()

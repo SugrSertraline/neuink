@@ -11,6 +11,8 @@ import {
   X
 } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { useFormRecovery } from '@/shared/hooks/useFormRecovery';
+import { registerSegmentEditorCloseHandler, setSegmentEditorDirty } from './segmentEditorDirtyRegistry';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -30,6 +32,7 @@ import { cn } from '@/lib/utils';
 import { useToast } from '@/shared/hooks/useToast';
 import type { CreateEntryRequest, CreateEntryResult } from '@/shared/hooks/useWorkspace';
 import { getEffectiveParserEndpoint } from '@/shared/lib/parserSettings';
+import { DuplicatePdfError, PdfDuplicateCancelledError } from '@/shared/lib/pdfDuplicate';
 import type { TagMeta } from '@/shared/types/domain';
 
 import {
@@ -49,6 +52,8 @@ type CreateEntryPanelProps = {
   onCreateEntry: (request: CreateEntryRequest) => Promise<CreateEntryResult | undefined>;
   onCreateEntryFinished: (result: CreateEntryResult) => void;
   onOpenMineruClientGuide: () => void;
+  mineruDrop?: { path: string; nonce: number } | null;
+  onMineruDropConsumed?: () => void;
 };
 
 export function CreateEntryPanel({
@@ -56,10 +61,15 @@ export function CreateEntryPanel({
   tags,
   onCreateEntry,
   onCreateEntryFinished,
-  onOpenMineruClientGuide
+  onOpenMineruClientGuide,
+  mineruDrop,
+  onMineruDropConsumed
 }: CreateEntryPanelProps) {
   const [pdfPath, setPdfPath] = useState('');
   const [mineruZipPath, setMineruZipPath] = useState('');
+  // Optional original PDF accompanying the MinerU result. Kept apart from `pdfPath`
+  // so the PDF-mode selection is never overwritten by the MinerU mode.
+  const [mineruPdfPath, setMineruPdfPath] = useState('');
   const [creationMode, setCreationMode] = useState<'pdf' | 'mineru'>('pdf');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -72,6 +82,14 @@ export function CreateEntryPanel({
   );
   const [pdfDragActive, setPdfDragActive] = useState(false);
   const pdfDropZoneRef = useRef<HTMLElement | null>(null);
+  const unsaved = Boolean(title || description || pdfPath || mineruZipPath || fields.length || tagDraft || selectedTagPaths.length);
+  const recovery = useFormRecovery({ kind: 'create-entry', id: 'create-entry', ownerId: 'new-entry', scope: 'create-entry',
+    label: '创建条目 · 未提交的资料', value: { pdfPath, mineruZipPath, creationMode, title, description, fields, tagDraft, selectedTagPaths }, dirty: unsaved,
+    restore: value => { if (typeof value.title !== 'string' || !Array.isArray(value.fields)) throw new Error('无效草稿');
+      setPdfPath(value.pdfPath); setMineruZipPath(value.mineruZipPath); setCreationMode(value.creationMode); setTitle(value.title);
+      setDescription(value.description); setFields(value.fields); setTagDraft(value.tagDraft); setSelectedTagPaths(value.selectedTagPaths); setCreateState('ready'); },
+    reveal: () => pdfDropZoneRef.current?.closest('[data-guide="create-entry"]')?.querySelector<HTMLInputElement>('input')?.focus() });
+  const closeState = useRef({ unsaved, createState, recovery }); closeState.current = { unsaved, createState, recovery };
   const { dismiss, notify } = useToast();
   const effectiveSelectedTagPaths = useMemo(
     () => normalizeSelectedTagPaths([...selectedTagPaths, ...parseTagInput(tagDraft)]),
@@ -84,6 +102,9 @@ export function CreateEntryPanel({
   const effectiveParserEndpoint = getEffectiveParserEndpoint(parserEndpoint);
   const activePdfPath = creationMode === 'pdf' ? pdfPath : '';
   const activeMineruZipPath = creationMode === 'mineru' ? mineruZipPath : '';
+  // The companion PDF is only meaningful with a MinerU source in MinerU mode.
+  const companionPdfPath = activeMineruZipPath ? mineruPdfPath : '';
+  const mineruPdfName = fileNameFromPath(mineruPdfPath);
 
   const usePdfPath = (nextPdfPath: string) => {
     setPdfPath(nextPdfPath);
@@ -91,22 +112,44 @@ export function CreateEntryPanel({
     setCreateState('ready');
   };
 
+  const useMineruSource = (path: string) => {
+    setCreationMode('mineru');
+    setMineruZipPath(path);
+    setPdfPath('');
+    setTitle((current) => current || titleFromMineruSource(path));
+    setCreateState('ready');
+  };
+
+  const lastMineruDropNonce = useRef<number | null>(null);
+  useEffect(() => {
+    if (!mineruDrop || lastMineruDropNonce.current === mineruDrop.nonce) return;
+    lastMineruDropNonce.current = mineruDrop.nonce;
+    useMineruSource(mineruDrop.path);
+    onMineruDropConsumed?.();
+  }, [mineruDrop, onMineruDropConsumed]);
+
   const handleDroppedPaths = (paths: string[]) => {
-    const zip = paths.find((path) => /\.zip$/i.test(path));
-    if (zip) {
-      setMineruZipPath(zip);
-      setPdfPath('');
-      setTitle((current) => current || titleFromFileName(fileNameFromPath(zip)));
-      setCreateState('ready');
+    const pdf = paths.find((path) => /\.pdf$/i.test(path));
+    const source = paths.find((path) => /\.(zip|rar)$/i.test(path)) ??
+      paths.find((path) => !/\.pdf$/i.test(path));
+    if (source) {
+      useMineruSource(source);
+      if (pdf) setMineruPdfPath(pdf);
       return;
     }
-    if (paths.some((path) => /\.pdf$/i.test(path))) return;
-    notify({ title: '无法导入文件', description: '请拖入 MinerU 客户端导出的 ZIP 压缩包。', tone: 'danger' });
+    if (pdf) {
+      if (mineruZipPath) {
+        setMineruPdfPath(pdf);
+        return;
+      }
+      notify({ title: '请先选择 MinerU 结果', description: '原始 PDF 需要与 MinerU 结果目录、ZIP 或 RAR 一起导入。', tone: 'danger' });
+      return;
+    }
+    notify({ title: '无法导入文件', description: '请拖入 MinerU 结果目录、ZIP 或 RAR。', tone: 'danger' });
   };
 
   useEffect(() => {
-    // PDF drops belong to the app-wide automatic import; only the ZIP source
-    // keeps a local drop target that populates this form.
+    // This zone takes MinerU sources and companion PDFs; the app-wide import skips it.
     if (creationMode !== 'mineru') return;
     let cancelled = false;
     const unlistenPromise = getCurrentWebview().onDragDropEvent((event) => {
@@ -139,7 +182,7 @@ export function CreateEntryPanel({
       setPdfDragActive(false);
       void unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [createState, creationMode, notify]);
+  }, [createState, creationMode, mineruZipPath, notify]);
 
   const choosePdf = async () => {
     const selected = await open({
@@ -152,13 +195,22 @@ export function CreateEntryPanel({
     }
   };
 
-  const chooseMineruZip = async () => {
-    const selected = await open({ multiple: false, filters: [{ name: 'MinerU 客户端结果', extensions: ['zip'] }] });
+  const chooseMineruSource = async (directory: boolean) => {
+    const selected = await open(directory
+      ? { multiple: false, directory: true }
+      : { multiple: false, filters: [{ name: 'MinerU 客户端结果', extensions: ['zip', 'rar'] }] });
     if (typeof selected === 'string') {
-      setMineruZipPath(selected);
-      setPdfPath('');
-      setTitle((current) => current || titleFromFileName(fileNameFromPath(selected)));
-      setCreateState('ready');
+      useMineruSource(selected);
+    }
+  };
+
+  const chooseCompanionPdf = async () => {
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: 'PDF', extensions: ['pdf'] }]
+    });
+    if (typeof selected === 'string') {
+      setMineruPdfPath(selected);
     }
   };
 
@@ -186,8 +238,10 @@ export function CreateEntryPanel({
   };
 
   const resetForm = () => {
+    recovery.discard();
     setPdfPath('');
     setMineruZipPath('');
+    setMineruPdfPath('');
     setTitle('');
     setDescription('');
     setFields([]);
@@ -197,10 +251,19 @@ export function CreateEntryPanel({
     setCreationMode('pdf');
     setCreateState('idle');
   };
+  const resetRef = useRef(resetForm); resetRef.current = resetForm;
+  useEffect(() => {
+    const off = registerSegmentEditorCloseHandler('create-entry', 'create-entry-form', { ...recovery.handlers,
+      isDirty: () => closeState.current.unsaved, isBusy: () => closeState.current.createState === 'creating',
+      // Creating/importing can have external effects; it remains an explicit form action.
+      save: async () => !closeState.current.unsaved, discard: () => resetRef.current() });
+    return () => { off(); setSegmentEditorDirty('create-entry', 'create-entry-form', false); };
+  }, []);
+  useEffect(() => setSegmentEditorDirty('create-entry', 'create-entry-form', unsaved || createState === 'creating'), [unsaved, createState]);
 
   const submitEntry = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (createState === 'creating') {
+    if (createState === 'creating' || recovery.blocked) {
       return;
     }
     if (titleRequired) {
@@ -218,11 +281,11 @@ export function CreateEntryPanel({
       setCreateState('creating');
       pendingToastId = notify({
         title: activeMineruZipPath ? '正在导入 MinerU 客户端结果' : '正在创建条目',
-        description: activeMineruZipPath ? '将从压缩包读取 PDF、解析结果和图片资源。' : activePdfPath ? '将根据自动解析设置处理 PDF。' : undefined,
+        description: activeMineruZipPath ? '将读取 PDF、解析结果和图片资源。' : activePdfPath ? '将根据自动解析设置处理 PDF。' : undefined,
         durationMs: (activePdfPath || activeMineruZipPath) ? Infinity : undefined
       });
       const result = await onCreateEntry({
-        pdfPath: activePdfPath || undefined,
+        pdfPath: activePdfPath || companionPdfPath || undefined,
         mineruZipPath: activeMineruZipPath || undefined,
         title,
         fields: {
@@ -232,6 +295,7 @@ export function CreateEntryPanel({
         tagPaths: effectiveSelectedTagPaths
       });
       if (result) {
+        resetForm();
         if (pendingToastId) {
           dismiss(pendingToastId);
           pendingToastId = null;
@@ -259,14 +323,20 @@ export function CreateEntryPanel({
           });
         }
         onCreateEntryFinished(result);
+      } else {
+        setCreateState('ready');
       }
     } catch (caught) {
       if (pendingToastId) {
         dismiss(pendingToastId);
       }
+      if (caught instanceof PdfDuplicateCancelledError) {
+        setCreateState('ready');
+        return;
+      }
       setCreateState('failed');
       notify({
-        title: '创建条目失败',
+        title: caught instanceof DuplicatePdfError ? 'PDF 已在本地' : '创建条目失败',
         description: caught instanceof Error ? caught.message : String(caught),
         tone: 'danger',
         durationMs: Infinity
@@ -275,7 +345,7 @@ export function CreateEntryPanel({
   };
 
   const sourceSummary = activeMineruZipPath
-    ? `MinerU · ${mineruZipName}`
+    ? `MinerU · ${mineruZipName}${companionPdfPath ? ` + ${mineruPdfName}` : ''}`
     : activePdfPath
       ? `PDF · ${pdfName}`
       : '无附件';
@@ -288,6 +358,7 @@ export function CreateEntryPanel({
   return (
     <div data-guide="create-entry" className="mx-auto h-full w-full max-w-4xl p-3">
       <Card className="h-full min-h-0 gap-0 overflow-hidden py-0">
+        {recovery.notice}
         <CardHeader className="shrink-0 border-b py-4">
           <CardTitle>创建条目</CardTitle>
           <CardDescription>添加来源、整理标签，然后创建到当前工作区。</CardDescription>
@@ -387,16 +458,29 @@ export function CreateEntryPanel({
                         <Archive size={18} aria-hidden="true" />
                       </div>
                       <div className="min-w-0">
-                        <p className="truncate font-medium">{mineruZipPath || pdfDragActive ? (pdfDragActive ? '松开后导入 ZIP' : mineruZipName) : 'MinerU 客户端完整结果 ZIP'}</p>
+                        <p className="truncate font-medium">{mineruZipPath || pdfDragActive ? (pdfDragActive ? '松开后导入 MinerU 结果' : mineruZipName) : 'MinerU 解析结果目录、ZIP 或 RAR'}</p>
                         <p className="mt-0.5 text-xs text-muted-foreground">直接读取 PDF、解析结果和图片，不会重复解析。</p>
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <Button disabled={createState === 'creating'} size="sm" type="button" variant="outline" onClick={() => void chooseMineruZip()}>
-                        <Archive size={14} aria-hidden="true" />选择 ZIP
+                      <Button disabled={createState === 'creating'} size="sm" type="button" variant="outline" onClick={() => void chooseMineruSource(false)}>
+                        <Archive size={14} aria-hidden="true" />选择 ZIP/RAR
+                      </Button>
+                      <Button disabled={createState === 'creating'} size="sm" type="button" variant="outline" onClick={() => void chooseMineruSource(true)}>
+                        选择结果目录
                       </Button>
                       {mineruZipPath ? (
-                        <Button disabled={createState === 'creating'} size="sm" type="button" variant="ghost" onClick={() => setMineruZipPath('')}>
+                        <Button
+                          disabled={createState === 'creating'}
+                          size="sm"
+                          type="button"
+                          variant="ghost"
+                          onClick={() => {
+                            // Clear the companion together with its MinerU source.
+                            setMineruZipPath('');
+                            setMineruPdfPath('');
+                          }}
+                        >
                           <X size={14} aria-hidden="true" />移除
                         </Button>
                       ) : null}
@@ -404,6 +488,22 @@ export function CreateEntryPanel({
                         查看教程
                       </Button>
                     </div>
+                    {mineruZipPath ? (
+                      <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+                        <FileText size={14} className="shrink-0 text-muted-foreground" aria-hidden="true" />
+                        <span className="min-w-0 flex-1 truncate text-xs">
+                          {mineruPdfPath ? mineruPdfName : '可选：附加原始 PDF，与解析结果一起导入'}
+                        </span>
+                        <Button disabled={createState === 'creating'} size="sm" type="button" variant="outline" onClick={() => void chooseCompanionPdf()}>
+                          {mineruPdfPath ? '更换 PDF' : '选择原始 PDF'}
+                        </Button>
+                        {mineruPdfPath ? (
+                          <Button aria-label="移除原始 PDF" disabled={createState === 'creating'} size="icon" type="button" variant="ghost" onClick={() => setMineruPdfPath('')}>
+                            <X size={14} aria-hidden="true" />
+                          </Button>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                 )}
 
@@ -576,7 +676,15 @@ function fileNameFromPath(path: string) {
 }
 
 function titleFromFileName(fileName: string) {
-  return fileName.replace(/\.(pdf|zip)$/i, '').trim();
+  return fileName.replace(/\.(pdf|zip|rar)$/i, '').trim();
+}
+
+function titleFromMineruSource(path: string) {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  const name = titleFromFileName(parts[parts.length - 1] ?? '');
+  return /^(auto|hybrid_auto|pipeline|output|result|results)$/i.test(name)
+    ? titleFromFileName(parts[parts.length - 2] ?? name)
+    : name;
 }
 
 function isDragPositionInsideDropZone(

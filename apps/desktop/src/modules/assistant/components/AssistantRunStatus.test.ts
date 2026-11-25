@@ -9,7 +9,7 @@ describe('resolveAssistantRunStatus', () => {
   });
   it.each([
     ['', '正在处理'], ['agent.plan', '正在规划'],
-    ['task.run_subagent', '子任务运行中'], ['agent.memory', '正在整理记录']
+    ['task_run_subagent', '子任务运行中'], ['agent.memory', '正在整理记录']
   ])('labels %s without pretending it is model reasoning', (toolName, label) => {
     expect(resolveAssistantRunStatus({ busy: true, error: null, queued: false, streaming: false,
       toolEvents: toolName ? [{ id: '1', status: 'running', toolName }] : [] }).label).toBe(label);

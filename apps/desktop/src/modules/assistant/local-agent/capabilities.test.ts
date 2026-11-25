@@ -77,10 +77,8 @@ describe('local Agent capability parity and recovery', () => {
   it('uses the shared frozen mention map and conversation context, including tag entries', async () => {
     vi.mocked(runLocalAgent).mockImplementation(async request => {
       const prompt = JSON.parse(request.prompt);
-      expect(prompt.harnessBrief).toContain('Earlier instruction');
-      expect(prompt.harnessBrief).toContain('C1');
-      expect(prompt.harnessBrief).toContain('e2');
-      expect(prompt.harnessBrief).toContain('exhaustive');
+      expect(prompt.bootstrap.conversation).toContain('Earlier instruction');
+      expect(prompt.workspace_context.references).toContainEqual(expect.objectContaining({ref:'C1',kind:'tag',entry_ids:expect.arrayContaining(['e2'])}));
       return { result: '已理解范围。' };
     });
     await runLocalAgentHarness(options({
@@ -129,7 +127,7 @@ describe('local Agent capability parity and recovery', () => {
     const restoreSession = vi.fn();
     const redelivered = await runLocalAgentHarness(options({ resumeExecutionId: id }), session, restoreSession);
     expect(redelivered.entryMetaProposals?.[0].id).toBe(proposal.id);
-    expect(restoreSession).toHaveBeenCalledWith({ ...session, initialized: true });
+    expect(restoreSession).toHaveBeenCalledWith(expect.objectContaining({ ...session, initialized: true, contextState:expect.objectContaining({version:1}) }));
     expect(runLocalAgent).toHaveBeenCalledTimes(2);
   });
 

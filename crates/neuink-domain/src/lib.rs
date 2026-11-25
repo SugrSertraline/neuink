@@ -1,5 +1,6 @@
 pub mod annotation;
 pub mod entry;
+pub mod entry_fields;
 pub mod error;
 pub mod ids;
 pub mod list_item;
@@ -28,9 +29,12 @@ pub use outline::{
 };
 pub use parser::NeuinkDocument;
 pub use pdf::{PdfAsset, PdfParseState, PdfParseStatus};
-pub use reading::{EntryReadingState, ReadingMode, ReadingState, ReadingStateUpdate};
+pub use reading::{EntryReadingState, ReadingMode, ReadingSession, ReadingState, ReadingStateUpdate};
 pub use segment::{SegmentType, SourceSegment};
 pub use segment_note::SegmentBlockNote;
 pub use source_link::{LinkOwner, SegmentRef, SourceLink};
 pub use tag::TagMeta;
 pub use tag_reading::{TagMemberReadingState, TagMemberStatus, TagReadingWorkspace};
+pub mod daily;
+pub mod deep_research;
+pub mod recommendations;

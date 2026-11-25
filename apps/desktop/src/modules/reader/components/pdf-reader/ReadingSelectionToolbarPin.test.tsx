@@ -35,9 +35,10 @@ beforeEach(() => {
     const element = this;
     const left = Number.parseFloat(element.style.left) || 100;
     const top = Number.parseFloat(element.style.top) || 100;
-    return { left, top, right: left + 300, bottom: top + 160, width: 300, height: 160, x: left, y: top, toJSON: () => ({}) };
+    const width = Number.parseFloat(element.style.width) || 300, height = Number.parseFloat(element.style.height) || 160;
+    return { left, top, right: left + width, bottom: top + height, width, height, x: left, y: top, toJSON: () => ({}) };
   });
-  vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(300);
+  vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) { return Number.parseFloat(this.style.width) || 300; });
   vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(160);
   HTMLElement.prototype.setPointerCapture = vi.fn();
   HTMLElement.prototype.hasPointerCapture = vi.fn(() => true);
@@ -46,6 +47,88 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe('pinned reading selection toolbar', () => {
+  it.each(['left', 'right'] as const)('resizes from the %s corner without pinning or requesting translation again', async side => {
+    const view = render(<Fixture selection={{ ...first, position: { x: 500, y: 100 } }} />);
+    await view.findByText('译文：first selection');
+    const dialog = view.getByRole('dialog');
+    await waitFor(() => expect(dialog.style.opacity).toBe('1'));
+    const left = Number.parseFloat(dialog.style.left), top = dialog.style.top;
+    const handle = view.getByRole('button', { name: side === 'left' ? '从左下角调整浮窗大小' : '从右下角调整浮窗大小' });
+    pointer(handle, 'pointerdown', 200, 200);
+    pointer(handle, 'pointermove', side === 'left' ? 160 : 240, 260);
+    pointer(handle, 'pointerup', side === 'left' ? 160 : 240, 260);
+    await waitFor(() => expect(dialog.style.width).toBe('340px'));
+    expect(dialog.style.height).toBe('220px');
+    await waitFor(() => expect(Number.parseFloat(dialog.style.left)).toBe(side === 'left' ? left - 40 : left));
+    expect(dialog.style.top).toBe(top);
+    expect(dialog.dataset.pinned).toBe('false');
+    expect(translate).toHaveBeenCalledOnce();
+    expect(document.body.style.cursor).toBe('');
+    fireEvent.keyDown(handle, { key: 'ArrowDown', shiftKey: true });
+    await waitFor(() => expect(dialog.style.height).toBe('240px'));
+  });
+
+  it('clamps resizing and restores the previous size on Escape', async () => {
+    const view = render(<Fixture selection={first} />);
+    const dialog = view.getByRole('dialog');
+    await waitFor(() => expect(dialog.style.opacity).toBe('1'));
+    const handle = view.getByRole('button', { name: '从右下角调整浮窗大小' });
+    pointer(handle, 'pointerdown', 200, 200);
+    pointer(handle, 'pointermove', -2000, -2000);
+    await waitFor(() => expect(dialog.style.width).toBe('280px'));
+    expect(dialog.style.height).toBe('160px');
+    fireEvent.keyDown(handle, { key: 'Escape' });
+    await waitFor(() => expect(dialog.style.width).toBe(''));
+    expect(dialog.style.height).toBe('');
+    expect(close).not.toHaveBeenCalled();
+    pointer(handle, 'pointerdown', 200, 200);
+    pointer(handle, 'pointermove', 2000, 2000);
+    pointer(handle, 'pointerup', 2000, 2000);
+    await waitFor(() => expect(Number.parseFloat(dialog.style.width)).toBeLessThanOrEqual(window.innerWidth - Number.parseFloat(dialog.style.left) - 8));
+    expect(Number.parseFloat(dialog.style.height)).toBeLessThanOrEqual(window.innerHeight - Number.parseFloat(dialog.style.top) - 8);
+  });
+
+  it('drags without pinning, keeps the translated content, and follows the next selection', async () => {
+    const view = render(<Fixture selection={first} />);
+    await view.findByText('译文：first selection');
+    const dialog = view.getByRole('dialog');
+    await waitFor(() => expect(dialog.style.opacity).toBe('1'));
+    const origin = Number.parseFloat(dialog.style.left);
+    const handle = view.getByRole('button', { name: /拖动选区工具/ });
+    pointer(handle, 'pointerdown', 100, 100);
+    pointer(handle, 'pointermove', 160, 140);
+    pointer(handle, 'pointerup', 160, 140);
+    await waitFor(() => expect(Number.parseFloat(dialog.style.left)).toBe(origin + 60));
+    expect(dialog.dataset.pinned).toBe('false');
+    expect(view.getByRole('button', { name: '固定' })).toBeTruthy();
+    expect(view.getByText('译文：first selection')).toBeTruthy();
+    expect(translate).toHaveBeenCalledOnce();
+    const moved = dialog.style.left;
+    view.rerender(<Fixture selection={second} />);
+    await view.findByText('译文：second selection');
+    await waitFor(() => expect(dialog.style.left).not.toBe(moved));
+    view.rerender(<Fixture selection={null} />);
+    expect(view.queryByRole('dialog')).toBeNull();
+  });
+
+  it.each(['pointercancel', 'lostpointercapture', 'Escape', 'blur'])('cancels an unpinned drag on %s', async cancel => {
+    const view = render(<Fixture selection={first} />);
+    const dialog = view.getByRole('dialog');
+    await waitFor(() => expect(dialog.style.opacity).toBe('1'));
+    const origin = dialog.style.left;
+    const handle = view.getByRole('button', { name: /拖动选区工具/ });
+    pointer(handle, 'pointerdown', 100, 100);
+    pointer(handle, 'pointermove', 160, 140);
+    await waitFor(() => expect(dialog.style.left).not.toBe(origin));
+    if (cancel === 'Escape') fireEvent.keyDown(handle, { key: 'Escape' });
+    else if (cancel === 'blur') fireEvent.blur(window);
+    else pointer(handle, cancel, 160, 140);
+    await waitFor(() => expect(dialog.style.left).toBe(origin));
+    expect(dialog.dataset.pinned).toBe('false');
+    expect(document.body.style.userSelect).toBe('');
+    expect(close).not.toHaveBeenCalled();
+  });
+
   it('closes with Escape from the reading body, including a pinned toolbar without a native selection', async () => {
     const view = render(<Fixture selection={first} />);
     await view.findByText('译文：first selection');
@@ -164,6 +247,7 @@ describe('pinned reading selection toolbar', () => {
     let finishFirst!: (text: string) => void;
     translate.mockImplementationOnce(() => new Promise<string>(resolve => { finishFirst = resolve; }));
     const view = render(<Fixture selection={first} />);
+    await waitFor(() => expect(translate).toHaveBeenCalledTimes(1));
     fireEvent.click(view.getByRole('button', { name: '固定' }));
     view.rerender(<Fixture selection={second} />);
     await view.findByText('译文：second selection');

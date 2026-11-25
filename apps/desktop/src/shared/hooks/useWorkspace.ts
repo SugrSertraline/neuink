@@ -56,7 +56,11 @@ import type { AssistantEntryMetaProposal, AssistantTagProposal } from '../types/
 import { useWorkspaceResourceActions } from './useWorkspaceResourceActions';
 import { listTagArchives, TAG_ARCHIVES_CHANGED } from '../ipc/tagReadingApi';
 import { createWorkspaceReadScope } from './workspaceReadScope';
+import { notifyNotesChanged } from '../ipc/noteCatalogApi';
+import { onCloudLibraryChanged } from '../ipc/cloudAccountApi';
 import { onResearchLibraryChanged } from '../ipc/researchApi';
+import { onZoteroLibraryChanged, zoteroCatalogTags } from '../ipc/zoteroApi';
+import type { ConfirmPdfDuplicate } from '../lib/pdfDuplicate';
 
 type WorkspaceStatus = 'loading' | 'ready' | 'error';
 
@@ -81,7 +85,7 @@ export type RefreshParsingEntriesResult = {
   updatedEntries: EntryMeta[];
 };
 
-export function useWorkspace() {
+export function useWorkspace(confirmPdfDuplicate?: ConfirmPdfDuplicate) {
   const [readScope] = useState(createWorkspaceReadScope);
   useEffect(() => () => readScope.open(null), [readScope]);
   const [root, setRoot] = useState<string | null>(null);
@@ -153,6 +157,19 @@ export function useWorkspace() {
     return () => { closed = true; stop(); };
   }, [root, refreshEntries]);
 
+  useEffect(() => {
+    if (!root) return;
+    let closed = false;
+    const failed = () => { if (!closed) setError('Zotero 导入后的条目列表刷新失败，请重新打开资料库。'); };
+    const stop = onZoteroLibraryChanged(root, () => {
+      const current = readScope.begin(root, 'tags');
+      void Promise.all([refreshEntries(root), zoteroCatalogTags(root).then(tags => {
+        if (!closed && current()) setTags(tags);
+      })]).catch(failed);
+    }, failed);
+    return () => { closed = true; stop(); };
+  }, [root, readScope, refreshEntries]);
+
   const applyOpenedWorkspace = useCallback(
     (workspace: {
       entries: EntryMeta[];
@@ -199,6 +216,22 @@ export function useWorkspace() {
     },
     [readScope, root]
   );
+
+  useEffect(() => {
+    if (!root) return;
+    let closed = false;
+    const failed = () => { if (!closed) setError('同步后的资料列表刷新失败，请重新打开资料库。'); };
+    const stop = onCloudLibraryChanged(root, () => {
+      notifyNotesChanged(root);
+      const current = readScope.begin(root, 'tags');
+      void Promise.all([
+        refreshEntries(root),
+        refreshAnnotationCatalog(root),
+        zoteroCatalogTags(root).then(tags => { if (!closed && current()) setTags(tags); })
+      ]).catch(failed);
+    }, failed);
+    return () => { closed = true; stop(); };
+  }, [root, readScope, refreshEntries, refreshAnnotationCatalog]);
 
   const refreshTrashItems = useCallback(
     async (workspaceRoot = root) => {
@@ -290,6 +323,7 @@ export function useWorkspace() {
     retryPdfParseForEntry,
     startQueuedPdfParseForEntry,
     importMineruClientResultForEntry,
+    replaceReadingPdfForEntry,
     createMarkdownNote,
     deleteMarkdownNote,
     createTagPath,
@@ -319,6 +353,7 @@ export function useWorkspace() {
     createMarkdownSourceLink,
     importMarkdownNoteSegmentAsset
   } = useWorkspaceResourceActions({
+    confirmPdfDuplicate,
     entries,
     refreshAnnotationCatalog,
     refreshEntries,
@@ -389,6 +424,7 @@ export function useWorkspace() {
         const parse = entry.pdf?.parse;
         return (
           parse?.task_id &&
+          !(parse.endpoint?.startsWith('neuink-account:') && parse.status === 'uploading') &&
           ['queued', 'uploading', 'uploaded', 'parsing'].includes(parse.status)
         );
       });
@@ -506,6 +542,7 @@ export function useWorkspace() {
     retryPdfParseForEntry,
     startQueuedPdfParseForEntry,
     importMineruClientResultForEntry,
+    replaceReadingPdfForEntry,
     saveAnnotation,
     saveSegmentNote,
     removeSegmentNote,

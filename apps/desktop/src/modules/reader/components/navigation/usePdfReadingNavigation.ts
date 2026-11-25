@@ -77,7 +77,7 @@ export function usePdfReadingNavigation(scrollRef: RefObject<HTMLDivElement>, se
         if (segment) flash(segment.uid);
         const moved = scrollToPdfRect(target.pageIdx, target.rect ?? segment?.bbox, container)
           || (segment ? scrollToSegment(segment.uid, container) : false) || scrollToPage(target.pageIdx, container);
-        if (moved) container.focus({ preventScroll: true });
+        if (moved && target.focus !== false) container.focus({ preventScroll: true });
         return moved;
       }
     }, scrollRef.current);

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { SETTINGS_CATALOG, SETTINGS_CATEGORIES, readSettingsTab, searchSettings, settingsCategory } from './settingsCatalog';
+import { SETTINGS_CATALOG, SETTINGS_CATEGORIES, readSettingsTab, searchSettings, settingsCategory, ADMIN_PASSWORD_RESET_COMMAND, ADMIN_PASSWORD_RESET_TARGET } from './settingsCatalog';
 
 describe('settings discovery', () => {
   it('hides advanced assistant configuration from navigation and all settings searches', () => {
@@ -12,7 +12,7 @@ describe('settings discovery', () => {
     expect(searchSettings('视觉编码服务')[0]?.id).toBe('tools-visual');
     expect(searchSettings('Reranker')[0]?.id).toBe('tools-rerank');
   });
-  it.each([['main-agent', 'models'], ['subagents', 'models'], ['removed-page', 'appearance']])('redirects the saved hidden page %s to %s', (saved, expected) => {
+  it.each([['data', 'account'], ['main-agent', 'models'], ['subagents', 'models'], ['getting-started', 'appearance'], ['removed-page', 'appearance']])('redirects the saved hidden page %s to %s', (saved, expected) => {
     window.localStorage.setItem('neuink.settings.lastTab', saved);
     expect(readSettingsTab()).toBe(expected);
     window.localStorage.clear();
@@ -20,19 +20,29 @@ describe('settings discovery', () => {
   it('finds user phrases and old names without indexing values', () => {
     expect(searchSettings('字体太小')[0].id).toBe('appearance-scale');
     expect(searchSettings('默认显示区域')[0].id).toBe('reader-regions');
+    expect(searchSettings('自动生成阅读详略')[0].id).toBe('reader-auto-fold');
     expect(searchSettings('默认打开PDF')[0].id).toBe('reader-open-pdf');
     expect(searchSettings('打开条目 PDF')[0].id).toBe('reader-open-pdf');
     expect(searchSettings(' API KEY ').map(item => item.id)).toContain('models-connections');
     expect(searchSettings('任务模型').map(item => item.id)).toContain('translation-model');
+    expect(searchSettings('账号解析').map(item => item.id)).toContain('parser-account');
+    expect(searchSettings('自建 MinerU').map(item => item.id)).toContain('parser-service');
     expect(searchSettings('不存在的密钥值')).toEqual([]);
     expect(searchSettings('')).toEqual([]);
   });
   it('gives each target a unique identity within the settings categories', () => {
     expect(SETTINGS_CATEGORIES.map(category => category.id)).toEqual([
-      'getting-started', 'appearance', 'reader', 'translation', 'parser', 'models', 'external-tools', 'data',
+      'account', 'appearance', 'reader', 'translation', 'parser', 'models', 'external-tools',
     ]);
-    expect(searchSettings('教程').find(item => item.id === 'data-onboarding')?.tab).toBe('getting-started');
+    expect(searchSettings('新手引导')).toEqual([]);
     expect(new Set(SETTINGS_CATALOG.map(item => item.id)).size).toBe(SETTINGS_CATALOG.length);
     for (const item of SETTINGS_CATALOG) expect(settingsCategory(item.tab)).toBeTruthy();
   });
+});
+
+it('requires the complete dedicated reset command and routes storage to account', () => {
+  expect(searchSettings('重置密码')).toEqual([]);
+  expect(searchSettings('/neuink::admin/account/password-reset')).toEqual([]);
+  expect(searchSettings(ADMIN_PASSWORD_RESET_COMMAND)).toEqual([expect.objectContaining({ id: ADMIN_PASSWORD_RESET_TARGET, tab: 'account' })]);
+  expect(SETTINGS_CATALOG.find(item => item.id === 'data-workspace')?.tab).toBe('account');
 });

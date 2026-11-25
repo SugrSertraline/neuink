@@ -2,19 +2,23 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { useUnsavedWindowCloseGuard } from './useUnsavedWindowCloseGuard';
-import { setSegmentEditorDirty } from '@/modules/reader/components/segmentEditorDirtyRegistry';
+import { registerSegmentEditorCloseHandler, setSegmentEditorDirty } from '@/modules/reader/components/segmentEditorDirtyRegistry';
+import { checkpointEditRecovery, isRecoveryExit } from '@/shared/lib/editRecovery';
 import { setAssistantBackgroundRun, finishAssistantBackgroundRun, stopAssistantBackgroundRun, queueAssistantBackgroundRun,
   getAssistantMessageQueues } from '@/modules/assistant/components/assistantBackgroundRuns';
 import type { QueuedAssistantDraft } from '@/modules/assistant/components/assistantRunController';
 
-const mocked = vi.hoisted(() => ({ listener: null as null | ((event: { preventDefault: () => void }) => void), unlisten: vi.fn(), notify: vi.fn(), close: vi.fn(async () => {}), isTauri: vi.fn(() => true) }));
+const mocked = vi.hoisted(() => ({ listener: null as null | ((event: { preventDefault: () => void }) => void), unlisten: vi.fn(), notify: vi.fn(), close: vi.fn(async () => {}), destroy: vi.fn(async () => {}), isTauri: vi.fn(() => true) }));
+const recovery = vi.hoisted(() => ({ write: vi.fn(async () => {}), read: vi.fn(async () => ({ drafts: [], unreadable: 0 })) }));
+vi.mock('@/shared/ipc/editRecoveryApi', () => ({ readEditRecovery: recovery.read, writeEditRecovery: recovery.write, removeEditRecovery: vi.fn(async () => {}) }));
 vi.mock('@tauri-apps/api/core', () => ({ isTauri: mocked.isTauri }));
-vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ close: mocked.close, onCloseRequested: async (listener: typeof mocked.listener) => { mocked.listener = listener; return mocked.unlisten; } }) }));
+vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ close: mocked.close, destroy: mocked.destroy, onCloseRequested: async (listener: typeof mocked.listener) => { mocked.listener = listener; return mocked.unlisten; } }) }));
 vi.mock('@/shared/hooks/useToast', () => ({ useToast: () => ({ notify: mocked.notify }) }));
 afterEach(() => { cleanup(); setAssistantBackgroundRun(null); setSegmentEditorDirty('pdf:exit', 'owner', false); vi.clearAllMocks(); });
 
 it('blocks native exit and reload for dirty fragments, and permits clean exit', async () => {
-  const view = renderHook(() => useUnsavedWindowCloseGuard());
+  const reveal = vi.fn();
+  const view = renderHook(() => useUnsavedWindowCloseGuard({ onReveal: reveal }));
   await act(async () => {});
   const preventDefault = vi.fn();
   mocked.listener?.({ preventDefault });
@@ -23,11 +27,54 @@ it('blocks native exit and reload for dirty fragments, and permits clean exit', 
   mocked.listener?.({ preventDefault });
   expect(preventDefault).toHaveBeenCalledOnce();
   expect(mocked.notify).toHaveBeenCalledOnce();
+  expect(reveal).toHaveBeenCalledWith(expect.objectContaining({ scopeKey: 'pdf:exit' }));
   const reload = new Event('beforeunload', { cancelable: true });
   window.dispatchEvent(reload);
   expect(reload.defaultPrevented).toBe(true);
   view.unmount();
   expect(mocked.unlisten).toHaveBeenCalledOnce();
+});
+
+it('checkpoints the latest content before allowing explicit keep-and-exit', async () => {
+  const draft = { key: 'note', kind: 'segment-note' as const, ownerId: 'exit', targetId: 's', label: '片段笔记', scopeKey: 'pdf:exit', payload: { text: 'latest content' } };
+  const unregister = registerSegmentEditorCloseHandler('pdf:exit', 'owner', {
+    discard: vi.fn(), save: vi.fn(async () => false), isDirty: () => true,
+    checkpoint: () => checkpointEditRecovery('close-test', draft), recovery: () => ({ root: 'close-test', key: draft.key })
+  });
+  const view = renderHook(() => useUnsavedWindowCloseGuard());
+  setSegmentEditorDirty('pdf:exit', 'owner', true);
+  await act(async () => view.result.current.onKeep());
+  expect(recovery.write).toHaveBeenCalledWith('close-test', expect.objectContaining({ payload: { text: 'latest content' } }));
+  expect(mocked.close).toHaveBeenCalledOnce();
+  expect(isRecoveryExit()).toBe(true);
+  const reload = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(reload);
+  expect(reload.defaultPrevented).toBe(false);
+  unregister();
+});
+
+it('does not close on a failed backup, preserves editing and allows retry', async () => {
+  const draft = { key: 'note', kind: 'note' as const, ownerId: 'exit', targetId: 'n', label: '笔记', scopeKey: 'pdf:exit', payload: { markdown: 'still here' } };
+  const unregister = registerSegmentEditorCloseHandler('pdf:exit', 'owner', {
+    discard: vi.fn(), save: vi.fn(async () => false), isDirty: () => true,
+    checkpoint: () => checkpointEditRecovery('failed-close', draft), recovery: () => ({ root: 'failed-close', key: draft.key })
+  });
+  recovery.write.mockRejectedValueOnce(new Error('disk full'));
+  const view = renderHook(() => useUnsavedWindowCloseGuard());
+  setSegmentEditorDirty('pdf:exit', 'owner', true);
+  await act(async () => view.result.current.onKeep());
+  expect(mocked.close).not.toHaveBeenCalled(); expect(isRecoveryExit()).toBe(false);
+  expect(view.result.current.error).toContain('备份失败');
+  await act(async () => view.result.current.onKeep());
+  expect(mocked.close).toHaveBeenCalledOnce(); unregister();
+});
+
+it('blocks keep-and-exit for unsupported settings or an active save', async () => {
+  const unregister = registerSegmentEditorCloseHandler('pdf:exit', 'owner', { discard: vi.fn(), save: vi.fn(async () => false), isDirty: () => true, isBusy: () => true });
+  const view = renderHook(() => useUnsavedWindowCloseGuard());
+  setSegmentEditorDirty('pdf:exit', 'owner', true);
+  await act(async () => view.result.current.onKeep());
+  expect(mocked.close).not.toHaveBeenCalled(); expect(view.result.current.error).toContain('请点击');
+  unregister();
 });
 
 it('cleans up native subscriptions that finish after unmount', async () => {
@@ -90,4 +137,56 @@ it('drops unsent paused messages and closes without dispatching them', async () 
   expect(getAssistantMessageQueues()).toHaveLength(0);
   expect(dispatch).not.toHaveBeenCalled();
   expect(mocked.close).toHaveBeenCalledOnce();
+});
+
+it('forces exit only after two close requests within the allowed interval', async () => {
+  const now = vi.spyOn(Date, 'now').mockReturnValue(10000);
+  const unregister = registerSegmentEditorCloseHandler('pdf:exit', 'owner', { discard: vi.fn(), save: vi.fn(async () => false), isDirty: () => true });
+  renderHook(() => useUnsavedWindowCloseGuard()); await act(async () => {});
+  setSegmentEditorDirty('pdf:exit', 'owner', true);
+  const preventDefault = vi.fn();
+  await act(async () => mocked.listener?.({ preventDefault }));
+  expect(mocked.destroy).not.toHaveBeenCalled();
+  now.mockReturnValue(11000);
+  await act(async () => mocked.listener?.({ preventDefault }));
+  expect(mocked.destroy).toHaveBeenCalledOnce();
+  expect(preventDefault).toHaveBeenCalledTimes(2);
+  unregister(); now.mockRestore();
+});
+
+it('does not force exit after the interval or after choosing to continue editing', async () => {
+  const now = vi.spyOn(Date, 'now').mockReturnValue(10000);
+  const unregister = registerSegmentEditorCloseHandler('pdf:exit', 'owner', { discard: vi.fn(), save: vi.fn(async () => false), isDirty: () => true });
+  const view = renderHook(() => useUnsavedWindowCloseGuard()); await act(async () => {});
+  setSegmentEditorDirty('pdf:exit', 'owner', true); const preventDefault = vi.fn();
+  await act(async () => mocked.listener?.({ preventDefault }));
+  now.mockReturnValue(14001); await act(async () => mocked.listener?.({ preventDefault }));
+  expect(mocked.destroy).not.toHaveBeenCalled();
+  act(() => view.result.current.onCancel());
+  now.mockReturnValue(15000); await act(async () => mocked.listener?.({ preventDefault }));
+  expect(mocked.destroy).not.toHaveBeenCalled();
+  unregister(); now.mockRestore();
+});
+it('still opens the confirmation when navigation to the editor fails', async () => {
+  const unregister = registerSegmentEditorCloseHandler('pdf:exit', 'owner', { discard: vi.fn(), save: vi.fn(async () => false), isDirty: () => true });
+  const view = renderHook(() => useUnsavedWindowCloseGuard({ onReveal: () => { throw new Error('navigation failed'); } }));
+  await act(async () => {}); setSegmentEditorDirty('pdf:exit', 'owner', true);
+  await act(async () => mocked.listener?.({ preventDefault: vi.fn() }));
+  expect(view.result.current.targets).toHaveLength(1); unregister();
+});
+
+it('reports a failed forced close and allows retry', async () => {
+  const now = vi.spyOn(Date, 'now').mockReturnValue(10000);
+  const unregister = registerSegmentEditorCloseHandler('pdf:exit', 'owner', { discard: vi.fn(), save: vi.fn(async () => false), isDirty: () => true });
+  mocked.destroy.mockRejectedValueOnce(new Error('关闭失败'));
+  const view = renderHook(() => useUnsavedWindowCloseGuard()); await act(async () => {});
+  setSegmentEditorDirty('pdf:exit', 'owner', true); const preventDefault = vi.fn();
+  await act(async () => mocked.listener?.({ preventDefault }));
+  now.mockReturnValue(11000); await act(async () => mocked.listener?.({ preventDefault }));
+  expect(view.result.current.error).toContain('关闭失败');
+  expect(view.result.current.targets).toHaveLength(1);
+  expect(isRecoveryExit()).toBe(false);
+  now.mockReturnValue(12000); await act(async () => mocked.listener?.({ preventDefault }));
+  expect(mocked.destroy).toHaveBeenCalledTimes(1);
+  unregister(); now.mockRestore();
 });

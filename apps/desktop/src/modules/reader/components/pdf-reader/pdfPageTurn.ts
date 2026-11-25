@@ -1,3 +1,9 @@
+import type { createSoftPageTurn } from '../book/softPageTurnScene';
+let softTurnFactory: typeof createSoftPageTurn | undefined;
+export function preparePdfPageTurns() {
+  return import('../book/softPageTurnScene').then(module => { softTurnFactory = module.createSoftPageTurn; }).catch(() => {});
+}
+
 type PageTurnOptions = {
   pageIdx: number;
   direction: 1 | -1;
@@ -68,6 +74,8 @@ export function animatePdfPageTurn(container: HTMLElement, { pageIdx, direction,
   const layer = document.createElement('div');
   layer.className = 'pdf-turn-layer';
   Object.assign(layer.style, position, { perspective: `${Math.max(width, height) * 6}px` });
+  let soft: ReturnType<typeof createSoftPageTurn> | undefined;
+  try { soft = softTurnFactory?.(layer, { width, height, direction, front: frontPage, back: backPage }); } catch { /* CSS fallback below. */ }
   const count = 20, stripWidth = width / count;
   const strips: HTMLElement[] = [];
   const crop = (bitmap: HTMLCanvasElement, index: number) => {
@@ -80,7 +88,7 @@ export function animatePdfPageTurn(container: HTMLElement, { pageIdx, direction,
     context.drawImage(bitmap, index * sw, 0, sw, bitmap.height, 0, 0, canvas.width, canvas.height);
     return canvas;
   };
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; !soft && i < count; i++) {
     const strip = document.createElement('div');
     strip.className = 'pdf-turn-strip'; strip.style.width = `${stripWidth + .6}px`;
     const front = crop(frontPage, i);
@@ -101,11 +109,12 @@ export function animatePdfPageTurn(container: HTMLElement, { pageIdx, direction,
   let frame = 0, start: number | null = null, disposed = false;
   const dispose = () => {
     if (disposed) return;
-    disposed = true; cancelAnimationFrame(frame); clip.remove();
+    disposed = true; cancelAnimationFrame(frame); soft?.dispose(); clip.remove();
     surface.style.opacity = opacity; surface.style.pointerEvents = pointerEvents;
     releaseBitmaps();
   };
   const drawPaper = (progress: number) => {
+    if (soft) { soft.draw(progress); shadow.style.opacity = `${Math.sin(Math.PI * progress) * .6}`; shadow.style.width = `${width * (.12 + .28 * Math.sin(Math.PI * progress))}px`; shadow.style.left = `${width * (1 - progress) - width * .15}px`; shadow.style.transformOrigin = 'bottom center'; shadow.style.transform = `rotate(${-35 * (1 - progress)}deg)`; shadow.style.filter = 'blur(8px)'; return; }
     const eased = progress * progress * (3 - 2 * progress);
     const lift = Math.sin(Math.PI * eased);
     let x = direction === 1 ? 0 : width, z = 0;
@@ -133,8 +142,8 @@ export function animatePdfPageTurn(container: HTMLElement, { pageIdx, direction,
   const draw = (time: number) => {
     if (disposed) return;
     start ??= time;
-    const progress = Math.min(1, (time - start) / 460);
-    drawPaper(progress);
+    const progress = Math.min(1, (time - start) / (soft ? 900 : 460));
+    try { drawPaper(progress); } catch { dispose(); onComplete?.(); return; }
     if (progress < 1) frame = requestAnimationFrame(draw);
     else if (onComplete) onComplete(); else dispose();
   };

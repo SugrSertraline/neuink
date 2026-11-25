@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import type { CreateEntryRequest, CreateEntryResult } from '@/shared/hooks/useWorkspace';
 import type { ToastContextValue } from '@/shared/hooks/useToast';
+import { DuplicatePdfError, PdfDuplicateCancelledError } from '@/shared/lib/pdfDuplicate';
 
 type NativeDropPosition = { x: number; y: number };
 
@@ -17,6 +18,7 @@ type PdfDropImportOptions = Pick<ToastContextValue, 'notify' | 'dismiss'> & {
     endpoint: string,
     apiKey: string
   ) => Promise<CreateEntryResult | undefined>;
+  onMineruSourceDrop: (path: string) => void;
 };
 
 type ImportProgress = { id: string; root: string; startedAt: number; completed: number; total: number };
@@ -37,6 +39,12 @@ export function droppedPdfFiles(paths: string[]) {
     files.push({ path, title });
   }
   return { files, skipped };
+}
+
+export function droppedMineruSource(paths: string[]) {
+  const archive = paths.find((path) => /\.(zip|rar)$/i.test(path));
+  if (archive || paths.some((path) => /\.pdf$/i.test(path))) return archive;
+  return paths[0];
 }
 
 function insideCreateEntryDropZone(position: NativeDropPosition) {
@@ -72,7 +80,7 @@ export function usePdfDropImport(options: PdfDropImportOptions) {
       }
       const { files, skipped } = droppedPdfFiles(paths);
       if (files.length === 0) {
-        current.notify({ title: '没有可导入的 PDF', description: '请拖入一个或多个 PDF 文件。', tone: 'danger' });
+        current.notify({ title: '没有可导入的文件', description: '请拖入 PDF、MinerU 结果目录、ZIP 或 RAR。', tone: 'danger' });
         return;
       }
       if (!current.workspaceReady || !current.workspaceRoot) {
@@ -86,6 +94,7 @@ export function usePdfDropImport(options: PdfDropImportOptions) {
       let completed = 0;
       let succeeded = 0;
       const failed: string[] = [];
+      const duplicates: string[] = [];
       setProgress({ ...identity, completed, total: files.length });
       const toastId = current.notify({
         title: `正在导入 ${files.length} 个 PDF`,
@@ -105,7 +114,13 @@ export function usePdfDropImport(options: PdfDropImportOptions) {
             );
             if (!result?.createdWithPdf) throw new Error('PDF 未附加到条目');
             succeeded += 1;
-          } catch {
+          } catch (error) {
+            if (error instanceof DuplicatePdfError || error instanceof PdfDuplicateCancelledError) {
+              duplicates.push(`${file.title} → ${error.duplicate.title}${error.duplicate.inTrash ? '（回收站）' : ''}`);
+              completed += 1;
+              if (!closed) setProgress({ ...identity, completed, total: files.length });
+              continue;
+            }
             // The create API can leave an empty entry if attaching the PDF fails.
             // Report this explicitly instead of silently retrying and duplicating it.
             failed.push(file.title);
@@ -124,14 +139,15 @@ export function usePdfDropImport(options: PdfDropImportOptions) {
           const interrupted = completed < files.length;
           const summary = [`成功 ${succeeded} 个`];
           if (failed.length) summary.push(`失败 ${failed.length} 个：${failed.slice(0, 3).join('、')}${failed.length > 3 ? '等' : ''}`);
+          if (duplicates.length) summary.push(`内容重复 ${duplicates.length} 个：${duplicates.slice(0, 3).join('、')}${duplicates.length > 3 ? '等' : ''}`);
           if (skipped) summary.push(`跳过 ${skipped} 个非 PDF 或重复文件`);
           if (interrupted) summary.push('资料库已切换，剩余文件未导入');
           if (failed.length) summary.push('失败项可能留下空条目，请在条目库核对');
           current.notify({
-            title: interrupted ? 'PDF 导入已中断' : failed.length ? 'PDF 导入部分失败' : 'PDF 导入完成',
+            title: interrupted ? 'PDF 导入已中断' : failed.length ? 'PDF 导入部分失败' : duplicates.length ? '发现本地已有 PDF' : 'PDF 导入完成',
             description: summary.join('；'),
-            tone: failed.length || interrupted ? 'danger' : 'success',
-            durationMs: failed.length || interrupted ? Infinity : undefined
+            tone: failed.length || interrupted ? 'danger' : duplicates.length ? 'default' : 'success',
+            durationMs: failed.length || interrupted || duplicates.length ? Infinity : undefined
           });
         }
       }
@@ -146,13 +162,23 @@ export function usePdfDropImport(options: PdfDropImportOptions) {
         setDragActive(!insideCreateEntryDropZone(payload.position) && !importingRef.current);
       } else if (payload.type === 'drop') {
         setDragActive(false);
-        const zipDrop = insideCreateEntryDropZone(payload.position) &&
-          payload.paths.some((path) => /\.zip$/i.test(path));
-        if (!zipDrop) void importPaths(payload.paths);
+        // The panel owns drops inside its MinerU zone, including companion PDFs.
+        // Elsewhere retain the app-wide archive/folder flow and PDF import queue.
+        if (insideCreateEntryDropZone(payload.position)) return;
+        const mineruSource = droppedMineruSource(payload.paths);
+        if (mineruSource) {
+          if (optionsRef.current.workspaceReady && optionsRef.current.workspaceRoot) {
+            optionsRef.current.onMineruSourceDrop(mineruSource);
+          } else {
+            optionsRef.current.notify({ title: '无法导入 MinerU 结果', description: '请先打开资料库。', tone: 'danger' });
+          }
+        } else {
+          void importPaths(payload.paths);
+        }
       }
     });
     void listener.catch(() => {
-      if (!closed) optionsRef.current.notify({ title: 'PDF 拖放不可用', description: '请通过“创建条目”选择 PDF。', tone: 'danger' });
+      if (!closed) optionsRef.current.notify({ title: '文件拖放不可用', description: '请通过“创建条目”选择文件。', tone: 'danger' });
     });
 
     return () => {

@@ -10,6 +10,7 @@ const select = (view: Parameters<typeof filterEntries>[1], tags: Set<string> | n
   filterEntries(entries, view, tags, query, 'title', [], {}).map(e => e.id);
 
 it('includes only unstarted/canceled PDFs and keeps other categories separate', () => {
+  expect(select('pdf')).toEqual(statuses.filter(status => status !== 'No PDF'));
   expect(select('unparsed')).toEqual(['Not started', 'Canceled']);
   expect(select('parsing')).toEqual(['Queued', 'Uploading', 'Parsing']);
   expect(select('failed')).toEqual(['Failed']);
@@ -17,6 +18,8 @@ it('includes only unstarted/canceled PDFs and keeps other categories separate', 
   expect(select('no_pdf')).toEqual(['No PDF']);
 });
 it('combines the unparsed category with the existing tag/search filters', () => {
+  expect(select('pdf', new Set(['b']), 'Paper 5')).toEqual(['Parsed']);
+  expect(select('pdf', null, 'Paper 7')).toEqual([]);
   expect(select('unparsed', new Set(['a']))).toEqual(['Not started']);
   expect(select('unparsed', null, 'Paper 1')).toEqual(['Canceled']);
   expect(select('unparsed', new Set(['a']), 'Paper 1')).toEqual([]);
@@ -24,4 +27,14 @@ it('combines the unparsed category with the existing tag/search filters', () => 
 it('updates the category when a PDF is queued or the last unparsed PDF is removed', () => {
   const updated = entries.filter(e => e.status !== 'Canceled').map(e => e.status === 'Not started' ? { ...e, status: 'Queued' as const } : e);
   expect(filterEntries(updated, 'unparsed', null, '', 'title', [], {})).toEqual([]);
+});
+
+
+it('filters text and structured select values without partial option matches', async () => {
+  const { matchesFieldFilter } = await import('./libraryEntryFilters');
+  expect(matchesFieldFilter('Nature Methods', 'nature', 'text')).toBe(true);
+  expect(matchesFieldFilter('AA', 'A', 'select')).toBe(false);
+  expect(matchesFieldFilter('["SCI","EI"]', 'SCI', 'multi_select')).toBe(true);
+  expect(matchesFieldFilter('["SCI","EI"]', 'CI', 'multi_select')).toBe(false);
+  expect(matchesFieldFilter('not-json', 'SCI', 'multi_select')).toBe(false);
 });

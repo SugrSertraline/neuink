@@ -39,6 +39,7 @@ const HIGHLIGHT_COLORS: Array<{
 type ExpandedPanel = 'annotation' | 'translation' | null;
 
 export type PendingPdfTextSelection = {
+  original?: { text: string; notice: string };
   anchorRect?: { bottom: number; left: number; right: number; top: number };
   position: { x: number; y: number };
   segment: SourceSegment;
@@ -125,14 +126,14 @@ export function PdfTextSelectionToolbarContent({
     };
   }, []);
   const selectionKey = pending
-    ? JSON.stringify([pending.segment.uid, pending.selection.page_idx, pending.selection.text, pending.selection.rects])
+    ? JSON.stringify([pending.segment.uid, pending.selection.page_idx, pending.selection.text, pending.selection.rects, pending.original])
     : '';
   const selectionKeyRef = useRef(selectionKey);
   selectionKeyRef.current = selectionKey;
 
   useEffect(() => {
     translationRequestRef.current += 1;
-    setPanel(current => position.pinned ? current : null);
+    setPanel(current => pending?.original ? 'translation' : position.pinned ? current : null);
     setComment('');
     setTranslation(null);
     setTranslationError(null);
@@ -151,6 +152,7 @@ export function PdfTextSelectionToolbarContent({
     if (
       !autoTranslate ||
       !incomingPending ||
+      incomingPending.original ||
       !onTranslate ||
       !selectionKey ||
       autoTranslatedSelectionKeyRef.current === selectionKey
@@ -164,9 +166,17 @@ export function PdfTextSelectionToolbarContent({
     setTranslation(null);
     setTranslationError(null);
     setTranslating(true);
-    void onTranslate({ segment: incomingPending.segment, text: incomingPending.selection.text })
+    // StrictMode replays mount effects. Dispatch after that replay so an invalidated
+    // request cannot leave the selection marked as translated without a visible result.
+    let queued = true;
+    let cancelled = false;
+    void Promise.resolve().then(() => {
+      if (cancelled || translationRequestRef.current !== requestId) return;
+      queued = false;
+      return onTranslate({ segment: incomingPending.segment, text: incomingPending.selection.text });
+    })
       .then((translatedText) => {
-        if (translationRequestRef.current === requestId) {
+        if (!cancelled && translatedText !== undefined && translationRequestRef.current === requestId) {
           setTranslation(translatedText);
         }
       })
@@ -180,6 +190,12 @@ export function PdfTextSelectionToolbarContent({
           setTranslating(false);
         }
       });
+    return () => {
+      // Re-renders must not invalidate a request that has already started.
+      if (!queued) return;
+      cancelled = true;
+      if (autoTranslatedSelectionKeyRef.current === selectionKey) autoTranslatedSelectionKeyRef.current = '';
+    };
   }, [autoTranslate, notify, onTranslate, pending, selectionKey]);
 
   if (!pending || !visible || typeof document === 'undefined') {
@@ -225,6 +241,7 @@ export function PdfTextSelectionToolbarContent({
     }
   };
   const translate = async () => {
+    if (incomingPending?.original) { setPanel('translation'); return; }
     if (!onTranslate || !incomingPending || translating) {
       return;
     }
@@ -267,11 +284,13 @@ export function PdfTextSelectionToolbarContent({
       data-material="reader-popover"
       data-reading-selection-toolbar
       data-pinned={position.pinned ? 'true' : 'false'}
-      className="fixed z-[var(--z-reader-selection)] w-[min(23rem,calc(100vw-1rem))] overflow-y-auto overscroll-contain rounded-lg border bg-popover p-2 shadow-xl"
+      className="fixed z-[var(--z-reader-selection)] flex flex-col w-[min(23rem,calc(100vw-1rem))] overflow-hidden rounded-lg border bg-popover p-2 shadow-xl"
       data-placement={layout?.placement}
       role="dialog"
       aria-label="选区操作"
       style={{
+        width: position.size?.width,
+        height: position.size?.height,
         left: layout?.left ?? pending.position.x,
         maxHeight: layout?.maxHeight ?? 'calc(100vh - 1rem)',
         maxWidth: layout?.maxWidth,
@@ -283,11 +302,12 @@ export function PdfTextSelectionToolbarContent({
       onClick={(event) => event.stopPropagation()}
       onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); } }}
     >
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
       <ReadingSelectionToolbarControls text={pending.selection.text} saving={saving} translating={translating}
-        translationFailed={Boolean(translationError)} panel={panel} onClose={close}
+        translationLabel={pending.original ? '查看原文' : undefined} translationFailed={Boolean(translationError)} panel={panel} onClose={close}
         pinned={position.pinned} onTogglePin={position.toggle} dragHandleProps={position.handleProps}
         selectionAvailable={Boolean(incomingPending)}
-        onTranslate={onTranslate ? () => void translate() : undefined}
+        onTranslate={pending.original || onTranslate ? () => void translate() : undefined}
         onAsk={onAsk ? intent => { if (incomingPending) onAsk({ segment:incomingPending.segment, text:incomingPending.selection.text }, intent); } : undefined}
         onHighlight={onApply ? () => void apply('') : undefined}
         onAnnotate={onApply ? () => { if (incomingPending) setPanel(current => current === 'annotation' ? null : 'annotation'); } : undefined}
@@ -326,8 +346,8 @@ export function PdfTextSelectionToolbarContent({
       </div> : null}
 
       {panel === 'translation' ? (
-        <SelectionTranslationPanel translation={translation} error={translationError} translating={translating}
-          saving={saving} disabled={busy} onCopy={text => void copy(text, '译文已复制')}
+        <SelectionTranslationPanel resizable={Boolean(position.size)} original={pending.original} translation={translation} error={translationError} translating={translating}
+          saving={saving} disabled={busy} onCopy={text => void copy(text, pending.original ? '原文已复制' : '译文已复制')}
           onAnnotate={onApply ? text => void apply(text, 'append') : undefined} />
       ) : null}
 
@@ -388,6 +408,19 @@ export function PdfTextSelectionToolbarContent({
           </div>
         </div>
       ) : null}
+      </div>
+      <div className="relative -mx-2 -mb-2 mt-1 h-4 shrink-0">
+        {(['left', 'right'] as const).map(side => <button key={side} type="button"
+          aria-label={side === 'left' ? '从左下角调整浮窗大小' : '从右下角调整浮窗大小'}
+          title="拖动调整大小；方向键微调"
+          className={cn('absolute bottom-0 grid size-5 touch-none place-items-center text-muted-foreground hover:text-primary focus-visible:outline-2 focus-visible:outline-ring',
+            side === 'left' ? 'left-0 cursor-nesw-resize' : 'right-0 cursor-nwse-resize')}
+          {...position.resizeProps(side)}>
+          <svg aria-hidden="true" viewBox="0 0 12 12" className={cn('size-3', side === 'left' && '-scale-x-100')}>
+            <path d="M3 10 10 3M7 10l3-3" fill="none" stroke="currentColor" strokeWidth="1.5" />
+          </svg>
+        </button>)}
+      </div>
     </div>,
     document.body
   );

@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+vi.mock('@/shared/ipc/selectionTranslationApi', () => ({ getTranslationServices: vi.fn(async () => []), saveTranslationService: vi.fn(), testSelectionTranslationService: vi.fn() }));
+vi.mock('@/shared/ipc/translationRoutingApi', async original => { const mod = await original<typeof import('@/shared/ipc/translationRoutingApi')>(); return { ...mod, getTranslationRouting: vi.fn(async () => mod.DEFAULT_TRANSLATION_ROUTING), saveTranslationRouting: vi.fn(async (value: import('@/shared/ipc/translationRoutingApi').TranslationRouting) => value) }; });
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,6 +14,10 @@ import { SettingsPanel } from './SettingsPanel';
 import { loadPublicModelCatalog, readPublicModelCatalog } from '@/modules/assistant/sdk/modelCatalogStore';
 import type { PublicModelCatalog } from '@/modules/assistant/sdk/modelCatalog';
 import { listOpenAiCompatibleModels } from '@/modules/assistant/sdk/provider';
+import { runModelDiagnostics } from '../modelConnectionDiagnostics';
+import { deepResearchCommand } from '@/shared/ipc/deepResearchApi';
+vi.mock('@/shared/ipc/deepResearchApi', () => ({ deepResearchCommand: vi.fn(async (_root: string, action: Record<string, unknown>) => action.kind === 'list' ? [] : { ready: false, active: null, error: null, pending_save: false }) }));
+vi.mock('../modelConnectionDiagnostics', async original => ({ ...await original<typeof import('../modelConnectionDiagnostics')>(), runModelDiagnostics: vi.fn() }));
 vi.mock('@/modules/assistant/sdk/provider', async original => ({ ...await original<typeof import('@/modules/assistant/sdk/provider')>(), listOpenAiCompatibleModels: vi.fn() }));
 vi.mock('@/modules/assistant/sdk/modelCatalogStore', () => ({ loadPublicModelCatalog: vi.fn(), readPublicModelCatalog: vi.fn() }));
 vi.mock('@/shared/ipc/researchApi', () => ({ getResearchSettings: vi.fn(async () => ({ papers_enabled: true, web_enabled: true, use_tavily: false, has_web_key: false })), saveResearchSettings: vi.fn() }));
@@ -44,6 +50,10 @@ beforeEach(() => {
   mocks.getWorkspaceSettings.mockResolvedValue({ root: 'fixture', default_root: 'fixture', recent_workspaces: [], translation_automation: { auto_translate_pdf: false, segment_types: ['paragraph'] } });
   mocks.saveLlmSettings.mockResolvedValue(llm);
   mocks.loadAgentRuntimeSettings.mockResolvedValue(DEFAULT_AGENT_RUNTIME_SETTINGS);
+  vi.mocked(runModelDiagnostics).mockImplementation(async (_profile, _signal, update) => {
+    const steps = [{ label: '选中文字翻译', status: 'success' as const }, { label: '片段与批量翻译', status: 'success' as const }];
+    update(steps); return steps;
+  });
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 function Harness({ target }: { target?: SettingsNavigationTarget }) {
@@ -57,33 +67,91 @@ function Harness({ target }: { target?: SettingsNavigationTarget }) {
 }
 
 describe('settings information architecture and navigation', () => {
-  it('defaults to the client import tab, keeps service settings separate, and opens the illustrated guide', async () => {
+  it('keeps a modified model open when dismissing its close warning, and discards only explicitly', async () => {
+    render(<Harness target={{ id: 'models-connections', nonce: 1 }} />);
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }));
+    const editor = screen.getByRole('dialog');
+    fireEvent.change(within(editor).getByLabelText('名称'), { target: { value: 'unsaved model name' } });
+    fireEvent.click(within(editor).getByRole('button', { name: 'Close' }));
+    const warning = await screen.findByRole('dialog', { name: '保存修改后再继续？' });
+    fireEvent.click(within(warning).getByRole('button', { name: '取消' }));
+    expect(within(editor).getByLabelText('名称')).toHaveProperty('value', 'unsaved model name');
+    expect(mocks.saveLlmSettings).not.toHaveBeenCalled();
+    fireEvent.click(within(editor).getByRole('button', { name: '取消' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+  it('opens the Research installation section from a chat navigation target without installing on navigation', async () => {
+    vi.mocked(deepResearchCommand).mockClear();
+    render(<Harness target={{ id: 'tools-deep-research', nonce: 1 }} />);
+    const install = await screen.findByRole('button', { name: '安装并启用' });
+    expect(install.closest('[data-setting-id]')?.getAttribute('data-setting-id')).toBe('tools-deep-research');
+    const optionalServices = screen.getByRole('heading', { name: '可选服务' }).closest('section')!;
+    expect(optionalServices.contains(screen.getByRole('region', { name: '深度研究 · Research' }))).toBe(true);
+    expect(within(optionalServices).getByRole('button', { name: '安装并启用' })).toBe(install);
+    expect(vi.mocked(deepResearchCommand).mock.calls.some(([, action]) => action.kind === 'install')).toBe(false);
+    fireEvent.click(install);
+    await waitFor(() => expect(deepResearchCommand).toHaveBeenCalledWith('fixture', { kind: 'install' }));
+  });
+  it('tests saved model and unsaved draft translations without saving the draft', async () => {
+    render(<Harness target={{ id: 'models-connections', nonce: 1 }} />);
+    fireEvent.click(await screen.findByRole('button', { name: '测试连接' }));
+    let dialog = await screen.findByRole('dialog', { name: '连接与翻译测试' });
+    await waitFor(() => expect(runModelDiagnostics).toHaveBeenCalledOnce());
+    expect(vi.mocked(runModelDiagnostics).mock.calls[0][0]).toMatchObject({ id: 'model', model: 'test-model', api_protocol: 'openai_compatible' });
+    fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }));
+    await screen.findByRole('button', { name: '测试通过' });
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
+    const editor = await screen.findByRole('dialog', { name: '模型配置：测试连接' });
+    fireEvent.change(within(editor).getByLabelText('最大输出（Token）'), { target: { value: '1234' } });
+    fireEvent.click(within(editor).getByRole('button', { name: '测试连接与翻译' }));
+    dialog = await screen.findByRole('dialog', { name: '连接与翻译测试' });
+    await waitFor(() => expect(runModelDiagnostics).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(runModelDiagnostics).mock.calls[1][0]).toMatchObject({ id: '__draft__', max_output_tokens: 1234 });
+    expect(mocks.saveLlmSettings).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }));
+    expect(within(editor).getByLabelText('最大输出（Token）')).toHaveProperty('value', '1234');
+  });
+  it('uses a swatch popover for accent colors and returns focus to its trigger', async () => {
+    render(<Harness target={{ id: 'appearance-color', nonce: 1 }} />);
+    const trigger = await screen.findByRole('button', { name: '强调色：蓝色' });
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(screen.queryByRole('combobox', { name: '强调色' })).toBeNull();
+    fireEvent.click(trigger);
+    const palette = screen.getByRole('dialog', { name: '强调色色板' });
+    expect(within(palette).getAllByRole('button')).toHaveLength(APP_THEME_PRESETS.length);
+    expect(within(palette).getByRole('button', { name: '蓝色' }).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(within(palette).getByRole('button', { name: '绿色' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '强调色色板' })).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
+  it('keeps reader-only preview sizes and reflow display out of settings', async () => {
+    render(<Harness target={{ id: 'reader-preview', nonce: 1 }} />);
+    await screen.findByRole('switch', { name: 'PDF 片段悬停' });
+    expect(screen.queryByText('预览文字大小')).toBeNull();
+    expect(screen.queryByText('预览卡片大小')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '翻译' }));
+    expect(screen.queryByRole('heading', { name: '重排视图显示' })).toBeNull();
+    expect(screen.getByRole('switch', { name: '选中文字后自动翻译' })).toBeTruthy();
+  });
+
+  it('shows parsing options and client import instructions without changing the selected service', async () => {
     render(<Harness target={{ id: 'parser-zip', nonce: 1 }} />);
     const tutorial = await screen.findByRole('button', { name: '查看客户端导入图文教程' });
-    expect(screen.getByRole('tab', { name: 'MinerU 客户端（推荐）' }).getAttribute('aria-selected')).toBe('true');
-    expect(screen.queryByRole('textbox', { name: 'MinerU URL' })).toBeNull();
-    fireEvent.mouseDown(screen.getByRole('tab', { name: '自建 MinerU 服务' }), { button: 0 });
-    expect(screen.getByRole('textbox', { name: 'MinerU URL' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: '查看客户端导入图文教程' })).toBeNull();
-    fireEvent.mouseDown(screen.getByRole('tab', { name: 'MinerU 客户端（推荐）' }), { button: 0 });
+    expect(screen.getByRole('radio', { name: '账号解析服务' })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: '自建 MinerU 服务' })).toBeTruthy();
     fireEvent.click(tutorial);
     expect(openMineruClientGuide).toHaveBeenCalledOnce();
   });
-  it('reveals the service tab before focusing search and tutorial navigation targets', async () => {
+  it('focuses service, client import, and shared auto-parse search targets', async () => {
     const view = render(<Harness target={{ id: 'parser-service', nonce: 1 }} />);
     const endpoint = await screen.findByRole('textbox', { name: 'MinerU URL' });
     await waitFor(() => expect(document.activeElement).toBe(endpoint));
-    expect(screen.getByRole('tab', { name: '自建 MinerU 服务' }).getAttribute('aria-selected')).toBe('true');
-    fireEvent.mouseDown(screen.getByRole('tab', { name: 'MinerU 客户端（推荐）' }), { button: 0 });
-    view.rerender(<Harness target={{ id: 'parser-service', nonce: 2 }} />);
-    await waitFor(() => expect(document.activeElement).toBe(endpoint));
-    expect(screen.getByRole('tab', { name: '自建 MinerU 服务' }).getAttribute('aria-selected')).toBe('true');
     view.rerender(<Harness target={{ id: 'parser-zip', nonce: 3 }} />);
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: '查看客户端导入图文教程' })));
     fireEvent.change(screen.getByRole('textbox', { name: '搜索设置' }), { target: { value: '导入 PDF 后自动解析' } });
     fireEvent.click(screen.getByRole('button', { name: /导入 PDF 后自动解析/ }));
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('switch', { name: '导入 PDF 后自动解析' })));
-    expect(screen.getByRole('tab', { name: '自建 MinerU 服务' }).getAttribute('aria-selected')).toBe('true');
+    await waitFor(() => expect(document.activeElement).toBe(view.container.querySelector('[data-setting-id="parser-auto"] [role="switch"]')));
   });
   it('opens new configurations without focusing inputs or opening suggestions, including after reopening', async () => {
     render(<Harness target={{ id: 'models-connections', nonce: 1 }} />);
@@ -111,15 +179,17 @@ describe('settings information architecture and navigation', () => {
     await screen.findByRole('button', { name: '编辑' });
     const page = screen.getByRole('heading', { level: 2, name: '模型与助手' }).closest('.settings-form')!;
     expect(page).toBeTruthy();
-    expect(within(page as HTMLElement).getAllByRole('heading', { level: 3 }).map(heading => heading.textContent)).toEqual(['默认模型', '模型连接']);
+    expect(within(page as HTMLElement).getAllByRole('heading', { level: 3 }).map(heading => heading.textContent)).toEqual(['默认模型', '自定义大模型配置', '本地 Agent', '诊断']);
     expect(screen.queryByRole('heading', { name: '模型高级参数' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '设置选中文字与整体翻译 →' }));
-    expect(screen.getByRole('combobox', { name: '整体翻译模型' })).toBeTruthy();
-    const selectionGroup = screen.getByRole('heading', { name: '选中文字翻译' }).closest('section')!;
-    const wholeGroup = screen.getByRole('heading', { name: '整篇与片段翻译' }).closest('section')!;
+    expect(await screen.findByRole('combobox', { name: '默认翻译来源' })).toBeTruthy();
+    const selectionGroup = screen.getByRole('heading', { name: '自动翻译' }).closest('section')!;
+    const wholeGroup = screen.getByRole('heading', { name: '自动翻译' }).closest('section')!;
     expect(selectionGroup.contains(screen.getByRole('switch', { name: '选中文字后自动翻译' }))).toBe(true);
     expect(wholeGroup.contains(screen.getByRole('switch', { name: '解析后自动翻译 PDF' }))).toBe(true);
-    expect(wholeGroup.contains(screen.getByRole('combobox', { name: '整体翻译模型' }))).toBe(true);
+    const behaviors = screen.getByRole('heading', { name: '翻译行为' });
+    const configuration = screen.getByRole('heading', { name: '翻译模型与服务' });
+    expect(behaviors.compareDocumentPosition(configuration) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     view.rerender(<Harness target={{ id: 'tools-services', nonce: 2 }} />);
     const service = view.container.querySelector<HTMLElement>('[data-setting-id="tools-services"]')!;
     await waitFor(() => expect(service.contains(document.activeElement) || service === document.activeElement).toBe(true));
@@ -127,7 +197,7 @@ describe('settings information architecture and navigation', () => {
     expect(screen.getByRole('heading', { level: 2, name: '检索与工具' }).closest('.settings-form')).toBeTruthy();
     expect(screen.getByRole('heading', { name: '基础检索' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '可选服务' })).toBeTruthy();
-    expect(view.container.querySelectorAll('.settings-service')).toHaveLength(2);
+    expect(view.container.querySelectorAll('.settings-service')).toHaveLength(3);
   });
   it('selects incomplete providers, shows their models, and requires an explicit protocol before syncing or saving', async () => {
     vi.mocked(loadPublicModelCatalog).mockResolvedValue({ ...catalog, models: [{ id: 'remote-chat', providerId: 'remote-demo', providerName: 'Remote Demo' }] });
@@ -196,26 +266,24 @@ describe('settings information architecture and navigation', () => {
       expect(container.querySelector(`[data-setting-id="${id}"]`)).toBeNull();
     }
     rerender(<Harness target={{ id: 'agent-main', nonce: 2 }} />);
-    expect(screen.getByRole('heading', { name: '模型连接' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '自定义大模型配置' })).toBeTruthy();
     expect(mocks.loadAgentRuntimeSettings).not.toHaveBeenCalled();
     expect(mocks.saveAgentRuntimeSettings).not.toHaveBeenCalled();
   });
-  it('keeps onboarding separate from storage and every searchable target at a stable address', async () => {
+  it('hides the onboarding settings and keeps every visible target at a stable address', async () => {
     const { container } = render(<Harness />);
-    expect(within(screen.getByRole('navigation', { name: '设置分类' })).getAllByRole('button')).toHaveLength(8);
-    const tutorial = screen.getByRole('heading', { level: 2, name: '入门与教程' }).closest('.settings-form')!;
-    const storage = screen.getByRole('heading', { level: 2, name: '资料与存储' }).closest('.settings-form')!;
-    expect(tutorial.querySelector('[data-setting-id="data-onboarding"]')).toBeTruthy();
-    expect(storage.querySelector('[data-setting-id="data-onboarding"]')).toBeNull();
+    expect(within(screen.getByRole('navigation', { name: '设置分类' })).getAllByRole('button')).toHaveLength(7);
+    expect(screen.queryByRole('heading', { level: 2, name: '入门与教程' })).toBeNull();
+    expect(container.querySelector('[data-setting-id="data-onboarding"]')).toBeNull();
     for (const item of SETTINGS_CATALOG) expect(container.querySelectorAll(`[data-setting-id="${item.id}"]`).length, item.id).toBe(1);
     await waitFor(() => expect(screen.queryByText('正在读取配置…')).toBeNull());
   });
   it('locates flat settings, including repeated requests', async () => {
-    const { rerender, container } = render(<Harness target={{ id: 'reader-preview-size', nonce: 1 }} />);
-    await waitFor(() => expect(container.querySelector('section[data-setting-id="reader-preview-size"]')?.getAttribute('data-setting-highlight')).toBe('true'));
-    expect(container.querySelector('details[data-setting-id="reader-preview-size"]')).toBeNull();
+    const { rerender, container } = render(<Harness target={{ id: 'reader-preview-content', nonce: 1 }} />);
+    await waitFor(() => expect(container.querySelector('section[data-setting-id="reader-preview-content"]')?.getAttribute('data-setting-highlight')).toBe('true'));
+    expect(container.querySelector('details[data-setting-id="reader-preview-content"]')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '翻译' }));
-    rerender(<Harness target={{ id: 'reader-preview-size', nonce: 2 }} />);
+    rerender(<Harness target={{ id: 'reader-preview-content', nonce: 2 }} />);
     await waitFor(() => expect(screen.getByRole('heading', { name: '阅读与批注' })).toBeTruthy());
     expect(container.querySelector('[data-setting-highlight="true"]')).toBeTruthy();
   });
@@ -322,4 +390,17 @@ describe('settings information architecture and navigation', () => {
     expect(vi.mocked(loadPublicModelCatalog).mock.calls[0][0]?.aborted).toBe(true);
     expect(mocks.saveLlmSettings).not.toHaveBeenCalled();
   });
+});
+
+it('merges storage into account and opens reset only through the full command result', async () => {
+  const { ADMIN_PASSWORD_RESET_COMMAND } = await import('../settingsCatalog');
+  render(<Harness />);
+  expect(screen.queryByRole('button', { name: '资料与存储' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '账户与存储' }));
+  expect(screen.getByText('本机资料与存储')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '使用管理员重置凭据' })).toBeNull();
+  fireEvent.change(screen.getByRole('textbox', { name: '搜索设置' }), { target: { value: ADMIN_PASSWORD_RESET_COMMAND } });
+  expect(screen.queryByRole('dialog', { name: '重置当前管理员密码' })).toBeNull();
+  fireEvent.click(await screen.findByRole('button', { name: /重置当前管理员密码/ }));
+  expect(await screen.findByRole('dialog', { name: '重置当前管理员密码' })).toBeTruthy();
 });

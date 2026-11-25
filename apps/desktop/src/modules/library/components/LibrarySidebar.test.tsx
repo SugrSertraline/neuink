@@ -8,6 +8,7 @@ import { TagPreferencesProvider } from '@/shared/components/TagPreferencesProvid
 import { ToastContext } from '@/shared/hooks/useToast';
 import { beginEntryTagDrag, cancelEntryTagDrag, finishEntryTagDrag } from '@/shared/lib/entryDragData';
 
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { LibrarySidebar, type LibraryEntry } from './LibrarySidebar';
 
 const entry: LibraryEntry = {
@@ -41,7 +42,7 @@ afterEach(() => {
 function renderSidebar(props: Partial<ComponentProps<typeof LibrarySidebar>> = {}, notify = vi.fn(() => 'toast')) {
   return render(
     <ToastContext.Provider value={{ dismiss: vi.fn(), notify }}>
-      <TagPreferencesProvider>
+      <TooltipProvider><TagPreferencesProvider>
         <LibrarySidebar
           activeContentId={null}
           activeTag={null}
@@ -70,10 +71,31 @@ function renderSidebar(props: Partial<ComponentProps<typeof LibrarySidebar>> = {
           onUpdateEntry={vi.fn()}
           {...props}
         />
-      </TagPreferencesProvider>
+      </TagPreferencesProvider></TooltipProvider>
     </ToastContext.Provider>
   );
 }
+
+it('removes the hidden Zotero view when that source is disabled', () => {
+  const view = renderSidebar({ zoteroEnabled: false, hiddenSourceCount: 2 });
+  expect(view.queryByRole('button', { name: /已隐藏/ })).toBeNull();
+  expect(within(view.getByRole('region', { name: '快速视图' })).getByRole('button', { name: '全部 1' })).toBeTruthy();
+});
+
+it('keeps the hide action without hidden navigation in entry details', () => {
+  const onSelectView = vi.fn(), onToggleSourceHidden = vi.fn();
+  const view = renderSidebar({ entryExplorerOpen: true, hiddenSourceCount: 2, onSelectView, onToggleSourceHidden,
+    selectedEntry: { ...entry, sourceInfo: { kinds: ['zotero'], zotero_hidden: false } } });
+  fireEvent.click(view.getByRole('button', { name: '从条目库隐藏当前来源论文' }));
+  expect(onToggleSourceHidden).toHaveBeenCalledExactlyOnceWith(entry.id);
+  expect(view.queryByRole('button', { name: /查看已隐藏论文/ })).toBeNull();
+  expect(onSelectView).not.toHaveBeenCalled();
+});
+
+it('identifies Zotero notes in the selected entry details', () => {
+  const view = renderSidebar({ entryExplorerOpen: true, selectedEntry: { ...entry, contents: [{ kind: 'note', note_id: 'from-zotero', title: 'Imported note' }] }, zoteroNoteIds: ['from-zotero'] });
+  expect(view.getByText('Zotero · 本地副本')).toBeTruthy();
+});
 
 describe('LibrarySidebar tag drop', () => {
   it('shows an unparsed category with a matching count, selection, and navigation', () => {
@@ -81,13 +103,15 @@ describe('LibrarySidebar tag drop', () => {
     const statuses = ['Not started', 'Canceled', 'Queued', 'Uploading', 'Parsing', 'Parsed', 'Failed', 'No PDF'] as const;
     const view = renderSidebar({ activeView: 'unparsed', onSelectView,
       entries: statuses.map(status => ({ ...entry, id: status, status, pdfFileName: status === 'No PDF' ? null : 'paper.pdf' })) });
-    const button = view.getByRole('button', { name: '未解析 PDF 2' });
+    const button = view.getByRole('button', { name: '未解析 2' });
     expect(button.getAttribute('aria-current')).toBe('page');
     button.focus(); expect(document.activeElement).toBe(button);
     fireEvent.click(button); expect(onSelectView).toHaveBeenCalledWith('unparsed');
     expect(view.getByRole('button', { name: '解析中 3' })).toBeTruthy();
     expect(view.getByRole('button', { name: '解析失败 1' })).toBeTruthy();
     expect(view.getByRole('button', { name: '无 PDF 1' })).toBeTruthy();
+    fireEvent.click(view.getByRole('button', { name: '全部 7' }));
+    expect(onSelectView).toHaveBeenLastCalledWith('pdf');
   });
   it('keeps library navigation visible when a paper is open but details were not selected', () => {
     const view = renderSidebar({ selectedEntry: entry, activeContentId: 'pdf', entryExplorerOpen: false });
@@ -142,9 +166,9 @@ it('shares resize handles while preserving three independent scroll regions and 
   viewports[2].scrollTop = 80;
   fireEvent.scroll(viewports[2]);
   fireEvent.keyDown(view.getByRole('separator', { name: '调整解析与全部标签高度' }), { key: 'ArrowUp' });
-  expect(panels[0].style.flexGrow).toBe('1');
-  expect(Number(panels[1].style.flexGrow)).toBeLessThan(1.25);
-  expect(Number(panels[2].style.flexGrow)).toBeGreaterThan(2);
+  expect(panels[0].style.flexBasis).toBe('100px');
+  expect(panels[1].style.flexBasis).toBe('117px');
+  expect(panels[2].style.flexBasis).toBe('208px');
   expect(viewports[2].scrollTop).toBe(80);
   fireEvent.click(view.getByRole('button', { name: '显示全部' }));
   expect(onClearFilters).toHaveBeenCalledOnce();
@@ -154,7 +178,7 @@ it('shares resize handles while preserving three independent scroll regions and 
   fireEvent.click(view.getByRole('button', { name: '解析' }));
   expect(view.getAllByRole('separator')).toHaveLength(1);
   expect(view.getByRole('separator', { name: '调整快速视图与全部标签高度' })).toBeTruthy();
-  expect(within(panels[1]).queryByRole('button', { name: /已解析 PDF/ })).toBeNull();
+  expect(within(panels[1]).queryByRole('button', { name: /已解析/ })).toBeNull();
   fireEvent.click(view.getByRole('button', { name: '解析' }));
   expect(view.getAllByRole('separator')).toHaveLength(2);
   expect(panels[1].querySelector('[data-slot="scroll-area-viewport"]')).toBe(viewports[1]);
@@ -188,4 +212,13 @@ it('keeps tag search, edit and directory navigation independent from the panel c
   expect(onOpenTagDetails).not.toHaveBeenCalled();
   fireEvent.click(view.getByRole('button', { name: '打开标签 研究' }));
   expect(onOpenTagDetails).toHaveBeenCalledWith('research');
+});
+
+it('opens the selected entry editor from the details header', () => {
+  const onEditEntry = vi.fn();
+  const view = renderSidebar({ entryExplorerOpen: true, selectedEntry: entry, onEditEntry });
+  const button = view.getByRole('button', { name: '编辑条目' });
+  expect(button.closest('.side-head')).toBeTruthy();
+  fireEvent.click(button);
+  expect(onEditEntry).toHaveBeenCalledExactlyOnceWith(entry.id);
 });

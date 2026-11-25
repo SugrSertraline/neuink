@@ -1,3 +1,5 @@
+import { AssistantDebugSetting } from './AssistantDebugSetting';
+import { LocalAgentSettingsSection } from './LocalAgentSettingsSection';
 import { CheckCircle2, Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -7,9 +9,11 @@ import { SettingsGroup, SettingsPage } from './SettingsPrimitives';
 import { TaskModelSetting } from './TaskModelSetting';
 import { ModelProfileEditor } from './ModelProfileEditor';
 import type { SettingsPanelLayoutProps } from './SettingsPanelLayout';
+import { useModelProfileRecovery } from '../useModelProfileRecovery';
 
 export function ModelSettingsSection({ props }: { props: SettingsPanelLayoutProps }) {
-  const [profileEditorOpen, setProfileEditorOpen] = useState(false);
+  const modelEditor = useModelProfileRecovery(props);
+  const setProfileEditorOpen = modelEditor.setOpen;
   const [deleteConfirmProfile, setDeleteConfirmProfile] =
     useState<SettingsPanelLayoutProps['editingProfile']>(null);
   const { busy, settings, profileTestStates, formatContextLength, onNewProfile,
@@ -21,7 +25,7 @@ export function ModelSettingsSection({ props }: { props: SettingsPanelLayoutProp
                   <TaskModelSetting props={props} task="assistant" />
                   <Button size="sm" variant="ghost" onClick={() => props.onSetActiveSettingsTab('translation')}>设置选中文字与整体翻译 →</Button>
                 </SettingsGroup>
-                <SettingsGroup id="models-connections" title="模型连接" action={
+                <SettingsGroup id="models-connections" title="自定义大模型配置" action={
                   <Button disabled={props.modelsUnavailable || taskBusy(props)} size="sm" type="button" variant="outline" onClick={() => {
                     onNewProfile();
                     setProfileEditorOpen(true);
@@ -40,7 +44,7 @@ export function ModelSettingsSection({ props }: { props: SettingsPanelLayoutProp
                           <span className="min-w-0 truncate text-[13px] font-semibold" title={profile.name}>{profile.name}</span>
                           <span className="flex flex-wrap gap-1">
                             {settings.assistant_profile_id === profile.id && <Badge variant="secondary">对话</Badge>}
-                            {settings.translation_profile_id === profile.id && <Badge variant="secondary">整体翻译</Badge>}
+                            {settings.translation_profile_id === profile.id && <Badge variant="secondary">默认翻译</Badge>}
                           </span>
                         </div>
                         <p className="mt-1 truncate text-xs" title={profile.model}>{profile.model}</p>
@@ -67,7 +71,11 @@ export function ModelSettingsSection({ props }: { props: SettingsPanelLayoutProp
                 </div>
 
                 </SettingsGroup>
-                <ModelProfileEditor props={props} open={profileEditorOpen} onOpenChange={setProfileEditorOpen} />
+                <LocalAgentSettingsSection active={props.activeSettingsTab === 'models'} workspaceRoot={props.workspaceRoot} />
+                <AssistantDebugSetting />
+                <ModelProfileEditor props={props} open={modelEditor.open} onOpenChange={modelEditor.onOpenChange}
+                  recovery={modelEditor.recovery} onSaved={modelEditor.saved} onDiscard={modelEditor.saved} />
+                {modelEditor.dialog}
     
                 <Dialog open={Boolean(deleteConfirmProfile)} onOpenChange={(open) => {
                   if (!open) {
@@ -113,10 +121,10 @@ function profileTestButtonLabel(status: 'error' | 'idle' | 'success' | 'testing'
     return '测试中';
   }
   if (status === 'success') {
-    return '已连接';
+    return '测试通过';
   }
   if (status === 'error') {
-    return '连接失败';
+    return '测试未通过';
   }
   return '测试连接';
 }

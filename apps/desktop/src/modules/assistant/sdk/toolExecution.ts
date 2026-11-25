@@ -1,0 +1,200 @@
+import type { GetEntryOutlineResponse } from '@/shared/ipc/assistantApi';
+import {
+  type SciverseAgenticSearchResponse,
+  type SciverseContentResponse,
+  type SciverseJsonResponse
+} from '@/modules/sciverse/types';
+import {
+  invokeMcpTool,
+  invokeAssistantTool as invokeNativeTool,
+  type ConversationSourceLink,
+  type ReadEntryAssistantContextResponse,
+  type ReadSegmentContentResponse
+} from '@/shared/ipc/assistantApi';
+import {
+  isResearchTool,
+  ResearchImportNotApprovedError,
+  researchPapersFromResult,
+  runResearchTool
+} from '@/shared/ipc/researchApi';
+import { type SearchResults } from '@/shared/ipc/workspaceApi';
+import { AgentToolNotExecutedError } from '../agent-core/agent';
+import { formatReadEntryOutput } from './entryContext';
+import { isPdfTool, runPdfTool } from './pdfTools';
+import { researchImportResult } from './researchImportResult';
+import { researchOutput } from './researchOutput';
+import { arxivSearchContext } from '../research/arxivSearchContext';
+import { PAPER_PRESENTATION_INSTRUCTIONS } from '../research/paperPresentation';
+import { arxivGateStatus, arxivGateMessage } from '@/shared/lib/arxivGateStatus';
+import { createAgentToolFailure } from '../agent-core/toolFailure';
+import { formatSciverseSearchOutput } from './sciverseOutput';
+import { assertSuccessfulToolResult } from './toolFailurePolicy';
+import {
+  formatReadSegmentOutput,
+  formatSciverseContentOutput,
+  formatSearchSegmentsOutput,
+  trimSciverseJson
+} from './toolOutput';
+import { type JsonObject } from './toolValues';
+
+async function invokeAssistantTool<T>(name: string, input: JsonObject): Promise<T> {
+  const result = await invokeNativeTool<T>(name, input);
+  assertSuccessfulToolResult(result);
+  return result;
+}
+
+export async function executeTool(
+  toolName: string,
+  input: JsonObject,
+  {
+    addSource,
+    signal,
+    contextBudget,
+    toolCallId
+  }: {
+    addSource: (source: ConversationSourceLink) => number;
+    signal?: AbortSignal;
+    contextBudget: number;
+    toolCallId?: string;
+  }
+) {
+  // Native IPC may finish after cancellation; never allocate citations from a late result.
+  const recordSource = (source: ConversationSourceLink) => { signal?.throwIfAborted(); return addSource(source); };
+  if (isPdfTool(toolName)) return runPdfTool(toolName, input, recordSource, contextBudget, signal);
+  if (isResearchTool(toolName)) {
+    let result: unknown;
+    try { result = await runResearchTool(toolName, input, signal, toolCallId); }
+    catch (error) {
+      const gate = arxivGateStatus(error);
+      if (gate && ['arxiv_search','search_papers'].includes(toolName)) {
+        const code = ['rate_limited','cooldown'].includes(gate.code) ? 'TOOL_RATE_LIMITED' : 'TOOL_EXECUTION_FAILED';
+        return { modelOutput: { ...createAgentToolFailure(code), arxivGate: gate }, sources: [], summary: arxivGateMessage(gate) };
+      }
+      if (error instanceof ResearchImportNotApprovedError) {
+        throw new AgentToolNotExecutedError(error.message, 'TOOL_APPROVAL_UNAVAILABLE');
+      }
+      throw error;
+    }
+    assertSuccessfulToolResult(result);
+    if (toolName === 'import_papers') return researchImportResult(result, input.paper_ids);
+    const native = result as { errors?: Array<{gate?:unknown}>; source_errors?: {arxiv?:unknown} };
+    const gate = arxivGateStatus(native?.source_errors?.arxiv ?? (Array.isArray(native?.errors) ? native.errors.find(row => row.gate)?.gate : undefined));
+    const projected = researchOutput(result, contextBudget);
+    const modelOutput = projected && typeof projected === 'object' ? { ...projected,
+      ...(['search_papers', 'arxiv_search'].includes(toolName) ? { presentation_contract: PAPER_PRESENTATION_INSTRUCTIONS } : {}),
+      ...(gate ? { arxivGate: gate } : {}) } : projected;
+    return { modelOutput, sources: [], researchPapers: ['search_papers', 'arxiv_search'].includes(toolName) ? researchPapersFromResult(result) : undefined,
+      researchCacheSource: toolName === 'arxiv_search' ? 'arxiv_search' as const : toolName === 'search_papers' ? 'research' as const : undefined,
+      researchSearch: toolName === 'arxiv_search' ? arxivSearchContext(result) : undefined,
+      arxivGate: gate,
+      summary: gate ? arxivGateMessage(gate) : '已获取外部检索结果（不代表已读论文全文）。' };
+  }
+  if (toolName.startsWith('mcp.')) {
+    const result = await invokeMcpTool(toolName, input, signal);
+    assertSuccessfulToolResult(result);
+    assertSuccessfulToolResult(result.output);
+    return {
+      modelOutput: result.output ?? result,
+      sources: [],
+      summary: result.summary ?? `Executed ${toolName}.`
+    };
+  }
+
+  if (toolName === 'search_segments') {
+    const results = await invokeAssistantTool<SearchResults>('search_segments', input);
+    signal?.throwIfAborted();
+    return formatSearchSegmentsOutput(results, recordSource, typeof input.section_filter === 'string' ? input.section_filter : null);
+  }
+
+  if (toolName === 'read_segment_content') {
+    const result = await invokeAssistantTool<ReadSegmentContentResponse>(
+      'read_segment_content',
+      input
+    );
+    signal?.throwIfAborted();
+    return formatReadSegmentOutput(result, recordSource, contextBudget);
+  }
+
+  if (toolName === 'read_entry_assistant_context') {
+    const result = await invokeAssistantTool<ReadEntryAssistantContextResponse>(
+      'read_entry_assistant_context',
+      { root: input.root, entry_id: input.entry_id }
+    );
+    signal?.throwIfAborted();
+    if (result.has_pdf && result.parsed_segment_count === 0) {
+      const fallback = await runPdfTool('read_pdf_pages', { ...input, start_page: 1, page_count: 3 }, recordSource, contextBudget, signal);
+      return { ...fallback, modelOutput: { ...fallback.modelOutput, requested_tool: 'read_entry_assistant_context',
+        note: 'PDF 尚未完整解析，已自动读取前 3 页以内的文字层；按 next_page 继续 read_pdf_pages，不能把这部分当成全文。' } };
+    }
+    return formatReadEntryOutput(result, recordSource, contextBudget, input);
+  }
+
+  if (toolName === 'get_entry_outline') {
+    const result = await invokeAssistantTool<GetEntryOutlineResponse>('get_entry_outline', {
+      root: input.root,
+      entry_id: input.entry_id
+    });
+    signal?.throwIfAborted();
+    const sections = result.sections.map((section) => `${'  '.repeat(Math.max(0, section.level - 1))}- ${section.section_path} (${section.segment_count} segments)`);
+    return {
+      modelOutput: {
+        entry_id: result.entry_id,
+        entry_title: result.entry_title,
+        compact_summary: result.compact_summary ?? '',
+        kind: 'get_entry_outline',
+        sections
+      },
+      sources: [],
+      summary: sections.length > 0 ? `Read the outline for "${result.entry_title}".` : `No section outline is available for "${result.entry_title}".`
+    };
+  }
+
+  if (toolName === 'search_sciverse_evidence') {
+    const result = await invokeAssistantTool<SciverseAgenticSearchResponse>(toolName, input);
+    signal?.throwIfAborted();
+    return formatSciverseSearchOutput(result, recordSource, String(input.query), contextBudget);
+  }
+
+  if (toolName === 'read_sciverse_content') {
+    const result = await invokeAssistantTool<SciverseContentResponse>(toolName, input);
+    signal?.throwIfAborted();
+    return formatSciverseContentOutput(result, input, recordSource, contextBudget);
+  }
+
+  if (toolName === 'search_sciverse_metadata' || toolName === 'search_sciverse_paper_schema' || toolName === 'get_sciverse_metadata_catalog' || toolName === 'get_sciverse_paper_schema') {
+    const result = await invokeAssistantTool<SciverseJsonResponse>(toolName, input);
+    return {
+      modelOutput: trimSciverseJson(result, contextBudget),
+      sources: [],
+      summary: toolName === 'search_sciverse_metadata'
+        ? `Searched Sciverse structured metadata for "${String(input.query)}".`
+        : toolName === 'search_sciverse_paper_schema'
+          ? `Searched Sciverse Paper Schema for "${String(input.query)}".`
+          : toolName === 'get_sciverse_metadata_catalog'
+            ? 'Read the Sciverse metadata field catalog.'
+            : 'Read the Sciverse Paper Schema.'
+    };
+  }
+
+  throw new Error(`Unsupported assistant tool: ${toolName}`);
+}
+
+export function runningSummary(toolName: string, input: JsonObject) {
+  if (isPdfTool(toolName)) return toolName === 'search_pdf_text' ? '正在搜索 PDF 文字层…' : '正在按页读取 PDF 文字层…';
+  if (toolName === 'search_segments') {
+    return `Searching parsed PDF segments for "${String(input.query)}" using ${String(input.mode)}.`;
+  }
+  if (toolName === 'read_segment_content') {
+    return `Reading segment ${String(input.segment_uid)}.`;
+  }
+  if (toolName === 'search_sciverse_evidence') {
+    return `Searching Sciverse for "${String(input.query)}".`;
+  }
+  if (toolName === 'read_sciverse_content') {
+    return `Reading Sciverse document ${String(input.doc_id)}.`;
+  }
+  if (toolName === 'read_entry_assistant_context') {
+    return `Reading parsed markdown for Entry ${String(input.entry_id)}.`;
+  }
+  return 'Running assistant tool.';
+}

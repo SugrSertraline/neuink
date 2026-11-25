@@ -1,0 +1,47 @@
+name: Alpha and beta validation
+
+on:
+  push:
+    branches: [alpha, beta]
+  pull_request:
+    branches: [alpha, beta]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: branch-validation-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  validate:
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/alpha' || github.ref == 'refs/heads/beta'
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Validate application versions
+        run: node apps/desktop/scripts/release-version.cjs
+      - run: rustup toolchain install 1.96.0 --profile minimal
+      - run: rustup override set 1.96.0
+      - run: npm --workspace apps/desktop run test:packaging
+      - name: Frontend regression tests
+        env:
+          NODE_OPTIONS: --no-experimental-webstorage
+        run: npm --workspace apps/desktop run test:frontend -- --maxWorkers=2 --testTimeout=30000 --hookTimeout=30000
+      - name: Type check and frontend production build
+        run: npm run desktop:build
+      - name: Rust service tests (serial local-server fixtures)
+        run: cargo test --locked -p neuink-domain -p neuink-config -p neuink-zotero -p neuink-parser -p neuink-search -p neuink-sciverse -p neuink-workspace -p neuink-job -p neuink-ipc --no-default-features -- --test-threads=1

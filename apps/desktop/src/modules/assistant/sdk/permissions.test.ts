@@ -18,7 +18,7 @@ describe('capability boundaries', () => {
     const options = {
       activeExecution: { agent: runtimeSettings.mainAssistant },
       runtimeSettings, root: 'fixture', scope,
-      invocationPlan: { enabledToolIds: ['task.run_subagent'], writePolicy: 'chat_only' }
+      invocationPlan: { enabledToolIds: ['task_run_subagent'], writePolicy: 'chat_only' }
     } as unknown as Parameters<typeof createAssistantTools>[0];
     const disabled = await createAssistantTools(options);
     expect(disabled.tools.task_run_subagent).toBeUndefined();
@@ -29,7 +29,7 @@ describe('capability boundaries', () => {
   it('enforces read-only planning even if a caller supplies an overly broad tool list', async () => {
     const runtime = await createAssistantTools({
       activeExecution: { agent: DEFAULT_AGENT_RUNTIME_SETTINGS.mainAssistant }, root: 'fixture', scope,
-      invocationPlan: { executionMode: 'plan', enabledToolIds: ['create_entry', 'app.set_appearance', 'task.run_subagent', 'note.propose_create', 'entry.propose_meta_patch', 'tag.propose_change'], writePolicy: 'proposal_only' } as never,
+      invocationPlan: { executionMode: 'plan', enabledToolIds: ['create_entry', 'app_set_appearance', 'task_run_subagent', 'note_propose_create', 'entry_propose_meta_patch', 'tag_propose_change'], writePolicy: 'proposal_only' } as never,
       onCreateEntry: vi.fn(), applicationActions: createApplicationActions('standard', vi.fn()),
       onNoteProposal: vi.fn(), onEntryMetaProposal: vi.fn(), onTagProposal: vi.fn()
     });
@@ -39,7 +39,7 @@ describe('capability boundaries', () => {
   it('does not grant proposal callbacks in a read-only invocation', async () => {
     const runtime = await createAssistantTools({
       activeExecution: { agent: DEFAULT_AGENT_RUNTIME_SETTINGS.mainAssistant }, root: 'fixture', scope,
-      invocationPlan: { enabledToolIds: ['note.propose_create', 'entry.propose_meta_patch', 'tag.propose_change'], writePolicy: 'chat_only' } as never,
+      invocationPlan: { enabledToolIds: ['note_propose_create', 'entry_propose_meta_patch', 'tag_propose_change'], writePolicy: 'chat_only' } as never,
       onNoteProposal: vi.fn(), onEntryMetaProposal: vi.fn(), onTagProposal: vi.fn()
     });
     expect(Object.keys(runtime.tools)).toEqual(['present_diagram']);
@@ -72,7 +72,7 @@ describe('capability boundaries', () => {
     const runtime = await createAssistantTools({
       activeExecution: { agent: DEFAULT_AGENT_RUNTIME_SETTINGS.mainAssistant },
       applicationActions: createApplicationActions('standard', setter),
-      invocationPlan: { enabledToolIds: ['app.set_appearance'], writePolicy: 'chat_only' } as never, root: 'fixture', scope
+      invocationPlan: { enabledToolIds: ['app_set_appearance'], writePolicy: 'chat_only' } as never, root: 'fixture', scope
     });
     expect(runtime.tools.app_set_appearance.needsApproval).toBe(true);
     await expect(agentExecutors(runtime.tools).app_set_appearance({ appearance: 'atelier' }, { id: 'blocked' })).rejects.toThrow('需要用户确认');

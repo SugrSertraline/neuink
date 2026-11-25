@@ -5,8 +5,8 @@ import { PaperTextPreview as SourceSnapshotPreview } from '../navigation/PaperRe
 import type { ParagraphTranslation, TranslationPart, ParagraphLiveProgress, TranslationTiming } from '@/shared/ipc/paragraphTranslationApi';
 import { useParagraphTranslation, useParagraphProgress } from './ParagraphTranslationContext';
 import { SegmentMenuButton } from '../SegmentMenuButton';
-import { hasParagraphTranslation, hasSentenceTranslation, paragraphTranslationRunning } from './paragraphTranslationState';
-import { cn } from '@/lib/utils';
+import { hasParagraphTranslation, paragraphTranslationRunning } from './paragraphTranslationState';
+import { SentenceAlignedTranslationContent } from './SentenceAlignedTranslationContent';
 
 export function ParagraphTranslationActions({ segment, close, viewControls = true, onTranslate, hasDocumentTranslation = false }: {
   segment: SourceSegment; close: () => void; viewControls?: boolean; onTranslate?: (view?: ParagraphTranslation['view']) => void; hasDocumentTranslation?: boolean;
@@ -15,12 +15,12 @@ export function ParagraphTranslationActions({ segment, close, viewControls = tru
   if (!context) return null;
   const submitting = context.pending.has(segment.uid);
   const running = paragraphTranslationRunning(record);
-  const supplement = !hasSentenceTranslation(record) && (hasParagraphTranslation(record) || hasDocumentTranslation);
-  const failed = record?.paragraph.status === 'failed' || record?.sentences.status === 'failed';
-  const run = (retry: boolean) => { onTranslate?.(supplement ? 'sentences' : undefined); context.translate(segment.uid, retry); close(); };
+  const translated = hasParagraphTranslation(record) || hasDocumentTranslation;
+  const failed = record?.paragraph.status === 'failed';
+  const run = (retry: boolean) => { onTranslate?.(); context.translate(segment.uid, retry); close(); };
   return <div className="my-1 border-y py-1" role="group" aria-label="段落翻译">
-    <SegmentMenuButton disabled={!context.ready || submitting || running} onClick={() => run(supplement)}
-      icon={<Languages size={14} aria-hidden="true" />} label={running || submitting ? (supplement ? '正在补充 AI 逐句翻译…' : '正在 AI 翻译此段…') : supplement ? 'AI 增强逐句翻译' : record ? '重新 AI 翻译此段' : 'AI 翻译此段'} />
+    <SegmentMenuButton disabled={!context.ready || submitting || running} onClick={() => run(false)}
+      icon={<Languages size={14} aria-hidden="true" />} label={running || submitting ? '正在翻译此段…' : translated ? '重新翻译此段' : '翻译此段'} />
     {failed ? <SegmentMenuButton disabled={submitting || running} onClick={() => run(true)} icon={<RotateCcw size={14} aria-hidden="true" />} label="重试失败的翻译" /> : null}
     {record && viewControls ? <div role="group" aria-label="对照方式">
       <div className="px-2 py-1 text-xs text-muted-foreground">对照方式</div>
@@ -51,37 +51,26 @@ export function ParagraphTranslationContent({ record, entryId, root, view = reco
   segmentUid?: string; focusedSentenceIndex?: number;
 }) {
   const live = useParagraphProgress(record);
-  const running = record.paragraph.status === 'running' || record.sentences.status === 'running';
+  const running = record.paragraph.status === 'running';
   const [now, setNow] = useState(Date.now);
   useEffect(() => { if (!running) return; const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, [running]);
   const renderText = (text: string, partial = false) => partial
     ? <div className="whitespace-pre-wrap break-words">{text}</div>
     : <SourceSnapshotPreview allowScroll={false} markdown={text} segmentType="paragraph" sourceEntryId={entryId} workspaceRoot={root} />;
   const paragraphPreview = live.paragraph?.paragraph;
-  const sentencePreview = live.sentences?.sentences;
-  const streaming = view === 'paragraph' ? Boolean(paragraphPreview) : Boolean(sentencePreview?.length);
+  const streaming = Boolean(paragraphPreview);
   const paragraph = paragraphPreview || record.paragraph.value;
-  const pairs = sentencePreview?.length
-    ? live.sentences!.sources.map((source, index) => ({ id: index + 1, source, translation: sentencePreview[index]?.translation ?? '' }))
-    : record.sentences.value;
-  const selected = view === 'sentences' ? record.sentences : record.paragraph;
-  return <div className="min-w-0" data-paragraph-translation={view}>
-    <div className="mb-2 text-xs text-muted-foreground">{view === 'sentences' ? 'AI 逐句译文' : 'AI 整段译文'}</div>
-    {view === 'sentences' && pairs?.length ? <div className="grid min-w-0 gap-3">
-      {pairs.map((pair, index) => <div key={pair.id} data-reading-segment-uid={segmentUid}
-        data-reading-sentence-index={index}
-        className={cn('min-w-0 space-y-1 rounded-sm', focusedSentenceIndex === index && 'bg-primary/10 ring-1 ring-primary/40')}>
-        {showOriginal ? <div lang="en">{renderText(pair.source)}</div> : null}
-        {pair.translation ? <div lang="zh-CN" className="text-[0.95em] text-muted-foreground">{renderText(pair.translation, streaming)}</div> : null}
-      </div>)}
-    </div> : <div className="min-w-0 space-y-2">
+  return <div className="min-w-0" data-paragraph-translation={view === 'sentences' && !streaming ? undefined : view}>
+    {view === 'sentences' && !streaming ? <SentenceAlignedTranslationContent
+      source={record.source_text} savedTranslation={paragraph} showOriginal={showOriginal}
+      entryId={entryId} workspaceRoot={root} segmentUid={segmentUid}
+      focusedSentenceIndex={focusedSentenceIndex} enhancing={false} /> : <div className="min-w-0 space-y-2">
       {showOriginal ? <div lang="en">{renderText(record.source_text)}</div> : null}
-      {view === 'paragraph' && paragraph ? <div lang="zh-CN" className="text-[0.95em] text-muted-foreground">{renderText(paragraph, streaming)}</div> : null}
+      {paragraph ? <div lang="zh-CN" className="text-[0.95em] text-muted-foreground">{renderText(paragraph, streaming)}</div> : null}
     </div>}
     <p role="status" className="mt-2 text-xs text-muted-foreground">
-      <span title={timingTitle(record.paragraph.timing ?? live.paragraph?.timing)}>{statusText('整段', record.paragraph, live.paragraph, now)}</span>
-      {' · '}<span title={timingTitle(record.sentences.timing ?? live.sentences?.timing)}>{statusText('逐句', record.sentences, live.sentences, now)}</span>
-      {streaming ? '（正在生成，完成后校验）' : selected.value && selected.status !== 'succeeded' ? '（显示上次结果）' : ''}
+      <span title={timingTitle(record.paragraph.timing ?? live.paragraph?.timing)}>{statusText('片段', record.paragraph, live.paragraph, now)}</span>
+      {streaming ? '（正在生成，完成后校验）' : paragraph && record.paragraph.status !== 'succeeded' ? '（显示上次结果）' : ''}
     </p>
   </div>;
 }

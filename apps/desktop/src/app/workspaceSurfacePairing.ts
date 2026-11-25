@@ -26,7 +26,7 @@ export function resolveWorkspaceSurfacePair(
   const rightReader = readerKind(right);
   let relation: WorkspaceSurfacePairRelation = 'independent';
 
-  if (sameEntry && leftReader && rightReader && leftReader !== rightReader) {
+  if (sameEntry && leftReader && rightReader) {
     relation = 'reader-sync';
   } else if (
     sameEntry &&

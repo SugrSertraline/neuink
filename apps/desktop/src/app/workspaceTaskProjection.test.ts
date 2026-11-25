@@ -12,6 +12,12 @@ const job = (id: string, root = 'A', status: Job['status'] = 'processing'): Job 
   created_at: '', updated_at: '', message: null, error: null, progress: { current: 0, total: 0, percent: 0 },
 });
 describe('workspace task projection', () => {
+  it('keeps canonical Windows PDF download jobs in the final dock projection', () => {
+    const native = { ...job('download', String.raw`\\?\E:\NeuInk\data\library`), kind: 'pdf_import' as const };
+    const foreign = { ...job('foreign', String.raw`\\?\E:\Other\data\library`), kind: 'pdf_import' as const };
+    expect(workspaceTaskProjection(String.raw`E:\NeuInk\data\library`, [native, foreign],
+      { waiting: [], active: [], failed: [] }, false)).toEqual([native]);
+  });
   it('includes persisted waiting and remote parsing work without inventing percentages', () => {
     const tasks = workspaceTaskProjection('A', [], { waiting: [entry('1'), entry('2')], active: [entry('3', 'parsing')], failed: [] }, true);
     expect(tasks.map(task => task.status)).toEqual(['processing', 'queued', 'queued']);
@@ -52,4 +58,11 @@ describe('workspace task projection', () => {
     const existing = { ...job('index'), kind: 'index_build' as const };
     expect(workspaceTaskProjection('A', [existing], queue, true, vector)).toEqual([existing]);
   });
+});
+
+it('keeps account-level maintenance visible without exposing other workspace tasks', () => {
+  const global = { ...job('maintenance'), scope: null };
+  const queue = { waiting: [], active: [], failed: [] };
+  expect(workspaceTaskProjection(null, [global, job('private', 'B')], queue, false)).toEqual([global]);
+  expect(workspaceTaskProjection('A', [global, job('private', 'B')], queue, false)).toEqual([global]);
 });

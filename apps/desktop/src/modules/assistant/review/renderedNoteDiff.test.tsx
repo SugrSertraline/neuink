@@ -66,7 +66,7 @@ describe('rendered note changes', () => {
   it('shows a diagram error without reverting to source, but retains genuine code blocks', async () => {
     vi.mocked(renderMermaidSvg).mockRejectedValue(new Error('invalid diagram'));
     const view = render(<NoteRenderedContent text={diagram + '\n\n```ts\nconst n = 1;\n```'} />);
-    await waitFor(() => expect(view.getByText(/Mermaid 渲染失败/)).toBeTruthy());
+    await waitFor(() => expect(view.getByRole('status').textContent).toBe('渲染失败'));
     expect(view.container.querySelectorAll('pre code')).toHaveLength(1);
     expect(view.container.querySelector('pre code')?.textContent).toContain('const n = 1');
     expect(view.container.querySelector('code.language-mermaid')).toBeNull();
@@ -116,3 +116,4 @@ describe('rendered note changes', () => {
     expect(view.queryByText('不能当成正文的摘要')).toBeNull();
   });
 });
+

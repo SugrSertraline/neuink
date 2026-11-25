@@ -1,32 +1,28 @@
 导入负责把文件放进资料库，解析负责识别段落、标题、表格、公式和图片。**能够打开 PDF，不等于已经有结构化解析结果。**
 
-## 按步骤看实际界面
+## 推荐路线：MinerU 客户端 → Neuink
 
-下列截图保留早期导入流程，当前解析方式选择和设置排列以本页文字为准。点击图片可放大查看。
+1. 在 MinerU 客户端导入 PDF 并完成解析，保留完整结果目录。
+2. 在 Neuink“设置 → 导入与解析”的本地来源区域，添加 MinerU 结果目录。
+3. 从顶部新标签入口打开 MinerU 解析结果，或在条目库选择 MinerU 来源，浏览可用内容。
+4. 选择需要的论文，明确“导入到本地”。来源缓存不等于独立本地条目，不会因为浏览就自动作为本地论文上传。
+5. 打开 PDF 或重排阅读，再按需要[配置小牛翻译](translation.md)、写笔记或接入大模型。
 
-### 1. 新建条目并选择 PDF
+![MinerU 来源列表：来源缓存状态与条目操作](../public/screenshots/current-mineru-source.png)
 
-在新建条目页填写标题，选择 PDF，再检查说明和标签。截图为尚未提交的表单；选择文件之后才进行创建。
+已有结果不需要再次请求在线解析。也可以将完整结果压缩成 ZIP 或 RAR，按下方步骤导入；目录和压缩包都需保留结构文件及图片相对路径。
 
-![Neuink 实机截图：1. 新建条目并选择 PDF](../public/screenshots/create-entry-pdf.png)
+## 直接导入 PDF 或结果包
 
-### 2. 选择解析方式或导入已有结果
+没有现成结果时可以先创建条目并选择 PDF；之后再解析。已有结果包则从对应导入入口选择，并按要求配对原 PDF。以下表单保留较早版本示例，当前入口以应用为准。
 
-打开设置中的“导入与解析”，选择账号解析或自建 MinerU 服务。如果已经有客户端解析结果，可以直接按下方说明导入，无需配置在线服务。
+![较早版本的新建条目表单：选择原 PDF](../public/screenshots/create-entry-pdf.png)
 
-![Neuink 实机截图：2. 找到 MinerU 客户端路线](../public/screenshots/settings-import.png)
+![较早版本的 MinerU ZIP 导入表单](../public/screenshots/create-entry-zip.png)
 
-### 3. 切换到 MinerU ZIP
+完成后从同一条目进入 PDF 或重排，阅读正文、公式、图表及其译文。
 
-在新建条目页选择 MinerU ZIP 入口，上传完整解析结果包。新条目还需按表单要求提供原 PDF。
-
-![Neuink 实机截图：3. 切换到 MinerU ZIP](../public/screenshots/create-entry-zip.png)
-
-### 4. 对照 PDF 检查解析正文
-
-完成导入后，在两侧分别打开重排与 PDF，核对段落、页码及图表。使用自己的文献时，也请完成这一步核对。
-
-![Neuink 实机截图：4. 对照 PDF 检查解析正文](../public/screenshots/reflow-pdf-split.png)
+![重排阅读中的原图、解析表格和中文译文](../public/screenshots/current-reflow-chart.png)
 
 ## 路径一：先导入 PDF
 
@@ -40,12 +36,12 @@
 
 ### 账号解析服务
 
-1. 在东北大学校园网环境中，进入“账户与存储”。
-2. 填写管理员提供的 Neuink 服务器地址，连接验证成功后登录。
+1. 自行部署 Neuink 后端及其解析服务，或取得所用部署的地址和账号，参见[后端部署说明](https://github.com/SugrSertraline/neuink/blob/beta/deploy/server/README.md)。
+2. 在“账户与存储”填写该 Neuink 后端地址，连接验证成功后登录。
 3. 回到“导入与解析”，选择账号解析服务，确认账户可用。
 4. 从条目发起解析，或按需要开启自动解析；在右下角任务区查看排队和进度。
 
-账号服务由 Neuink 后端统一排队，再交给部署的 MinerU 处理，不需要每位用户填写 MinerU 地址。服务繁忙时会等待队列，重复提交不会让同一任务更快。账号由管理员提供，暂不开放自助注册。
+账号解析使用你连接的 Neuink 后端，由后端统一排队后交给所部署的 MinerU 处理，不需要每位用户填写 MinerU 地址。它不代表客户端附送公共免费解析额度。服务繁忙时会等待队列，重复提交不会让同一任务更快。账号由管理员提供，暂不开放自助注册。
 
 ### 自建 MinerU 服务
 
@@ -53,7 +49,7 @@
 
 不要把第三方网页地址或 LLM Base URL 当成解析接口。使用远程服务时，PDF 会发送到该地址；切换来源后核对当前选择，再提交任务。
 
-## 路径二：导入 MinerU 客户端 ZIP
+## 路径二：读取 MinerU 目录或导入结果包
 
 已有 MinerU 客户端结果时，可以直接导入。应用内提供结果导入说明；先在客户端完成解析，保留完整目录或压缩为 ZIP／RAR，再返回 Neuink。它与在线解析服务是两条独立路线。
 
@@ -61,17 +57,17 @@
 
 在 MinerU 客户端完成 PDF 解析后，找到对应任务，点击任务旁边的文件夹按钮。下图红箭头指向“打开文件夹”；右边能看到解析后的文字。
 
-![MinerU 客户端已有截图：红箭头标出解析任务旁的打开文件夹按钮](../public/screenshots/mineru-step-1-download-and-parse.png)
+![较早版本示例：MinerU 客户端已有截图：红箭头标出解析任务旁的打开文件夹按钮](../public/screenshots/mineru-step-1-download-and-parse.png)
 
 **检查结果**：应打开这篇论文的解析结果目录，而不是仅下载一份 Markdown。图中是 MinerU 客户端，不是 Neuink；客户端版本变化时按钮位置可能不同。
 
-### 第二步：检查文件，再压缩完整结果
+### 第二步：保留完整结果目录，按需压缩
 
 保留结构化 JSON、图片目录及原有相对路径。下图红框展示一份结果目录：有 images 文件夹、多个 JSON、PDF 与 Markdown。截图中的本地路径已做遮挡。
 
-![结果目录已有截图：红框圈出 images、JSON、PDF 与 Markdown，私人路径已遮挡](../public/screenshots/mineru-step-2-zip-results.png)
+![较早版本示例：结果目录已有截图：红框圈出 images、JSON、PDF 与 Markdown，私人路径已遮挡](../public/screenshots/mineru-step-2-zip-results.png)
 
-**检查结果**：需要有 Neuink 支持的 content_list_v2.json 或兼容 content_list.json；部分长文件名在图中被截断，请实际检查完整文件名。不能仅凭图里的 block_list.json 或 full.md 判断结果可导入。将完整结果压缩成 ZIP，并保留图片相对目录。
+**检查结果**：需要有 Neuink 支持的 content_list_v2.json 或兼容 content_list.json；部分长文件名在图中被截断，请实际检查完整文件名。不能仅凭图里的 block_list.json 或 full.md 判断结果可导入。读取目录时直接保留完整文件夹；需要用包导入时，再将完整结果压缩成 ZIP 或 RAR，保留图片相对目录。
 
 ### 第三步：回到 Neuink，选择导入目标
 

@@ -63,7 +63,7 @@ async fn independent_segment_translation_rejects_running_and_paused_tasks_before
                 source_language: "en".into(),
                 target_language: "zh-CN".into(),
             },
-            profile("http://127.0.0.1:1/v1".into()),
+            profile("http://127.0.0.1:1/v1".into()).into(),
         )
         .await;
         assert!(result.err().unwrap().contains("请先完成或取消任务"));
@@ -194,7 +194,7 @@ async fn stopping_recovery_keeps_each_completed_response_and_only_resumes_remain
             control: control.clone(),
             entry_id: entry.id.clone(),
             root: temp.path().into(),
-            profile: profile(format!("http://{address}/v1")),
+            client: profile(format!("http://{address}/v1")).into(),
             force: true,
             job_total: 3,
             selected_segment_uids: None,

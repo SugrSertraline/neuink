@@ -1,4 +1,4 @@
-type Resource = 'entries' | 'annotations' | 'trash' | 'parsing';
+type Resource = 'entries' | 'annotations' | 'trash' | 'parsing' | 'tags';
 
 /** Reads may complete after navigation, including A → B → A. Only the latest read in
  * the current workspace session may publish; this does not cancel or delay I/O. */

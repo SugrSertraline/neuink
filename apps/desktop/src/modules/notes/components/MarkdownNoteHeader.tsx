@@ -38,6 +38,7 @@ export function MarkdownNoteHeader({
   loading,
   saving,
   sourceCount,
+  zoteroSource,
   title,
   titleEditing,
   workspaceAvailable,
@@ -68,6 +69,7 @@ export function MarkdownNoteHeader({
   loading: boolean;
   saving: boolean;
   sourceCount: number;
+  zoteroSource?: boolean;
   title: string;
   titleEditing: boolean;
   workspaceAvailable: boolean;
@@ -138,7 +140,7 @@ export function MarkdownNoteHeader({
           {!loading && saving ? <span>保存中…</span> : null}
           {!loading && !saving && canEdit && dirty ? <span>未保存</span> : null}
           {!loading && !saving && !canEdit && !error ? <span>只读</span> : null}
-          {!loading && !saving && canEdit && !dirty && !error ? <span>已保存</span> : null}
+          {!loading && !saving && canEdit && !dirty && !error ? <span>{zoteroSource ? '草稿已保存' : '已保存'}</span> : null}
           {error ? (
             <span className="max-w-48 truncate text-destructive" title={error}>
               {loadFailed ? '加载失败' : hasSaveConflict ? '版本冲突' : '保存失败'}
@@ -171,7 +173,7 @@ export function MarkdownNoteHeader({
                 <Redo2 aria-hidden="true" />恢复
               </DropdownMenuItem>
               <DropdownMenuItem
-                disabled={loadFailed || saving || !canEdit || !dirty || hasSaveConflict}
+                disabled={loadFailed || saving || !canEdit || (!dirty && !zoteroSource) || hasSaveConflict}
                 onSelect={onSave}
               >
                 <Save aria-hidden="true" />保存
@@ -265,7 +267,7 @@ export function MarkdownNoteHeader({
           <Redo2 aria-hidden="true" />
         </Button>
         <Button
-          disabled={loading || loadFailed || saving || !canEdit || !dirty || hasSaveConflict}
+          disabled={loading || loadFailed || saving || !canEdit || (!dirty && !zoteroSource) || hasSaveConflict}
           size="xs"
           title="保存（Ctrl/Cmd + S）"
           type="button"

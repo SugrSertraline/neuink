@@ -29,7 +29,7 @@ impl Fixture {
     fn pdf(&self, title: &str) -> EntryMeta {
         let entry = self.workspace.create_entry(title).unwrap();
         let path = self.root.join("input.pdf");
-        fs::write(&path, b"%PDF-1.4\nfixture").unwrap();
+        fs::write(&path, format!("%PDF-1.4\nfixture {title}")).unwrap();
         self.workspace.import_pdf(&entry.id, path).unwrap()
     }
 }

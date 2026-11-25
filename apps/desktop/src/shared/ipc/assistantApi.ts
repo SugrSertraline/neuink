@@ -156,14 +156,22 @@ export function conversationSourceKey(source: ConversationSourceLink) {
     : `local:${source.entry_id}:${source.segment_uid}`;
 }
 
+export function conversationSourceSnapshotKey(source: ConversationSourceLink) {
+  return JSON.stringify([conversationSourceKey(source), source.quote,
+    isSciverseConversationSource(source) ? source.page_no : source.page_idx]);
+}
+
 export type ConversationRole = 'user' | 'assistant';
 
 export type AssistantToolTraceEvent = {
+  arxivGate?: import('@/shared/lib/arxivGateStatus').ArxivGateStatus;
+  researchCacheSource?: import('./researchApi').PaperCacheSource;
   /** A rejected read was subsequently satisfied; the original failure remains in the trace. */
   recovered?: boolean;
   diagram?: import('@/modules/assistant/sdk/diagramArtifact').AssistantDiagramArtifact;
   researchPapers?: import('./researchApi').ResearchPaper[];
   durationMs?: number;
+  researchSearch?: import('@/modules/assistant/research/arxivSearchContext').ArxivSearchContext;
   error?: string;
   id: string;
   input?: unknown;
@@ -174,6 +182,15 @@ export type AssistantToolTraceEvent = {
 };
 
 export type AssistantConversationMemory = {
+  observed_markers?: string[];
+  /** Automatic compaction summarizes a prefix and keeps this complete recent suffix verbatim. */
+  retained_context?: {
+    version: 2;
+    messages: import('ai').ModelMessage[];
+    profileId: string;
+    model: string;
+    protocol: string;
+  };
   decisions: string[];
   entities: string[];
   last_user_goal: string | null;
@@ -187,7 +204,9 @@ export type AssistantConversationMemory = {
 };
 
 export type AssistantMessagePart =
-  | { type: 'local-agent'; provider: 'claude' | 'codex' | 'opencode'; sessionId: string; initialized: boolean }
+  | { type: 'model-transcript'; transcript: import('../types/modelTranscript').AssistantModelTranscript }
+  | { type: 'local-agent'; provider: 'claude' | 'codex' | 'opencode'; sessionId: string; initialized: boolean;
+      contextState?: import('../types/modelContext').NativeContextState }
   | { type: 'text'; markdown: string }
   | { type: 'reasoning'; text: string }
   | { type: 'context'; items: AssistantContextItem[] }
@@ -214,6 +233,9 @@ export type AssistantMessagePart =
       diagram?: import('@/modules/assistant/sdk/diagramArtifact').AssistantDiagramArtifact;
       sourceLinks?: ConversationSourceLink[];
       researchPapers?: import('./researchApi').ResearchPaper[];
+      arxivGate?: import('@/shared/lib/arxivGateStatus').ArxivGateStatus;
+      researchCacheSource?: import('./researchApi').PaperCacheSource;
+      researchSearch?: import('@/modules/assistant/research/arxivSearchContext').ArxivSearchContext;
       summary: string;
       toolName: string;
       type: 'tool-result';
@@ -342,6 +364,7 @@ export type AssistantContextSnapshotPinnedSegment = {
 };
 
 export type AssistantEntrySnapshot = {
+  revision?: string;
   entry_id: EntryId;
   entry_title: string;
   has_pdf: boolean;
@@ -349,6 +372,8 @@ export type AssistantEntrySnapshot = {
 };
 
 export type AssistantNoteSnapshot = {
+  body_loaded?: boolean;
+  revision?: string;
   entry_id: EntryId;
   entry_title: string;
   note_id: NoteId;
@@ -379,6 +404,7 @@ export type AssistantPinnedSegmentSnapshot = {
 };
 
 export type AssistantContextSnapshot = {
+  metadata_only?: boolean;
   active_entry: AssistantEntrySnapshot | null;
   active_note: AssistantNoteSnapshot | null;
   document: AssistantDocumentSnapshot | null;
@@ -663,6 +689,7 @@ export async function analyzeEntryTags(args: {
 }
 
 export async function getAssistantContextSnapshot(args: {
+  metadataOnly?: boolean;
   activeEntryId?: EntryId | null;
   activeNote?: { entryId: EntryId; noteId: NoteId } | null;
   documentCharBudget?: number;
@@ -673,6 +700,7 @@ export async function getAssistantContextSnapshot(args: {
   return invoke<AssistantContextSnapshot>('get_assistant_context_snapshot', {
     request: {
       root: args.root,
+      metadata_only: args.metadataOnly ?? false,
       active_entry_id: args.activeEntryId ?? null,
       active_note: args.activeNote
         ? {

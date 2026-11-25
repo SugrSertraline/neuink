@@ -205,6 +205,7 @@ fn validate_state(state: &TagReadingWorkspace, tag_id: &TagId) -> Result<(), Wor
     if let Some(target) = &state.active_note {
         validate_id(target.note_id.as_str())?;
         match &target.owner {
+            neuink_domain::NoteOwner::Daily { date } => crate::daily::validate_date(date)?,
             neuink_domain::NoteOwner::Entry { entry_id } => validate_id(entry_id.as_str())?,
             neuink_domain::NoteOwner::TagReading { tag_id: owner_id } => {
                 if owner_id != tag_id {

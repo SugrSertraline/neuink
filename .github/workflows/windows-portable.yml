@@ -2,9 +2,9 @@ name: Desktop portable (Windows x64)
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, beta, alpha]
   push:
-    branches: [main]
+    branches: [main, beta, alpha]
     tags: ['v*']
   workflow_dispatch:
 
@@ -32,7 +32,7 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - name: Require main for release builds; allow PR validation only
+      - name: Validate release event and source; allow PR validation only
         run: node apps/desktop/scripts/release-source.cjs
       - run: npm ci
       - name: Validate application and tag versions before building
@@ -64,9 +64,15 @@ jobs:
       - run: node apps/desktop/scripts/embedding-resources.cjs
       - run: npm --workspace apps/desktop run prepare:browser-reader
       - run: npm --workspace apps/desktop run verify:browser-reader
+      - name: Build standalone research component (no end-user Python dependency)
+        run: py -3.12 apps/desktop/scripts/build-research-component.py
       - run: npm run desktop:release:portable
+      - name: Build Windows installer with optional offline Research
+        run: npm --workspace apps/desktop run release:installer
       - name: Prepare download metadata and checksums
         run: node apps/desktop/scripts/release-artifacts.cjs
+      - name: Include Windows installer and checksums
+        run: node apps/desktop/scripts/installer-artifacts.cjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: Neuink-windows-x64-${{ github.sha }}
@@ -94,8 +100,8 @@ jobs:
         run: |
           if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') { throw 'Invalid release tag' }
           $notes = "publish/Neuink-windows-x64-$env:GITHUB_SHA/RELEASE_NOTES.md"
-          $assets = @(Get-ChildItem -LiteralPath publish -Recurse -File | Where-Object { $_.Extension -in '.zip', '.json', '.txt' } | ForEach-Object FullName)
-          if ($assets.Count -ne 3) { throw 'Expected Windows ZIP, metadata and checksums' }
+          $assets = @(Get-ChildItem -LiteralPath publish -Recurse -File | Where-Object { $_.Extension -in '.zip', '.json', '.txt', '.exe' } | ForEach-Object FullName)
+          if ($assets.Count -ne 5) { throw 'Expected Windows ZIP, metadata, checksums, installer and installer metadata' }
           $options = @('--draft', '--verify-tag', '--title', "Neuink $env:RELEASE_TAG", '--notes-file', $notes)
           if ($env:RELEASE_TAG.Contains('-')) { $options += '--prerelease' }
           gh release create $env:RELEASE_TAG @assets @options

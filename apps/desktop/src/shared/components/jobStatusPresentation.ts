@@ -5,6 +5,7 @@ export { isUnfinishedJob } from '@/shared/lib/backgroundJobs';
 
 /** Read-only projection: execution and cancellation remain with the original task owner. */
 export type AssistantDockTask = {
+  category?: 'research';
   id: string;
   title: string;
   question: string;
@@ -20,13 +21,20 @@ export const assistantTaskStatusLabels: Record<AssistantDockTask['status'], stri
 };
 
 export function jobTitle(job: Job) {
+  if (job.id.startsWith('zotero-read:')) return '读取本地 Zotero';
+  if (job.id.startsWith('library-source-sync:')) return '本地来源同步';
+  if (job.id.startsWith('paper-cards:')) return '论文卡片整理';
+  if (job.id.startsWith('cloud-maintenance:')) return '账户与同步维护';
+  if (job.id.startsWith('ideation-recommend:')) return '研究卡片推荐';
+  if (job.id.startsWith('ideation-compose:')) return '研究思路整理';
+  if (job.id.startsWith('ideation-report:')) return '研究报告生成';
   if (job.id.startsWith('research-import:')) return '论文下载与添加';
   if (job.id.startsWith('sciverse-import:')) return 'Sciverse 论文保存';
   if (job.id.startsWith('selection-translation:')) return '选区翻译';
   if (job.id.startsWith('single-segment-translation:')) return '片段翻译';
   const labels: Record<Job['kind'], string> = {
-    index_build: '索引构建', llm: '模型任务', parser: 'PDF 解析', pdf_import: 'PDF 导入',
-    translation: '全文翻译', paragraph_translation: '段落翻译', vectorize: '向量构建',
+    export: '导出文件', sync: '资料库云同步', index_build: '索引构建', llm: '模型任务', parser: 'PDF 解析', pdf_import: 'PDF 导入',
+    translation: '全文翻译', paragraph_translation: '段落翻译', vectorize: '向量构建', folding: '阅读详略',
   };
   return labels[job.kind] ?? '后台任务';
 }
@@ -39,7 +47,12 @@ export function jobStatusLabel(job: Job) {
 }
 
 export function jobDescription(job: Job, debug: boolean): string {
+  // Cloud task messages contain the same per-object issues shown in account settings.
+  if (job.id.startsWith('cloud-task:')) return job.message || jobStatusLabel(job);
   const paperImport = job.id.startsWith('research-import:') || job.id.startsWith('sciverse-import:');
+  if (job.kind === 'translation' && job.status === 'failed') {
+    return '全文翻译失败，已有译文保留。请打开翻译任务重试未完成内容。';
+  }
   if (job.status === 'failed' || job.error) return formatAssistantError(job.error || job.message, {
     debug, fallback: paperImport ? ASSISTANT_IMPORT_INCOMPLETE : '任务未完成，请核对结果后重试。',
   });
@@ -48,8 +61,11 @@ export function jobDescription(job: Job, debug: boolean): string {
   if (paperImport && job.status === 'succeeded') return '论文添加已结束，请在条目库核对结果。';
   if (job.status === 'queued') return job.message || '等待执行';
   if (job.kind === 'translation' && job.status === 'processing') {
+    const contextPhase = job.message?.startsWith('正在生成论文背景') || job.message === '准备论文背景';
+    const phase = contextPhase ? '正在整理论文背景' : '正在翻译';
     const received = job.message?.match(/已接收\s*(\d+)\s*字/)?.[1];
-    return received ? `正在翻译 · 已接收 ${received} 字` : '正在翻译';
+    return received === '0' ? `${phase} · 等待模型正文`
+      : received ? `${phase} · 已接收 ${received} 字` : phase;
   }
   return job.message || jobStatusLabel(job);
 }

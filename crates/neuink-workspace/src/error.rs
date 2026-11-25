@@ -5,6 +5,22 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum WorkspaceError {
     #[error("{0}")]
+    FieldDefinitions(String),
+    #[error("{0}")]
+    ContentTransaction(String),
+    #[error("{0}")]
+    LocalCopy(String),
+    #[error("外部来源条目只能隐藏或恢复。请到 Zotero 或 MinerU 来源端删除原论文。")]
+    SourceManagedEntry,
+    #[error("只有带有 Zotero 或 MinerU 来源记录的条目支持隐藏。")]
+    SourceVisibilityUnavailable,
+    #[error("{0}")]
+    Zotero(String),
+    #[error("{0}")]
+    Daily(String),
+    #[error("invalid reading session: {0}")]
+    InvalidReadingSession(String),
+    #[error("{0}")]
     Onboarding(String),
     #[error("{0}")]
     PdfQueue(String),
@@ -48,10 +64,20 @@ pub enum WorkspaceError {
     InvalidTagParent(String),
     #[error("entry already has a PDF: {0}")]
     PdfAlreadyExists(String),
+    #[error("相同内容的 PDF 已在本地：{0}")]
+    PdfContentDuplicate(String),
     #[error("entry has no PDF: {0}")]
     PdfMissing(String),
     #[error("invalid PDF display name: {0}")]
     InvalidPdfDisplayName(String),
+    #[error("reading PDF changed since it was loaded; reload the entry before replacing it: {0}")]
+    ReadingPdfChanged(String),
+    #[error("file is not a PDF: {0}")]
+    ReadingPdfInvalid(String),
+    #[error("reading PDF was not replaced because verification failed: {0}")]
+    ReadingPdfVerification(String),
+    #[error("reading PDF replacement failed and restoring the previous files also failed: {0}")]
+    ReadingPdfRollbackFailed(String),
     #[error("entry PDF is not parsed: {0}")]
     PdfNotParsed(String),
     #[error("invalid PDF parse transition: {0}")]

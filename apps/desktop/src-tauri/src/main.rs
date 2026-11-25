@@ -1,4 +1,6 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// Local standalone builds are also launched from a desktop shortcut. Windows
+// must not create a console window for either debug or release executables.
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 fn main() {
     #[cfg(windows)]

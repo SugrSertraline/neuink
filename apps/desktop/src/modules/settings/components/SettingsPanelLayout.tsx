@@ -1,3 +1,4 @@
+import { visibleSettingsTab } from '../settingsCatalog';
 import { ArrowLeft } from 'lucide-react';
 import { useLayoutEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
@@ -49,6 +50,8 @@ type TranslationAutomationSettingsLike = {
 };
 
 export type SettingsPanelLayoutProps = {
+  recoveryNotices?: import('react').ReactNode;
+  recoveryBlocked?: boolean;
   activeSettingsTab: SettingsTab;
   navigationTarget?: SettingsNavigationTarget;
   modelsUnavailable?: boolean;
@@ -138,7 +141,8 @@ export type SettingsPanelLayoutProps = {
 };
 
 export function SettingsPanelLayout(props: SettingsPanelLayoutProps) {
-  const { activeSettingsTab, onSetActiveSettingsTab, onBack } = props;
+  const { onSetActiveSettingsTab, onBack } = props;
+  const activeSettingsTab = visibleSettingsTab(props.activeSettingsTab);
   const navigation = useSettingsNavigation(activeSettingsTab, onSetActiveSettingsTab, props.navigationTarget);
   const category = settingsCategory(activeSettingsTab);
   const scrollPositions = useRef(new Map<string, number>());
@@ -162,13 +166,14 @@ export function SettingsPanelLayout(props: SettingsPanelLayoutProps) {
         <div className="settings-viewport" onScroll={event => {
           if (!navigation.query.trim()) scrollPositions.current.set(activeSettingsTab, event.currentTarget.scrollTop);
         }}>
+          {props.recoveryNotices}
           {navigation.query.trim() && <SettingsSearchResults results={navigation.results} onSelect={navigation.navigate} />}
-          <div hidden={Boolean(navigation.query.trim())}>
+          <fieldset disabled={props.recoveryBlocked} hidden={Boolean(navigation.query.trim())} className="min-w-0">
             <ModelSettingsSection props={props} />
             <GeneralSettingsSections props={props} />
-            <DataSettingsSection props={props} navigationTarget={navigation.pending} />
+            <DataSettingsSection props={{ ...props, activeSettingsTab }} navigationTarget={navigation.pending} />
             <ExternalToolsSettingsSection props={props} />
-          </div>
+          </fieldset>
         </div>
         {props.feedback?.length ? <div className="settings-feedback" aria-live="polite">{props.feedback.map(item => <div key={item.key} className={item.error ? 'text-destructive' : 'text-muted-foreground'}>
           <span>{item.message}</span>{item.retry && <Button size="xs" variant="outline" onClick={item.retry}>重试</Button>}

@@ -9,6 +9,7 @@ const { REQUIRED_FILES, DEFAULT_SOURCE, verifyResources, copyResources, copyOpti
 const { resourceArguments } = require('./tauri.cjs');
 const BASE_RESOURCES = [
   'resources/embedding-models/default/**/*',
+  'resources/unrar-license.txt',
   'resources/onboarding-availability.json',
   'resources/pdfium.dll',
   'resources/pdfium-licenses/**/*',

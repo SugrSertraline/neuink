@@ -1,13 +1,21 @@
-import { jsonSchema, tool, type JSONSchema7, type ToolSet } from 'ai';
-import { PDF_TOOL_NAMES } from './pdfTools';
-import { loadAssistantToolCatalog } from './toolCatalog';
-import { assertResearchRetry } from './researchRecovery';
-import { buildDiagramArtifact } from './diagramArtifact';
-import { createBrowserTabTool } from './browserTabTool';
+import { arxivGateMessage } from '@/shared/lib/arxivGateStatus';
 import type { BrowserTabTarget } from '@/shared/ipc/browserApi';
-import { safeToolErrorEvent, toolPreflight, trackToolFailures, ToolPreconditionError } from './toolFailurePolicy';
-import { createAgentToolFailure, isAgentToolFailure } from '../agent-core/toolFailure';
+import { jsonSchema, tool, type JSONSchema7, type ToolSet } from 'ai';
 import { AgentLocalLimitError, AgentStoppedError } from '../agent-core/agent';
+import { createAgentToolFailure, isAgentToolFailure } from '../agent-core/toolFailure';
+import { createBrowserTabTool } from './browserTabTool';
+import { createContextReferenceTool } from './contextReferenceTool';
+import { buildDiagramArtifact } from './diagramArtifact';
+import { PDF_TOOL_NAMES } from './pdfTools';
+import { assertResearchRetry } from './researchRecovery';
+import { bindPaperSelections, resolvePaperSelections } from '../research/researchPaperSelection';
+import { loadAssistantToolCatalog } from './toolCatalog';
+import {
+  safeToolErrorEvent,
+  ToolPreconditionError,
+  toolPreflight,
+  trackToolFailures
+} from './toolFailurePolicy';
 
 import type {
   AssistantContextSnapshot,
@@ -15,74 +23,68 @@ import type {
   ConversationMessage,
   ConversationSourceLink,
   LlmProfile,
-  ReadEntryAssistantContextResponse,
-  ReadSegmentContentResponse,
   ScopeSnapshot
 } from '@/shared/ipc/assistantApi';
+import { readNote } from '@/shared/ipc/workspaceApi';
+import { canonicalAssistantToolId } from '@/shared/lib/assistantToolNames';
 import type {
   AgentInvocationPlan,
   AssistantActiveNote,
   AssistantContext,
   AssistantEntryMetaProposal,
   AssistantEntryMetaTarget,
-  AssistantMarkdownPatchOperation,
   AssistantNoteProposal,
-  AssistantNoteProposalAction,
-  AssistantNoteProposalSource,
-  AssistantSegmentContextItem,
   AssistantTagProposal,
   AssistantTaskPlan
 } from '@/shared/types/assistant';
-import { readNote } from '@/shared/ipc/workspaceApi';
 
+import { executeTool, runningSummary } from './toolExecution';
 import {
-  asObject,
-  assertModelToolNameAvailable,
-  assertValidModelToolNames,
-  buildNoteProposal,
   clampTopK,
   entryIdOrSingleScope,
-  errorMessage,
-  executeTool,
   mcpToolIdsForAgent,
-  modelInputSchema,
-  modelToolName,
   normalizeToolInput,
-  noteProposalInputSchema,
-  noteProposalSummary,
-  noteSnapshotKey,
-  numberMarkdownLines,
-  optionalString,
-  proposalToolDescription,
   proposalToolInput,
-  publicInput,
+  publicInput
+} from './toolInput';
+import { buildNoteProposal, noteProposalSummary } from './toolNoteProposal';
+import { numberMarkdownLines, readCurrentNoteOutput } from './toolOutput';
+import {
+  assertModelToolNameAvailable,
+  assertValidModelToolNames,
+  modelInputSchema,
+  mcpModelToolName,
+  noteProposalInputSchema,
+  proposalToolDescription,
   readCurrentNoteInputSchema,
-  readCurrentNoteOutput,
+  runSubagentInputSchema,
+  tagProposalInputSchema,
+  toolDescription
+} from './toolSchema';
+import {
+  asObject,
+  errorMessage,
+  noteSnapshotKey,
+  optionalString,
   rememberReadNote,
   requiredEnum,
   requiredString,
-  runSubagentInputSchema,
-  runningSummary,
   stringArray,
-  tagProposalInputSchema,
-  toolDescription,
   trimToBudget
-} from './toolSupport';
+} from './toolValues';
 
-import type { AgentExecutionSelection, AgentRuntimeSettings, AgentToolId } from '@/shared/types/agentRuntime';
 import {
   auditAgentToolPermissions,
   buildAgentSystemPrompt,
   resolveAllowedSubagents
 } from '@/shared/lib/agentRuntimeSettings';
+import type { AgentExecutionSelection, AgentRuntimeSettings, AgentToolId } from '@/shared/types/agentRuntime';
 
-import { assistantContextCharBudget } from './contextBudget';
-import { runSubagentTask } from '../runtime/subagent';
+import { RunBudget, type AgentLoopGuard } from '../agent-core';
+import type { ApplicationActions } from '../runtime/applicationActions';
 import type { DurableExecution } from '../runtime/durableExecution';
 import { stableHash } from '../runtime/evidenceLedger';
-import { RunBudget, type AgentLoopGuard } from '../agent-core';
 import { SourceLedger } from '../runtime/sourceLedger';
-import type { ApplicationActions } from '../runtime/applicationActions';
 import { resolveModelProfile, runJsonModelTask } from './modelTasks';
 import {
   HOP2_RESOLVE_TASK_DESCRIPTION,
@@ -102,6 +104,8 @@ import { runSearchLibrary, type DependentTaskResolveInput, type PlanInput, type 
 import { createSearchLibraryBatch, type UnifiedRetrievalConfig } from './searchLibraryBatch';
 import { frozenScopeFromSnapshot, scopeRequestFromToolInput } from './searchScope';
 import { PLANNING_READ_TOOLS } from '../runtime/executionPolicy';
+import { runSubagentTask } from '../runtime/subagent';
+import { assistantContextCharBudget } from './contextBudget';
 import { buildEntryMetaProposal } from './entryMetaProposal';
 import {
   ENTRY_META_PROPOSAL_TOOL_DESCRIPTION,
@@ -110,8 +114,9 @@ import {
 } from './entryMetaProposalTool';
 
 const SUPPORTED_TOOL_NAMES = new Set([
+  'read_context_reference',
   ...PDF_TOOL_NAMES,
-  'search_papers', 'search_web', 'read_webpage', 'import_papers',
+  'search_papers', 'arxiv_search', 'search_web', 'read_webpage', 'import_papers',
   'search_segments',
   'search_library',
   'read_segment_content',
@@ -189,6 +194,7 @@ type TagProposalHandler = (proposal: AssistantTagProposal) => void;
 type CreateEntryHandler = (title: string) => Promise<AssistantEntryMetaTarget>;
 
 type CreateAssistantToolsOptions = {
+  historicalSourceMarkers?: ReadonlySet<number>;
   execution?: DurableExecution;
   actorId?: string;
   restoredState?: ToolRuntimeState;
@@ -204,6 +210,7 @@ type CreateAssistantToolsOptions = {
   browserTabTarget?: BrowserTabTarget | null;
   contextBudget?: number;
   conversationHistory?: ConversationMessage[];
+  tagMentionScopes?: Record<string, ScopeSnapshot>;
   currentEntry?: {
     id: string;
     title: string;
@@ -270,6 +277,7 @@ type ToolEvidence = {
 };
 
 export async function createAssistantTools({
+  historicalSourceMarkers,
   execution,
   actorId = 'main',
   restoredState,
@@ -285,6 +293,7 @@ export async function createAssistantTools({
   browserTabTarget,
   contextBudget = assistantContextCharBudget(null),
   conversationHistory = [],
+  tagMentionScopes = {},
   currentEntry,
   currentNote,
   executionDepth = 0,
@@ -309,8 +318,8 @@ export async function createAssistantTools({
   const { descriptors, notes: availabilityNotes, events: initializationErrors } = await loadAssistantToolCatalog({
     root, signal: abortSignal, runtimeSettings, activeExecution, invocationPlan
   });
-  const events: AssistantToolTraceEvent[] = [...(restoredState?.events ?? [])];
-  const observations: Array<{ output: unknown; toolName: string }> = [...(restoredState?.observations ?? [])];
+  const events: AssistantToolTraceEvent[] = (restoredState?.events ?? []).map(event => ({ ...event, toolName: canonicalAssistantToolId(event.toolName) }));
+  const observations: Array<{ output: unknown; toolName: string }> = (restoredState?.observations ?? []).map(observation => ({ ...observation, toolName: canonicalAssistantToolId(observation.toolName) }));
   const ledger = sourceLedger ?? new SourceLedger(initialSourceByMarker);
   const sourceByMarker = ledger.sources;
   const addSource = (source: ConversationSourceLink) => {
@@ -372,10 +381,19 @@ export async function createAssistantTools({
   );
   const enabledToolIds = new Set<AgentToolId>(permissionAudit.allowedToolIds);
 
-  if (browserTabTarget && enabledToolIds.has('read_browser_tab') &&
+  if (enabledToolIds.has('read_context_reference')) {
+    tools.read_context_reference = createContextReferenceTool({ assistantContext, history: conversationHistory,
+      scopes: [scope, ...Object.values(tagMentionScopes)],
+      signal: abortSignal, addSource, emit, observe: output => {
+        observations.push({ output, toolName: 'read_context_reference' });
+        loopGuard?.recordSuccess(output);
+      } });
+  }
+
+  if (enabledToolIds.has('read_browser_tab') &&
       activeExecution?.agent.kind === 'main_assistant' && executionDepth === 0) {
     tools.read_browser_tab = createBrowserTabTool({
-      target: browserTabTarget, contextBudget, abortSignal, loopGuard, emit,
+      target: browserTabTarget ?? null, contextBudget, abortSignal, loopGuard, emit,
       observe: output => observations.push({ output, toolName: 'read_browser_tab' })
     });
   }
@@ -419,7 +437,7 @@ export async function createAssistantTools({
     });
   }
 
-  if (enabledToolIds.has('app.set_appearance') && applicationActions && activeExecution?.agent.kind === 'main_assistant') {
+  if (enabledToolIds.has('app_set_appearance') && applicationActions && activeExecution?.agent.kind === 'main_assistant') {
     tools.app_set_appearance = tool({
       needsApproval: true,
       description: 'Change the application visual style only when requested by the user. standard=标准, atelier=工作室, liquid-glass=液态玻璃. This reversible local preference never changes documents or model settings.',
@@ -430,9 +448,9 @@ export async function createAssistantTools({
       execute: async (input, options) => {
         (options.abortSignal ?? abortSignal)?.throwIfAborted();
         const appearance = toolPreflight(() => requiredEnum(asObject(input).appearance, 'appearance', ['standard', 'atelier', 'liquid-glass'] as const));
-        loopGuard?.beforeToolCall('app.set_appearance', input);
+        loopGuard?.beforeToolCall('app_set_appearance', input);
         const result = applicationActions.setAppearance(appearance);
-        emit({ id: options.toolCallId, toolName: 'app.set_appearance', status: 'done',
+        emit({ id: options.toolCallId, toolName: 'app_set_appearance', status: 'done',
           summary: result.persisted ? `Appearance changed to ${result.current}.` : `Appearance changed for this session; preference could not be saved.` });
         return result;
       }
@@ -534,7 +552,7 @@ export async function createAssistantTools({
       continue;
     }
 
-    const exposedToolName = modelToolName(descriptor.name);
+    const exposedToolName = descriptor.name.startsWith('mcp.') ? mcpModelToolName(descriptor.name) : descriptor.name;
     assertModelToolNameAvailable(tools, descriptor.name, exposedToolName);
     tools[exposedToolName] = tool<unknown, unknown>({
       // MCP declarations/annotations are not a trusted guarantee of read-only behavior.
@@ -569,6 +587,8 @@ export async function createAssistantTools({
           observations.push({ output: output.modelOutput, toolName });
           if (isAgentToolFailure(output.modelOutput)) {
             if (fingerprint) loopGuard?.recordFailure(fingerprint);
+            if (output.modelOutput.arxivGate) emit({id:toolCallId,toolName,status:'error',
+              arxivGate:output.modelOutput.arxivGate,error:arxivGateMessage(output.modelOutput.arxivGate)});
             return output.modelOutput;
           }
           loopGuard?.recordSuccess(output.modelOutput);
@@ -578,6 +598,9 @@ export async function createAssistantTools({
             input: publicInput(normalizedInput),
             sources: output.sources,
             researchPapers: 'researchPapers' in output ? output.researchPapers : undefined,
+            researchSearch: 'researchSearch' in output ? output.researchSearch : undefined,
+            researchCacheSource: 'researchCacheSource' in output ? output.researchCacheSource : undefined,
+            arxivGate: 'arxivGate' in output ? output.arxivGate : undefined,
             status: 'done',
             summary: output.summary,
             toolName
@@ -585,6 +608,7 @@ export async function createAssistantTools({
 
           return output.modelOutput;
         } catch (error) {
+          (options.abortSignal ?? abortSignal)?.throwIfAborted();
           if (fingerprint) loopGuard?.recordFailure(fingerprint);
           emit({
             error: errorMessage(error),
@@ -623,6 +647,7 @@ export async function createAssistantTools({
           currentNote,
           root
         });
+        (options.abortSignal ?? abortSignal)?.throwIfAborted();
         if ('snapshot' in output && output.snapshot) {
           const modelOutput = asObject(output.modelOutput);
           const entryId = optionalString(modelOutput.entry_id);
@@ -646,6 +671,7 @@ export async function createAssistantTools({
 
         return output.modelOutput;
       } catch (error) {
+        (options.abortSignal ?? abortSignal)?.throwIfAborted();
         emit({
           error: errorMessage(error),
           id: toolCallId,
@@ -685,6 +711,7 @@ export async function createAssistantTools({
           toolName: 'read_note'
         });
         const note = await readNote(root, entryId, noteId);
+        (options.abortSignal ?? abortSignal)?.throwIfAborted();
         const markdown = trimToBudget(note.markdown, Math.min(36_000, contextBudget));
         readNoteSnapshots.set(noteSnapshotKey(entryId, noteId), {
           markdown: note.markdown,
@@ -901,20 +928,20 @@ export async function createAssistantTools({
   }
 
   const proposalToolNames = [
-    'note.propose_create',
-    'note.propose_patch',
-    'segment_note.propose_patch'
-  ] as const;  for (const toolName of proposalToolNames) {
+    'note_propose_create',
+    'note_propose_patch',
+    'segment_note_propose_patch'
+  ] as const;
+  for (const toolName of proposalToolNames) {
     if (!canPropose || !enabledToolIds.has(toolName) || !onNoteProposal) continue;
-    const exposedToolName = modelToolName(toolName);
-    assertModelToolNameAvailable(tools, toolName, exposedToolName);
-    tools[exposedToolName] = tool<unknown, unknown>({
+    assertModelToolNameAvailable(tools, toolName);
+    tools[toolName] = tool<unknown, unknown>({
       description: proposalToolDescription(toolName),
       inputSchema: jsonSchema<unknown>(noteProposalInputSchema()),
       execute: async (input, options) => {
         loopGuard?.beforeToolCall(toolName, input);
         const normalizedInput = proposalToolInput(toolName, input, plan);
-        const createdEntries = toolName === 'note.propose_create' &&
+        const createdEntries = toolName === 'note_propose_create' &&
           (!plan?.noteAction || plan.noteAction === 'create') ? [...createdEntryByTitle.values()] : [];
         const proposal = buildNoteProposal(normalizedInput, {
           assistantContext,
@@ -930,7 +957,9 @@ export async function createAssistantTools({
             entry_titles: [...scope.entry_titles, ...createdEntries.map(entry => entry.title)] },
           sourceByMarker
         });
-        if (sourceByMarker.size > 0 && proposal.markdown.trim() && proposal.sources.length === 0) {
+        const hasCurrentEvidence = [...sourceByMarker.keys()].some(marker => !historicalSourceMarkers?.has(marker))
+          || events.some(event => event.status === 'done' && event.sources?.length);
+        if (hasCurrentEvidence && proposal.markdown.trim() && proposal.sources.length === 0) {
           throw new ToolPreconditionError('inline_citations_required');
         }
         onNoteProposal(proposal);
@@ -951,11 +980,10 @@ export async function createAssistantTools({
     }) as ToolSet[string];
   }
 
-  if (canPropose && enabledToolIds.has('entry.propose_meta_patch') && onEntryMetaProposal && plan) {
-    const toolName = 'entry.propose_meta_patch';
-    const exposedToolName = modelToolName(toolName);
-    assertModelToolNameAvailable(tools, toolName, exposedToolName);
-    tools[exposedToolName] = tool<unknown, unknown>({
+  if (canPropose && enabledToolIds.has('entry_propose_meta_patch') && onEntryMetaProposal && plan) {
+    const toolName = 'entry_propose_meta_patch';
+    assertModelToolNameAvailable(tools, toolName);
+    tools[toolName] = tool<unknown, unknown>({
       description: ENTRY_META_PROPOSAL_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<unknown>(entryMetaProposalInputSchema()),
       execute: async (input, options) => {
@@ -983,11 +1011,10 @@ export async function createAssistantTools({
     }) as ToolSet[string];
   }
 
-  if (canPropose && enabledToolIds.has('tag.propose_change') && onTagProposal) {
-    const toolName = 'tag.propose_change';
-    const exposedToolName = modelToolName(toolName);
-    assertModelToolNameAvailable(tools, toolName, exposedToolName);
-    tools[exposedToolName] = tool<unknown, unknown>({
+  if (canPropose && enabledToolIds.has('tag_propose_change') && onTagProposal) {
+    const toolName = 'tag_propose_change';
+    assertModelToolNameAvailable(tools, toolName);
+    tools[toolName] = tool<unknown, unknown>({
       description:
         'Create a reviewable Tag change proposal. This never applies the Tag change directly.',
       inputSchema: jsonSchema<unknown>(tagProposalInputSchema()),
@@ -1031,7 +1058,7 @@ export async function createAssistantTools({
   }
 
   if (
-    enabledToolIds.has('task.run_subagent') &&
+    enabledToolIds.has('task_run_subagent') &&
     runtimeSettings &&
     activeExecution?.agent.permissions.canInvokeSubagents &&
     resolveAllowedSubagents(runtimeSettings, activeExecution.agent).length > 0 &&
@@ -1043,14 +1070,14 @@ export async function createAssistantTools({
       inputSchema: jsonSchema<unknown>(runSubagentInputSchema(activeExecution)),
       execute: async (input, options) => {
         const toolCallId = options.toolCallId;
-        loopGuard?.beforeToolCall('task.run_subagent', input);
+        loopGuard?.beforeToolCall('task_run_subagent', input);
         try {
           emit({
             id: toolCallId,
             input: publicInput(input),
             status: 'running',
             summary: 'Delegating a task to a subagent.',
-            toolName: 'task.run_subagent'
+            toolName: 'task_run_subagent'
           });
 
           const object = asObject(input);
@@ -1088,14 +1115,14 @@ export async function createAssistantTools({
             unifiedRetrieval
           });
           loopGuard?.recordSuccess(result);
-          observations.push({ toolName: 'task.run_subagent', output: { externalSourceUrls: result.externalSourceUrls } });
+          observations.push({ toolName: 'task_run_subagent', output: { externalSourceUrls: result.externalSourceUrls } });
           emit({
             id: toolCallId,
             input: publicInput(input),
             sources: result.sources,
             status: 'done',
             summary: `Subagent ${resolvedAgent.name} completed its delegated task.`,
-            toolName: 'task.run_subagent'
+            toolName: 'task_run_subagent'
           });
 
           return {
@@ -1117,7 +1144,7 @@ export async function createAssistantTools({
             id: toolCallId,
             input,
             status: 'error',
-            toolName: 'task.run_subagent'
+            toolName: 'task_run_subagent'
           });
           const failure = createAgentToolFailure('TOOL_EXECUTION_FAILED');
           if (error instanceof AgentLocalLimitError) failure.diagnostic = {
@@ -1140,6 +1167,7 @@ export async function createAssistantTools({
   }
   const toolNames = Object.keys(tools);
   trackToolFailures(tools, emit, abortSignal);
+  if (tools.import_papers) bindPaperSelections(tools.import_papers, input => resolvePaperSelections(events, input));
   const identityToolNames = restoredState?.toolNames ? [...restoredState.toolNames] : toolNames;
   return {
     availabilityNotes,
@@ -1153,7 +1181,7 @@ export async function createAssistantTools({
   };
 }
 
-export { entryIdOrSingleScope, modelToolName } from './toolSupport';
+export { entryIdOrSingleScope } from './toolInput';
 
 function assertToolPrerequisites(
   toolName: string,

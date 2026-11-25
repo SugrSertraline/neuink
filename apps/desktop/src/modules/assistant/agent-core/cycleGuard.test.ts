@@ -3,6 +3,15 @@ import { describe, expect, it } from 'vitest';
 import { AgentLoopGuard, AgentToolNotExecutedError, createAgentLoopState } from './index';
 
 describe('AgentLoopGuard', () => {
+  it('retains repeated-call and failed-call limits across legacy tool names', () => {
+    const state = createAgentLoopState('resume');
+    state.recentToolFingerprints = ['note.propose_patch:{}', 'note_propose_patch:{}'];
+    state.failedToolFingerprints = { 'task.run_subagent:{}': 1, 'task_run_subagent:{}': 1 };
+    const guard = new AgentLoopGuard(state);
+    expect(() => guard.beforeToolCall('note_propose_patch', {})).toThrow('TOOL_REPEAT_SKIPPED');
+    expect(() => guard.beforeToolCall('task_run_subagent', {})).toThrow('TOOL_REPEAT_SKIPPED');
+    expect(state.failedToolFingerprints).toEqual({ 'task_run_subagent:{}': 2 });
+  });
   it('permits model-native direct answers without fake tool calls', () => {
     const state = createAgentLoopState('帮我取个名字');
     const guard = new AgentLoopGuard(state);

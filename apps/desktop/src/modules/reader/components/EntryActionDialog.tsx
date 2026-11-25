@@ -88,6 +88,7 @@ export function EntryActionDialog({
               <div className="grid gap-1">
                 <div>PDF：{impact.has_pdf ? '1 个' : '无'}；解析块：{impact.parsed_block_count}；笔记：{impact.note_count}；批注：{impact.annotation_count}。</div>
                 <div>其他笔记中有 {impact.incoming_source_link_count} 个来源链接指向此条目；移入回收站后这些笔记保留，但预览将在恢复前不可用。</div>
+                {((impact.ideation_card_count ?? 0) + (impact.ideation_link_count ?? 0) > 0) && <div>研究构思中有 {impact.ideation_card_count ?? 0} 张卡片、{impact.ideation_link_count ?? 0} 条关系引用此条目。卡片正文、摘录及来源标识会保留并继续同步；恢复来源前无法打开原文。</div>}
               </div>
             ) : impactError ? `无法读取影响统计：${impactError}` : '删除后该条目会从当前列表和已打开标签页中移除。'
           )}

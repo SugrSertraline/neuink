@@ -1,6 +1,6 @@
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Copy, Minus, Search, Square, X } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 
 import { Kbd } from '@/components/ui/kbd';
 import { appearanceLogos } from '../assets/appearance';
@@ -8,7 +8,7 @@ import { useAppearance } from './AppearanceProvider';
 
 type WindowAction = 'minimize' | 'toggleMaximize' | 'close';
 
-export function TitleBar({ onOpenSearch }: { onOpenSearch: () => void }) {
+export function TitleBar({ onOpenSearch, recoveryAction }: { onOpenSearch: () => void; recoveryAction?: ReactNode }) {
   const { appearance } = useAppearance();
   const [isMaximized, setIsMaximized] = useState(false);
 
@@ -90,6 +90,7 @@ export function TitleBar({ onOpenSearch }: { onOpenSearch: () => void }) {
       </button>
       <div className="drag-region" data-tauri-drag-region />
       <div className="window-controls">
+        {recoveryAction}
         <button
           className="win-btn"
           title="最小化 / Minimize"

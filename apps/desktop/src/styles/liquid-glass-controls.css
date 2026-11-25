@@ -16,6 +16,7 @@
   -webkit-backdrop-filter: var(--glass-control-filter);
   backdrop-filter: var(--glass-control-filter);
 }
+
 :root[data-appearance="liquid-glass"] [data-ui="button"][data-variant="default"] {
   --glass-face: var(--glass-tinted-face);
   --glass-specular: var(--glass-tinted-specular);
@@ -74,12 +75,16 @@
 :root[data-appearance="liquid-glass"] [data-slot="switch-thumb"] {
   background: var(--glass-face), var(--glass-switch-thumb);
   box-shadow: var(--glass-control-shadow);
-  transition: translate var(--glass-motion) var(--glass-ease), box-shadow var(--glass-motion);
+  transition: transform var(--glass-motion) var(--glass-ease), translate var(--glass-motion) var(--glass-ease), box-shadow var(--glass-motion);
 }
 :root[data-appearance="liquid-glass"] [data-slot="checkbox"] {
   border-radius: 5px; --glass-control-elevation: var(--glass-rim);
 }
 :root[data-appearance="liquid-glass"] [data-slot="checkbox"][data-state="unchecked"] { background: var(--glass-control); border-color: var(--input); }
+:root[data-appearance="liquid-glass"] [data-slot="checkbox"][data-state="indeterminate"] { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
+/* Input groups own their focus and error border, including when the inner control is invalid. */
+:root[data-appearance="liquid-glass"] [data-slot="input-group"]:has([data-slot="input-group-control"]:focus-visible):not(:has([aria-invalid="true"])) { border-color: var(--ring); }
+:root[data-appearance="liquid-glass"] [data-slot="input-group"]:has([aria-invalid="true"]) { border-color: var(--destructive); }
 /* Segmented controls share a base with one distinct selected glass capsule. */
 :root[data-appearance="liquid-glass"] :is([data-slot="tabs-list"], [data-slot="toggle-group"][data-spacing="0"]) {
   border-radius: var(--glass-control-radius);
@@ -99,7 +104,21 @@
   background: var(--glass-face), var(--glass-control-hover); --glass-control-elevation: var(--glass-control-shadow);
 }
 /* Shared Radix menu rows retain their destructive/disabled semantics and original scroll owner. */
-:root[data-appearance="liquid-glass"] :is([data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-checkbox-item"], [data-slot="dropdown-menu-radio-item"], [data-slot="dropdown-menu-sub-trigger"], [data-slot="context-menu-item"], [data-slot="select-item"], [data-slot="command-item"]) { border-radius: calc(var(--radius) - 4px); }
-:root[data-appearance="liquid-glass"] :is([data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-checkbox-item"], [data-slot="dropdown-menu-radio-item"], [data-slot="dropdown-menu-sub-trigger"], [data-slot="context-menu-item"], [data-slot="select-item"], [data-slot="command-item"]):is([data-highlighted], [data-selected="true"]):not([data-variant="destructive"], [data-disabled]) {
+:root[data-appearance="liquid-glass"] :is([data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-checkbox-item"], [data-slot="dropdown-menu-radio-item"], [data-slot="dropdown-menu-sub-trigger"], [data-slot="context-menu-item"], [data-slot="context-menu-checkbox-item"], [data-slot="context-menu-radio-item"], [data-slot="context-menu-sub-trigger"], [data-slot="menubar-item"], [data-slot="menubar-checkbox-item"], [data-slot="menubar-radio-item"], [data-slot="menubar-sub-trigger"], [data-slot="select-item"], [data-slot="command-item"]) { border-radius: calc(var(--radius) - 4px); }
+:root[data-appearance="liquid-glass"] :is([data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-checkbox-item"], [data-slot="dropdown-menu-radio-item"], [data-slot="dropdown-menu-sub-trigger"], [data-slot="context-menu-item"], [data-slot="context-menu-checkbox-item"], [data-slot="context-menu-radio-item"], [data-slot="context-menu-sub-trigger"], [data-slot="menubar-item"], [data-slot="menubar-checkbox-item"], [data-slot="menubar-radio-item"], [data-slot="menubar-sub-trigger"], [data-slot="select-item"], [data-slot="command-item"]):is([data-highlighted], [data-selected="true"]):not([data-variant="destructive"], [data-disabled]) {
   background: var(--glass-control-pressed); box-shadow: var(--glass-rim);
+}
+
+@media (forced-colors: active) {
+  :root[data-appearance="liquid-glass"] :is([data-ui="button"], [data-ui="toggle"], [data-ui="toggle-group-item"], [data-slot="select-trigger"], [data-slot="input"], [data-slot="textarea"], [data-slot="input-group"], [data-slot="switch"], [data-slot="checkbox"]) {
+    background: Canvas; color: CanvasText; border-color: ButtonText;
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
+  :root[data-appearance="liquid-glass"] :is([data-slot="switch"], [data-slot="checkbox"])[data-state="checked"],
+  :root[data-appearance="liquid-glass"] [data-slot="checkbox"][data-state="indeterminate"] {
+    background: Highlight; color: HighlightText; border-color: Highlight;
+  }
+  :root[data-appearance="liquid-glass"] [data-slot="switch-thumb"] { background: ButtonText; }
+  :root[data-appearance="liquid-glass"] :is([data-ui="button"], [data-slot="select-trigger"], [data-slot="input"], [data-slot="textarea"], [data-slot="switch"], [data-slot="checkbox"]):focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
+  :root[data-appearance="liquid-glass"] :is([data-ui="button"], [data-slot="switch"], [data-slot="checkbox"]):disabled { color: GrayText; border-color: GrayText; }
 }

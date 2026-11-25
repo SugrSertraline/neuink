@@ -13,6 +13,7 @@
   background: var(--atelier-control-background, var(--atelier-button)); border-color: var(--atelier-control-edge);
   --atelier-control-elevation: var(--atelier-control-face);
 }
+
 :root[data-appearance="atelier"] :is([data-ui="button"][data-variant="plain"], [data-ui="button"][data-variant="ghost"]) {
   background: var(--atelier-control-background, transparent);
 }

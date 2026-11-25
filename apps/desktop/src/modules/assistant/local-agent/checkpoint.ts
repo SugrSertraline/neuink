@@ -1,8 +1,9 @@
-import { AgentPersistenceError, AgentToolNotExecutedError, RunBudget } from '../agent-core';
+import { abortable, AgentPersistenceError, AgentStoppedError, AgentToolNotExecutedError, RunBudget } from '../agent-core';
 import type { AgentTool, AgentToolContext } from '../agent-core/agent';
+import { MAX_PARALLEL_TOOLS, ToolScheduler } from '../agent-core/toolScheduler';
 import { createAgentToolFailure, isAgentToolFailure } from '../agent-core/toolFailure';
 import { canReplayAssistantTool, type DurableExecution } from '../runtime/durableExecution';
-import { PLANNING_READ_TOOLS } from '../runtime/executionPolicy';
+import { canParallelAssistantTool, PLANNING_READ_TOOLS } from '../runtime/executionPolicy';
 
 type Journal = {
   pending?: { name: string; replayable: boolean };
@@ -13,9 +14,11 @@ type Journal = {
 /** CLI owns its transcript; NeuInk owns tool effects and their write-ahead receipts. */
 export class LocalAgentCheckpoint {
   private journal: Journal;
-  private queue: Promise<unknown> = Promise.resolve();
+  private readonly scheduler = new ToolScheduler(MAX_PARALLEL_TOOLS, error => error instanceof AgentPersistenceError
+    || error instanceof AgentStoppedError || (error instanceof Error && error.name === 'AbortError'));
   constructor(private execution: DurableExecution | undefined, readonly budget: RunBudget,
-    private capture: () => void) {
+    private capture: () => void,
+    private canParallel: (name: string, input: unknown) => boolean = canParallelAssistantTool) {
     this.journal = execution?.get<Journal>('local:journal') ?? { completed: [] };
     if (!this.journal || !Array.isArray(this.journal.completed) || this.journal.completed.some(row =>
       !Array.isArray(row) || row.length !== 2 || typeof row[0] !== 'string') ||
@@ -24,6 +27,8 @@ export class LocalAgentCheckpoint {
       throw new AgentPersistenceError('本地 Agent 的任务检查点无效，请开始新任务。');
     }
     if (this.journal.nativePending || (this.journal.pending && !canReplayAssistantTool(this.journal.pending.name))) budget.blockUncertainWrites();
+    // Interrupted legacy reads may be repeated; only exclusive tools own pending from now on.
+    if (this.journal.pending && canParallelAssistantTool(this.journal.pending.name)) delete this.journal.pending;
   }
   async save() {
     this.capture();
@@ -38,13 +43,27 @@ export class LocalAgentCheckpoint {
     this.journal.nativePending = false;
     await this.save();
   }
-  async settled() { await this.queue; }
-  run(name: string, input: unknown, context: AgentToolContext, tool: AgentTool): Promise<unknown> {
-    const result = this.queue.then(() => this.execute(name, input, context, tool));
-    // Ordinary tool failures are observations. A failed checkpoint stops every later call.
-    this.queue = result.catch(error => { if (error instanceof AgentPersistenceError) throw error; });
-    void this.queue.catch(() => undefined);
-    return result;
+  async settled() { await this.scheduler.settled(); }
+  run(name: string, input: unknown, context: AgentToolContext, tool: AgentTool, beforeExecute?: () => void): Promise<unknown> {
+    const parallel = this.canParallel(name, input) && canReplayAssistantTool(name);
+    return this.scheduler.run(parallel, async signal => {
+      beforeExecute?.();
+      return parallel ? this.read(input, { ...context, signal }, tool) : this.execute(name, input, { ...context, signal }, tool);
+    }, context.signal);
+  }
+  private async read(input: unknown, context: AgentToolContext, tool: AgentTool) {
+    context.signal?.throwIfAborted();
+    this.budget.tool();
+    const prepared = tool.prepare ? await abortable(tool.prepare(input, context), context.signal) : tool;
+    context.signal?.throwIfAborted();
+    // No pending/receipt for reads: an interrupted request can simply be read again.
+    await this.save();
+    context.signal?.throwIfAborted();
+    const output = await abortable(prepared(input, context), context.signal);
+    context.signal?.throwIfAborted();
+    if (isAgentToolFailure(output) && output.recovery.writesBlocked) this.budget.blockUncertainWrites();
+    await this.save();
+    return output;
   }
   private async execute(name: string, input: unknown, context: AgentToolContext, tool: AgentTool) {
     context.signal?.throwIfAborted();

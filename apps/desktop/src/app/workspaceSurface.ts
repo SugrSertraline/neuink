@@ -12,20 +12,27 @@ export type WorkspaceSurface = { viewId?: string } & (
   | { kind: 'browser'; id: string; url?: string; title?: string; navigationId?: string; loading?: boolean; openRequestIds?: string[] }
   | { kind: 'note-review'; proposalId: string; label: string; entryId: string; noteId?: string | null }
   | { kind: 'library' }
+  | { kind: 'daily-dashboard' }
+  | { kind: 'ideation' }
+  | { kind: 'empty' }
+  | { kind: 'new-tab'; id: string }
   | { kind: 'relations' }
   | { kind: 'settings'; target?: SettingsNavigationTarget }
   | { kind: 'create-entry' }
+  | { kind: 'external-import'; source?: 'zotero' | 'mineru'; navigationId?: string }
   | { kind: 'mineru-client-guide' }
   | { kind: 'tag-editor' }
+  | { kind: 'field-editor' }
   | { kind: 'tag-reading'; tagId: string; label?: string }
   | { kind: 'tag-details'; tagId: string; label?: string; view?: 'overview' | 'papers' | 'notes' }
   | { kind: 'owned-note'; target: NoteTarget; label?: string }
-  | { kind: 'entry-overview'; entryId: string; contextTagId?: string }
+  | { kind: 'entry-overview'; entryId: string; contextTagId?: string; editRequestId?: string }
   | { kind: 'pdf'; entryId: string; contextTagId?: string }
   | { kind: 'reflow'; entryId: string; contextTagId?: string }
   | { kind: 'note'; entryId: string; noteId: string }
   | { kind: 'segment-notes'; entryId: string; segmentUid?: string; mode?: 'note' | 'annotation' }
   | { kind: 'source-links'; entryId: string }
+  | { kind: 'paper-cards'; entryId: string }
   | { kind: 'entry-trash'; entryId: string });
 
 export type WorkspaceSurfaceLayout = {
@@ -46,6 +53,11 @@ export const initialWorkspaceSurfaceLayout: WorkspaceSurfaceLayout = {
   pinnedTabKeys: []
 };
 
+/** `empty` is a rendering target, never a tab or a replacement library. */
+export const emptyWorkspaceSurfaceLayout: WorkspaceSurfaceLayout = {
+  focusedPane: 'left', left: { kind: 'empty' }, leftTabs: [], right: null, rightTabs: [], pinnedTabKeys: []
+};
+
 export type WorkspaceSurfaceAction =
   | BrowserTabOpenAction
   | { type: 'duplicate'; key: string; pane: WorkspacePaneId; viewId: string }
@@ -53,6 +65,7 @@ export type WorkspaceSurfaceAction =
   | { type: 'reset' }
   | { type: 'focus'; pane: WorkspacePaneId }
   | { type: 'open'; pane?: WorkspacePaneId; surface: WorkspaceSurface }
+  | { type: 'replaceNewTab'; key: string; surface: WorkspaceSurface }
   | { type: 'close'; pane: WorkspacePaneId; key: string }
   | { type: 'closeOthers'; pane: WorkspacePaneId; key: string }
   | { type: 'closePane'; pane: WorkspacePaneId }
@@ -97,7 +110,8 @@ export function workspaceSurfaceReducer(
     case 'focus':
       return action.pane === 'right' && !state.right ? state : { ...state, focusedPane: action.pane };
     case 'open': {
-      const pane = action.pane ?? state.focusedPane;
+      if (action.surface.kind === 'empty') return state;
+      const pane = state.leftTabs.length ? action.pane ?? state.focusedPane : 'left';
       const otherPane = pane === 'left' ? 'right' : 'left';
       const otherTabs = otherPane === 'left' ? state.leftTabs : state.rightTabs;
       const existingInOtherPane = otherTabs.find(
@@ -117,6 +131,26 @@ export function workspaceSurfaceReducer(
         return { ...state, focusedPane: 'right', right: action.surface, rightTabs: nextTabs };
       }
       return { ...state, focusedPane: 'left', left: action.surface, leftTabs: nextTabs };
+    }
+    case 'replaceNewTab': {
+      const pane = findSurfacePane(state, action.key);
+      if (!pane) return state;
+      const tabs = pane === 'left' ? state.leftTabs : state.rightTabs;
+      const index = tabs.findIndex(tab => surfaceKey(tab) === action.key);
+      if (index < 0 || tabs[index].kind !== 'new-tab' || action.surface.kind === 'empty' || action.surface.kind === 'new-tab') return state;
+      const targetKey = surfaceKey(action.surface);
+      if ([...state.leftTabs, ...state.rightTabs].some(tab => surfaceKey(tab) === targetKey)) {
+        const closed = workspaceSurfaceReducer(state, { type: 'close', pane, key: action.key });
+        return workspaceSurfaceReducer(closed, { type: 'open', surface: action.surface });
+      }
+      const nextTabs = [...tabs];
+      nextTabs[index] = action.surface;
+      const pinnedTabKeys = state.pinnedTabKeys?.includes(action.key)
+        ? [...(state.pinnedTabKeys ?? []).filter(key => key !== action.key), targetKey]
+        : state.pinnedTabKeys;
+      return pane === 'left'
+        ? { ...state, focusedPane: 'left', left: action.surface, leftTabs: nextTabs, pinnedTabKeys }
+        : { ...state, focusedPane: 'right', right: action.surface, rightTabs: nextTabs, pinnedTabKeys };
     }
     case 'close': {
       // A confirmed batch can collapse a pane before its remaining targets close.
@@ -209,7 +243,7 @@ export function workspaceSurfaceReducer(
       const tabs = action.pane === 'left' ? state.leftTabs : state.rightTabs;
       const surface = tabs.find((tab) => surfaceKey(tab) === action.key);
       if (!surface) return state;
-      const retained = tabs.filter((tab) => surfaceKey(tab) === action.key || tab.kind === 'library' || state.pinnedTabKeys?.includes(surfaceKey(tab)));
+      const retained = tabs.filter((tab) => surfaceKey(tab) === action.key || state.pinnedTabKeys?.includes(surfaceKey(tab)));
       return action.pane === 'left'
         ? { ...state, focusedPane: 'left', left: surface, leftTabs: retained, pinnedTabKeys: retainPinnedKeys(state, retained, state.rightTabs) }
         : { ...state, focusedPane: 'right', right: surface, rightTabs: retained, pinnedTabKeys: retainPinnedKeys(state, state.leftTabs, retained) };
@@ -240,20 +274,20 @@ export function workspaceSurfaceReducer(
   }
 }
 
-/** Empty panes must not manufacture a second singleton library tab after a swap.
- * Reuse the surviving pane and its view identities instead of remounting its contents. */
+/** Collapse empty panes without recreating a library the user has closed.
+ * Reuse surviving view identities instead of remounting readers or editors. */
 function withSurfaceTabs(state: WorkspaceSurfaceLayout, leftTabs: WorkspaceSurface[], rightTabs: WorkspaceSurface[]): WorkspaceSurfaceLayout {
   const activeTab = (tabs: WorkspaceSurface[], active: WorkspaceSurface | null) =>
     (active ? tabs.find(tab => surfaceKey(tab) === surfaceKey(active)) : undefined) ?? tabs[tabs.length - 1];
-  if (!leftTabs.length && rightTabs.some(tab => tab.kind === 'library')) {
+  if (!leftTabs.length && !rightTabs.length) return emptyWorkspaceSurfaceLayout;
+  if (!leftTabs.length) {
     return { ...state, focusedPane: 'left', left: activeTab(rightTabs, state.right), leftTabs: rightTabs,
       right: null, rightTabs: [], pinnedTabKeys: retainPinnedKeys(state, rightTabs, []) };
   }
-  const remainingLeft: WorkspaceSurface[] = leftTabs.length ? leftTabs : [{ kind: 'library' }];
-  return { ...state, left: activeTab(remainingLeft, state.left), leftTabs: remainingLeft,
+  return { ...state, left: activeTab(leftTabs, state.left), leftTabs,
     right: rightTabs.length ? activeTab(rightTabs, state.right) : null, rightTabs,
     focusedPane: rightTabs.length ? state.focusedPane : 'left',
-    pinnedTabKeys: retainPinnedKeys(state, remainingLeft, rightTabs) };
+    pinnedTabKeys: retainPinnedKeys(state, leftTabs, rightTabs) };
 }
 
 /** Reveal cited evidence without replacing or moving the note that requested it. */
@@ -322,6 +356,7 @@ export function canDuplicateSurface(surface: WorkspaceSurface) {
 export function surfaceContentKey(surface: WorkspaceSurface) {
   switch (surface.kind) {
     case 'browser': return `browser:${surface.id}`;
+    case 'new-tab': return `new-tab:${surface.id}`;
     case 'assistant-reply': return `assistant-reply:${surface.message.message_id}`;
     case 'note-review': return `note-review:${surface.proposalId}`;
     case 'tag-reading': return `tag-reading:${surface.tagId}`;
@@ -329,7 +364,7 @@ export function surfaceContentKey(surface: WorkspaceSurface) {
     case 'owned-note': return `note:${noteTargetKey(surface.target)}`;
     case 'note': return `note:${surface.entryId}:${surface.noteId}`;
     case 'segment-notes': return `segment-records:${surface.entryId}`;
-    case 'library': case 'relations': case 'settings': case 'create-entry': case 'mineru-client-guide': case 'tag-editor': return surface.kind;
+    case 'empty': case 'daily-dashboard': case 'ideation': case 'library': case 'relations': case 'settings': case 'external-import': case 'create-entry': case 'mineru-client-guide': case 'tag-editor': case 'field-editor': return surface.kind;
     default: return `${surface.kind}:${surface.entryId}`;
   }
 }
@@ -344,6 +379,7 @@ export function entryContentSurface(entryId: string, contentId: string, contextT
   if (contentId === 'reflow') return { kind: 'reflow', entryId, ...context };
   if (contentId === 'overview') return { kind: 'entry-overview', entryId, ...context };
   if (contentId === 'segment-notes') return { kind: 'segment-notes', entryId };
+  if (contentId === 'paper-cards') return { kind: 'paper-cards', entryId };
   if (contentId === 'source-links') return { kind: 'source-links', entryId };
   if (contentId === 'entry-trash') return { kind: 'entry-trash', entryId };
   if (contentId.startsWith('note:')) return { kind: 'note', entryId, noteId: contentId.slice(5) };
@@ -357,6 +393,7 @@ export function entryContentId(surface: WorkspaceSurface) {
     case 'reflow': return 'reflow';
     case 'entry-overview': return 'overview';
     case 'segment-notes': return 'segment-notes';
+    case 'paper-cards': return 'paper-cards';
     case 'source-links': return 'source-links';
     case 'entry-trash': return 'entry-trash';
     case 'note': return `note:${surface.noteId}`;
@@ -373,14 +410,20 @@ export function workspaceSurfaceLabel(
     : '';
   switch (surface.kind) {
     case 'library': return '条目库';
+    case 'daily-dashboard': return '每日看板';
+    case 'ideation': return '研究构思';
+    case 'empty': return '工作区';
+    case 'new-tab': return '新建标签';
     case 'browser': return surface.title || '新网页';
     case 'assistant-reply': return '完整回复';
     case 'note-review': return `${surface.label} · 修改审阅`;
     case 'relations': return '关系图';
     case 'settings': return '设置';
+    case 'external-import': return '从其他来源导入';
     case 'create-entry': return '新建条目';
     case 'mineru-client-guide': return 'MinerU 客户端教程';
     case 'tag-editor': return '标签管理';
+    case 'field-editor': return '属性管理';
     case 'tag-reading': return `${surface.label ?? '标签'} · 平行阅读`;
     case 'tag-details': return `${surface.label ?? '标签'} · 详情`;
     case 'owned-note': return surface.label ?? '标签笔记';
@@ -389,6 +432,7 @@ export function workspaceSurfaceLabel(
     case 'reflow': return `${title} · 重排视图`;
     case 'note': return `${title} · 笔记`;
     case 'segment-notes': return `${title} · 片段记录`;
+    case 'paper-cards': return `${title} · 论文卡片`;
     case 'source-links': return `${title} · 引用此文`;
     case 'entry-trash': return `${title} · 回收站`;
   }

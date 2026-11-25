@@ -9,6 +9,7 @@ pub(super) struct Protocol<'a> {
     pub(super) cwd: &'a Path,
     pub(super) session: String,
     pub(super) resume: bool,
+    pub(super) seed_policy: bool,
     pub(super) prompt: &'a str,
     pub(super) url: &'a str,
     pub(super) token: &'a str,
@@ -36,7 +37,7 @@ impl Protocol<'_> {
     pub(super) fn setup(&self, init: &Value) -> Result<Value, String> {
         if self.provider == Provider::Codex {
             let mut params = json!({"cwd":self.cwd,"approvalPolicy":"untrusted","approvalsReviewer":"user","sandbox":"read-only",
-                "developerInstructions":include_str!("../prompt.md"),
+                "developerInstructions":super::super::system_instructions(),
                 "config":{"mcp_servers":{"neuink":{"url":self.url,"http_headers":{"Authorization":format!("Bearer {}",self.token)},"required":true}}}});
             if self.resume {
                 params["threadId"] = json!(self.session);
@@ -89,7 +90,7 @@ impl Protocol<'_> {
                 2,
                 "session/prompt",
                 json!({"sessionId":self.session,"prompt":[{"type":"text",
-                "text":format!("{}\n\n{}",include_str!("../prompt.md"),self.prompt)}]}),
+                "text":if !self.resume || self.seed_policy { format!("{}\n\n{}",super::super::system_instructions(),self.prompt) } else {self.prompt.to_owned()}}]}),
             )
         }
     }

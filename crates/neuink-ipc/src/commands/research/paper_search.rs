@@ -1,5 +1,41 @@
 use super::{crossref, providers, Paper};
-use std::{collections::BTreeMap, future::Future, time::Duration};
+use serde_json::{json, Value};
+use std::{collections::BTreeMap, future::Future, path::Path, time::Duration};
+
+pub async fn read_only(
+    root: &Path,
+    search: impl Future<Output = Result<(Vec<Paper>, BTreeMap<String, String>), String>>,
+) -> Result<Value, String> {
+    let root = neuink_workspace::validate_workspace_read_only(root).map_err(read_only_error)?;
+    let (papers, errors) = search.await?;
+    // The workspace may have changed while the network future was suspended.
+    neuink_workspace::validate_workspace_read_only(&root).map_err(read_only_error)?;
+    super::remember(&root, &papers)?;
+    let source_errors:BTreeMap<String,super::arxiv_gate::GateError>=errors.iter()
+        .filter_map(|(source,error)|super::arxiv_gate::from_wire(error).map(|gate|(source.clone(),gate))).collect();
+    let errors:BTreeMap<String,String>=errors.into_iter().map(|(source,error)|{
+        let message=source_errors.get(&source).map(|e|e.message()).unwrap_or(error);(source,message)
+    }).collect();
+    Ok(
+        json!({"papers":papers,"errors":errors,"source_errors":source_errors,"retrieved_at":chrono::Utc::now().to_rfc3339(),
+        "notice":"这些是检索元数据和摘要，不代表已读全文。只能引用返回的 URL。下载请调用 import_papers 等待用户确认；不得自行编造 PDF 地址。"}),
+    )
+}
+
+fn read_only_error(error: neuink_workspace::WorkspaceError) -> String {
+    use neuink_workspace::WorkspaceError;
+    match error {
+        WorkspaceError::TagReading(message) => message,
+        WorkspaceError::WorkspaceSchemaUnsupported(_) => {
+            "资料库版本不受支持，搜索未执行写盘".into()
+        }
+        WorkspaceError::WorkspaceMarkerMissing(_) => "缺少资料库标记，搜索不会初始化该目录".into(),
+        WorkspaceError::WorkspaceMissing(_) | WorkspaceError::WorkspaceNotDirectory(_) => {
+            "资料库目录不可用，搜索不会创建目录".into()
+        }
+        _ => "无法读取有效资料库标记，请检查资料库；搜索未执行修复".into(),
+    }
+}
 
 pub async fn bounded<T>(future: impl Future<Output = Result<T, String>>) -> Result<T, String> {
     tokio::time::timeout(Duration::from_secs(25), future)
@@ -19,7 +55,7 @@ pub async fn search(
     let (arxiv, crossref, openalex) = tokio::join!(
         async {
             if ["all", "arxiv"].contains(&source) {
-                bounded(providers::arxiv(query, count)).await
+                providers::arxiv(query, count).await
             } else {
                 Ok(vec![])
             }
@@ -68,6 +104,8 @@ fn merge<const N: usize>(
     if (source == "all" && errors.contains_key("arxiv") && errors.contains_key("crossref"))
         || errors.contains_key(source)
     {
+        // Keep the exact typed host failure for single-source failures and all-source failures.
+        if let Some(error)=errors.get("arxiv").and_then(|v|super::arxiv_gate::from_wire(v)) {return Err(error.wire());}
         return Err(format!(
             "论文检索服务不可用：{}",
             errors

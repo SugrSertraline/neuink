@@ -5,6 +5,7 @@ import { FileText, TextQuote } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AssistantComposerTargetPicker } from './AssistantComposerTargetPicker';
 import { usePdfBlockComposerDrop } from './usePdfBlockComposerDrop';
+import { useInlineSegmentContext } from './useInlineSegmentContext';
 import { ContextMention } from './AssistantContextMention';
 import { mentionContextInput } from './AssistantMentionChip';
 import { serializeComposer } from './assistantComposerDocument';
@@ -51,6 +52,7 @@ export type AssistantComposerDraft = {
 export function AssistantComposerEditor({
   actions,
   composerDraft,
+  contextItems = [],
   disabled,
   draftQuestion,
   entries,
@@ -164,7 +166,9 @@ export function AssistantComposerEditor({
   const isEmpty = useEditorState({ editor, selector: () => !editor || editor.isEmpty });
 
   useEffect(() => {
-    editor?.setEditable(!disabled);
+    // Model availability changes editability, not the draft or its context.
+    editor?.setEditable(!disabled, false);
+    editor?.view.dom.dispatchEvent(new Event('neuink:composer-editable-change'));
   }, [disabled, editor]);
 
   useEffect(() => {
@@ -191,6 +195,8 @@ export function AssistantComposerEditor({
     setSuggestionRange(null);
     setDismissedSuggestion(null);
   }, [editor, resetKey]);
+
+  useInlineSegmentContext(editor, contextItems, disabled, workspaceRoot, resetKey);
 
   useEffect(() => {
     setActiveIndex(0);

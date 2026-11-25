@@ -8,6 +8,7 @@ import type { LibraryEntry } from '@/modules/library/components/LibrarySidebar';
 import { buildTagPathById } from '@/modules/library/utils/tagTree';
 import type { TagMeta } from '@/shared/types/domain';
 import type { AssistantReadingChoice, AssistantReadingContext } from './assistantReadingContext';
+import { PdfParseButton, type PdfParseAction } from '@/modules/library/components/PdfParseButton';
 
 type TargetKind = 'tag' | 'entry' | 'pdf' | 'note';
 type ReadingTarget = { id: string; kind: TargetKind; label: string; description: string; choice: AssistantReadingChoice };
@@ -16,9 +17,10 @@ const kinds: Array<{ id: TargetKind; label: string }> = [
   { id: 'pdf', label: 'PDF' }, { id: 'note', label: '笔记' }
 ];
 
-export function AssistantReadingContextControl({ context, entries, tags, busy, choice, onChange }: {
+export function AssistantReadingContextControl({ context, entries, tags, busy, choice, onChange, pdfParseAction }: {
   context: AssistantReadingContext; entries: LibraryEntry[]; tags?: TagMeta[]; busy: boolean;
   choice: AssistantReadingChoice; onChange: (choice: AssistantReadingChoice) => void;
+  pdfParseAction?: PdfParseAction;
 }) {
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<TargetKind>('tag');
@@ -123,6 +125,13 @@ export function AssistantReadingContextControl({ context, entries, tags, busy, c
     </p>
     {context.notice && <p role="status" className="mt-1 text-xs leading-5 text-muted-foreground">{context.notice}</p>}
     {!context.unavailable && !context.note && context.entry?.pdfFileName && context.entry.status !== 'Parsed' &&
-      <p role="status" className="mt-1 text-xs leading-5 text-muted-foreground">PDF 尚未完成解析，仍可让助手按页读取或搜索文字。扫描件、图表和复杂排版需 OCR／完整解析；不会自动启动解析。</p>}
+      <div role="status" className="mt-2 rounded-md border border-warning-border bg-warning-surface p-2 text-xs leading-5">
+        <p className="font-medium text-foreground">{context.entry.status === 'Failed' ? '当前 PDF 解析失败'
+          : context.entry.status === 'Queued' ? '当前 PDF 正在等待解析'
+            : context.entry.status === 'Uploading' || context.entry.status === 'Parsing' ? '当前 PDF 正在解析'
+              : '当前 PDF 未解析'}</p>
+        <p className="text-muted-foreground">尚未取得完整解析内容，提问效果可能较差，尤其是扫描件、公式和图表。建议解析完成后提问，也可以继续发送。</p>
+        {pdfParseAction && <div className="mt-2 flex justify-end"><PdfParseButton key={context.entry.id} entry={context.entry} action={pdfParseAction} /></div>}
+      </div>}
   </div>;
 }

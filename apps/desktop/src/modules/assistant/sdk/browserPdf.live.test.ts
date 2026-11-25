@@ -14,7 +14,7 @@ import type { LlmProfile } from '@/shared/ipc/assistantApi';
 import type { BrowserTabSnapshot } from '@/shared/ipc/browserApi';
 import { Agent, RunBudget } from '../agent-core';
 import { agentExecutors, createAgentDriver } from './agentDriver';
-import { BROWSER_TAB_INSTRUCTIONS, createBrowserTabTool } from './browserTabTool';
+import { createBrowserTabTool } from './browserTabTool';
 
 const live = vi.hoisted(() => ({
   invoke: vi.fn(), pdfStarted: 0, pdfMs: 0,
@@ -140,7 +140,7 @@ it.skipIf(!enabled)('live main agent uses default PDF page bounds and summarizes
     phase = 'model-tool-selection';
     const agent = new Agent({
       driver: createAgentDriver({ settings, tools, budget, onTurn: () => { turns++; },
-        system: `${BROWSER_TAB_INSTRUCTIONS}\nFor this read-only test, call read_browser_tab exactly once with only {"mode":"text"}. Do not supply start_page or page_count: exercise the production default page window. Then summarize the returned paper text in Chinese in three concise substantive points. Cite its exact returned URL. State the actual pagesRead range, total page count, that the remaining pages were not read, and whether the returned text was truncated. No other tools or local source markers are available.` }),
+        system: `${await readFile(new URL('../../../../../../crates/neuink-ipc/prompts/qna_system.md', import.meta.url), 'utf8')}\nFor this read-only test, call read_browser_tab exactly once with only {"mode":"text"}. Do not supply start_page or page_count: exercise the production default page window. Then summarize the returned paper text in Chinese in three concise substantive points. Cite its exact returned URL. State the actual pagesRead range, total page count, that the remaining pages were not read, and whether the returned text was truncated. No other tools or local source markers are available.` }),
       tools: agentExecutors(tools), budget, signal: controller.signal, maxTurns: 3,
       messages: [{ role: 'user', content: `请读取当前网页中的这篇论文 ${PDF_URL}，使用默认读取范围，总结研究问题、方法和主要发现，并注明实际阅读范围、其余未读页和正文截断情况。不要导入论文或创建笔记。` }],
       verify: () => observed?.status === 'read' ? undefined : 'Read the actual PDF with read_browser_tab before summarizing.',

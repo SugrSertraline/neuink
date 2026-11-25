@@ -3,6 +3,14 @@ import { describe, expect, it } from 'vitest';
 import { normalizeMathMarkdown } from './sourceSnapshotMath';
 
 describe('snapshot math boundaries', () => {
+  it.each(['$x^2$', String.raw`\(x^2\)`, '$$x^2$$', 'x^2'])('unwraps one complete parsed formula before displaying it: %s', value => {
+    expect(normalizeMathMarkdown(value, 'math')).toBe('$$\nx^2\n$$');
+  });
+  it('does not unwrap separate inline formulas as a single parsed expression', () => {
+    expect(normalizeMathMarkdown(String.raw`\(x\)+\(y\)`, 'math')).toContain(String.raw`\(x\)`);
+    expect(normalizeMathMarkdown('$x$+$y$', 'math')).toContain('$x$+$y$');
+  });
+
   it('keeps correctly delimited inline and display formulas intact', () => {
     for (const value of [
       String.raw`其中，$q_s(t) \in \mathbb{R}_{\geq 0}$表示工位$s \in \mathcal{S}$的库存量。`,
@@ -59,4 +67,15 @@ describe('snapshot math boundaries', () => {
     expect(normalizeMathMarkdown(String.raw`\text{库存} \geq 0表示下界`))
       .toBe(String.raw`$\text{库存}\geq0$表示下界`);
   });
+});
+
+it('repairs a split graph definition without consuming following prose', () => {
+  const broken = String.raw`$\mathcal { G } =$$( \nu , \mathcal { E } )`;
+  const fixed = String.raw`$\mathcal { G } = ( \nu , \mathcal { E } )$`;
+  expect(normalizeMathMarkdown(broken)).toBe(fixed);
+  expect(normalizeMathMarkdown(broken + '$')).toBe(fixed);
+  expect(normalizeMathMarkdown('图为 ' + broken + '，表示关系。')).toBe('图为 ' + fixed + '，表示关系。');
+  expect(normalizeMathMarkdown('`' + broken + '`')).toBe('`' + broken + '`');
+  expect(normalizeMathMarkdown(broken, 'code')).toBe(broken);
+  expect(normalizeMathMarkdown(String.raw`$x$$(y)$`)).toBe(String.raw`$x$$(y)$`);
 });

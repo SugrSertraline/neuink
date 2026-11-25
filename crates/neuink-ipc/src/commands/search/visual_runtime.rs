@@ -97,7 +97,7 @@ fn write_state(state: &VisualRuntimeState, resource_dir: &Path) -> Result<(), St
     let dir = runtime_dir(resource_dir, &state.model_id);
     std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
     let bytes = serde_json::to_vec_pretty(state).map_err(|error| error.to_string())?;
-    std::fs::write(dir.join("state.json"), bytes).map_err(|error| error.to_string())
+    neuink_workspace::atomic_write(dir.join("state.json"), &bytes).map_err(|error| error.to_string())
 }
 
 fn model_of(model_id: &str) -> Option<RecommendedVisualModel> {
@@ -320,10 +320,7 @@ pub fn start_with_state(state: &VisualRuntimeState, service_script: &Path) -> Re
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     hide_console(&mut command);
-    let child = command
-        .spawn()
-        .map_err(|error| format!("无法启动视觉服务：{error}"))?;
-    Ok(child.id())
+    super::visual_process::start(&mut command)
 }
 
 #[cfg(test)]

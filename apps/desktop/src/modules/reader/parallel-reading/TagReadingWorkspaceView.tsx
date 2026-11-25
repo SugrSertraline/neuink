@@ -151,6 +151,7 @@ export function TagReadingWorkspaceView({ root, tagId, tags, refreshKey, active,
     onMove={(id, delta) => change((current) => moveReadingMember(current, members, id, delta))} /> : null;
 
   return <div ref={container} className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-card" data-testid="tag-reading-workspace">
+    {model.recovery.notice}
     <TagReadingToolbar title={tags.find((tag) => tag.id === tagId)?.name ?? '标签不可用'} path={path} compact={width < 600}
       progress={progress} saveStatus={saving ? '保存中…' : model.hasPending ? '未保存' : state && state.revision > 0 ? '已保存' : ''}
       disabled={disabled} noteDisabled={!root || !exists || notes.busy || Boolean(notes.pending)} loaded={Boolean(state)} queueVisible={queueVisible} hasCompare={Boolean(state?.compare_entry_id)} canFinish={canFinish}

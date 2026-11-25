@@ -1,11 +1,6 @@
 use super::{network, Paper};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::sync::OnceLock;
-use tokio::{
-    sync::Mutex,
-    time::{Duration, Instant},
-};
 
 pub fn short(value: &str, max: usize) -> String {
     value.chars().take(max).collect()
@@ -15,20 +10,29 @@ fn text(value: &Value) -> String {
 }
 
 pub async fn arxiv(query: &str, count: usize) -> Result<Vec<Paper>, String> {
-    // arXiv asks clients to leave three seconds between requests, including concurrent conversations.
-    static LAST: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
-    let mut last = LAST.get_or_init(|| Mutex::new(None)).lock().await;
-    if let Some(at) = *last {
-        tokio::time::sleep_until(at + Duration::from_secs(3)).await;
-    }
-    *last = Some(Instant::now());
+    parse_arxiv(&arxiv_feed(query, count, false).await?)
+}
+pub async fn arxiv_feed(query: &str, count: usize, newest: bool) -> Result<String, String> {
     let mut url =
         reqwest::Url::parse("https://export.arxiv.org/api/query").map_err(|_| "检索地址无效")?;
     url.query_pairs_mut()
         .append_pair("search_query", query)
         .append_pair("max_results", &count.to_string());
-    let bytes = network::get(url.as_str(), 2 * 1024 * 1024).await?;
-    parse_arxiv(&String::from_utf8(bytes).map_err(|_| "arXiv 编码无效")?)
+    if newest { url.query_pairs_mut().append_pair("sortBy", "submittedDate").append_pair("sortOrder", "descending"); }
+    arxiv_response(url).await
+}
+pub async fn arxiv_by_ids(ids: &[String]) -> Result<Vec<Paper>, String> {
+    if ids.is_empty() { return Ok(vec![]); }
+    if ids.len() > 10 || ids.iter().any(|id| id.is_empty() || id.len() > 100 || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b".-/".contains(&b)) || id.contains("..")) { return Err("arXiv 论文标识无效".into()); }
+    let mut url = reqwest::Url::parse("https://export.arxiv.org/api/query").map_err(|_| "检索地址无效")?;
+    url.query_pairs_mut().append_pair("id_list", &ids.join(",")).append_pair("max_results", &ids.len().to_string());
+    parse_arxiv(&arxiv_response(url).await?)
+}
+async fn arxiv_response(url: reqwest::Url) -> Result<String, String> {
+    let mut context=super::arxiv_gate::context("legacy_query");context.request_id=neuink_domain::NoteId::new().to_string();
+    let response = super::arxiv_gate::shared().map_err(|e|e.wire())?
+        .request(url, context).await.map_err(|e|e.wire())?;
+    String::from_utf8(response.bytes).map_err(|_| "arXiv 编码无效".into())
 }
 
 #[derive(Deserialize)]

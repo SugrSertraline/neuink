@@ -1,6 +1,7 @@
 import { Check, RotateCcw } from 'lucide-react';
-import { Toggle } from '@/components/ui/toggle';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { type ReflowComponentKey, type ReflowContentPreference, type ReflowContentOverrides } from '@/shared/lib/reflowContentPreferences';
 import { SegmentMenuButton } from '../SegmentMenuButton';
 
@@ -10,18 +11,22 @@ const layers = [
     { key: 'translation' as const, label: '翻译' },
   ];
 
-export function ReflowContentControls({ component, label, value, disabled, onChange }: {
-  component: ReflowComponentKey; label: string; value: ReflowContentPreference; disabled: boolean;
+export function ReflowContentControls({ component, label, value, disabled, onChange, showTranslationView = true }: {
+  showTranslationView?: boolean; component: ReflowComponentKey; label: string; value: ReflowContentPreference; disabled: boolean;
   onChange: (patch: ReflowContentOverrides) => void;
 }) {
-  return <div className="flex flex-wrap items-center gap-1 px-3 pb-2">
-    {layers.map(layer => <Toggle key={layer.key} size="sm" variant="outline" disabled={disabled}
-      aria-label={`${label}显示${layer.label}`} pressed={value[layer.key]} onPressedChange={checked => onChange({ [layer.key]: checked })}
-      className="h-7 rounded-md px-2 text-xs">{layer.label}</Toggle>)}
-    {component === 'paragraph' ? <Select value={value.translationView} onValueChange={translationView => onChange({ translationView: translationView as ReflowContentPreference['translationView'] })}>
-      <SelectTrigger size="sm" aria-label="正文翻译排列" disabled={disabled} className="ml-auto w-24 text-xs"><SelectValue /></SelectTrigger>
-      <SelectContent viewportAligned><SelectItem value="paragraph">整段对照</SelectItem><SelectItem value="sentences">逐句对照</SelectItem></SelectContent>
-    </Select> : null}
+  return <div className="grid grid-cols-3 gap-1 border-l-2 border-border pl-2" role="group" aria-label={`${label}内容显示`}>
+    {layers.map(layer => <label key={layer.key}
+      className={`flex min-w-0 items-center justify-between gap-1 rounded border px-1.5 py-1 text-[11px] ${disabled ? 'opacity-50' : 'cursor-pointer'} ${value[layer.key] ? 'border-transparent bg-muted/40 text-foreground' : 'border-transparent text-muted-foreground'}`}>
+      <Checkbox className="size-3.5" disabled={disabled} aria-label={`${label}显示${layer.label}`} checked={value[layer.key]}
+        onCheckedChange={checked => onChange({ [layer.key]: checked === true })} />
+      <span className="flex-1">{layer.label}</span>
+    </label>)}
+    {showTranslationView && component === 'paragraph' ? <label className="col-span-3 flex items-center justify-between gap-2 text-xs">
+      逐句对照
+      <Switch aria-label="正文逐句对照" disabled={disabled} checked={value.translationView === 'sentences'}
+        onCheckedChange={checked => onChange({ translationView: checked ? 'sentences' : 'paragraph' })} />
+    </label> : null}
   </div>;
 }
 
@@ -41,5 +46,25 @@ export function ReflowSegmentContentActions({ component, value, overridden, onCh
         onClick={() => onChange({ translationView: view, translation: true })} />)}
     </div> : null}
     <SegmentMenuButton disabled={!overridden} icon={<RotateCcw size={14} aria-hidden="true" />} label="恢复跟随组件设置" onClick={() => onChange(null)} />
+  </div>;
+}
+
+/** Local display choice; the existing preferences provider owns persistence. */
+export function ReflowSegmentViewControls({ value, onChange, onInteraction }: {
+  value: 'inherit' | 'paragraph' | 'sentences';
+  onChange: (value: 'inherit' | 'paragraph' | 'sentences') => void;
+  onInteraction: () => void;
+}) {
+  return <div className="reflow-segment-fold-tabs h-6 shrink-0">
+    <ToggleGroup type="single" value={value} size="sm" spacing={0} aria-label="本段对照方式"
+      className="h-6 rounded-md border border-border bg-background"
+      onValueChange={next => { if (next) { onInteraction(); onChange(next as typeof value); } }}
+      onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}
+      onMouseMove={event => { event.stopPropagation(); onInteraction(); }}
+      onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape') { event.preventDefault(); event.currentTarget.closest('section')?.focus(); } }}>
+      <ToggleGroupItem value="inherit" className="h-6 px-2 text-[11px]" aria-label="对照方式跟随全局">跟随</ToggleGroupItem>
+      <ToggleGroupItem value="paragraph" className="h-6 px-2 text-[11px]" aria-label="本段整段对照">整段</ToggleGroupItem>
+      <ToggleGroupItem value="sentences" className="h-6 px-2 text-[11px]" aria-label="本段逐句对照">逐句</ToggleGroupItem>
+    </ToggleGroup>
   </div>;
 }

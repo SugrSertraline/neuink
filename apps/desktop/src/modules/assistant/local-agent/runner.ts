@@ -1,45 +1,64 @@
-import { asSchema } from 'ai';
-import { runLocalAgent } from '@/shared/ipc/localAgentApi';
-import { readLocalAgentEnabled } from '@/shared/lib/localAgentSettings';
 import { readUnifiedRetrieval } from '@/shared/lib/retrievalMode';
-import { loadAgentRuntimeSettings, getAssistantContextSnapshot, getEntryOutlineTool } from '@/shared/ipc/assistantApi';
-import { normalizeAgentRuntimeSettings, readAgentRuntimeSettings } from '@/shared/lib/agentRuntimeSettings';
-import type { AssistantNoteProposal, AssistantEntryMetaProposal, AssistantTagProposal } from '@/shared/types/assistant';
-import type { RunAssistantHarnessOptions } from '../harness/engine';
-import { modelDrivenBrief, verifyGroundedProposals } from '../harness/engine';
-import type { GroundedAnswer } from '../sdk/qna';
-import { buildPinnedContext, buildSelectedMarkdownContext, buildToolNotes, normalizeCitedSources, uniqueConversationSources } from '../sdk/qna';
 import type { AssistantToolTraceEvent } from '@/shared/ipc/assistantApi';
-import { createAssistantTools, type ToolRuntimeState } from '../sdk/tools';
-import { agentExecutors } from '../sdk/agentDriver';
-import { createUserInputTool, USER_INPUT_INSTRUCTIONS } from '../sdk/userInputTool';
-import { finalizeVerifiedProposals } from '../runtime/verifiedProposal';
-import { SourceLedger } from '../runtime/sourceLedger';
-import { observeAssistantContext } from '../harness/context';
-import { ClaudeStream } from './protocol';
-import { approveClaudeTool } from './approvals';
-import type { LocalAgentSession } from './session';
-import { AgentPersistenceError, AgentStoppedError, AgentToolNotExecutedError, RunBudget } from '../agent-core/agent';
-import { noteSnapshotKey } from '../sdk/toolSupport';
-import { protocolObject } from './protocol';
-import { createAgentToolFailure, isAgentToolFailure } from '../agent-core/toolFailure';
-import { TOOL_FAILURE_INSTRUCTIONS } from '../sdk/toolFailurePolicy';
-import { RpcAgentStream, type AgentStreamCallbacks } from './rpcProtocol';
-import { localAgentWebContext } from './webContext';
-import { matchedExternalCitationUrls, normalizeReturnedExternalCitationLinks, returnedExternalCitationUrls } from '../sdk/citationContract';
+import { getAssistantContextSnapshot, loadAgentRuntimeSettings } from '@/shared/ipc/assistantApi';
+import { runLocalAgent } from '@/shared/ipc/localAgentApi';
 import { RESEARCH_READ_TOOLS } from '@/shared/ipc/researchApi';
+import { normalizeAgentRuntimeSettings, readAgentRuntimeSettings } from '@/shared/lib/agentRuntimeSettings';
 import { describeAssistantReadFailure } from '@/shared/lib/assistantReadFailure';
-import { researchFailureMessage } from '../sdk/researchRecovery';
-import { answerVerification } from '../sdk/answerVerification';
+import { readLocalAgentEnabled } from '@/shared/lib/localAgentSettings';
+import type {
+  AssistantEntryMetaProposal,
+  AssistantNoteProposal,
+  AssistantTagProposal
+} from '@/shared/types/assistant';
+import { asSchema } from 'ai';
+import {
+  AgentPersistenceError,
+  AgentStoppedError,
+  AgentToolNotExecutedError,
+  RunBudget
+} from '../agent-core/agent';
+import { createAgentToolFailure, isAgentToolFailure } from '../agent-core/toolFailure';
+import { observeAssistantContext } from '../harness/context';
+import { buildConversationTail } from '../harness/conversationMemory';
 import { runDurableHarness } from '../harness/durableHarness';
-import { bindExecutionIdentity } from '../runtime/durableExecution';
-import { buildDirectExecution, executionModeInstructions } from '../runtime/executionPolicy';
-import { createCompiledTaskState, transitionTaskState } from '../runtime/taskState';
+import type { RunAssistantHarnessOptions } from '../harness/engine';
+import { verifyGroundedProposals } from '../harness/engine';
+import { observeWorkspaceContext } from '../context/observation';
+import { prepareNativeContextRequest } from '../context/nativeRequest';
+import { latestConversationMemory } from '../harness/conversationMemory';
+import { formatContextMemory } from '../context/checkpoint';
 import { createAgentRun, finishAgentRun } from '../harness/runState';
-import { verifyHarnessResult, AssistantVerificationError } from '../harness/verification';
-import { paperRecords, presentedPaperRecords } from '../research/paperPresentation';
-import { LocalAgentCheckpoint } from './checkpoint';
+import { AssistantVerificationError, verifyHarnessResult } from '../harness/verification';
+import {
+  paperRecords,
+  presentedPaperRecords
+} from '../research/paperPresentation';
+import { bindExecutionIdentity } from '../runtime/durableExecution';
+import { buildDirectExecution, canParallelAssistantTool } from '../runtime/executionPolicy';
+import { SourceLedger } from '../runtime/sourceLedger';
+import { createCompiledTaskState, transitionTaskState } from '../runtime/taskState';
+import { finalizeVerifiedProposals } from '../runtime/verifiedProposal';
+import { agentExecutors } from '../sdk/agentDriver';
+import { researchPapersFromEvents } from '../research/researchPaperSelection';
+import { answerVerification } from '../sdk/answerVerification';
+import {
+  matchedExternalCitationUrls,
+  normalizeReturnedExternalCitationLinks,
+  returnedExternalCitationUrls
+} from '../sdk/citationContract';
 import { parsedEntryReadingNotice } from '../sdk/entryContext';
+import type { GroundedAnswer } from '../sdk/qna';
+import { normalizeCitedSources, uniqueConversationSources } from '../sdk/citationSources';
+import { researchFailureMessage } from '../sdk/researchRecovery';
+import { createAssistantTools, type ToolRuntimeState } from '../sdk/tools';
+import { noteSnapshotKey } from '../sdk/toolValues';
+import { createUserInputTool } from '../sdk/userInputTool';
+import { approveClaudeTool } from './approvals';
+import { LocalAgentCheckpoint } from './checkpoint';
+import { ClaudeStream, protocolObject } from './protocol';
+import { RpcAgentStream, type AgentStreamCallbacks } from './rpcProtocol';
+import type { LocalAgentSession } from './session';
 
 export async function runLocalAgentHarness(inputOptions: RunAssistantHarnessOptions, session: LocalAgentSession,
   onSession: (session: LocalAgentSession) => void): Promise<GroundedAnswer> {
@@ -81,7 +100,7 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
       activeSegment:options.currentSegment, activeSurface:options.currentSurface,
       fallbackEntryId:options.currentEntry?.id, fallbackNote:options.currentNote });
     const snapshot = execution?.get<Awaited<ReturnType<typeof getAssistantContextSnapshot>>>('contextSnapshot') ?? await getAssistantContextSnapshot({ root:options.root, activeEntryId:observed.activeEntryId,
-      activeNote:observed.activeNote, pinnedSegments:observed.pinnedSegments, documentCharBudget:32_000, noteCharBudget:36_000 });
+      activeNote:observed.activeNote, pinnedSegments:observed.pinnedSegments, metadataOnly:true });
     options.abortSignal?.throwIfAborted();
     const runtimeSettings = await (async () => {
       try { return normalizeAgentRuntimeSettings(await loadAgentRuntimeSettings(options.root) ?? readAgentRuntimeSettings()); }
@@ -89,34 +108,9 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
     })();
     execution?.set('contextSnapshot', snapshot);
     const { plan, invocationPlan } = buildDirectExecution(runtimeSettings, options.question, options.composerSnapshot?.executionMode ?? 'act');
-    invocationPlan.enabledToolIds = invocationPlan.enabledToolIds.filter(id => id !== 'task.run_subagent');
-    const main = { ...runtimeSettings.mainAssistant, enabledToolIds:runtimeSettings.mainAssistant.enabledToolIds.filter(id => id !== 'task.run_subagent') };
-    const pinned = buildPinnedContext(options.assistantContext?.items ?? [], 1);
-    const frozenSelected = execution?.get<string>('local:selectedNotes');
-    const selected = frozenSelected !== undefined ? {text:frozenSelected, sourceByMarker:new Map()} :
-      await buildSelectedMarkdownContext({ root:options.root, assistantContext:options.assistantContext, markerStart:pinned.nextMarker });
-    execution?.set('local:selectedNotes', selected.text);
-    const ledger = new SourceLedger(new Map(execution?.get<Array<[number, import('@/shared/ipc/assistantApi').ConversationSourceLink]>>('sources') ?? [...pinned.sourceByMarker, ...selected.sourceByMarker]));
-    const pinnedSnapshot = snapshot.pinned_segments.map(segment => {
-      const marker = ledger.add({entry_id:segment.entry_id, entry_title:segment.entry_title,
-        page_idx:segment.page_idx, segment_uid:segment.segment_uid, quote:segment.text});
-      return `[S${marker}] ${segment.entry_title}, p.${segment.page_idx + 1}\n${segment.text}`;
-    }).join('\n\n');
-    // Provide only a compact document outline (matching the built-in SDK path in `qna.ts`)
-    // instead of preloading truncated full paper text, so local agents route single-paper
-    // questions through `search_library` (dense + BM25 + cross-encoder rerank + visual rescue).
-    const outlineTarget = snapshot.active_entry
-      ? { id: snapshot.active_entry.entry_id, title: snapshot.active_entry.entry_title }
-      : options.currentEntry ? { id: options.currentEntry.id, title: options.currentEntry.title } : null;
-    let compactOutline = '';
-    if (outlineTarget) {
-      try {
-        const outline = await getEntryOutlineTool({ entryId: outlineTarget.id, root: options.root });
-        compactOutline = outline.compact_summary?.trim() ?? '';
-      } catch {
-        // Outline is an optional context hint; retrieval tools remain available.
-      }
-    }
+    invocationPlan.enabledToolIds = invocationPlan.enabledToolIds.filter(id => id !== 'task_run_subagent');
+    const main = { ...runtimeSettings.mainAssistant, enabledToolIds:runtimeSettings.mainAssistant.enabledToolIds.filter(id => id !== 'task_run_subagent') };
+    const ledger = new SourceLedger(new Map(execution?.get<Array<[number, import('@/shared/ipc/assistantApi').ConversationSourceLink]>>('sources') ?? []));
     const browserTabTarget = options.currentSurface?.kind === 'browser' ? options.currentSurface.browserTab : null;
     const restoredState = execution?.get<ToolRuntimeState>('tools:local');
     const unifiedRetrieval = (await readUnifiedRetrieval()) ? {} : null;
@@ -124,6 +118,7 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
       restoredState: restoredState && { ...restoredState, readNotes: [] }, retrievalScope:options.retrievalScope, root:options.root, scope:options.scope, abortSignal:options.abortSignal,
       activeExecution:{agent:main}, runtimeSettings, currentEntry:options.currentEntry, currentNote:options.currentNote,
       contextSnapshot:snapshot, assistantContext:options.assistantContext, availableEntries:options.availableEntries,
+      tagMentionScopes:options.tagMentionScopes,
       browserTabTarget,
       conversationHistory:options.conversationHistory, sourceLedger:ledger, profiles:options.profiles,
       defaultProfile:options.profiles?.[0],
@@ -143,23 +138,30 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
       execution?.set('tagProposals', tagProposals);
       execution?.set('tools:local', runtime.snapshot());
       execution?.set('sources', [...ledger.sources]);
-    });
+    }, (name, input) => canParallelAssistantTool(name, input, runtime.observations));
     await bindExecutionIdentity(execution, 'local', { provider: session.provider, agent: main,
       tools: runtime.identityToolNames, mode: plan.executionMode });
     await checkpoint.save();
     const executors = agentExecutors(runtime.tools, options.requestToolApproval);
-    const tools = await Promise.all(Object.entries(runtime.tools).map(async ([name, definition]) => ({ name,
+    const tools = await Promise.all(Object.entries(runtime.tools).sort(([a], [b]) => a.localeCompare(b)).map(async ([name, definition]) => ({ name,
       description:definition.description ?? name, inputSchema:await asSchema(definition.inputSchema).jsonSchema })));
     tools.push({name:'approve_tool', description:'Host permission callback. Do not call this tool directly.', inputSchema:{type:'object', properties:{tool_name:{type:'string'}, input:{type:'object'}}, required:['tool_name','input']} });
+    let contextCompacted = false;
     const callbacks:AgentStreamCallbacks = { text:delta => options.onDelta?.(delta), reset:() => options.onAnswerReset?.(),
       reasoning:delta => options.onReasoningDelta?.(delta), tool:emit,
+      compacted:() => {
+        contextCompacted = true; session = {...session, contextState:undefined}; onSession(session);
+        void checkpoint.save().catch(error => lifetime.abort(error));
+      },
       initialized:sessionId => {
         session = {...session, ...(sessionId ? {sessionId} : {}), initialized:true}; onSession(session);
         void checkpoint.save().catch(error => lifetime.abort(error));
       } };
     const stream = session.provider === 'claude' ? new ClaudeStream(callbacks) : new RpcAgentStream(session.provider,callbacks);
     for (const observation of runtime.observations) stream.pdfReading.observe(observation.output);
-    const web = localAgentWebContext(runtime.toolNames, browserTabTarget);
+    const workspace = await observeWorkspaceContext({ scope:options.scope, currentEntry:options.currentEntry,
+      currentNote:options.currentNote, assistantContext:options.assistantContext, composerSnapshot:options.composerSnapshot,
+      tagMentionScopes:options.tagMentionScopes, contextSnapshot:snapshot, browserTabTarget });
     options.abortSignal?.throwIfAborted();
     let answer = '';
     let correction = execution?.get<string>('local:correction') ?? '';
@@ -168,52 +170,26 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
       budget.turn();
       await checkpoint.save();
       const turnStartedAt = Date.now();
+      const prepared = prepareNativeContextRequest({ previous:session.initialized ? session.contextState : undefined,
+        workspace, policy:{ mode:plan.executionMode ?? 'act', write_policy:invocationPlan.writePolicy,
+          source_policy:invocationPlan.sourcePolicy ?? 'mixed', required_tools:invocationPlan.requiredToolIds ?? [] },
+        agentProfile:main.systemPrompt, capabilities:Object.keys(runtime.tools), question:options.question });
+      const memory = latestConversationMemory(options.conversationHistory ?? []);
+      const bootstrap = session.initialized ? undefined : {
+        memory:memory ? formatContextMemory(memory) : undefined,
+        conversation:buildConversationTail(options.conversationHistory ?? []) };
+      contextCompacted = false;
       const result = await runLocalAgent({ runId: crypto.randomUUID(), root:options.root, conversationId:options.conversationId, sessionId:session.sessionId,
-        provider:session.provider, resume:session.initialized, tools,
-        prompt: JSON.stringify({ request:options.question, correction,
-          harnessBrief:modelDrivenBrief({ composerSnapshot:options.composerSnapshot, contextPlan:options.contextPlan,
-            currentSurface:options.currentSurface, history:options.conversationHistory ?? [],
-            mentionScope:options.mentionScope ?? options.scope, tagMentionScopes:options.tagMentionScopes }),
+        provider:session.provider, resume:session.initialized, seedPolicy:!session.contextState, tools,
+        prompt: JSON.stringify({ ...prepared.payload, ...(correction ? {correction} : {}),
+          ...(bootstrap ? {bootstrap} : {}),
+          ...(runtime.availabilityNotes.length || snapshot.warnings.length
+            ? {observations:[...runtime.availabilityNotes,...snapshot.warnings]} : {}),
           recovery:options.resumeExecutionId ? { observations:runtime.observations,
             sources:[...ledger.sources].map(([marker,source]) => ({marker:`S${marker}`,source})),
             proposals:[...proposals,...entryMetaProposals,...tagProposals].map(p => ({id:p.id,status:p.status})),
             writesBlocked:budget.writesBlocked,
-            instruction:'Continue the frozen request using the saved observations. Completed operations and proposals already exist; do not repeat them. Freshly read a note before any new edit. If writesBlocked, only inspect and explain the uncertain outcome.' } : undefined,
-          capabilities:web.capabilities,
-          context:{currentSurface:options.currentSurface ? {
-            kind:options.currentSurface.kind, pane:options.currentSurface.pane,
-            entryId:options.currentSurface.entryId, noteId:options.currentSurface.noteId,
-            segmentUid:options.currentSurface.segmentUid
-          } : null, browser:web.browser, active_entry:snapshot.active_entry, active_note:snapshot.active_note && {
-            entry_id:snapshot.active_note.entry_id, note_id:snapshot.active_note.note_id, note_title:snapshot.active_note.note_title},
-            document:snapshot.document && {entry_id:snapshot.document.entry_id, entry_title:snapshot.document.entry_title},
-            documentOutline:compactOutline || undefined, warnings:snapshot.warnings},
-          selectedNotes:selected.text.slice(0,36_000), selectedNotesTruncated:selected.text.length > 36_000,
-          pinnedEvidence:[pinned.text,pinnedSnapshot].filter(Boolean).join('\n\n').slice(0,32_000),
-          targets:{entry:options.currentEntry,note:options.currentNote,mentions:options.composerSnapshot?.mentions,scope:options.scope},
-          catalog:{entries:options.availableEntries,notes:options.availableNotes,tags:options.availableTags},
-          priorProposalDecisions:(options.conversationHistory ?? []).flatMap(message => (message.note_proposals ?? []).map(p => ({id:p.id,status:p.status}))),
-          agentInstructions:main.systemPrompt,
-          instructions:[
-            'The user can switch reading tabs without starting a new conversation. Preserve prior discussion, but resolve "this paper", "this note" and "the current page" using this request\'s frozen context and targets, not a previous turn or native session memory. The host has already resolved any explicitly pinned reading target. Explicit references to earlier documents and requests to compare them still apply; read their evidence again when needed. Null current targets mean no target is selected: never silently restore the previous one. If the intended target remains ambiguous, ask. A tab change during execution does not retarget this frozen request. Treat historical source markers as historical; only this task\'s retrieved or explicitly recovered markers are valid for new citations.',
-            buildToolNotes(runtime.toolNames, plan, { agent: main }, invocationPlan, {
-              focusedParsedPaper: Boolean(compactOutline),
-              hasSelectedNote: Boolean(options.currentNote || snapshot.active_note || selected.text),
-              question: options.question
-            }),web.instructions,USER_INPUT_INSTRUCTIONS,
-            executionModeInstructions(plan.executionMode!),
-            runtime.toolNames.includes('search_library')
-              ? [
-                  'Paper retrieval: Parsed paper text is not preloaded in pinnedEvidence (only a compact outline may be attached). For questions about parsed papers—including the focused single paper—call search_library first to retrieve grounded passages, tables, and visual evidence with [S#] citations before answering; use read_segment_content or read_entry_assistant_context only when you need expanded reading beyond retrieved snippets, and batch multiple follow-up reads in one parallel turn rather than reading one page or segment per turn.',
-                  'Retrieval planning rules (apply directly in your search_library arguments so the host executes your plan in one batch without spawning a second planner):',
-                  '- single: one focused question -> do not split; pass question (and english_query when asking in Chinese about English papers).',
-                  '- multi_target: multiple distinct aspects (e.g., abstract gains + main table metrics + baseline numbers) -> set question_types: ["multi_target"] and pass 2–4 focused items in planned_tasks (each with question, english_query, and preserved constraints).',
-                  '- cross_paper: comparison across multiple papers -> set question_types: ["cross_paper"], create one task per paper-and-dimension in planned_tasks, and bind each task with target_entry_ids from the allowed catalog.',
-                  '- global: exhaustive inventory across a whole paper or corpus (e.g., all experiments/tables) -> set question_types: ["global"] and decompose by major section/module in planned_tasks.',
-                  '- dependent_multihop: when hop-2 depends on an entity discovered in hop-1, call search_library for hop-1 first, then call search_library again with the concrete entities discovered.'
-                ].join('\n')
-              : '',
-            TOOL_FAILURE_INSTRUCTIONS,...runtime.availabilityNotes].join('\n\n') }) }, options.abortSignal,
+            instruction:'Continue the frozen request using the saved observations. Completed operations and proposals already exist; do not repeat them. Freshly read a note before any new edit. If writesBlocked, only inspect and explain the uncertain outcome.' } : undefined }) }, options.abortSignal,
         event => { if (event.type === 'message') stream.consume(event.value); },
         async event => {
           options.abortSignal?.throwIfAborted();
@@ -235,16 +211,17 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
           }
           const execute = executors[event.name];
           if (!execute) return {isError:true,content:[{type:'text',text:'当前工具不可用。'}]};
-          if (event.name === 'note_propose_patch') {
-            const input = protocolObject(event.input);
-            const entryId = typeof input.entry_id === 'string' ? input.entry_id : options.currentNote?.entryId ?? options.currentEntry?.id;
-            const noteId = typeof input.note_id === 'string' ? input.note_id : options.currentNote?.noteId;
-            if (!entryId || !noteId || !runtime.snapshot().readNotes.some(([key]) => key === noteSnapshotKey(entryId,noteId))) {
-              return {isError:true,content:[{type:'text',text:'本轮修改前必须先成功调用 read_note 或 read_current_note 读取目标笔记，再提交修改提案。'}]};
-            }
-          }
           try {
-            const output = await checkpoint.run(event.name, event.input, {id:event.id, signal:options.abortSignal}, execute);
+            const output = await checkpoint.run(event.name, event.input, {id:event.id, signal:options.abortSignal}, execute, () => {
+              // Check after earlier reads settle, not when concurrent MCP requests first arrive.
+              if (event.name !== 'note_propose_patch') return;
+              const input = protocolObject(event.input);
+              const entryId = typeof input.entry_id === 'string' ? input.entry_id : options.currentNote?.entryId ?? options.currentEntry?.id;
+              const noteId = typeof input.note_id === 'string' ? input.note_id : options.currentNote?.noteId;
+              if (!entryId || !noteId || !runtime.snapshot().readNotes.some(([key]) => key === noteSnapshotKey(entryId,noteId))) {
+                throw new AgentToolNotExecutedError('本轮修改前必须先成功调用 read_note 或 read_current_note 读取目标笔记，再提交修改提案。');
+              }
+            });
             options.abortSignal?.throwIfAborted();
             stream.pdfReading.observe(output);
             return {...(isAgentToolFailure(output) ? {isError:true} : {}),content:[{type:'text',text:JSON.stringify(output)}]};
@@ -264,7 +241,7 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
       turnDurationsMs.push(Math.max(0, Date.now() - turnStartedAt));
       options.abortSignal?.throwIfAborted();
       await checkpoint.settled();
-      session = {...session,initialized:true}; onSession(session);
+      session = {...session,initialized:true,contextState:contextCompacted ? undefined : prepared.state}; onSession(session);
       await checkpoint.finishNativeTurn();
       answer = normalizeReturnedExternalCitationLinks(
         typeof result.result === 'string' ? result.result : '', returnedExternalCitationUrls(runtime.observations));
@@ -294,7 +271,8 @@ async function executeLocalAgent(inputOptions: RunAssistantHarnessOptions, sessi
     verifyGroundedProposals({ composerSnapshot:options.composerSnapshot, assistantContext:options.assistantContext,
       contextPlan:options.contextPlan, currentSurface:options.currentSurface, history:options.conversationHistory, proposals, sources });
     const cited = normalizeCitedSources(answer, ledger.sources, events);
-    const records = paperRecords(runtime.events.flatMap(event => event.status === 'done' ? event.researchPapers ?? [] : []), sources);
+    const selectedPapers = researchPapersFromEvents(runtime.events);
+    const records = paperRecords(selectedPapers.map(item => item.paper), sources, selectedPapers);
     const readingNotice = [parsedEntryReadingNotice(runtime.observations), stream.pdfReading.notice()].filter(Boolean).join('\n');
     const grounded: GroundedAnswer = {...cited, localAgentSession:session, plan, entryMetaProposals, tagProposals, answer:[readingNotice,cited.answer].filter(Boolean).join('\n\n'),
       sources:uniqueConversationSources([...cited.sources,

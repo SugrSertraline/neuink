@@ -1,0 +1,42 @@
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: neuink
+      POSTGRES_USER: neuink
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - database:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U neuink -d neuink"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  app:
+    build:
+      context: ../..
+      dockerfile: deploy/server/Dockerfile
+    restart: unless-stopped
+    environment:
+      NEUINK_DATABASE_URL: jdbc:postgresql://db:5432/neuink
+      NEUINK_DATABASE_USER: neuink
+      NEUINK_DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      NEUINK_INVITE_REQUIRED: ${NEUINK_INVITE_REQUIRED:-true}
+      NEUINK_SERVER_STORAGE: /data
+      NEUINK_SERVER_ADDRESS: 0.0.0.0
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=60 -XX:+ExitOnOutOfMemoryError
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8790:8790"
+    volumes:
+      - attachments:/data
+volumes:
+  database:
+  attachments:

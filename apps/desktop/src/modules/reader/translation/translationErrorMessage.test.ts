@@ -6,8 +6,22 @@ describe('describeTranslationFailure', () => {
   it('does not expose low-level model output errors', () => {
     const result = describeTranslationFailure('LLM did not return a JSON object');
 
-    expect(result).toContain('检查任务模型配置');
+    expect(result).toContain('模型已响应');
+    expect(result).toContain('译文格式');
     expect(result).not.toContain('JSON');
+  });
+
+  it.each([
+    ['LLM_TRANSLATION_OUTPUT_LIMIT', '最大输出长度'],
+    ['LLM_TRANSLATION_REASONING_ONLY', '思考过程'],
+    ['LLM_TRANSLATION_CONTENT_FILTERED', '拦截'],
+    ['LLM_TRANSLATION_PROVIDER_ERROR', '调用权限'],
+    ['LLM_TRANSLATION_INVALID_FORMAT', '译文格式'],
+    ['error sending request for url (https://private.example/?key=sk-secret)', '检查网络']
+  ])('explains %s without exposing response content or credentials', (error, guidance) => {
+    const result = describeTranslationFailure(`${error}: private response sk-secret`);
+    expect(result).toContain(guidance);
+    expect(result).not.toMatch(/sk-secret|private|LLM_TRANSLATION/);
   });
 
   it('maps common actionable failures to user-facing guidance', () => {

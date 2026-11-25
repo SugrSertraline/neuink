@@ -1,198 +1,48 @@
-import {
-  FolderPlus,
-  Hash,
-  Pencil,
-  Plus,
-  Save,
-  Trash2,
-  X
-} from 'lucide-react';
-import { useState, type FormEvent } from 'react';
-
+import { FolderClosed, Hash } from 'lucide-react';
+import { useRef } from 'react';
 import { Button } from '@/components/ui/button';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { DisclosureIcon } from '@/components/ui/disclosure-icon';
-import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-
 import type { TagNode } from '../utils/tagTree';
 
-type TagEditorNodeProps = {
-  activeTag: string | null;
-  busy: boolean;
-  childName: string;
-  creatingChildForId: string | null;
-  editingId: string | null;
-  editingName: string;
-  node: TagNode;
-  onCreateChild: (node: TagNode) => void;
-  onDeleteRequest: (node: TagNode) => void;
-  onEdit: (node: TagNode) => void;
-  onRename: (node: TagNode) => void;
-  onSelectTag: (tag: string | null) => void;
-  onSetChildName: (name: string) => void;
-  onSetEditingName: (name: string) => void;
-  onStartCreateChild: (node: TagNode) => void;
-  onStopCreateChild: () => void;
-  onStopEdit: () => void;
-};
-
-export function TagEditorNode({
-  activeTag,
-  busy,
-  childName,
-  creatingChildForId,
-  editingId,
-  editingName,
-  node,
-  onCreateChild,
-  onDeleteRequest,
-  onEdit,
-  onRename,
-  onSelectTag,
-  onSetChildName,
-  onSetEditingName,
-  onStartCreateChild,
-  onStopCreateChild,
-  onStopEdit
-}: TagEditorNodeProps) {
-  const [open, setOpen] = useState(true);
-  const active = activeTag === node.id;
-  const editing = editingId === node.id;
-  const creatingChild = creatingChildForId === node.id;
-  const hasChildren = node.children.length > 0;
-
-  const submitChild = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    onCreateChild(node);
-  };
-
-  return (
-    <div>
-      <div
-        className={cn(
-          'grid min-h-10 grid-cols-[auto_minmax(0,1fr)_auto_auto_auto_auto] items-center gap-1 rounded-md border border-transparent px-1 transition-colors hover:border-border hover:bg-muted',
-          active && 'border-primary/20 bg-accent/80 text-primary',
-          editing && 'border-primary/45 bg-primary/5 ring-2 ring-primary/15'
-        )}
-      >
-        {hasChildren ? (
-          <Button aria-expanded={open} aria-label={`${open ? '收起' : '展开'} ${node.name}`} size="icon-sm" title={open ? '收起' : '展开'} type="button" variant="ghost" onClick={() => setOpen(!open)}>
-            <DisclosureIcon open={open} />
-          </Button>
-        ) : (
-          <span className="grid size-7 place-items-center text-muted-foreground">
-            <Hash size={13} aria-hidden="true" />
-          </span>
-        )}
-        {editing ? (
-          <Input
-            className="border-primary/45 bg-white font-medium"
-            disabled={busy}
-            style={{ marginLeft: node.depth * 14 }}
-            value={editingName}
-            onChange={(event) => onSetEditingName(event.target.value)}
-          />
-        ) : (
-          <button
-            aria-label={`打开标签 ${node.path}`}
-            className="min-w-0 rounded-md px-2 py-1.5 text-left hover:bg-accent"
-            style={{ marginLeft: node.depth * 14 }}
-            title={`双击打开：${node.path}`}
-            type="button"
-            onClick={(event) => {
-              if (event.detail === 0) onSelectTag(node.id);
-            }}
-            onDoubleClick={() => onSelectTag(node.id)}
-          >
-            <span className="block truncate text-sm font-medium">{node.name}</span>
-            <span className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-              <FolderPlus size={12} aria-hidden="true" />
-              <span className="min-w-0 truncate">{node.path}</span>
-              <span className="shrink-0">{node.count} 个条目</span>
-            </span>
-          </button>
-        )}
-        {editing ? (
-          <Button disabled={busy || !editingName.trim()} size="icon-sm" title="保存" type="button" variant="outline" onClick={() => onRename(node)}>
-            <Save size={13} aria-hidden="true" />
-          </Button>
-        ) : (
-          <Button disabled={busy} size="icon-sm" title="重命名" type="button" variant="outline" onClick={() => onEdit(node)}>
-            <Pencil size={13} aria-hidden="true" />
-          </Button>
-        )}
-        <Button
-          disabled={busy}
-          size="icon-sm"
-          title="添加子标签"
-          type="button"
-          variant={creatingChild ? 'outline' : 'ghost'}
-          onClick={() => onStartCreateChild(node)}
-        >
-          <Plus size={13} aria-hidden="true" />
-        </Button>
-        <Button disabled={busy} size="icon-sm" title="删除" type="button" variant="ghost" onClick={() => onDeleteRequest(node)}>
-          <Trash2 size={13} aria-hidden="true" />
-        </Button>
-        {editing ? (
-          <Button disabled={busy} size="icon-sm" title="取消" type="button" variant="ghost" onClick={onStopEdit}>
-            <X size={13} aria-hidden="true" />
-          </Button>
-        ) : (
-          <span className="size-7" />
-        )}
-      </div>
-      {creatingChild ? (
-        <form
-          className="mt-1 grid min-h-9 grid-cols-[auto_minmax(0,1fr)_auto_auto] items-center gap-1 rounded-md border border-primary/30 bg-primary/5 px-1 py-1"
-          style={{ marginLeft: node.depth * 14 + 28 }}
-          onSubmit={submitChild}
-        >
-          <span className="grid size-7 place-items-center text-primary">
-            <FolderPlus size={13} aria-hidden="true" />
-          </span>
-          <Input
-            autoFocus
-            className="h-7 border-primary/35 bg-white"
-            disabled={busy}
-            placeholder={`添加到 ${node.name} 下`}
-            value={childName}
-            onChange={(event) => onSetChildName(event.target.value)}
-          />
-          <Button disabled={busy || !childName.trim()} size="icon-sm" title="添加" type="submit" variant="outline">
-            <Plus size={13} aria-hidden="true" />
-          </Button>
-          <Button disabled={busy} size="icon-sm" title="取消" type="button" variant="ghost" onClick={onStopCreateChild}>
-            <X size={13} aria-hidden="true" />
-          </Button>
-        </form>
-      ) : null}
-      {hasChildren && open ? (
-        <div className="ml-4 border-l border-border pl-1">
-          {node.children.map((child) => (
-            <TagEditorNode
-              activeTag={activeTag}
-              busy={busy}
-              childName={childName}
-              creatingChildForId={creatingChildForId}
-              editingId={editingId}
-              editingName={editingName}
-              key={child.id}
-              node={child}
-              onCreateChild={onCreateChild}
-              onDeleteRequest={onDeleteRequest}
-              onEdit={onEdit}
-              onRename={onRename}
-              onSelectTag={onSelectTag}
-              onSetChildName={onSetChildName}
-              onSetEditingName={onSetEditingName}
-              onStartCreateChild={onStartCreateChild}
-              onStopCreateChild={onStopCreateChild}
-              onStopEdit={onStopEdit}
-            />
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
+export function TagEditorNode({ node, active, selected, expanded, busy, onToggle, onSelect, onOpen, onCreateChild, onRename, onDelete, onFocusEditor }: {
+  node: TagNode; active: boolean; selected: boolean; expanded: boolean; busy: boolean;
+  onToggle: () => void; onSelect: () => void; onOpen: () => void;
+  onCreateChild: () => void; onRename: () => void; onDelete: () => void;
+  onFocusEditor?: () => void;
+}) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const focusAfterMenu = useRef<'node' | 'editor' | 'destination'>('node');
+  return <ContextMenu onOpenChange={open => { if (open) focusAfterMenu.current = 'node'; }}><ContextMenuTrigger asChild><div data-tag-editor-node data-allow-context-menu="true" onContextMenu={event => { event.stopPropagation(); onSelect(); }}
+    className={cn('flex h-[58px] w-[218px] cursor-default items-center gap-1 rounded-lg border bg-card p-1.5 shadow-sm transition-colors',
+    selected ? 'border-primary bg-primary/5 ring-1 ring-primary/20' : 'border-border hover:border-primary/35')}>
+    <button ref={buttonRef} aria-label={`选择标签 ${node.path}`} aria-current={active ? 'location' : undefined} aria-pressed={selected}
+      title={`${node.path} · ${node.count} 个条目\n双击打开条目库`}
+      className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      onClick={event => { if (event.detail === 0) onOpen(); else onSelect(); }} onDoubleClick={onOpen} type="button">
+      <FolderClosed size={15} className={selected ? 'shrink-0 text-primary' : 'shrink-0 text-muted-foreground'} aria-hidden="true" />
+      <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium">{node.name}</span>
+        <span className="block text-[10px] tabular-nums text-muted-foreground">{node.children.length ? `${node.children.length} 个子标签 · ` : ''}{node.count} 个条目</span></span>
+    </button>
+    {node.children.length ? <Button aria-expanded={expanded} aria-label={`${expanded ? '收起' : '展开'} ${node.name}`} size="icon-xs" variant="ghost" disabled={busy}
+      title={expanded ? '收起子标签' : '展开子标签'} onClick={onToggle}><DisclosureIcon open={expanded} /></Button>
+      : <span className="grid size-6 shrink-0 place-items-center text-muted-foreground"><Hash size={13} aria-hidden="true" /></span>}
+  </div></ContextMenuTrigger>
+    <ContextMenuContent viewportAligned className="w-52 max-w-[calc(100vw-1rem)]" data-allow-context-menu="true" onPointerDown={event => event.stopPropagation()}
+      onCloseAutoFocus={event => {
+        event.preventDefault();
+        if (focusAfterMenu.current === 'editor') onFocusEditor?.();
+        else if (focusAfterMenu.current === 'node') buttonRef.current?.focus({ preventScroll: true });
+      }}>
+      <ContextMenuLabel className="truncate" title={node.path}>{node.name}</ContextMenuLabel>
+      <ContextMenuItem disabled={busy} onSelect={() => { focusAfterMenu.current = 'destination'; onOpen(); }}>打开条目</ContextMenuItem>
+      {node.children.length ? <ContextMenuItem disabled={busy} onSelect={onToggle}>{expanded ? '收起子标签' : '展开子标签'}</ContextMenuItem> : null}
+      <ContextMenuSeparator />
+      <ContextMenuItem disabled={busy} onSelect={() => { focusAfterMenu.current = 'editor'; onCreateChild(); }}>添加子标签</ContextMenuItem>
+      <ContextMenuItem disabled={busy} onSelect={() => { focusAfterMenu.current = 'editor'; onRename(); }}>重命名</ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem disabled={busy} variant="destructive" onSelect={() => { focusAfterMenu.current = 'destination'; onDelete(); }}>移入回收站</ContextMenuItem>
+    </ContextMenuContent>
+  </ContextMenu>;
 }

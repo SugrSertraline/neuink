@@ -1,6 +1,7 @@
 import { createAgentToolFailure, isAgentToolFailure, type AgentToolFailure, type AgentToolNotExecutedCode } from './toolFailure';
+import { MAX_PARALLEL_TOOLS, ToolScheduler } from './toolScheduler';
 
-/** Provider-independent, sequential agent loop. Business writes remain in tools. */
+/** Provider-independent agent loop. Business writes remain in tools. */
 export class AgentStoppedError extends Error {}
 /** Recoverable only at a delegated-agent boundary; the current agent still stops. */
 export class AgentLocalLimitError extends AgentStoppedError {
@@ -23,8 +24,11 @@ export class RunBudget {
   persist?: () => Promise<void>;
   constructor(readonly maxTurns = 24, readonly maxToolCalls = 48, readonly maxDepth = 2, readonly maxReportedTokens = 512_000) {}
   assertCanTurn() {
-    if (this.inputTokens + this.outputTokens >= this.maxReportedTokens) throw new AgentStoppedError('Request token budget exhausted.');
+    this.assertTokenBudget();
     if (this.turns >= this.maxTurns) throw new AgentStoppedError('Agent tree model-turn budget exhausted.');
+  }
+  assertTokenBudget() {
+    if (this.inputTokens + this.outputTokens >= this.maxReportedTokens) throw new AgentStoppedError('Request token budget exhausted.');
   }
   turn() {
     this.assertCanTurn();
@@ -60,6 +64,8 @@ export type AgentToolCall = {
 };
 export type AgentTurn<M> = { text: string; messages: M[]; calls: AgentToolCall[] };
 export type AgentDriver<M> = {
+  /** Append host control observations before the request is durably saved and sent. */
+  prepare?(messages: readonly M[], options: { finalTurn: boolean }): readonly M[] | Promise<readonly M[]>;
   turn(messages: readonly M[], signal?: AbortSignal, options?: { finalTurn: boolean }): Promise<AgentTurn<M>>;
   result(call: AgentToolCall, output: unknown, failed: boolean): M;
   instruction(text: string): M;
@@ -109,6 +115,7 @@ export class Agent<M> {
   private turns = 0;
   private pending?: AgentCheckpoint<M>['pending'];
   private answer?: string;
+  private checkpointWrites: Promise<void> = Promise.resolve();
   private readonly steering: M[] = [];
   private readonly followUps: M[] = [];
   private settling = false;
@@ -136,6 +143,7 @@ export class Agent<M> {
     checkpoint?: AgentCheckpoint<M>;
     saveCheckpoint?: (checkpoint: AgentCheckpoint<M>) => Promise<void>;
     canReplayTool?: (name: string) => boolean;
+    canParallelTool?: (name: string, input: unknown) => boolean;
   }) {
     const saved = options.checkpoint;
     if (saved) validateCheckpoint(saved);
@@ -161,13 +169,17 @@ export class Agent<M> {
   }
   private async save() {
     if (!this.options.saveCheckpoint) return;
-    try {
-      await this.options.saveCheckpoint({ messages: this.messages, turns: this.turns, pending: this.pending, answer: this.answer,
-        ...(this.options.budget.writesBlocked ? { uncertainWriteGate: true as const } : {}) });
-    } catch (error) {
-      if (error instanceof AgentPersistenceError) throw error;
-      throw new AgentPersistenceError('任务检查点保存失败，已停止执行。请检查存储后继续，系统不会自动重放结果不明的操作。');
-    }
+    const checkpoint = { messages: [...this.messages], turns: this.turns,
+      pending: this.pending ? { ...this.pending } : undefined, answer: this.answer,
+      ...(this.options.budget.writesBlocked ? { uncertainWriteGate: true as const } : {}) };
+    this.checkpointWrites = this.checkpointWrites.then(async () => {
+      try { await this.options.saveCheckpoint!(checkpoint); }
+      catch (error) {
+        if (error instanceof AgentPersistenceError) throw error;
+        throw new AgentPersistenceError('任务检查点保存失败，已停止执行。请检查存储后继续，系统不会自动重放结果不明的操作。');
+      }
+    });
+    await this.checkpointWrites;
   }
 
   private async blockUncertainWrites() {
@@ -180,24 +192,26 @@ export class Agent<M> {
     }
   }
 
-  private async executeTool(call: AgentToolCall): Promise<{ output: unknown; failed: boolean }> {
+  private async executeTool(call: AgentToolCall, batch?: { reserved: boolean; signal: AbortSignal }): Promise<{ output: unknown; failed: boolean }> {
     const o = this.options;
+    const signal = batch?.signal ?? o.signal;
+    const started = batch ? false : this.pending!.started;
     const replayable = o.canReplayTool?.(call.name) === true;
     let invoked = false;
     let failureCode: AgentToolNotExecutedCode = 'TOOL_NOT_EXECUTED';
     const assertWriteAllowed = () => {
       if (!replayable && o.budget.writesBlocked) throw new AgentToolNotExecutedError(undefined, 'TOOL_WRITE_BLOCKED');
     };
-    if (this.pending!.started && !replayable) {
+    if (started && !replayable) {
       await this.blockUncertainWrites();
       const failure = createAgentToolFailure('TOOL_OUTCOME_UNKNOWN');
       o.onToolError?.(call, new Error(failure.message), failure);
       return { output: failure, failed: true };
     }
     try {
-      if (!this.pending!.started) {
-        if (o.budget.toolCalls >= o.budget.maxToolCalls) throw new AgentToolNotExecutedError(undefined, 'TOOL_LIMIT_REACHED');
-        o.budget.tool();
+      if (!started) {
+        if (batch ? !batch.reserved : o.budget.toolCalls >= o.budget.maxToolCalls) throw new AgentToolNotExecutedError(undefined, 'TOOL_LIMIT_REACHED');
+        if (!batch) o.budget.tool();
       }
       let execute = Object.prototype.hasOwnProperty.call(o.tools, call.name) ? o.tools[call.name] : undefined;
       if (typeof execute !== 'function') throw new AgentToolNotExecutedError(undefined, 'TOOL_NOT_AVAILABLE');
@@ -206,16 +220,18 @@ export class Agent<M> {
       }
       assertWriteAllowed();
       failureCode = 'TOOL_PREFLIGHT_FAILED';
-      if (execute.prepare) execute = await abortable(execute.prepare(call.input, { id: call.id, signal: o.signal }), o.signal);
-      o.signal?.throwIfAborted();
+      if (execute.prepare) execute = await abortable(execute.prepare(call.input, { id: call.id, signal }), signal);
+      signal?.throwIfAborted();
       assertWriteAllowed();
-      this.pending!.started = true;
-      await this.save();
+      if (!batch) {
+        this.pending!.started = true;
+        await this.save();
+      }
       await this.emit({ type: 'tool_start', call });
-      o.signal?.throwIfAborted();
+      signal?.throwIfAborted();
       assertWriteAllowed(); // Another actor may have closed the shared gate while we awaited persistence.
       invoked = true;
-      const output = await abortable(execute(call.input, { id: call.id, signal: o.signal }), o.signal);
+      const output = await abortable(execute(call.input, { id: call.id, signal }), signal);
       if (isAgentToolFailure(output)) {
         if (output.outcome === 'unknown' || output.recovery.writesBlocked) await this.blockUncertainWrites();
         return { output: { ...output, recovery: { ...output.recovery, writesBlocked: o.budget.writesBlocked } }, failed: true };
@@ -224,7 +240,7 @@ export class Agent<M> {
     } catch (error) {
       const unknownWrite = invoked && !replayable && !(error instanceof AgentToolNotExecutedError);
       if (unknownWrite) await this.blockUncertainWrites();
-      if (o.signal?.aborted || (error instanceof Error && error.name === 'AbortError')
+      if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')
         || error instanceof AgentStoppedError || o.isFatal?.(error)) throw error;
       const failure = createAgentToolFailure(unknownWrite ? 'TOOL_OUTCOME_UNKNOWN'
         : error instanceof AgentToolNotExecutedError ? error.code : invoked ? 'TOOL_EXECUTION_FAILED' : failureCode,
@@ -233,11 +249,40 @@ export class Agent<M> {
         const diagnostic = o.toolErrorDiagnostic?.(error);
         if (typeof diagnostic === 'string' && diagnostic.trim()) failure.diagnostic = diagnostic.trim().slice(0, 512);
       } catch (diagnosticError) {
-        if (o.signal?.aborted || diagnosticError instanceof AgentStoppedError
+        if (signal?.aborted || diagnosticError instanceof AgentStoppedError
           || (diagnosticError instanceof Error && diagnosticError.name === 'AbortError') || o.isFatal?.(diagnosticError)) throw diagnosticError;
       }
       o.onToolError?.(call, error, failure);
       return { output: failure, failed: true };
+    }
+  }
+
+  private async executeReadBatch(calls: AgentToolCall[]) {
+    const o = this.options;
+    const reserved = calls.map(() => {
+      if (o.budget.toolCalls >= o.budget.maxToolCalls) return false;
+      o.budget.tool();
+      return true;
+    });
+    // A read batch has no irreversible attempt. Its unchanged cursor can replay the
+    // whole batch after interruption, without a per-call journal or partial transcript.
+    this.pending!.started = false;
+    await this.save();
+    const scheduler = new ToolScheduler();
+    const results = await Promise.allSettled(calls.map((call, index) => scheduler.run(true,
+      signal => this.executeTool(call, { reserved: reserved[index], signal }), o.signal)));
+    await scheduler.settled();
+    o.signal?.throwIfAborted();
+    for (let index = 0; index < results.length; index++) {
+      const result = results[index];
+      if (result.status === 'rejected') throw result.reason;
+      this.messages.push(o.driver.result(calls[index], result.value.output, result.value.failed));
+    }
+    this.pending!.next += calls.length;
+    await this.save();
+    for (let index = 0; index < results.length; index++) {
+      const result = results[index];
+      if (result.status === 'fulfilled') await this.emit({ type: 'tool_end', call: calls[index], failed: result.value.failed });
     }
   }
 
@@ -263,12 +308,13 @@ export class Agent<M> {
           o.budget.turn();
           this.turns++;
           o.beforeTurn?.();
-          await this.save(); // Reserve the attempt before network I/O, including interrupted requests.
-          await this.emit({ type: 'turn_start' });
           const localMaxTurns = o.maxTurns ?? 12;
           const synthesisTurn = Math.max(1, localMaxTurns - (o.synthesisReserveTurns ?? 0));
           const finalTurn = this.turns >= synthesisTurn || o.budget.turns >= o.budget.maxTurns - (o.reserveParentTurn ? 1 : 0)
             || o.budget.toolCalls >= o.budget.maxToolCalls;
+          this.messages.push(...await o.driver.prepare?.(this.messages, { finalTurn }) ?? []);
+          await this.save(); // Include host updates before network I/O, including interrupted requests.
+          await this.emit({ type: 'turn_start' });
           const response = await abortable(o.driver.turn(this.messages, o.signal, { finalTurn }), o.signal);
           o.signal?.throwIfAborted();
           if (finalTurn && response.calls.length) {
@@ -282,6 +328,16 @@ export class Agent<M> {
         while (this.pending.next < response.calls.length) {
           const call = response.calls[this.pending.next];
           o.signal?.throwIfAborted();
+          const batch: AgentToolCall[] = [];
+          for (let index = this.pending.next; index < response.calls.length && batch.length < MAX_PARALLEL_TOOLS; index++) {
+            const candidate = response.calls[index];
+            if (!o.canParallelTool?.(candidate.name, candidate.input) || !o.canReplayTool?.(candidate.name)) break;
+            batch.push(candidate);
+          }
+          if (batch.length > 1) {
+            await this.executeReadBatch(batch);
+            continue;
+          }
           const { output, failed } = await this.executeTool(call);
           o.signal?.throwIfAborted();
           this.messages.push(o.driver.result(call, output, failed));

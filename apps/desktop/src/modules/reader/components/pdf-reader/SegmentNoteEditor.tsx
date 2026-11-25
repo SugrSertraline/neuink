@@ -39,6 +39,9 @@ import { useStoredCollapseState } from './useStoredCollapseState';
 import { ReadingExportButton } from '../../export/ReadingExportButton';
 import { logicalSegmentUid } from './readerUtils';
 import { applyRemoteMarkdown } from '@/modules/notes/editor/applyRemoteMarkdown';
+import { useEditRecovery } from '@/shared/hooks/useEditRecovery';
+import { recoveryDraftKey } from '@/shared/lib/editRecovery';
+import { EditRecoveryNotice } from '@/shared/components/EditRecoveryNotice';
 
 const SegmentMarkdownShortcuts = Extension.create({
   name: 'segmentMarkdownShortcuts',
@@ -108,6 +111,11 @@ export function SegmentNoteEditor({
     getSegmentNoteVisibleText(noteText)
   );
   const syncedSegmentUidRef = useRef<string | null>(segment?.uid ?? null);
+  const recovery = useEditRecovery({ root: workspaceRoot, dirty, ready: Boolean(segment),
+    draft: segment ? { key: recoveryDraftKey('segment-note', sourceEntryId, logicalSegmentUid(segment)), kind: 'segment-note',
+      label: `片段笔记 · 第 ${segment.page_idx + 1} 页`, ownerId: sourceEntryId, targetId: logicalSegmentUid(segment),
+      scopeKey: `segment-records:${sourceEntryId}`, payload: { text: noteText } } : null,
+    restore: draft => { if (typeof draft.payload.text !== 'string') throw new Error('Invalid draft'); onNoteTextChange(draft.payload.text); } });
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -144,6 +152,7 @@ export function SegmentNoteEditor({
   });
 
   const noteValidation = getSegmentNoteValidation(visibleNoteText);
+  useEffect(() => { editor?.setEditable(!recovery.loading && !recovery.pending, false); }, [editor, recovery.loading, recovery.pending]);
 
   useEffect(() => {
     if (!editor) {
@@ -175,6 +184,7 @@ export function SegmentNoteEditor({
   return (
     <aside data-guide="segment-editor" className={cn('grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden border-l bg-card', className)}>
       <div className="min-w-0 border-b bg-muted/40 px-3 py-2">
+        <EditRecoveryNotice recovery={recovery} />
         <div className="flex min-w-0 items-center justify-between gap-2">
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold">片段笔记</div>
@@ -320,7 +330,7 @@ export function SegmentNoteEditor({
             </section>
 
             <div className="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden border-t border-border pt-3">
-              <TipTapToolbar editor={editor} disabled={false} />
+              <TipTapToolbar editor={editor} disabled={recovery.loading || Boolean(recovery.pending)} />
               <div className="relative min-h-0 min-w-0 overflow-hidden [&_.tiptap]:h-full">
                 <EditorContent className="h-full min-h-0" editor={editor} />
                 <div

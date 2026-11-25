@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { SettingsServiceSection, SettingSwitch } from '@/modules/settings/components/SettingsPrimitives';
 import { registerSegmentEditorCloseHandler, setSegmentEditorDirty } from '@/modules/reader/components/segmentEditorDirtyRegistry';
+import { useFormRecovery } from '@/shared/hooks/useFormRecovery';
 
 import {
   getSciverseSettings,
@@ -55,15 +56,21 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
   const latest = useRef({ tokenDraft, busy });
   latest.current = { tokenDraft, busy };
   const writing = busy === 'save' || busy === 'toggle' || busy === 'clear';
+  const recovery = useFormRecovery({ id: 'sciverse-token', label: 'Sciverse Token', targetId: 'tools-services', value: { tokenDraft },
+    secretFields: ['tokenDraft'], dirty: Boolean(tokenDraft), ready: loaded && Boolean(settings),
+    restore: value => { if (settings?.token_source === 'environment') throw new Error('环境变量管理'); setTokenDraft(value.tokenDraft); setEditingToken(true); setShowToken(false); },
+    reveal: () => document.getElementById('sciverse-api-token')?.focus() });
+  const recoveryRef = useRef(recovery); recoveryRef.current = recovery;
   useEffect(() => {
     mounted.current = true;
     const unregister = registerSegmentEditorCloseHandler('settings', owner, {
+      ...recovery.handlers, settingsTargetId: 'tools-services', isBusy: () => ['save', 'toggle', 'clear'].includes(latest.current.busy ?? ''),
       isDirty: () => Boolean(latest.current.tokenDraft || ['save', 'toggle', 'clear'].includes(latest.current.busy ?? '')),
       save: async () => {
         if (!latest.current.tokenDraft && !['save', 'toggle', 'clear'].includes(latest.current.busy ?? '')) return true;
         notify({ tone: 'danger', title: '请先保存或放弃 Sciverse Token，再关闭设置。' }); return false;
       },
-      discard: () => { setTokenDraft(''); setEditingToken(false); setShowToken(false); setRevealedToken(null); latest.current.tokenDraft = ''; },
+      discard: () => { recoveryRef.current.discard(); setTokenDraft(''); setEditingToken(false); setShowToken(false); setRevealedToken(null); latest.current.tokenDraft = ''; },
     });
     return () => { mounted.current = false; unregister(); setSegmentEditorDirty('settings', owner, false); };
   }, [owner]);
@@ -303,6 +310,7 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
     <SettingsServiceSection id="tools-services" title="Sciverse" description="科学文献检索与远程全文读取，需服务 Token。"
       status={writing ? '保存中…' : tokenDraft ? '未保存' : notice?.tone === 'danger' || connectionError ? '操作失败' : busy === 'load' ? '读取中…' : loadError ? '读取失败' : !settings ? '未就绪' : settings.enabled ? '已启用' : hasToken ? '未启用' : '未配置'}>
       <div className="sciverse-settings grid min-w-0 gap-3">
+        {recovery.notice}
         {notice && <p role={notice.tone === 'danger' ? 'alert' : 'status'} className={`text-xs [overflow-wrap:anywhere] ${notice.tone === 'danger' ? 'text-destructive' : 'text-muted-foreground'}`}>{notice.title}{notice.description ? `：${notice.description}` : ''}</p>}
         {writing && <p role="status" className="text-xs text-muted-foreground">保存中…</p>}
         {busy === 'load' ? (
@@ -356,7 +364,7 @@ export function SciverseSettingsSection({ active }: SciverseSettingsSectionProps
                     id="sciverse-api-token"
                     aria-label="Sciverse API Token"
                     className="sciverse-token-input pl-9 pr-16"
-                    disabled={pending}
+                    disabled={pending || recovery.blocked}
                     placeholder={
                       environmentManaged
                         ? '由环境变量管理'

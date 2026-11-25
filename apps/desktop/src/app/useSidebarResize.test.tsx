@@ -10,12 +10,13 @@ class TestPointerEvent extends MouseEvent {
   constructor(type: string, init: PointerEventInit) { super(type, init); this.pointerId = init.pointerId ?? 1; this.isPrimary = init.isPrimary ?? true; }
 }
 const commit = vi.fn();
+const collapse = vi.fn();
 const rendered = vi.fn();
 const frames = new Map<number, FrameRequestCallback>();
 let nextFrameId = 0;
 function Fixture({ enabled = true, liveResize = false }: { enabled?: boolean; liveResize?: boolean }) {
   rendered();
-  const { previewRef, onPointerDown, onKeyDown } = useSidebarResize({ width: 280, min: 220, max: 820, enabled, onCommit: commit, liveResize });
+  const { previewRef, onPointerDown, onKeyDown } = useSidebarResize({ width: 280, min: 220, max: 820, enabled, onCommit: commit, onCollapse: collapse, liveResize });
   return <div data-testid="shell" className="app-shell" style={{ '--app-sidebar-width': '280px' } as React.CSSProperties}><div role="separator" aria-label="侧栏" onPointerDown={onPointerDown} onKeyDown={onKeyDown} /><div data-testid="preview" ref={previewRef} hidden /></div>;
 }
 beforeEach(() => {
@@ -30,7 +31,7 @@ beforeEach(() => {
   HTMLElement.prototype.setPointerCapture = vi.fn();
   HTMLElement.prototype.releasePointerCapture = vi.fn();
   HTMLElement.prototype.hasPointerCapture = vi.fn(() => true);
-  commit.mockReset(); rendered.mockReset(); document.body.style.cursor = 'crosshair'; document.body.style.userSelect = 'text';
+  commit.mockReset(); collapse.mockReset(); rendered.mockReset(); document.body.style.cursor = 'crosshair'; document.body.style.userSelect = 'text';
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.style.cssText = ''; });
 const begin = () => fireEvent.pointerDown(screen.getByRole('separator'), { clientX: 350, pointerId: 1, button: 0 });
@@ -41,21 +42,24 @@ const flushFrame = () => act(() => {
 const preview = () => screen.getByTestId('preview') as HTMLDivElement;
 const liveWidth = () => screen.getByTestId('shell').style.getPropertyValue('--app-sidebar-live-width');
 describe('sidebar resize interaction', () => {
-  it('ignores a click or a movement below the drag threshold', () => {
+  it('collapses on click below the drag threshold without changing the saved width', () => {
     render(<Fixture />); begin(); move(352); fireEvent.pointerUp(window, { pointerId: 1 });
     expect(commit).not.toHaveBeenCalled();
+    expect(collapse).toHaveBeenCalledTimes(1);
     expect(document.body.style.userSelect).toBe('text');
   });
   it('converts physical pointer distance at 125% into layout width and commits once', () => {
     render(<Fixture />); begin(); move(); fireEvent.pointerUp(window, { pointerId: 1 });
     fireEvent.pointerUp(window, { pointerId: 1 });
     expect(commit).toHaveBeenCalledExactlyOnceWith(360);
+    expect(collapse).not.toHaveBeenCalled();
   });
   it.each(['Escape', 'pointercancel', 'blur'])('rolls back %s without persisting or leaving text selection disabled', action => {
     render(<Fixture />); begin(); move();
     if (action === 'Escape') fireEvent.keyDown(window, { key: 'Escape' });
     else if (action === 'blur') fireEvent.blur(window);
     else fireEvent.pointerCancel(window, { pointerId: 1 });
+    expect(collapse).not.toHaveBeenCalled();
     expect(preview().hidden).toBe(true);
     expect(screen.getByTestId('shell').classList.contains('is-sidebar-resizing')).toBe(false);
     expect(frames.size).toBe(0);
@@ -306,4 +310,21 @@ describe('sidebar resize interaction', () => {
     begin(); move(); fireEvent.pointerUp(window, { pointerId: 1 });
     expect(commit).toHaveBeenCalledExactlyOnceWith(360);
   });
+});
+
+it.each(['Enter', ' '])('supports keyboard collapse with %s without repeated toggles', key => {
+  render(<Fixture />);
+  fireEvent.keyDown(screen.getByRole('separator'), { key });
+  fireEvent.keyDown(screen.getByRole('separator'), { key, repeat: true });
+  expect(collapse).toHaveBeenCalledTimes(1);
+  expect(commit).not.toHaveBeenCalled();
+});
+it('does not collapse on vertical movement or on a drag that returns to its origin', () => {
+  render(<Fixture />);
+  begin();
+  fireEvent.pointerMove(window, { clientX: 350, clientY: 12, pointerId: 1 });
+  fireEvent.pointerUp(window, { pointerId: 1 });
+  expect(collapse).not.toHaveBeenCalled();
+  begin(); move(); move(350); fireEvent.pointerUp(window, { pointerId: 1 });
+  expect(collapse).not.toHaveBeenCalled();
 });

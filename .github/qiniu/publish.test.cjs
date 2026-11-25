@@ -92,7 +92,7 @@ test('checksum manifests cannot introduce paths or omit metadata', async t => {
   await assert.rejects(verifyArtifacts(directory, [group], tag, commit), /Invalid checksum/);
 });
 
-test('a release tag must be included in main and match the committed version', t => {
+test('a release tag may originate from beta and must match the committed version', t => {
   const root = temp(t);
   const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
   git('init', '--initial-branch=main');
@@ -109,7 +109,7 @@ test('a release tag must be included in main and match the committed version', t
   git('add', 'package.json');
   git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-m', 'unapproved feature');
   git('tag', 'v0.1.2');
-  assert.throws(() => sourceCommit(root, 'v0.1.2'), /not included/);
+  assert.match(sourceCommit(root, 'v0.1.2'), /^[a-f0-9]{40}$/);
 });
 
 test('archives finish before fixed URLs change, and the manifest is written last', async t => {
@@ -121,25 +121,34 @@ test('archives finish before fixed URLs change, and the manifest is written last
     assert.ok(storage.objects.has(key));
   } });
   assert.equal(result.aliasesUpdated, true);
+  assert.equal(result.prefix, `neuink/releases/${tag}`);
   const events = storage.events;
-  const firstAlias = events.findIndex(e => e.type === 'copy' && e.key === group.zip);
+  const firstAlias = events.findIndex(e => e.type === 'copy' && e.key === `neuink/releases/current/${group.zip}`);
+  assert.ok(firstAlias > 0);
   assert.equal(events.slice(0, firstAlias).filter(e => e.type === 'verify').length, 3);
-  assert.equal(events.filter(e => e.type === 'upload').at(-1).key, 'releases/latest.json');
-  assert.equal(events.at(-1).key, 'releases/latest.json');
+  assert.equal(events.filter(e => e.type === 'upload').at(-1).key, 'neuink/releases/latest.json');
+  assert.equal(events.at(-1).key, 'neuink/releases/latest.json');
   assert.equal(events.filter(e => e.type === 'copy').length, 3);
   assert.equal(events.filter(e => e.type === 'upload' && e.key.endsWith('.zip')).length, 1);
+  assert.deepEqual([...storage.objects.keys()].sort(), [
+    ...files.flatMap(file => [`neuink/releases/${tag}/${file.name}`, `neuink/releases/current/${file.name}`]),
+    'neuink/releases/latest.json',
+  ].sort());
+  assert.ok(events.every(event => event.key?.startsWith('neuink/releases/') || event.keys?.every(key => key.startsWith('neuink/releases/'))));
+  const manifest = JSON.parse(fs.readFileSync(path.join(directory, 'cdn-latest.json'), 'utf8'));
+  assert.deepEqual(manifest.files.map(file => file.url), files.map(file => `https://cdn.sugrsertraline.top/neuink/releases/${tag}/${file.name}`));
 });
 
 test('archive conflicts or verification failures leave fixed downloads untouched', async t => {
   const { directory, group } = await fixture(t);
   const files = await verifyArtifacts(directory, [group], tag, commit);
   const storage = mockStorage();
-  storage.objects.set(`releases/${tag}/${group.zip}`, { hash: 'different', fsize: 1 });
+  storage.objects.set(`neuink/releases/${tag}/${group.zip}`, { hash: 'different', fsize: 1 });
   await assert.rejects(publish({ storage, files, release, directory, log() {}, verify: async () => {} }), /different bytes/);
   assert.equal(storage.events.length, 0);
   storage.objects.clear();
   await assert.rejects(publish({ storage, files, release, directory, log() {}, verify: async () => { throw new Error('offline'); } }), /offline/);
-  assert.ok(storage.events.every(event => event.key?.startsWith(`releases/${tag}/`) || event.keys?.every(key => key.startsWith(`releases/${tag}/`))));
+  assert.ok(storage.events.every(event => event.key?.startsWith(`neuink/releases/${tag}/`) || event.keys?.every(key => key.startsWith(`neuink/releases/${tag}/`))));
 });
 
 test('refresh failures never claim success or write a latest manifest', async t => {
@@ -148,7 +157,7 @@ test('refresh failures never claim success or write a latest manifest', async t 
   const storage = mockStorage();
   storage.refresh = async () => { throw new Error('refresh denied'); };
   await assert.rejects(publish({ storage, files, release, directory, log() {}, verify: async () => {} }), /refresh denied/);
-  assert.equal(storage.objects.has('releases/latest.json'), false);
+  assert.equal(storage.objects.has('neuink/releases/latest.json'), false);
 });
 
 test('retries reuse byte-identical version files and archive-only never promotes downloads', async t => {
@@ -157,7 +166,8 @@ test('retries reuse byte-identical version files and archive-only never promotes
   const storage = mockStorage();
   for (let i = 0; i < 2; i++) await publish({ storage, files, release, directory, archiveOnly: true, log() {}, verify: async () => {} });
   assert.equal(storage.events.filter(e => e.type === 'upload').length, 3);
-  assert.equal(storage.objects.has(group.zip), false);
+  assert.equal(storage.objects.has(`neuink/releases/current/${group.zip}`), false);
+  assert.equal(storage.objects.has('neuink/releases/latest.json'), false);
   await assert.rejects(uploadChecked({ ...storage, upload: async () => ({ hash: 'wrong' }) }, 'test.zip', files[0]), /verification/);
 });
 
@@ -184,9 +194,9 @@ test('the connection test verifies both uploads and a server-side replacement us
   assert.equal(verified, 3);
   assert.equal(new Set(uploads.map(e => e.key)).size, 2);
   assert.ok(uploads.every(e => e.options.temporary));
-  assert.match(result.key, /^releases\/_checks\//);
+  assert.match(result.key, /^neuink\/releases\/_checks\//);
   assert.equal(storage.events.filter(e => e.type === 'copy').length, 1);
-  assert.match(result.copyKey, /^releases\/_checks\//);
+  assert.match(result.copyKey, /^neuink\/releases\/_checks\//);
   assert.equal(storage.events.filter(e => e.type === 'expire').at(-1).key, result.copyKey);
 });
 
@@ -229,7 +239,7 @@ test('failed server-side promotion never writes the latest manifest', async t =>
   const storage = mockStorage();
   storage.copy = async () => { throw new Error('copy denied'); };
   await assert.rejects(publish({ storage, files, release, directory, log() {}, verify: async () => {} }), /copy denied/);
-  assert.equal(storage.objects.has('releases/latest.json'), false);
+  assert.equal(storage.objects.has('neuink/releases/latest.json'), false);
 });
 
 test('older Releases cannot replace current downloads and drafts do not affect ordering', () => {
@@ -244,12 +254,14 @@ test('server fetch validates temporary bytes before a non-overwriting archive co
   file.sourceUrl = `https://github.com/SugrSertraline/neuink/releases/download/${tag}/${file.name}`;
   const storage = mockStorage();
   storage.fetchRelease = async (url, key) => { assert.equal(url, file.sourceUrl); storage.objects.set(key, { hash: file.etag, fsize: file.size }); };
-  const key = `releases/${tag}/${file.name}`;
+  const key = `neuink/releases/${tag}/${file.name}`;
   await fetchChecked(storage, key, file);
   assert.equal(storage.objects.get(key).hash, file.etag);
   assert.equal(storage.events[0].type, 'copy');
+  assert.match(storage.events[0].source, /^neuink\/releases\/_transfers\/[^/]+\/Neuink-windows-x64-portable\.zip$/);
   assert.equal(storage.events[0].options.immutable, true);
   assert.equal(storage.events.at(-1).type, 'expire-transfer');
+  assert.equal(storage.events.at(-1).key, storage.events[0].source);
   const count = storage.events.length;
   await fetchChecked(storage, key, file);
   assert.equal(storage.events.length, count);
@@ -261,7 +273,7 @@ test('server fetch rejects wrong bytes, existing versions and unexpected source 
   file.sourceUrl = `https://github.com/SugrSertraline/neuink/releases/download/${tag}/${file.name}`;
   const storage = mockStorage();
   storage.fetchRelease = async (_url, key) => storage.objects.set(key, { hash: 'wrong', fsize: file.size });
-  const key = `releases/${tag}/${file.name}`;
+  const key = `neuink/releases/${tag}/${file.name}`;
   await assert.rejects(fetchChecked(storage, key, file), /Fetched file verification/);
   assert.equal(storage.objects.has(key), false);
   assert.ok(storage.events.every(event => event.type === 'expire-transfer'));
@@ -272,9 +284,31 @@ test('server fetch rejects wrong bytes, existing versions and unexpected source 
   }
 });
 
+test('installer assets are included in checksum verification when present', async t => {
+  const { directory, group } = await fixture(t);
+  const extras = ['Neuink-windows-x64-setup.exe', 'installer-info.json'];
+  for (const name of extras) {
+    fs.writeFileSync(path.join(directory, name), 'fixture');
+    fs.appendFileSync(path.join(directory, group.sums), `${(await fingerprint(path.join(directory, name))).sha256}  ${name}\n`);
+  }
+  const groups = releaseFiles({...release, assets:[group.zip,group.info,group.sums,...extras].map(name=>({name}))}, tag);
+  const files = await verifyArtifacts(directory, groups, tag, commit);
+  assert.equal(files.length, 5);
+  const storage = mockStorage();
+  await publish({ storage, files, release, directory, log() {}, verify: async () => {} });
+  for (const name of extras) {
+    assert.ok(storage.objects.has(`neuink/releases/${tag}/${name}`));
+    assert.ok(storage.objects.has(`neuink/releases/current/${name}`));
+    assert.equal(storage.objects.has(name), false);
+  }
+  fs.writeFileSync(path.join(directory, extras[0]), 'tampered');
+  await assert.rejects(verifyArtifacts(directory, groups, tag, commit), /Checksum mismatch/);
+  assert.throws(()=>releaseFiles({...release,assets:[group.zip,group.info,group.sums,extras[0]].map(name=>({name}))},tag),/Incomplete installer/);
+});
+
 
 test('publication supports Windows only and ignores historical macOS attachments', () => {
   assert.deepEqual(PLATFORMS.map(group => group.platform), ['windows-x64']);
-  const assets = [PLATFORMS[0].zip, PLATFORMS[0].info, PLATFORMS[0].sums, 'Neuink-macos-arm64.app.zip'].map(name => ({ name }));
+  const assets = [...[PLATFORMS[0].zip, PLATFORMS[0].info, PLATFORMS[0].sums], 'Neuink-macos-arm64.app.zip'].map(name => ({ name }));
   assert.deepEqual(releaseFiles({ ...release, assets }, tag), [PLATFORMS[0]]);
 });

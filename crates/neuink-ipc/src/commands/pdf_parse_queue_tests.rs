@@ -1,6 +1,6 @@
 use super::{
     entry::{submit_queued_pdf_parse, SubmitQueuedPdfParseRequest},
-    pdf_parse_queue::{process_pdf_parse_queue, DispatchRequest},
+    pdf_parse_queue::{process_pdf_parse_queue_impl, DispatchRequest},
 };
 use neuink_domain::PdfParseStatus;
 use neuink_workspace::Workspace;
@@ -10,6 +10,12 @@ use std::{
     net::TcpListener,
     time::{Duration, Instant},
 };
+
+async fn process_pdf_parse_queue(request: DispatchRequest) -> Result<(), String> {
+    process_pdf_parse_queue_impl(request, |_| async {
+        Err("self-hosted parsing must not submit an account task".into())
+    }).await
+}
 
 fn server(status: &str, body: &str) -> (String, std::thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -61,11 +67,13 @@ async fn downloaded_pdf_queue_dispatch_failure_and_interrupted_recovery() {
     let temp = tempfile::tempdir().unwrap();
     let w = Workspace::create(temp.path()).unwrap();
     let path = temp.path().join("downloaded.pdf");
+    let next_path = temp.path().join("next.pdf");
     fs::write(&path, b"%PDF-1.4\nfixture").unwrap();
+    fs::write(&next_path, b"%PDF-1.4\nnext fixture").unwrap();
     let a = w.create_entry("downloaded").unwrap();
     let b = w.create_entry("next").unwrap();
     w.import_pdf(&a.id, &path).unwrap();
-    w.import_pdf(&b.id, &path).unwrap();
+    w.import_pdf(&b.id, &next_path).unwrap();
     let (endpoint, http) = server("200 OK", r#"{"task_id":"remote-1","state":"queued"}"#);
     let response = submit_queued_pdf_parse(SubmitQueuedPdfParseRequest {
         root: temp.path().into(),

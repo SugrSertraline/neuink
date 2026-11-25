@@ -7,6 +7,7 @@ import { registerSegmentEditorCloseHandler, setSegmentEditorDirty } from '@/modu
 import type { NoteTarget, TagMeta } from '@/shared/types/domain';
 import type { LibraryEntry } from './LibrarySidebar';
 import { buildTagPathById, collectDescendantTagIds } from '../utils/tagTree';
+import { useFormRecovery } from '@/shared/hooks/useFormRecovery';
 
 type View = 'overview' | 'papers' | 'notes';
 export function TagDetailsView({ root, tagId, tags, entries, initialView, onDescription, onOpenNote, onOpenEntry, onReading, onManage, onTrash }: {
@@ -50,6 +51,12 @@ function TagDescriptionEditor({ tag, onSave }: { tag: TagMeta; onSave: (id: stri
   const pending = useRef<Promise<boolean> | null>(null);
   const scope = `tag-details:${tag.id}`;
   const dirty = draft !== baseline;
+  const recovery = useFormRecovery({ kind: 'tag-description', id: scope, ownerId: tag.id, targetId: 'description', scope,
+    label: `标签描述 · ${tag.name}`, dirty, value: { draft, baseline }, restore: value => {
+      if (typeof value.draft !== 'string' || typeof value.baseline !== 'string') throw new Error('无效草稿');
+      setDraft(value.draft); setBaseline(value.baseline);
+    }, reveal: () => document.getElementById(`tag-description-${tag.id}`)?.focus() });
+  const recoveryRef = useRef(recovery); recoveryRef.current = recovery;
   useEffect(() => { if (!dirty && !pending.current) { setDraft(tag.description ?? ''); setBaseline(tag.description ?? ''); } }, [tag.description]);
   const save = () => {
     if (pending.current) return pending.current;
@@ -65,14 +72,16 @@ function TagDescriptionEditor({ tag, onSave }: { tag: TagMeta; onSave: (id: stri
   const saveRef = useRef(save); saveRef.current = save;
   useEffect(() => {
     const off = registerSegmentEditorCloseHandler(scope, 'description', {
+      ...recovery.handlers, isBusy: () => Boolean(pending.current),
       save: () => saveRef.current(), isDirty: () => latest.current.draft !== latest.current.baseline,
-      discard: () => { setDraft(latest.current.baseline); latest.current.draft = latest.current.baseline; setError(null); }
+      discard: () => { recoveryRef.current.discard(); setDraft(latest.current.baseline); latest.current.draft = latest.current.baseline; setError(null); }
     });
     return () => { off(); setSegmentEditorDirty(scope, 'description', false); };
   }, [scope]);
   useEffect(() => setSegmentEditorDirty(scope, 'description', dirty || busy), [scope, dirty, busy]);
   return <div className="max-w-3xl space-y-3"><label className="block text-sm font-medium" htmlFor={`tag-description-${tag.id}`}>描述</label>
-    <Textarea id={`tag-description-${tag.id}`} className="min-h-36 resize-y text-sm" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="这组论文讨论什么，以及你想关注的内容。" />
+    {recovery.notice}
+    <Textarea disabled={recovery.blocked} id={`tag-description-${tag.id}`} className="min-h-36 resize-y text-sm" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="这组论文讨论什么，以及你想关注的内容。" />
     <div className="flex items-center gap-2"><Button size="sm" disabled={!dirty || busy} onClick={() => void save()}>{busy ? '保存中…' : '保存描述'}</Button><span role="status" className="text-xs text-muted-foreground">{dirty ? '有未保存修改' : '已保存'}</span></div>
     {error ? <p role="alert" className="text-xs text-destructive">{error}</p> : null}
   </div>;

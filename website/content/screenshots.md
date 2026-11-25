@@ -1,360 +1,199 @@
-Neuink 是一个本地优先的文献阅读与知识整理工作台。你可以把论文、报告和书籍章节放进资料库，在同一个窗口里阅读 PDF、查看重排与译文、记录想法，并将笔记中的结论连接到原文。需要进一步研究时，可以搜索已有资料，或让配置好的 AI 助手参与整理。
+这组截图来自 Windows 客户端的完整工具窗口，按功能排列。点击任意图片可查看原尺寸。
 
-本页沿用较早版本截图，用于认识阅读流程。属性管理、表格编辑、账号解析和账户设置的最新入口，以[账户设置](settings.md)、[条目库](library.md)及[解析指南](import.md)的文字步骤为准。
+从翻译开始，接入 MinerU 与 Zotero，再把阅读、笔记和大模型助手连在一起。想先配置一套顺手的组合，可以按[推荐上手流程](start.md)：MinerU 解析 → Neuink 读取结果并导入本地 → 小牛翻译 → 按需接入大模型。
 
-## 先理解概念，再找操作入口
+## 翻译与原文、双语阅读
 
-[核心概念图解](concepts.md)解释内容层级、标签与论文的关系，以及不同笔记的用途；[第一次使用](start.md)给出从导入到导出的流程。已经熟悉系统时，可以直接按下方目录找步骤图。
+从划词、整句到双语对照，按阅读任务选择。详见[翻译指南](translation.md)。
 
-## 先认识几个核心概念
+### 整句翻译
 
-| 概念 | 它是什么 | 什么时候用 |
-| --- | --- | --- |
-| 资料库（Workspace） | 保存在本地的一组文献与阅读成果。 | 按长期研究方向管理自己的资料。 |
-| 条目（Entry） | 一篇文献的管理单位，包含标题、PDF、解析结果及相关笔记。 | 导入论文、补充属性、管理文件。 |
-| 标签（Tag） | 可有父子层级的主题分类，一篇文献可属于多个标签。 | 汇集同一主题的论文，进行跨篇阅读。 |
-| 片段（Segment） | 解析得到的段落、表格、公式或图片等内容单元。 | 定位证据、翻译某段、记录局部想法。 |
-| 笔记（Note） | 文档笔记整理单篇论文，标签综合笔记整理跨篇主题。 | 把阅读转化成自己的理解。 |
-| 来源链接（Source Link） | 将笔记连接到文献、页码、片段及引用快照。 | 检查某个结论的依据，返回原文核对。 |
+选择 PDF 中的文字，查看译文，并使用高亮、批注或复制操作。
 
-## 从第一篇论文开始
+![Neuink 完整窗口：整句翻译](../public/screenshots/current-selection-translation.png)
 
-1. **建立资料库**：在设置中打开或新建资料库，确定文件保存位置。
-2. **导入 PDF**：创建条目并附加 PDF，先确认原文可以阅读。重排和片段功能需要再导入解析结果。
-3. **边读边记**：将 PDF 与笔记分屏打开，写下问题、方法和结论，并添加来源。
-4. **按需翻译与研究**：配置模型后使用翻译或助手；先核对上下文，再检查生成内容与出处。
-5. **整理与分享**：用标签组织主题，搜索已有材料，最后选择笔记或全文导出。
+### 原文与译文分屏
 
-下面按功能展示操作入口和界面。点击图片可以放大；完整的前置条件、操作方法和问题处理见各专题教程。
+同一窗口保留原文和中文 PDF，两侧可对照同一段落。
 
-## 按任务找步骤图
+![Neuink 完整窗口：原文与译文分屏](../public/screenshots/current-translation-parallel.png)
 
-| 教程 | 步骤图 | 可以看清什么 |
-| --- | --- | --- |
-| [资料库与条目](library.md) | 3 张 | 打开资料库列表、按需要显示列、查看一篇论文的概览 |
-| [PDF 与解析结果导入](import.md) | 4 张 | 新建条目并选择 PDF、找到 MinerU 客户端路线、切换到 MinerU ZIP、对照 PDF 检查解析正文 |
-| [PDF 原文阅读](pdf.md) | 2 张 | 打开原始 PDF、把文档笔记放到另一侧 |
-| [重排与显示控制](reflow.md) | 3 张 | 打开重排视图、选择原文、译文或双语、选择要显示的内容类型 |
-| [翻译设置与任务](translation.md) | 3 张 | 先指定阅读翻译模型、打开翻译任务面板、筛选已有译文 |
-| [笔记、片段记录与批注](notes.md) | 3 张 | 打开文档笔记编辑器、查看某一片段的记录、切换到批注 |
-| [来源追溯](sources.md) | 3 张 | 查找哪些笔记引用了本文、从反向引用查看证据、从笔记返回原文 |
-| [标签阅读与主题范围](parallel.md) | 2 张 | 打开标签阅读侧栏、选择一个研究主题 |
-| [本地搜索](search.md) | 1 张 | 输入术语并检查结果类型 |
-| [关系图](graph.md) | 2 张 | 打开关系图总览、筛选要观察的关系 |
-| [助手与上下文](assistant.md) | 2 张 | 确认模型和阅读对象、选择额外上下文 |
-| [内嵌网页](browser.md) | 1 张 | 打开论文主页并确认关联对象 |
-| [导出成果](export.md) | 3 张 | 检查全文导出范围、选择自己的阅读成果、选择合并文件或逐项打包 |
-| [设置与模型连接](settings.md) | 5 张 | 调整外观与缩放、调整阅读交互、查看已有模型连接、填写新的模型连接、选择研究工具 |
-| [资料库管理](data.md) | 1 张 | 查看数据位置与便携用法 |
+### 整段双语阅读
 
-## 完整操作画面
+重排视图同时呈现解析后的原文与中文译文，可切换源语言显示方式。
 
-下面按操作顺序收录各功能的操作截图。需要功能边界、异常处理或操作后检查方法，请进入各组的详细教程。
+![Neuink 完整窗口：整段双语阅读](../public/screenshots/current-reflow-bilingual.png)
 
-## 资料库与条目
+### 逐句中英对照
 
-[打开详细教程](library.md)。
+切换逐句显示，在阅读中对应查看原句与译句。
 
-### 打开资料库列表
+![Neuink 完整窗口：逐句中英对照](../public/screenshots/current-reflow-sentences.png)
 
-从左侧资料库入口进入列表，先核对当前范围。表格同时显示题名、标签、解析状态和阅读进度。
+### 纯中文阅读
 
-![Neuink 实机截图：打开资料库列表](../public/screenshots/library-list.png)
+隐藏源语言后阅读中文译文，保留原文阅读入口。
 
-### 按需要显示列
+![Neuink 完整窗口：纯中文阅读](../public/screenshots/current-reflow-translated.png)
 
-打开列表右侧的列设置，勾选需要比较的字段。调整后返回列表，确认需要的列已经显示。
+## 接入 MinerU 与 Zotero
 
-![Neuink 实机截图：按需要显示列](../public/screenshots/library-columns.png)
+读取已有资料，按需要明确导入本地副本。详见[MinerU 导入](import.md)与[Zotero 接入](zotero.md)。
 
-### 查看一篇论文的概览
+### MinerU 来源资料
 
-进入条目概览，核对标题、说明、属性和文件操作。PDF、解析结果与阅读成果都属于同一条目。
+来源列表显示解析资料、阅读状态和来源身份；来源缓存不作为本地论文上传。
 
-![Neuink 实机截图：查看一篇论文的概览](../public/screenshots/entry-overview.png)
+![Neuink 完整窗口：MinerU 来源资料](../public/screenshots/current-mineru-source.png)
 
-## PDF 与解析结果导入
+### Zotero 来源与隐藏视图
 
-[打开详细教程](import.md)。
+Zotero 来源条目仍保留来源身份，隐藏视图集中查看已隐藏条目及恢复入口。
 
-### 新建条目并选择 PDF
+![Neuink 完整窗口：Zotero 来源与隐藏视图](../public/screenshots/current-zotero-source.png)
 
-在新建条目页填写标题，选择 PDF，再检查说明和标签。截图为尚未提交的表单；选择文件之后才进行创建。
+## 阅读详略、悬停与导航
 
-![Neuink 实机截图：新建条目并选择 PDF](../public/screenshots/create-entry-pdf.png)
+在[重排阅读](reflow.md)与[PDF 阅读](pdf.md)中选择适合当前任务的显示方式。
 
-### 选择解析方式或导入已有结果
+### TextFold 中英阅读详略
 
-打开设置中的“导入与解析”，选择账号解析或自建服务。已有 MinerU 客户端结果也能独立导入；下图是较早布局，当前入口见解析指南。
+单段选择精简后显示中英文内容，可继续切换要点、结论或主题，并查看原文依据。
 
-![Neuink 实机截图：找到 MinerU 客户端路线](../public/screenshots/settings-import.png)
+![Neuink 完整窗口：TextFold 中英阅读详略](../public/screenshots/current-textfold.png)
 
-### 切换到 MinerU ZIP
+### 按自己的习惯配置悬停
 
-在新建条目页选择 MinerU ZIP 入口，上传完整解析结果包。新条目还需按表单要求提供原 PDF。
+原文、译文、片段笔记、批注和引文预览，以及字号、卡片大小集中配置。
 
-![Neuink 实机截图：切换到 MinerU ZIP](../public/screenshots/create-entry-zip.png)
+![Neuink 完整窗口：按自己的习惯配置悬停](../public/screenshots/current-hover-settings.png)
 
-### 对照 PDF 检查解析正文
+### 段落双语悬停
 
-完成导入后，在两侧分别打开重排与 PDF，核对段落、页码及图表。使用自己的文献时，也请完成这一步核对。
+停留在原文区域，查看解析文字和中文译文，阅读原 PDF 时也能对照理解。
 
-![Neuink 实机截图：对照 PDF 检查解析正文](../public/screenshots/reflow-pdf-split.png)
+![Neuink 完整窗口：段落双语悬停](../public/screenshots/current-hover-text.png)
 
-## PDF 原文阅读
+### 参考文献预览
 
-[打开详细教程](pdf.md)。
+在正文中查看参考文献信息，并通过定位入口返回原文位置。
 
-### 打开原始 PDF
+![Neuink 完整窗口：参考文献预览](../public/screenshots/current-hover-citation.png)
 
-从条目详情选择 PDF。上方工具栏管理原文／译文、导出、翻译任务和缩放；页码与片段导航在其下方。
+### 图表与中文图示
 
-![Neuink 实机截图：打开原始 PDF](../public/screenshots/pdf-reader.png)
+在 PDF 中对照原图、解析后的图示及中文内容。
 
-### 把文档笔记放到另一侧
+![Neuink 完整窗口：图表与中文图示](../public/screenshots/current-hover-figure.png)
 
-使用笔记旁的分屏入口，左边保留 PDF，右边查看或编辑笔记。两个阅读区各自滚动，分屏不是 PDF 的双页模式。
+### 固定图表进行对照
 
-![Neuink 实机截图：把文档笔记放到另一侧](../public/screenshots/pdf-note-workspace.png)
+将图表保留在浮窗中，继续查看正文；浮窗提供定位和取消固定操作。
 
-## 重排与显示控制
+![Neuink 完整窗口：固定图表进行对照](../public/screenshots/current-pinned-figure.png)
 
-[打开详细教程](reflow.md)。
+### 目录与章节导航
 
-### 打开重排视图
+展开目录查看章节，结合页码与正文进行阅读导航。
 
-从条目详情选择“重排视图”，阅读解析后的标题、段落与结构内容。原 PDF 仍是核对依据。
+![Neuink 完整窗口：目录与章节导航](../public/screenshots/current-outline.png)
 
-![Neuink 实机截图：打开重排视图](../public/screenshots/reflow-reader.png)
+### 结构化图表阅读
 
-### 选择原文、译文或双语
+重排视图把原图、结构化表格及中英图注放在一起。
 
-打开顶部显示菜单，选择解析后内容、译文或双语。当前没有对应译文的区域可能为空，应先检查翻译状态。
+![Neuink 完整窗口：结构化图表阅读](../public/screenshots/current-reflow-chart.png)
 
-![Neuink 实机截图：选择原文、译文或双语](../public/screenshots/reflow-display.png)
+## 分屏、笔记与来源
 
-### 选择要显示的内容类型
+把阅读和记录放在同一工作台。详见[笔记与批注](notes.md)及[来源链接](sources.md)。
 
-展开阅读工具中的组件显示选项，控制标题、正文、列表、表格、公式等类型。菜单可滚动，隐藏某类型不会删除原内容。
+### 高亮与批注
 
-![Neuink 实机截图：选择要显示的内容类型](../public/screenshots/reflow-components.png)
+选择原文后使用高亮颜色、批注、翻译和提问等操作。
 
-## 翻译设置与任务
+![Neuink 完整窗口：高亮与批注](../public/screenshots/current-annotations.png)
 
-[打开详细教程](translation.md)。
+### 随段落记录片段笔记
 
-### 先指定阅读翻译模型
+从片段打开笔记编辑浮窗，保留与原文位置的关联。
 
-在设置的“翻译”页选择模型，分别核对自动翻译开关、内容类型和显示偏好。
+![Neuink 完整窗口：随段落记录片段笔记](../public/screenshots/current-segment-notes.png)
 
-![Neuink 实机截图：先指定阅读翻译模型](../public/screenshots/settings-translation.png)
+### PDF 与笔记分屏
 
-### 打开翻译任务面板
+左侧整理笔记，右侧核对 PDF，通过来源引用连接笔记与原文。
 
-从阅读器工具栏进入翻译任务，核对片段总数、翻译范围与当前状态，再决定启动或继续。截图中的演示条目预置了 1 个译文；公开便携包不含这份演示素材。
+![Neuink 完整窗口：PDF 与笔记分屏](../public/screenshots/current-pdf-notes.png)
 
-![Neuink 实机截图：打开翻译任务面板](../public/screenshots/translation-tasks.png)
+### PDF 与网页同屏
 
-### 筛选已有译文
+将内嵌网页放在阅读器旁边，在一个窗口里查看相关材料。
 
-切换到“已翻译”查看实际保存的片段。不要把一个片段完成理解成整篇完成；返回重排后再选择双语显示。
+![Neuink 完整窗口：PDF 与网页同屏](../public/screenshots/current-browser.jpg)
 
-![Neuink 实机截图：筛选已有译文](../public/screenshots/translation-filter.png)
+## 自选大模型与本地 Codex
 
-## 笔记、片段记录与批注
+模型和服务按需选择。详见[AI 助手](assistant.md)与[模型设置](settings.md)。
 
-[打开详细教程](notes.md)。
+### 带来源的论文问答
 
-### 打开文档笔记编辑器
+结合当前论文提问，查看回答与引用，并与 PDF 原文同屏阅读。
 
-从条目下的文档笔记进入编辑器，使用标题、列表、公式与来源组织阅读理解。检查右上角保存状态。图中为既有演示笔记。
+![Neuink 完整窗口：带来源的论文问答](../public/screenshots/current-assistant.png)
 
-![Neuink 实机截图：打开文档笔记编辑器](../public/screenshots/notes-editor.png)
+### 本地 Codex 实际会话
 
-### 查看某一片段的记录
+助手选择已接入的 Codex 本地 Agent，展示问答结果、来源引用和原文定位。
 
-打开“片段记录”，在同一画面核对原文片段和对应笔记。片段笔记与整篇文档笔记分别管理。
+![Neuink 完整窗口：本地 Codex 实际会话](../public/screenshots/current-local-codex.png)
 
-![Neuink 实机截图：查看某一片段的记录](../public/screenshots/segment-notes.png)
+## 本地资料整理与阅读记录
 
-### 切换到批注
+用标签归类、用属性描述，再按任务选择视图。详见[条目库](library.md)、[关系图](graph.md)和[工作台](workspace.md)。
 
-在片段记录中查看批注内容及对应原文。先确认选中的片段，再决定修改或导出；编辑后请确认保存成功。
+### 条目表格
 
-![Neuink 实机截图：切换到批注](../public/screenshots/annotations.png)
+在列表里查看标签、阅读进度和云端状态，打开论文继续阅读。
 
-## 来源追溯
+![Neuink 完整窗口：条目表格](../public/screenshots/current-library.png)
 
-[打开详细教程](sources.md)。
+### 三种条目库视图
 
-### 查找哪些笔记引用了本文
+通过同一入口切换纯条目表格、纯标签文件夹或标签与表格共存。
 
-在条目详情点击“引用此文”，查看引用笔记、页码与证据摘要。每条结果提供“打开笔记”和“查看证据”。
+![Neuink 完整窗口：三种条目库视图](../public/screenshots/current-library-layout.png)
 
-![Neuink 实机截图：查找哪些笔记引用了本文](../public/screenshots/source-backlinks.png)
+### 标签文件夹
 
-### 从反向引用查看证据
+按标签层级浏览资料，用文件夹形式找到主题。
 
-点击“查看证据”，另一侧打开 PDF 并定位对应原文区域。核对高亮段落与引用摘要是否一致。
+![Neuink 完整窗口：标签文件夹](../public/screenshots/current-folders.png)
 
-![Neuink 实机截图：从反向引用查看证据](../public/screenshots/source-jump.png)
+### 统一管理属性
 
-### 从笔记返回原文
+在资料库级别管理属性定义、类型及可选项，再为每篇条目填写值。
 
-打开笔记并点击正文中的来源链接，左侧重排定位并突出显示摘要片段。这样可以从结论回到它引用的完整上下文。
+![Neuink 完整窗口：统一管理属性](../public/screenshots/current-properties.png)
 
-![Neuink 实机截图：从笔记返回原文](../public/screenshots/notes-source-return.png)
+### 标签层级管理
 
-## 标签阅读与主题范围
+在层级画布上查看标签关系，选择标签后管理名称与子标签。
 
-[打开详细教程](parallel.md)。
+![Neuink 完整窗口：标签层级管理](../public/screenshots/current-tags.png)
 
-### 打开标签阅读侧栏
+### 论文、标签与笔记的关系图
 
-点击左侧标签阅读入口，查看标签、论文和标签笔记三个分组。展开论文可继续进入相应阅读内容。
+把已建立的对象关系放进同一张图，按对象和关系探索资料。
 
-![Neuink 实机截图：打开标签阅读侧栏](../public/screenshots/tag-reading.png)
+![Neuink 完整窗口：论文、标签与笔记的关系图](../public/screenshots/current-graph.png)
 
-### 选择一个研究主题
+### 阅读记录与每日看板
 
-点击“混合检索”标签后，论文列表缩小到该标签的 3 篇成员。中间原阅读对象仍保留，说明主题范围与当前页面分别管理。
+查看阅读时长、阅读记录和论文推荐，回到正在阅读的资料。
 
-![Neuink 实机截图：选择一个研究主题](../public/screenshots/tag-scope.png)
+![Neuink 完整窗口：阅读记录与每日看板](../public/screenshots/current-dashboard.png)
 
-## 本地搜索
+## 继续了解
 
-[打开详细教程](search.md)。
-
-### 输入术语并检查结果类型
-
-打开左侧搜索并输入 attention，选择 Hybrid 或 Keyword。结果同时标明字段、条目、PDF 片段与页面，点击前先看出处；上方可检查模型和索引状态。
-
-![Neuink 实机截图：输入术语并检查结果类型](../public/screenshots/search-results.png)
-
-## 关系图
-
-[打开详细教程](graph.md)。
-
-### 打开关系图总览
-
-从资料库进入关系图，查看标签、论文和笔记之间已有的连接。节点与数量来自当前资料库，图形布局可能随数据变化。
-
-![Neuink 实机截图：打开关系图总览](../public/screenshots/graph-overview.png)
-
-### 筛选要观察的关系
-
-展开关系类型菜单，分别控制层级、归属、笔记与来源关系。先缩小范围，再查看具体节点，避免把所有连线都理解为引用。
-
-![Neuink 实机截图：筛选要观察的关系](../public/screenshots/graph-filter.png)
-
-## 助手与上下文
-
-[打开详细教程](assistant.md)。
-
-### 确认模型和阅读对象
-
-打开助手，检查顶部模型和底部阅读对象。图中关联演示论文，尚未发送问题；右边保留原文和笔记用于核对。
-
-![Neuink 实机截图：确认模型和阅读对象](../public/screenshots/assistant-context.png)
-
-### 选择额外上下文
-
-点击“选择元素”，按标签、条目、PDF 或笔记选择材料。核对范围后再输入问题并发送；发送前再次确认已选材料就是这次问题所需的范围。
-
-![Neuink 实机截图：选择额外上下文](../public/screenshots/assistant-attachment.png)
-
-## 内嵌网页
-
-[打开详细教程](browser.md)。
-
-### 打开论文主页并确认关联对象
-
-点击标签栏“＋”，输入公开论文网址并访问。图中 arXiv 页面已加载，助手的阅读对象变为当前网页；可一边查看网页一边整理笔记。
-
-![Neuink 实机截图：打开论文主页并确认关联对象](../public/screenshots/browser-reading.png)
-
-## 导出成果
-
-[打开详细教程](export.md)。
-
-### 检查全文导出范围
-
-从 PDF 或重排的导出入口选择原文、中文或双语，等待内容检查并核对缺失项。图中为原文导出检查完成状态，尚未写出文件。
-
-![Neuink 实机截图：检查全文导出范围](../public/screenshots/export-fulltext.png)
-
-### 选择自己的阅读成果
-
-从条目概览打开阅读成果导出，按类型和标题选择项目。图中还未勾选项目，空选择不会自动导出全部。
-
-![Neuink 实机截图：选择自己的阅读成果](../public/screenshots/export-selection.png)
-
-### 选择合并文件或逐项打包
-
-展开格式菜单，选择 Word、TXT 或相应 ZIP。确认已选内容、格式与检查结果后再导出，并在目标软件中复核文件。
-
-![Neuink 实机截图：选择合并文件或逐项打包](../public/screenshots/export-formats.png)
-
-## 设置与模型连接
-
-[打开详细教程](settings.md)。
-
-### 调整外观与缩放
-
-打开设置的“外观与界面”，选择界面风格、强调色与缩放。截图使用标准风格，其他风格的业务入口相同。
-
-![Neuink 实机截图：调整外观与缩放](../public/screenshots/settings-appearance.png)
-
-### 调整阅读交互
-
-在“阅读与批注”中选择悬停预览及其内容。页面可继续滚动；截图展示当前可见的上部设置，不代表全部选项。
-
-![Neuink 实机截图：调整阅读交互](../public/screenshots/settings-reading.png)
-
-### 查看已有模型连接
-
-进入“模型与助手”，检查模型列表及任务分工，再决定新增或编辑连接。截图未展开已有凭据。
-
-![Neuink 实机截图：查看已有模型连接](../public/screenshots/settings-models.png)
-
-### 填写新的模型连接
-
-点击新增模型，按实际服务填写协议、模型、名称、Base URL 与密钥，测试后保存。截图是空白表单，没有可直接复用的密钥。
-
-![Neuink 实机截图：填写新的模型连接](../public/screenshots/model-add-dialog.png)
-
-### 选择研究工具
-
-在“检索与工具”中核对论文和网页检索开关，以及可选服务配置。查看设置不会自动发起研究任务。
-
-![Neuink 实机截图：选择研究工具](../public/screenshots/settings-tools.png)
-
-## 资料库管理
-
-[打开详细教程](data.md)。
-
-Windows 0.1.3 的数据固定保存在程序旁的 `data`；路径选择和手动迁移入口已移除。当前位置、备份和升级方法见[数据管理](data.md)。
-
-## 继续学习
-
-第一次使用建议先阅读[入门指南](start.md)。解析准备见 [MinerU 导入](import.md)，AI 修改前的审阅见[助手指南](assistant.md)，便携与恢复见[数据管理](data.md)。
-
-## 0.1.1 阅读与引用界面
-
-下面两张 0.1.1 历史图来自当时在浏览器中运行的真实组件，使用隔离的示例数据，区别于上文的原生窗口实拍。它们说明引用拖入流程，不代表 0.1.3 的完整界面，也不代表模型请求或 PDF 下载已执行。
-
-![Ctrl 拖入引用与聊天输入框：0.1.1 真实组件演示](../public/screenshots/reading-citations-011.jpg)
-
-按住 Ctrl 从 PDF 片段拖入输入框；引用支持预览和来源定位。操作说明见[AI 助手](assistant.md)。
-
-![拖入引用时的遮罩：0.1.1 真实组件演示](../public/screenshots/reading-drop-011.jpg)
-
-拖入目标用遮罩显示，松开即可加入引用。图中的检查按钮属于演示工具，不是应用正式入口。无 PDF 条目的补取入口见[在线研究](research.md)。
-
-## 0.1.2：查看本地 Agent 返回的思考
-
-选择已安装并登录的 Claude Code、Codex 或 OpenCode 发起对话。工具返回思考文本或摘要时，执行详情旁出现“思考过程”，生成期间显示最近内容的两行预览。点击或用键盘展开查看已返回全文；完成后仍可从历史消息展开查看。
-
-思考与正式答复分开保存，停止任务后不再追加。不同工具、模型与配置提供的内容可能不同；没有返回思考时只显示实际执行状态，不保证取得模型全部内部推理。
-
-![思考预览界面演示：浏览器运行真实组件，使用合成示例数据，并非真实模型输出](../public/screenshots/local-agent-thinking-012.png)
+本地 PDF 阅读、笔记和资料整理可独立使用。需要跨设备同步时，可自行部署仓库提供的后端，也可以完全不启用云端功能。查看[本地数据](data.md)与[可选云端同步](sync.md)。

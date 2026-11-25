@@ -9,6 +9,15 @@ import { useLibraryReadingStates } from './useLibraryReadingStates';
 vi.mock('@/shared/ipc/workspaceApi', () => ({ listReadingStates: vi.fn() }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 const state: EntryReadingState = { entry_id: 'paper', version: 1, document_hash: null, mode: 'pdf', current_page_idx: 1, page_count: 10, visited_pages: [0, 1], total_active_ms: 1000, session_count: 1, last_read_at: null, daily_active_ms: {} };
+it('retries a failed read and preserves live updates during that retry', async () => {
+  vi.mocked(listReadingStates).mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce([state]);
+  const view = renderHook(() => useLibraryReadingStates('root'));
+  await waitFor(() => expect(view.result.current.error).toBe(true));
+  act(() => view.result.current.refresh());
+  await waitFor(() => expect(view.result.current.error).toBe(false));
+  await waitFor(() => expect(view.result.current.loading).toBe(false));
+  expect(view.result.current.states.paper).toEqual(state);
+});
 it('does not overwrite a live reading update with an older initial snapshot', async () => {
   let resolve!: (states: EntryReadingState[]) => void;
   vi.mocked(listReadingStates).mockImplementation(() => new Promise(done => { resolve = done; }));

@@ -1,0 +1,86 @@
+import { useEffect, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { getTranslationRouting, saveTranslationRouting, DEFAULT_TRANSLATION_ROUTING, type TranslationRouting, type TranslationKind, type TranslationSource } from '@/shared/ipc/translationRoutingApi';
+import { translationServices } from '../translationServices';
+import type { TranslationServiceProvider } from '@/shared/ipc/selectionTranslationApi';
+import { useSettingsAutosave } from '../useSettingsAutosave';
+import { SettingsGroup, SettingSelect, SettingSwitch } from './SettingsPrimitives';
+
+const kinds: { id: TranslationKind; label: string; description: string }[] = [
+  { id: 'word', label: '单词释义来源', description: '单个英文词；开启本地词库优先时，仅未收录的词使用此来源。' },
+  { id: 'selection', label: '选中文字来源', description: '拖选的句子或一段文字；手动与自动选区翻译共用。' },
+  { id: 'segment', label: '单个片段来源', description: '右键翻译一个解析片段，包括标题、表格、图片说明等。' },
+  { id: 'paragraph', label: '段落逐句对照来源', description: '整段、逐句对照及阅读详略的中文译文共用。' },
+  { id: 'document', label: '整篇与批量来源', description: '整篇、勾选多个片段及解析后自动翻译共用。' },
+];
+const valueOf = (source: TranslationSource) => source.kind === 'profile' ? `profile:${source.profile_id}` : source.kind === 'service' ? `service:${source.provider}` : source.kind;
+const sourceOf = (value: string): TranslationSource => value.startsWith('profile:')
+  ? { kind: 'profile', profile_id: value.slice(8) } : value.startsWith('service:') ? { kind: 'service', provider: value.slice(8) as TranslationServiceProvider } : value === 'selection_service' ? { kind: value } : { kind: 'default_model' };
+const equal = (a: TranslationRouting, b: TranslationRouting) => JSON.stringify(a) === JSON.stringify(b);
+
+/** Draft and failed saves stay here; the settings viewport owns scrolling and shared controls own keyboard input. */
+export function TranslationSourcesSettings({ active, profiles, defaultProfileId, unavailable }: {
+  active: boolean; profiles: { id: string; name: string; model: string }[]; defaultProfileId: string | null; unavailable?: boolean;
+}) {
+  const [saved, setSaved] = useState<TranslationRouting | null>(null);
+  const [draft, setDraft] = useState(DEFAULT_TRANSLATION_ROUTING);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    if (!active || saved) return;
+    let canceled = false;
+    setLoading(true); setError('');
+    void getTranslationRouting().then(value => { if (!canceled) { setSaved(value); setDraft(value); } })
+      .catch(() => { if (!canceled) setError('读取翻译来源失败，请重试。'); })
+      .finally(() => { if (!canceled) setLoading(false); });
+    return () => { canceled = true; };
+  }, [active, saved, attempt]);
+  const save = useSettingsAutosave({ value: draft, savedValue: saved ?? DEFAULT_TRANSLATION_ROUTING, equal,
+    recovery: { id: 'translation-routing', label: '翻译来源', targetId: 'translation-sources', restore: setDraft },
+    enabled: Boolean(saved), closeScope: 'settings', save: saveTranslationRouting, onSaved: setSaved });
+  const options = [
+    ...Object.entries(translationServices).map(([id, service]) => ({ value: `service:${id}`, label: service.label })),
+    ...profiles.map(p => ({ value: `profile:${p.id}`, label: `${p.name} · ${p.model}` })),
+  ];
+  const defaultSource = draft.default_source ?? (defaultProfileId ? { kind: 'profile' as const, profile_id: defaultProfileId } : { kind: 'default_model' as const });
+  const defaultValue = valueOf(defaultSource);
+  const defaultLabel = options.find(option => option.value === defaultValue)?.label ?? (defaultSource.kind === 'profile' ? '原模型已删除，请重新选择' : '尚未指定');
+  const defaultMissing = defaultSource.kind === 'profile' && !profiles.some(p => p.id === defaultSource.profile_id);
+  return <SettingsGroup id="translation-sources" title="翻译行为" description="先选择默认翻译来源；各行为可跟随默认，也可单独指定服务或大模型。">
+    <div id="translation-model" data-setting-id="translation-model" tabIndex={-1} />
+    {save.notice}
+    {!saved ? <div className="text-xs">{loading ? <p role="status">正在读取翻译来源…</p> : <><p role="alert" className="text-destructive">{error}</p><Button size="sm" variant="outline" onClick={() => setAttempt(n => n + 1)}>重新读取翻译来源</Button></>}</div> : <fieldset className="min-w-0" disabled={save.recovery.blocked}>
+      <div>
+      <SettingSelect label="默认翻译来源" value={defaultValue}
+        options={[...options, ...(!options.some(option => option.value === defaultValue) ? [{ value: defaultValue, label: defaultLabel }] : [])]}
+        description="可选择上方配置的专用翻译服务或大模型；修改后，仅影响选择“跟随默认来源”的行为。"
+        onValueChange={value => setDraft(previous => ({ ...previous, default_source: sourceOf(value) }))} />
+      </div>
+      {defaultMissing && <p role="alert" className="text-xs text-destructive">默认来源已不可用，请重新选择；不会自动改用其他模型。</p>}
+      <SettingSwitch label="单词优先使用本地词库" checked={draft.local_dictionary_first}
+        description="本地命中不联网；关闭后，所有单词都使用下方指定的来源。"
+        onCheckedChange={local_dictionary_first => setDraft(value => ({ ...value, local_dictionary_first }))} />
+      {kinds.map(({ id, label, description }) => {
+        const source = draft[id];
+        const missing = source.kind === 'profile' && !profiles.some(p => p.id === source.profile_id);
+        return <div key={id}>
+          <SettingSelect label={label} value={valueOf(source)}
+            description={description} options={[
+              { value: 'default_model', label: `跟随默认来源 · ${defaultLabel}` },
+              ...options,
+              ...(source.kind === 'selection_service' ? [{ value: 'selection_service', label: '原选区服务（兼容旧设置）' }] : []),
+              ...(missing ? [{ value: valueOf(source), label: '原模型已删除，请重新选择' }] : []),
+            ]} onValueChange={value => setDraft(previous => ({ ...previous, [id]: sourceOf(value) }))} />
+          {missing && <p role="alert" className="text-xs text-destructive">此来源已不可用，不会自动改用其他模型。</p>}
+        </div>;
+      })}
+      {unavailable && <p role="alert" className="text-xs text-warning">模型连接尚未加载，可配置专用翻译服务；模型来源请在连接恢复后核对。</p>}
+      <p className="mt-2 text-xs text-muted-foreground">更改后用于新发起的翻译；已有译文不会自动重译，暂停任务继续使用原翻译来源。悬停预览与双语显示读取已保存译文。</p>
+      {save.error && <div className="mt-2 flex items-center gap-2 text-xs" role="alert">
+        <span className="text-destructive">保存失败，修改已保留。</span>
+        <Button size="xs" variant="outline" onClick={save.retry}>重试保存翻译来源</Button>
+      </div>}
+    </fieldset>}
+  </SettingsGroup>;
+}

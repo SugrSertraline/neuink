@@ -8,21 +8,21 @@ export function EntryTagRecommendations({ entry, workspaceRoot, onApplyEntryTagP
   entry: LibraryEntry; workspaceRoot: string | null;
   onApplyEntryTagPaths?: (entryId: string, paths: string[]) => Promise<unknown> | unknown;
 }) {
-  const suggestions = useEntryTagSuggestions({ entry, workspaceRoot, onApplyEntryTagPaths: onApplyEntryTagPaths ?? (() => undefined) });
+  const suggestions = useEntryTagSuggestions({ entry, workspaceRoot, onApplyEntryTagPaths });
   return <ReaderSection guideId="entry-tags" className="entry-overview-section" title="推荐标签"
-    description={suggestions.generatedAt ? '已保留本次生成结果。重新生成时才会替换；添加标签不会清除结果。' : '根据论文内容生成推荐，已有标签不影响生成。'}
+    description="根据论文内容自动推荐，仅显示尚未添加的标签。"
     actions={<Button variant="outline" size="sm" disabled={suggestions.busy || Boolean(suggestions.disabledReason)} title={suggestions.disabledReason ?? undefined} onClick={() => void suggestions.generate()}>
       {suggestions.phase === 'generating' ? <Loader2 size={13} className="animate-spin" /> : suggestions.generatedAt ? <RefreshCw size={13} /> : null}
       {suggestions.phase === 'generating' ? '正在生成…' : suggestions.generatedAt ? '重新生成' : '生成推荐标签'}
     </Button>}>
     {suggestions.recommendations.length ? <div className="flex flex-wrap gap-2">{suggestions.recommendations.map(tag => {
-      const applied = entry.tags.includes(tag.path), selected = suggestions.selectedPaths.has(tag.path);
+      const selected = suggestions.selectedPaths.has(tag.path);
       return <Button key={tag.path} size="sm" variant={selected ? 'secondary' : 'outline'} className="h-auto min-w-0 max-w-full whitespace-normal py-1.5 text-left"
-        aria-pressed={selected} disabled={suggestions.busy} title={tag.reason || tag.path} aria-label={`${tag.path}${applied ? '，已添加' : ''}`}
+        aria-pressed={selected} disabled={suggestions.busy} title={tag.reason || tag.path} aria-label={tag.path}
         onClick={() => suggestions.toggleRecommendation(tag)}>
-        {selected ? <Check size={12} className="shrink-0" /> : null}<span className="min-w-0 break-words">{tag.path}</span>{applied ? <span className="shrink-0 text-xs text-muted-foreground">已添加</span> : null}
+        {selected ? <Check size={12} className="shrink-0" /> : null}<span className="min-w-0 [overflow-wrap:anywhere]">{tag.path}</span>
       </Button>;
-    })}</div> : <p className="text-sm text-muted-foreground">{suggestions.generatedAt ? '本次分析没有生成推荐标签，可以重新生成。' : '尚未生成推荐标签。'}</p>}
+    })}</div> : <p className="text-sm text-muted-foreground">{suggestions.phase === 'generating' ? '正在分析论文，生成推荐标签…' : suggestions.generatedAt ? '暂无新的推荐标签。' : '配置模型并完成解析后，将自动生成推荐标签。'}</p>}
     {suggestions.disabledReason ? <p className="mt-2 text-xs text-muted-foreground">{suggestions.disabledReason}</p> : null}
     {suggestions.error ? <p role="alert" className="mt-2 text-sm text-destructive">{suggestions.error}</p> : null}
     {suggestions.recommendations.length ? <div className="mt-3 flex flex-wrap items-center justify-between gap-2">

@@ -8,7 +8,7 @@ export function WorkspaceSurfaceDeck({ layout, onFocus, renderSurface }: {
   renderSurface: (surface: WorkspaceSurface, sibling: WorkspaceSurface | null, pane: WorkspacePaneId, active: boolean) => ReactNode;
 }) {
   const slots = [
-    ...layout.leftTabs.map(surface => ({ surface, pane: 'left' as const })),
+    ...(layout.leftTabs.length ? layout.leftTabs : [layout.left]).map(surface => ({ surface, pane: 'left' as const })),
     ...layout.rightTabs.map(surface => ({ surface, pane: 'right' as const }))
   ].sort((a, b) => surfaceKey(a.surface).localeCompare(surfaceKey(b.surface)));
   // Even moving an existing DOM node within its parent can reset native scroll.

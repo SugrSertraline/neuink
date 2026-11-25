@@ -1,5 +1,5 @@
 import { useId, useRef, type ComponentProps, type ReactNode } from 'react';
-import { FileText, FileType, Link2, PanelLeftOpen, PanelRightOpen, ScrollText, StickyNote, type LucideIcon } from 'lucide-react';
+import { Layers, FileText, FileType, Link2, PanelLeftOpen, PanelRightOpen, ScrollText, StickyNote, type LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DisclosureIcon } from '@/components/ui/disclosure-icon';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, ContextMenuPortal, ContextMenuSeparator, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger } from '@/components/ui/context-menu';
@@ -32,6 +32,7 @@ export function SidebarPaperContents({ expanded, notesExpanded, onExpandedChange
     ...(entry.pdfFileName ? [{ id: 'pdf', label: 'PDF 原文', meta: entry.pdfFileName, icon: FileType }] : []),
     { id: 'reflow', label: '重排阅读', meta: parsed ? '解析正文' : reflowState, icon: ScrollText, disabled: !parsed },
     ...(entry.pdfFileName || parsed ? [{ id: 'segment-notes', label: '片段记录', meta: '笔记与批注', icon: StickyNote }] : []),
+    { id: 'paper-cards', label: '论文卡片', meta: '方法与实例', icon: Layers },
     { id: 'source-links', label: '引用此文', meta: '证据与笔记', icon: Link2 }
   ];
   const notes: Content[] = entry.contents.filter(item => item.kind === 'note').map(note => ({ id: `note:${note.note_id}`, label: note.title || '未命名笔记', meta: '文档笔记', icon: FileText }));

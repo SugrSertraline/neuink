@@ -12,6 +12,8 @@ import type { TranslatedSegment } from '@/shared/ipc/workspaceApi';
 import { ReflowSegmentPreferencesProvider } from './ReflowSegmentPreferences';
 import { ReflowComponentPreferencesProvider } from './ReflowComponentPreferencesContext';
 import { ReflowSegmentGroupView } from './ReflowSegmentGroupView';
+import { FoldReaderProvider } from '../../folding/FoldReaderContext';
+import type { FoldReader } from '../../folding/useFoldReader';
 import { ReflowContentLayers } from './ReflowContentLayers';
 import { buildReflowSegmentGroups } from './buildReflowBlocks';
 import { readCachedPdfSegmentSnapshot } from './pdfSourceSnapshot';
@@ -55,6 +57,34 @@ beforeEach(() => { localStorage.clear(); record = undefined; pending = new Set()
 afterEach(cleanup);
 
 describe('reflow content display', () => {
+  it('switches only this paragraph, preserves layer choices, and restores following the global layout', () => {
+    const view = render(surface({ source: paragraph, mode: 'bilingual', translations: translatedParagraph('第一句。第二句。') }));
+    fireEvent.click(screen.getByRole('radio', { name: '本段逐句对照' }));
+    expect(view.container.querySelector('[data-paragraph-translation="sentences"]')).toBeTruthy();
+    view.rerender(surface({ source: { ...paragraph, uid: 'p2' }, mode: 'bilingual' }));
+    expect(screen.getByRole('radio', { name: '对照方式跟随全局' }).getAttribute('aria-checked')).toBe('true');
+    view.rerender(surface({ source: paragraph, mode: 'bilingual', translations: translatedParagraph('第一句。第二句。') }));
+    expect(screen.getByRole('radio', { name: '本段逐句对照' }).getAttribute('aria-checked')).toBe('true');
+    openMenu('p1');
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: '显示解析后内容' }));
+    fireEvent.click(screen.getByRole('radio', { name: '对照方式跟随全局' }));
+    expect(view.container.querySelector('[data-paragraph-translation="sentences"]')).toBeNull();
+    expect(screen.queryByText(paragraph.text)).toBeNull();
+    view.rerender(surface({ source: paragraph, mode: 'sentences', translations: translatedParagraph('第一句。第二句。') }));
+    expect(view.container.querySelector('[data-paragraph-translation="sentences"]')).toBeTruthy();
+    expect(translate).not.toHaveBeenCalled();
+  });
+  it('suspends folding only for the paragraph changed to sentence view', () => {
+    const setLevel = vi.fn();
+    const fold = { level: 'full', records: {}, overrides: {}, setLevel, setOverride: vi.fn() } as unknown as FoldReader;
+    const view = render(<FoldReaderProvider value={fold}>{surface({ source: paragraph, mode: 'bilingual', translations: translatedParagraph('第一句。第二句。') })}</FoldReaderProvider>);
+    fireEvent.click(screen.getByRole('radio', { name: '本段逐句对照' }));
+    expect(view.container.querySelector('[data-paragraph-translation="sentences"]')).toBeTruthy();
+    expect(setLevel).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('radio', { name: '对照方式跟随全局' }));
+    expect(view.container.querySelector('[data-paragraph-translation="sentences"]')).toBeNull();
+    expect(setLevel).not.toHaveBeenCalled();
+  });
   it.each([
     ['source', true, false, false],
     ['translation', false, true, false],
@@ -71,7 +101,7 @@ describe('reflow content display', () => {
   it('shows the original and requests the existing whole-document translation when no result exists', () => {
     render(surface({ source: paragraph, mode: 'sentences' }));
     expect(translate).not.toHaveBeenCalled();
-    expect(screen.getByText('暂无整段译文，请先运行整体翻译。')).toBeTruthy();
+    expect(screen.getByText('暂无译文，请先翻译此段。')).toBeTruthy();
     expect(screen.getByText('First.')).toBeTruthy();
     expect(screen.getByText('Second.')).toBeTruthy();
     expect(screen.queryByText(/本地词义提示/)).toBeNull();
@@ -154,8 +184,8 @@ describe('reflow content display', () => {
       status:'translated', error:null, updated_at:'' }]]);
     render(surface({ source:paragraph, mode:'sentences', translations }));
     expect(translate).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name:'AI 增强逐句翻译' }));
-    expect(translate).toHaveBeenCalledExactlyOnceWith('p1', true);
+    expect(screen.queryByRole('button', { name:'重新翻译此段' })).toBeNull();
+    expect(translate).not.toHaveBeenCalled();
   });
   it('does not submit a second request while a paragraph submission is pending', () => {
     pending.add('p1'); render(surface({ source: paragraph, mode:'sentences' })); openMenu('p1');
@@ -165,10 +195,10 @@ describe('reflow content display', () => {
   });
   it.each([false, true])('offers incremental sentence translation for a document translation (stale=%s)', stale => {
     const translations = new Map<string, TranslatedSegment>([['p1', { segment_uid: 'p1', page_idx: 0, segment_type: 'paragraph',
-      source_hash: 'hash', source_text: stale ? 'Old source.' : paragraph.text, translated_text: '已有整段译文。', status: 'translated', error: null, updated_at: '' }]]);
+      source_hash: 'hash', source_text: stale ? 'Old source.' : paragraph.text, translated_text: '合并译文。', status: 'translated', error: null, updated_at: '' }]]);
     render(surface({ source: paragraph, mode:'sentences', translations })); openMenu('p1');
-    fireEvent.click(screen.getByRole('menuitem', { name: stale ? 'AI 翻译此段' : 'AI 增强逐句翻译' }));
-    expect(translate).toHaveBeenCalledExactlyOnceWith('p1', !stale);
+    fireEvent.click(screen.getByRole('menuitem', { name: stale ? '翻译此段' : '重新翻译此段' }));
+    expect(translate).toHaveBeenCalledExactlyOnceWith('p1', false);
     expect(screen.queryByRole('menu')).toBeNull();
     if (!stale) {
       expect(screen.getByText(/句界无法可靠配对/)).toBeTruthy();
@@ -223,10 +253,10 @@ describe('reflow content display', () => {
   });
   it('switches cached sentence/paragraph translations locally, respecting original and translation visibility', () => {
     record = { segment_uid: 'p1', source_text: paragraph.text, source_hash: 'hash', job_id: 'job', model: 'model', view: 'paragraph',
-      paragraph: { status: 'succeeded', value: '整段译文。', error: null }, sentences: { status: 'succeeded', value: [
+      paragraph: { status: 'succeeded', value: '第一句。第二句。', error: null }, sentences: { status: 'succeeded', value: [
         { id: 1, source: 'First.', translation: '第一句。' }, { id: 2, source: 'Second.', translation: '第二句。' },
       ], error: null } };
-    const { container } = render(surface({ source: paragraph, mode: 'sentences', translations: translatedParagraph('整段译文。') }));
+    const { container } = render(surface({ source: paragraph, mode: 'sentences', translations: translatedParagraph('第一句。第二句。') }));
     expect(screen.getByText('第一句。')).toBeTruthy();
     openMenu('p1');
     fireEvent.click(screen.getByRole('menuitemradio', { name: '逐句对照' }));
@@ -240,19 +270,19 @@ describe('reflow content display', () => {
     expect(screen.queryByRole('menu')).toBeNull();
     openMenu('p1');
     fireEvent.click(screen.getByRole('menuitemradio', { name: '整段对照' }));
-    expect(screen.getByText('整段译文。')).toBeTruthy();
+    expect(screen.getByText('第一句。第二句。')).toBeTruthy();
     expect(screen.queryByText('第一句。')).toBeNull();
     expect(translate).not.toHaveBeenCalled(); expect(setView).not.toHaveBeenCalled();
     expect(screen.queryByRole('menu')).toBeNull();
     openMenu('p1');
     fireEvent.click(screen.getByRole('menuitemcheckbox', { name: '显示翻译' }));
-    expect(screen.queryByText('整段译文。')).toBeNull();
+    expect(screen.queryByText('第一句。第二句。')).toBeNull();
     expect(screen.queryByRole('menu')).toBeNull();
   });
   it('does not leak source text when only translation is requested but unavailable', () => {
     render(surface({ source: paragraph, content: { paragraph: { original: false, translation: true, translationView: 'sentences' } } }));
     expect(screen.queryByText(paragraph.text)).toBeNull();
-    expect(screen.getByText('暂无整段译文，请先运行整体翻译。')).toBeTruthy();
+    expect(screen.getByText('暂无译文，请先翻译此段。')).toBeTruthy();
   });
   it('uses a PDF crop if the original asset fails, without silently showing the parsed diagram', async () => {
     const pdf = {} as PDFDocumentProxy;
@@ -309,7 +339,7 @@ describe('reflow content display', () => {
   it('starting translation preserves an image-only segment display', () => {
     render(surface({ source: { ...paragraph, asset_path: image.asset_path }, content: { paragraph: { image: true, parsed: false } } }));
     openMenu('p1');
-    fireEvent.click(screen.getByRole('menuitem', { name: 'AI 翻译此段' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '翻译此段' }));
     expect(translate).toHaveBeenCalledExactlyOnceWith('p1', false);
     expect(screen.getByRole('img', { name: '片段原图' })).toBeTruthy();
     expect(screen.queryByText(paragraph.text)).toBeNull();

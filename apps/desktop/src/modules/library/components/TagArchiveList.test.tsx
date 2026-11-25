@@ -5,7 +5,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { listTagArchives, purgeTagArchive } from '@/shared/ipc/tagReadingApi';
 import { TagArchiveList } from './TagArchiveList';
 
-vi.mock('@/shared/ipc/tagReadingApi', () => ({
+vi.mock('@/shared/ipc/tagReadingApi', async original => ({
+  ...await original<typeof import('@/shared/ipc/tagReadingApi')>(),
   listTagArchives: vi.fn(), purgeTagArchive: vi.fn(), notifyTagArchivesChanged: vi.fn(),
 }));
 

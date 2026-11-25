@@ -108,3 +108,18 @@ html[data-appearance="atelier"] .pdf-reading-ribbon {
   html[data-appearance="atelier"] [data-material="annotation-paper"]::before,
   html[data-appearance="atelier"] [data-material="annotation-paper"]::after { display: none; }
 }
+
+/* Native PDF remains the text/annotation surface above the open 3D binding. */
+:root[data-appearance="atelier"] .library-book.pdf-book-model {
+  position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; transform: none;
+  pointer-events: none; container-type: normal; z-index: 0;
+}
+:root[data-appearance="atelier"] .pdf-book-model::after { content: none; }
+.pdf-book-model > canvas { display: block; width: 100%; height: 100%; }
+:root[data-appearance="atelier"] .pdf-book-model:is([data-cover-open="false"], [data-moving="true"]) { z-index: 24; }
+.pdf-book-stage[data-cover-closed] [data-book-spread] { visibility: hidden; }
+.pdf-book-opening { position: absolute; inset: 8px 0 40px; z-index: 25; display: flex; justify-content: center; align-items: stretch; }
+.pdf-book-open-button { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; width: min(80%, 480px); height: 100%; padding: 20px; white-space: normal; background: transparent !important; border: 0; box-shadow: none !important; }
+.pdf-book-open-button > span { padding: 6px 12px; color: var(--foreground); background: var(--card); border: 1px solid var(--border); border-radius: 4px; }
+.pdf-book-open-button > .library-book { margin-block: auto; }
+.pdf-book-close { position: absolute; left: 44px; bottom: -38px; pointer-events: auto; }

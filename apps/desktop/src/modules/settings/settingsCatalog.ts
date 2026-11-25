@@ -1,23 +1,28 @@
+import { ONBOARDING_GUIDE_VISIBLE } from '@/modules/onboarding/availability';
+
 // Temporary tester-facing surface. Existing runtime configuration stays intact.
 export const ADVANCED_ASSISTANT_SETTINGS_VISIBLE = false;
 const ALL_SETTINGS_CATEGORIES = [
+  { id: 'account', title: '账户与存储', tabs: ['account', 'data'] },
   { id: 'getting-started', title: '入门与教程', tabs: ['getting-started'] },
   { id: 'appearance', title: '外观与界面', tabs: ['appearance'] },
   { id: 'reader', title: '阅读与批注', tabs: ['reader'] },
   { id: 'translation', title: '翻译', tabs: ['translation'] },
   { id: 'parser', title: '导入与解析', tabs: ['parser'] },
   { id: 'models', title: '模型与助手', tabs: ['models', 'main-agent', 'subagents'] },
-  { id: 'external-tools', title: '检索与工具', tabs: ['external-tools'] },
-  { id: 'data', title: '资料与存储', tabs: ['data'] }
+  { id: 'external-tools', title: '检索与工具', tabs: ['external-tools'] }
 ] as const;
 
 export type SettingsTab = typeof ALL_SETTINGS_CATEGORIES[number]['tabs'][number];
 export function visibleSettingsTab(tab: SettingsTab): SettingsTab {
+  if (tab === 'data') return 'account';
+  if (!ONBOARDING_GUIDE_VISIBLE && tab === 'getting-started') return 'appearance';
   if (ADVANCED_ASSISTANT_SETTINGS_VISIBLE) return tab;
   if (tab === 'main-agent' || tab === 'subagents') return 'models';
   return tab;
 }
-export const SETTINGS_CATEGORIES = ALL_SETTINGS_CATEGORIES.map(category => ({
+export const SETTINGS_CATEGORIES = ALL_SETTINGS_CATEGORIES.filter(category =>
+  ONBOARDING_GUIDE_VISIBLE || category.id !== 'getting-started').map(category => ({
   ...category, tabs: category.tabs.filter(tab => visibleSettingsTab(tab) === tab) as SettingsTab[],
 }));
 export type SettingsNavigationTarget = { id: string; nonce: number };
@@ -31,35 +36,40 @@ export type SettingDefinition = {
 
 // Metadata only: never index user values, credentials, paths or document content.
 const ALL_SETTINGS_CATALOG: SettingDefinition[] = [
-  { id: 'tools-local-agent', tab: 'external-tools', title: '本地 Agent', description: '检测本地 Agent，管理已记住的操作授权。', keywords: 'claudecode Claude Code Codex OpenCode 本地 agent 智能体 工具 检测 权限 授权 以后都允许 撤销 恢复询问' },
+  { id: 'data-cloud-sync', tab: 'account', title: '云端同步与问题处理', description: '查看同步失败、依赖未就绪及版本冲突，重试同步。', keywords: '同步 失败 未就绪 冲突 配额' },
+  { id: 'data-cloud-account', tab: 'account', title: '个人账户', description: '连接私有服务器，注册登录、管理设备与云端资料库。', keywords: '同步 账号 登录 注册 服务器 云端 设备 局域网' },
+  { id: 'parser-zotero', tab: 'parser', title: 'Zotero 本地资料', description: '设置 Zotero 目录，读取论文列表并选择导入。', keywords: 'zotero 文献 论文 导入 数据目录 文件夹 附件' },
+  { id: 'tools-local-agent', tab: 'models', title: '本地 Agent', description: '检测本地 Agent，管理已记住的操作授权。', keywords: 'claudecode Claude Code Codex OpenCode 本地 agent 智能体 工具 检测 权限 授权 以后都允许 撤销 恢复询问' },
   { id:'data-onboarding', tab:'getting-started', title:'新手引导', description:'继续或回放聚焦式任务教程。', keywords:'教程 onboarding 入门 引导 回放 Attention 论文 示例' },
   { id: 'appearance-style', tab: 'appearance', title: '界面风格', description: '标准、拟物和玻璃。', keywords: '主题 theme 外观 皮肤 材质' },
   { id: 'appearance-color', tab: 'appearance', title: '强调色', description: '选中、焦点与主要操作使用的颜色预设。', keywords: '主题 颜色 配色 蓝色 绿色 紫色' },
   { id: 'appearance-scale', tab: 'appearance', title: '界面缩放', description: '调整标题栏、侧栏、阅读区和弹窗的大小。', keywords: '字体太小 字体大小 放大 缩小 DPI 比例' },
   { id: 'appearance-transparency', tab: 'appearance', title: '降低透明度', description: '切换玻璃通透效果与实色显示。', keywords: '主题 玻璃 模糊 透明 辅助 实色 折射 通透' },
+  { id: 'reader-auto-fold', tab: 'reader', title: '自动生成阅读详略', description: '打开重排版时自动生成尚未处理的阅读详略。', keywords: '阅读详略 重排 自动 生成 助手模型' },
   { id: 'reader-open-pdf', tab: 'reader', title: '有 PDF 时直接打开 PDF', description: '打开条目时优先阅读 PDF；关闭后或没有 PDF 时显示条目概览。', keywords: '默认打开PDF 默认打开 PDF 打开条目 直接阅读 阅读方式 概览 详情' },
   { id: 'reader-preview', tab: 'reader', title: 'PDF 悬停预览', description: '悬停时查看对应片段。', keywords: '阅读 鼠标 预览 浮层 卡片' },
-  { id: 'reader-sentence-hover', tab: 'reader', title: 'PDF 逐句悬停', description: '悬停查看当前句，点击联动重排译文。', keywords: '阅读 句子 逐句 hover 翻译 联动' },
+  { id: 'reader-sentence-hover', tab: 'reader', title: 'PDF 悬停显示粒度', description: '在片段预览内容中分别选择原文和译文的整段或逐句显示。', keywords: '阅读 句子 逐句 hover 翻译 联动' },
   { id: 'reader-reflow-preview', tab: 'reader', title: '重排悬停预览', description: '重排视图悬停时查看对应片段。', keywords: '阅读 reflow 鼠标 预览' },
   { id: 'reader-inline-annotation-hover', tab: 'reader', title: '行内批注', description: '悬停 PDF 选区批注时查看该处原文和批注。', keywords: '划词 高亮 选中文字 悬停 批注' },
   { id: 'reader-paper-reference-hover', tab: 'reader', title: '文内引用悬停', description: '悬停参考文献、图表引用时预览目标；点击定位仍可使用。', keywords: '参考文献 图表 引用 图片 表格 hover 预览' },
   { id: 'reader-preview-content', tab: 'reader', title: '预览显示内容', description: '原文、译文、片段记录和批注；PDF 与重排共用。', keywords: '悬停 片段笔记 区域 内容' },
-  { id: 'reader-preview-size', tab: 'reader', title: 'PDF 预览大小', description: '预览文字大小和卡片宽度。', keywords: '悬停 字体大小 预览卡片大小' },
   { id: 'reader-regions', tab: 'reader', title: '默认显示 PDF 分段框', description: '控制 PDF 上分段区域框的默认显示。', keywords: '默认显示区域 框线 阅读 高亮' },
   { id: 'reader-open-note', tab: 'reader', title: '打开片段记录的方式', description: '选中后操作、单击或 Alt + 单击。', keywords: '打开片段笔记 左键 手势 点击 笔记' },
   { id: 'reader-close-overlay', tab: 'reader', title: '片段浮层关闭方式', description: '点击空白处或再次点击当前片段关闭。', keywords: '空白处关闭片段浮层 再次点击片段关闭 笔记 批注' },
-  { id: 'translation-model', tab: 'translation', title: '整体翻译模型', description: '指定整篇 PDF 和段落／片段翻译的模型。', keywords: '任务模型 AI 阅读 全文 整篇 翻译 模型' },
-  { id: 'translation-service', tab: 'translation', title: '选中文字翻译', description: '常见英文单词优先使用本地词库；其他选区可选 Azure、DeepL、Qwen-MT 或整体翻译模型。', keywords: '免费 额度 API Key 密钥 微软 通义 划词 选区 快速 翻译 词典 单词' },
-  { id: 'translation-selection', tab: 'translation', title: '选中文字后自动翻译', description: '选择文字后自动调用选区翻译服务。', keywords: '划词 选区 翻译 英译中' },
+  { id: 'translation-model', tab: 'translation', title: '默认翻译来源', description: '选择专用翻译服务或大模型，各行为可跟随默认或单独指定。', keywords: '任务模型 AI 阅读 全文 整篇 翻译 模型' },
+  { id: 'translation-sources', tab: 'translation', title: '翻译行为与使用来源', description: '在模型与服务配置下方，分别指定单词、选区、片段、逐句与整篇翻译使用的来源。', keywords: '翻译来源 独立模型 默认模型 词库 逐句 全局 小牛 NiuTrans DeepL Azure Qwen-MT' },
+  { id: 'translation-service', tab: 'translation', title: '翻译模型与服务配置', description: '展开小牛翻译、DeepL、Azure 或 Qwen-MT 的独立表单，填写 API Key 并验证保存。', keywords: '小牛 NiuTrans DeepL Azure Qwen-MT 额度 API Key 密钥 微软 通义 全局 翻译 折叠 展开' },
+  { id: 'translation-model-connections', tab: 'translation', title: '翻译的大模型连接', description: '展开查看已有大模型连接，前往模型与助手配置后，在下方翻译行为中选择使用。', keywords: '大模型 连接 配置 LLM 翻译 折叠 展开 API Key' },
+  { id: 'translation-selection', tab: 'translation', title: '选中文字后自动翻译', description: '选择文字后自动调用翻译服务。', keywords: '划词 选区 翻译 英译中' },
   { id: 'translation-auto', tab: 'translation', title: '解析后自动翻译 PDF', description: '解析成功后自动启动英译中。', keywords: 'PDF自动翻译 自动翻译 数据与解析' },
   { id: 'translation-content', tab: 'translation', title: '自动翻译内容范围', description: '选择段落、标题、表格等参与翻译的内容类型。', keywords: '翻译 图片 公式 页眉 页脚 列表' },
-  { id: 'translation-display', tab: 'translation', title: '重排翻译显示', description: '默认显示原文、译文或双语对照。', keywords: '翻译 reflow 双语 原文 译文' },
-  { id: 'translation-visible', tab: 'translation', title: '重排显示翻译', description: '独立控制重排视图的译文显示。', keywords: '翻译 reflow 双语 开关 译文' },
-  { id: 'parser-auto', tab: 'parser', title: '导入 PDF 后自动解析', description: '默认关闭；开启后使用已配置的解析服务，客户端 ZIP 导入不受影响。', keywords: '上传PDF后自动开始解析 导入 解析' },
-  { id: 'parser-service', tab: 'parser', title: 'MinerU 服务连接', description: '配置解析服务地址和可选 API Key。', keywords: 'MinerU URL 密钥 API Key token 凭据 解析 Base URL' },
-  { id: 'parser-zip', tab: 'parser', title: '导入 MinerU 客户端 ZIP', description: '使用客户端生成的解析结果。', keywords: '离线 解析 导入 ZIP content_list' },
-  { id: 'data-workspace', tab: 'data', title: '数据位置', description: '数据固定保存在程序文件夹内，随程序一起移动。', keywords: '工作区 workspace 位置 路径 目录 data 便携 U盘 USB' },
-  { id: 'models-connections', tab: 'models', title: '模型连接配置', description: '选择公开模型预设，自动填入参数；配置 API Key、接口地址和模型 ID。', keywords: '大模型 大语言模型 密钥 API Key token 凭据 Base URL Provider Ollama OpenAI 模型预设 models.dev OpenRouter 公开目录 自动填充' },
+  { id: 'parser-auto', tab: 'parser', title: '导入 PDF 后自动解析', description: '默认关闭；开启后使用已配置的解析服务，客户端结果导入不受影响。', keywords: '上传PDF后自动开始解析 导入 解析' },
+  { id: 'parser-account', tab: 'parser', title: '账号解析服务', description: '登录后使用 Neuink 服务器解析论文。', keywords: 'MinerU 账号 局域网 服务器 登录 排队 解析' },
+  { id: 'parser-service', tab: 'parser', title: '自建 MinerU 服务', description: '配置自己的解析服务地址和可选密钥。', keywords: 'MinerU 服务器 自建 URL 密钥 API Key token 凭据 解析 Base URL' },
+  { id: 'parser-zip', tab: 'parser', title: '导入 MinerU 客户端结果', description: '使用客户端生成的结果目录、ZIP 或 RAR。', keywords: '离线 解析 导入 目录 ZIP RAR content_list' },
+  { id: 'parser-mineru-local', tab: 'parser', title: 'MinerU 本地结果目录', description: '选择或自动查找 MinerU 解析结果所在的文件夹。', keywords: 'MinerU 本地 自动查找 下载 结果目录 导入' },
+  { id: 'data-workspace', tab: 'account', title: '数据位置', description: '数据固定保存在程序文件夹内，随程序一起移动。', keywords: '工作区 workspace 位置 路径 目录 data 便携 U盘 USB' },
+  { id: 'models-connections', tab: 'models', title: '自定义大模型配置', description: '选择公开模型预设，自动填入参数；配置 API Key、接口地址和模型 ID。', keywords: '大模型 大语言模型 密钥 API Key token 凭据 Base URL Provider Ollama OpenAI 模型预设 models.dev OpenRouter 公开目录 自动填充' },
   { id: 'models-advanced', tab: 'models', title: '模型高级参数', description: '在模型编辑中设置上下文、最大输出、Temperature 和 Top P。', keywords: '采样 温度 token 上下文窗口 参数' },
   { id: 'models-assistant', tab: 'models', title: '助手对话模型', description: '指定对话与资料问答使用的模型。', keywords: '任务模型 助手 对话 AI' },
   { id: 'agent-main', tab: 'main-agent', title: '主助手与执行权限', description: '身份、模型、工具调用和写入提案权限。', keywords: '主Agent 主 Agent 系统提示词 委派 权限 prompt' },
@@ -72,7 +82,9 @@ const ALL_SETTINGS_CATALOG: SettingDefinition[] = [
   { id: 'tools-model-access', tab: 'external-tools', title: '文本检索器', description: '配置本地或远程文本嵌入模型、下载推荐模型并重建检索索引，支持一键自检。', keywords: '文本检索器 模型 embedding 嵌入 bge-m3 e5 维度 模型目录 onnx 下载 HuggingFace 自检 通道总览' },
   { id: 'tools-visual', tab: 'external-tools', title: '视觉编码服务', description: '配置本地 Qwen 视觉服务或远程 API，管理模型安装、启动服务与准备视觉索引。', keywords: '视觉编码 视觉服务 视觉检索 双通道 Qwen 图像 页面 图表 索引 启动服务 下载 endpoint' },
   { id: 'tools-rerank', tab: 'external-tools', title: 'Reranker', description: '配置本地 ONNX 或远程 Rerank API，一键安装并切换重排模型。', keywords: '重排 rerank reranker 交叉编码器 cross encoder 模型 onnx 下载 jina cohere 百炼' },
-  { id: 'tools-assistant-debug', tab: 'external-tools', title: '助手调试信息', description: '仅本机显示安全错误类别和状态码，默认关闭。', keywords: '调试 debug 诊断 工具报错 错误详情' },
+  { id: 'tools-download-confirmation', tab: 'external-tools', title: '下载论文前确认', description: '控制主动添加论文时的二次确认，模型任务仍需授权。', keywords: '下载 PDF 添加 论文 确认 二次确认 不再确认 防误触' },
+  { id: 'tools-deep-research', tab: 'external-tools', title: '深度研究组件', description: '在可选服务中按需安装 Research，查看进度、取消或重试安装。', keywords: 'research DeerFlow 深度研究 可选服务 安装 组件 环境 进度 检查' },
+  { id: 'tools-assistant-debug', tab: 'models', title: '助手调试信息', description: '仅本机显示安全错误类别和状态码，默认关闭。', keywords: '调试 debug 诊断 工具报错 错误详情' },
   { id: 'tools-mcp', tab: 'external-tools', title: 'MCP 与工具连接', description: '注册工具服务并配置连接参数。', keywords: 'MCP 服务 插件 工具 外部工具' }
 ];
 export const SETTINGS_CATALOG = ALL_SETTINGS_CATALOG.filter(item =>
@@ -82,7 +94,10 @@ export function settingsCategory(tab: SettingsTab) {
   return SETTINGS_CATEGORIES.find(category => category.tabs.includes(visibleSettingsTab(tab)))!;
 }
 
+export const ADMIN_PASSWORD_RESET_COMMAND = '/neuink::admin/account/password-reset --revoke-all-sessions --confirm-intent';
+export const ADMIN_PASSWORD_RESET_TARGET = 'account-admin-password-reset';
 export function searchSettings(query: string): SettingDefinition[] {
+  if (query.trim() === ADMIN_PASSWORD_RESET_COMMAND) return [{ id: ADMIN_PASSWORD_RESET_TARGET, tab: 'account', title: '重置当前管理员密码', description: '验证管理员身份后设置新密码，并撤销全部设备登录。', keywords: '' }];
   const terms = query.trim().normalize('NFKC').toLocaleLowerCase().split(/\s+/).filter(Boolean);
   if (!terms.length) return [];
   return SETTINGS_CATALOG.map((item, index) => {

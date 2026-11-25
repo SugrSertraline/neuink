@@ -7,3 +7,6 @@
 
 # Preserve upstream source bytes and recorded SHA256 across Windows checkouts.
 crates/neuink-ipc/src/commands/vendor/readability/** -text
+
+# Generated PDF offsets and SHA-256 summaries require byte-exact fixtures.
+crates/neuink-workspace/tests/fixtures/reading_pdf/*.pdf binary

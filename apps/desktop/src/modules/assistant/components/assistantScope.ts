@@ -39,13 +39,10 @@ export function buildAssistantScope({
     const scopedEntries = entries.filter((entry) =>
       entry.tagIds.some((tagId) => tagIds.has(tagId))
     );
-    const tagNames = tags
-      .filter((tag) => tagIds.has(tag.id))
-      .map((tag) => tag.name)
-      .sort();
+    const namesById = new Map(tags.map(tag => [tag.id, tag.name]));
     return {
       tag_ids: [...tagIds],
-      tag_names: tagNames,
+      tag_names: [...tagIds].map(id => namesById.get(id) ?? id),
       entry_ids: scopedEntries.map((entry) => entry.id),
       entry_titles: scopedEntries.map((entry) => entry.title),
       scope_intent: requestedTagIds.some((tagId) => !knownTagIds.has(tagId)) ? 'unresolved' : 'selection'
@@ -250,7 +247,9 @@ export function mergeScopeSnapshots(
     entryTitles.push(additional.entry_titles[index] ?? entryId);
   });
   const tagIds = [...new Set([...primary.tag_ids, ...additional.tag_ids])];
-  const tagNames = [...new Set([...primary.tag_names, ...additional.tag_names])];
+  const namesById = new Map(primary.tag_ids.map((id, index) => [id, primary.tag_names[index] ?? id]));
+  additional.tag_ids.forEach((id, index) => namesById.set(id, additional.tag_names[index] ?? namesById.get(id) ?? id));
+  const tagNames = tagIds.map(id => namesById.get(id) ?? id);
   const intent = mergeScopeIntents(effectiveScopeIntent(primary), effectiveScopeIntent(additional));
   // Legacy inputs stay legacy: an intent is written only when a side already carried one.
   const hasExplicitIntent = primary.scope_intent !== undefined || additional.scope_intent !== undefined;

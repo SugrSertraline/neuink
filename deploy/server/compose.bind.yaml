@@ -1,0 +1,59 @@
+# Isolated acceptance deployment with explicit, pre-existing storage directories.
+# Start through the host mount checks. Automatic container restart stays disabled
+# until the host service has been configured with mount dependencies.
+services:
+  db:
+    image: postgres:17-alpine
+    restart: "no"
+    environment:
+      POSTGRES_DB: neuink
+      POSTGRES_USER: neuink
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a dedicated database password}
+    volumes:
+      - type: bind
+        source: ${NEUINK_DB_DIR:?Set an existing ext4 database directory}
+        target: /var/lib/postgresql/data
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U neuink -d neuink"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "2"
+  app:
+    image: ${NEUINK_SERVER_IMAGE:?Set the verified server image}
+    user: ${NEUINK_UID:?Set the storage owner UID}:${NEUINK_GID:?Set the storage owner GID}
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
+    environment:
+      NEUINK_DATABASE_URL: jdbc:postgresql://db:5432/neuink
+      NEUINK_DATABASE_USER: neuink
+      NEUINK_DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      NEUINK_INVITE_REQUIRED: ${NEUINK_INVITE_REQUIRED:-true}
+      NEUINK_SERVER_STORAGE: /data
+      NEUINK_SERVER_ADDRESS: 0.0.0.0
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=60 -XX:+ExitOnOutOfMemoryError
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${NEUINK_PORT:-8790}:8790"
+    volumes:
+      - type: bind
+        source: ${NEUINK_ATTACHMENT_DIR:?Set an existing attachment directory}
+        target: /data
+        bind:
+          create_host_path: false
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "2"

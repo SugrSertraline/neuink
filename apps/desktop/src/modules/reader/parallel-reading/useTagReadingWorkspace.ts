@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { readTagReading, saveTagReading, type TagReadingMember, type TagReadingState } from '@/shared/ipc/tagReadingApi';
 import { registerSegmentEditorCloseHandler, setSegmentEditorDirty } from '../components/segmentEditorDirtyRegistry';
 import { reconcileTagReading } from './tagReadingState';
+import { useFormRecovery } from '@/shared/hooks/useFormRecovery';
 
 export function useTagReadingWorkspace(root: string | null, tagId: string, refreshKey: string) {
   const [state, setState] = useState<TagReadingState | null>(null);
@@ -15,6 +16,13 @@ export function useTagReadingWorkspace(root: string | null, tagId: string, refre
   const generation = useRef(0);
   const live = useRef(false);
   const scope = `tag-reading:${tagId}`;
+  const recovery = useFormRecovery({ kind: 'tag-reading', id: tagId, ownerId: tagId, scope, root, label: '平行阅读 · 未保存的任务设置',
+    dirty: Boolean(pending.current), ready: !loading, value: { pending: pending.current, baseline: state }, restore: value => {
+      if (!value.pending || JSON.stringify(value.baseline) !== JSON.stringify(current.current)) throw new Error('任务已更新，请核对后手动合并');
+      pending.current = value.pending; setError('已恢复任务修改，请重试保存。');
+      setSegmentEditorDirty(scope, 'task-state', true);
+    } });
+  const recoveryRef = useRef(recovery); recoveryRef.current = recovery;
   const loadRef = useRef<(restore?: boolean) => Promise<void>>(async () => undefined);
   const reloadPending = useRef(false);
 
@@ -80,12 +88,13 @@ export function useTagReadingWorkspace(root: string | null, tagId: string, refre
   useEffect(() => {
     live.current = true;
     const unregister = registerSegmentEditorCloseHandler(scope, 'task-state', {
+      ...recovery.handlers, isBusy: () => Boolean(inFlight.current),
       save: retry,
       isDirty: () => Boolean(pending.current || inFlight.current),
       discard: () => {
         // A command already accepted by the backend is allowed to finish; only a
         // failed, unsaved task change can be discarded, never an on-disk revision.
-        if (!inFlight.current) pending.current = null;
+        if (!inFlight.current) { pending.current = null; recoveryRef.current.discard(); setError(null); }
       }
     });
     return () => {
@@ -98,7 +107,7 @@ export function useTagReadingWorkspace(root: string | null, tagId: string, refre
 
   useEffect(() => { void load(); }, [load, refreshKey]);
 
-  return { state, members, loading, saving, error, commit, retry,
+  return { state, members, loading, saving, error, commit, retry, recovery,
     hasPending: Boolean(pending.current), reload: (restore = false) => load(restore) };
 }
 

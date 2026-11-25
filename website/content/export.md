@@ -8,19 +8,19 @@
 
 从 PDF 或重排的导出入口选择原文、中文或双语，等待内容检查并核对缺失项。图中为原文导出检查完成状态，尚未写出文件。
 
-![Neuink 实机截图：1. 检查全文导出范围](../public/screenshots/export-fulltext.png)
+![较早版本示例：Neuink 实机截图：1. 检查全文导出范围](../public/screenshots/export-fulltext.png)
 
 ### 2. 选择自己的阅读成果
 
 从条目概览打开阅读成果导出，按类型和标题选择项目。图中还未勾选项目，空选择不会自动导出全部。
 
-![Neuink 实机截图：2. 选择自己的阅读成果](../public/screenshots/export-selection.png)
+![较早版本示例：Neuink 实机截图：2. 选择自己的阅读成果](../public/screenshots/export-selection.png)
 
 ### 3. 选择合并文件或逐项打包
 
 展开格式菜单，选择 Word、TXT 或相应 ZIP。确认已选内容、格式与检查结果后再导出，并在目标软件中复核文件。
 
-![Neuink 实机截图：3. 选择合并文件或逐项打包](../public/screenshots/export-formats.png)
+![较早版本示例：Neuink 实机截图：3. 选择合并文件或逐项打包](../public/screenshots/export-formats.png)
 
 ## 格式与入口
 

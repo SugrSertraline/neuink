@@ -1,5 +1,8 @@
 # 打包与发行
 
+> 2026-11-13 发布规则更新：经用户确认的 alpha、beta 或 main 提交均可发布官网和发行包，不再要求先合并 main。保留来源提交记录、版本一致性、测试、空 data、凭据排除及下载校验。下文历史流程中限定 main 的表述不再适用。
+
+
 > 当前版本：0.1.3（预览版）
 >
 > 状态：Tauri 与 Windows Actions 构建流程已配置；云端运行结果以 Actions 为准。当前仅发布 Windows x64；签名和应用内自动更新尚未完成。
@@ -39,6 +42,8 @@ npm run desktop:release:portable
 脚本先执行前端类型检查与构建，再生成 Tauri release 程序，输出到 `release/Neuink-portable-时间戳.zip`。压缩包包含 `Neuink.exe`、本地 embedding 模型、空值配置模板和中文使用说明；不包含模型下载缓存、个人资料库或本机密钥。已有同名发行目录不会被覆盖。完整解压后双击 `Neuink.exe`，不需要 Node.js、Rust 或开发服务；系统需有 Microsoft Edge WebView2 Runtime。
 
 Windows 免安装版将资料库及设置保存在 `Neuink.exe` 旁的 `data` 文件夹；更新时须保留原 `data`。模型与 MinerU 服务仍由使用者配置；同机启动会使用已有设置。`--skip-build` 只适合重新组装已核验的 release 产物，不应代替新版本构建。
+
+本机工作目录位于 `D:\NeuInk`，日常使用的便携版位于其 `portable` 子目录。验证过的新版本可以直接更新到 `portable`，先退出程序并备份，再替换程序和资源文件，始终保留 `portable/data` 中的个人资料与设置。开发版 `dev:d-data` 默认读取同一目录下的资料，不再需要单独映射旧安装路径。本机更新不等于公开发布；公开发行仍遵守 `main` 分支门禁。
 
 ## 2. Embedding 资源
 
@@ -85,7 +90,7 @@ Windows x64 的 `prepare:browser-reader` 从官方固定地址显式下载并校
 
 ### 分支与构建来源
 
-- `main` 是 GitHub 默认分支，保存确认后的版本；`beta` 用于日常新功能开发，验证后由用户确认，再合入 `main`。校园旅行在 `seal-campus-travel` 独立维护。
+- `main` 是 GitHub 默认分支，保存确认后的版本；`alpha` 用于日常开发；用户确认保留功能范围后进入 `beta` 验收，再经确认合入 `main`。校园旅行在 `seal-campus-travel` 独立维护。
 - 桌面流程的来源门禁在依赖安装之前执行：直接提交和手动运行仅接受 `main`；版本标签的提交必须已包含在远程 `main` 的历史中，不能从尚未合入的 `beta` 打标签发布。
 - 指向 `main` 的 PR 运行验证和原生编译检查，不上传发行包或生成 Release。官网 PR 也仅面向 `main`，手动选择其他分支不会构建或部署官网。
 - 分支名称不会自动建立 GitHub 的 PR 审批保护；合并仍需遵守人工确认约定。不要把 `beta` 的开发进度自动合入 `main`。
@@ -133,7 +138,7 @@ embedding 由 `embedding-resources.cjs` 从 Hugging Face 固定 revision 下载�
 4. 先上传并核验 `releases/<版本标签>/` 下的版本副本，再由七牛在桶内复制到根目录的同名固定下载文件，避免再次传输完整安装包；复制前后均检查文件信息。刷新 URL 缓存后，最后写入 `releases/latest.json`。
 5. ZIP 以 CDN 实际返回的 ETag、长度核验；小文件下载实际内容，按字节长度和 SHA256 核验，兼容 CDN 分块传输或压缩响应。ZIP 的 SHA256 在上传前校验，上传及 CDN 响应则核对本地计算的七牛分块 ETag；不把 CDN 的 ETag 当作 SHA256。
 
-只处理 Windows x64 ZIP、版本信息和校验文件，不上传整个构建目录；这三个文件必须齐全。历史 macOS 附件不再上传或更新，`latest.json` 只列本次发布的 Windows 文件。
+只处理 Windows x64 ZIP、版本信息和校验文件，不上传整个构建目录；这三个文件必须齐全。历史 macOS 附件不再上传或更新，`latest.json` 只列本次发布的 Windows 文件。 Windows 安装程序若作为附件发布，必须同时包含 `installer-info.json`，并纳入校验清单。
 
 已有版本副本只能重用相同内容，不能用不同字节覆盖。固定下载文件按顺序更新，跨文件没有原子事务；失败时不会报告成功，也不会先发布最新清单。重新运行可继续完成已有副本和固定链接的更新。
 
@@ -173,3 +178,15 @@ npm test --prefix .github/qiniu
 - 自动化全新机器冒烟测试。
 
 这些完成前不能把“Windows 正式发行准备”标记为已完成。
+
+## 当前内测版转为主页下载的顺序
+
+截图更新可以后续补充，继续标注旧截图范围；不能因此跳过程序包验收。当前工作区的日常 debug 程序不是公开 ZIP，不直接压缩 portable 目录。
+
+1. 固定候选内容与版本号，在开发计划记录功能范围、兼容性、验证及限制；按 alpha → beta → main 流程取得对应确认。
+2. 从批准的 main 构建 release 便携包，使用打包脚本创建空 data，不携带 sync-account.json、同步绑定、论文、笔记、账号或服务密钥。
+3. 全新解压验证：本地功能可用，服务器地址空白，未连接不显示登录入口；连接成功及登录均不自动绑定，用户确认同步范围后才开启同步。更新已有用户时保留 data 和已确认的同步选择。
+4. 下载草稿 Release 的实际 ZIP，在干净目录验证启动和必要资源；核对 build-info.json 与 SHA256SUMS.txt，再发布 Release。
+5. 七牛同步完成后验证固定 ZIP、版本清单和下载内容。主页继续使用固定的 Neuink-windows-x64-portable.zip 地址；同步更新网站的版本范围和发行说明后，从 main 部署。
+
+在新文件下载验证成功前，不把当前 alpha 标为“最新版已发布”，也不提前更换下载按钮的版本说明。当前截图豁免不等于跨电脑、证书或发布验收已完成。

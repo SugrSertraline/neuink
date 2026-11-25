@@ -1,5 +1,5 @@
 import type { AssistantNoteProposal } from '@/shared/types/assistant';
-import { applyMarkdownPatchPreview } from '../sdk/toolSupport';
+import { applyMarkdownPatchPreview } from '../sdk/noteProposalPreview';
 
 export type NoteReviewBlock =
   | { kind: 'context'; text: string }

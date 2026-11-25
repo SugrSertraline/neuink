@@ -1,18 +1,31 @@
-import { Trash2 } from 'lucide-react';
-import type { HTMLAttributes } from 'react';
+import type { FieldDefinition } from '@/shared/ipc/fieldDefinitionsApi';
+import { entryCloudLabels, useEntryCloudStatus } from './useEntryCloudStatus';
+import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
+import { useMemo, useRef, useState, type CSSProperties, type HTMLAttributes } from 'react';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import { FieldValue } from '@/modules/library/components/EntryFieldsEditor';
 import { Button } from '@/components/ui/button';
 import { LibraryPaperContextMenu, type LibraryPaperActions } from './LibraryPaperContextMenu';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
 import type { EntryReadingState } from '@/shared/types/domain';
 import type { LibraryEntry } from '../../library/components/LibrarySidebar';
+import type { PdfParseAction } from '@/modules/library/components/PdfParseButton';
+import { LibraryPaperRowActions } from './LibraryPaperRowActions';
 import { AssetSummary, StatusBadge, TagBadges, formatDate } from './EntryDisplay';
 import { LibraryEntryTitle } from './LibraryEntryTitle';
 import { formatLastRead, formatReadingDuration, getReadingProgress } from './libraryReading';
 import { useEntryLibraryColumnWidths, type EntryLibraryColumnId } from './useEntryLibraryColumnWidths';
+import { Checkbox } from '@/components/ui/checkbox';
+import { LibrarySelectionCheckbox } from './LibrarySelectionCheckbox';
+import type { LibraryPaperSelection } from './useLibrarySelection';
+import { resolveColumnOrder, useEntryLibraryColumnOrder } from './useEntryLibraryColumnOrder';
+import { libraryEntrySourceLabel, nextLibraryEntrySort, type LibraryEntrySort } from './libraryEntrySorting';
 
 export const ENTRY_LIBRARY_COLUMNS: Array<{ id: EntryLibraryColumnId; label: string }> = [
   { id: 'title', label: '标题' },
+  { id: 'source', label: '来源' },
+  { id: 'cloud', label: '云端状态' },
   { id: 'reading-progress', label: '阅读进度' },
   { id: 'last-read', label: '最近阅读' },
   { id: 'reading-time', label: '阅读时长' },
@@ -23,7 +36,16 @@ export const ENTRY_LIBRARY_COLUMNS: Array<{ id: EntryLibraryColumnId; label: str
   { id: 'actions', label: '操作' }
 ];
 
+export function fieldColumnId(name: string, root?: string | null): EntryLibraryColumnId { return `field:${encodeURIComponent(root ?? '')}:${encodeURIComponent(name)}`; }
+export function fieldColumnName(id: EntryLibraryColumnId): string | null {
+  if (!id.startsWith('field:')) return null;
+  try { const parts = id.slice(6).split(':'); return decodeURIComponent(parts.length > 1 ? parts.slice(1).join(':') : parts[0]); } catch { return null; }
+}
+
 export type LibraryPaperCollectionProps = LibraryPaperActions & {
+  workspaceRoot?: string | null;
+  selection?: LibraryPaperSelection;
+  pdfParseAction?: PdfParseAction;
   active: boolean;
   entries: LibraryEntry[];
   status: 'loading' | 'ready' | 'error';
@@ -32,31 +54,57 @@ export type LibraryPaperCollectionProps = LibraryPaperActions & {
   selectedEntryId: string | null;
   draggingEntryId: string | null;
   getRowProps: (entry: LibraryEntry) => HTMLAttributes<HTMLElement>;
+  sourceKindsByEntry?: Record<string, ('zotero' | 'mineru')[]>;
+  sourceChangedEntryIds?: ReadonlySet<string>;
+  onReviewSourceChanges?: () => void;
 };
 type LibraryPaperTableProps = LibraryPaperCollectionProps & {
+  fieldNames?: readonly string[];
+  fieldDefinitions?: readonly FieldDefinition[];
+  onEditField?: (entry: LibraryEntry, definition: FieldDefinition, expected: string | null, value: string | null) => Promise<void>;
+  sort?: LibraryEntrySort;
+  onSortChange?: (sort: LibraryEntrySort | null) => void;
   visibleColumns: ReadonlySet<EntryLibraryColumnId>;
   pinnedEdges: ReadonlySet<'left' | 'right'>;
 };
 
-const headCellClass = 'h-8 overflow-hidden border-b border-border bg-muted px-3 text-left text-[11px] font-medium text-muted-foreground';
-const bodyCellClass = 'h-12 overflow-hidden border-b border-border/60 px-3 py-1 text-left align-middle';
+const headCellClass = 'h-8 overflow-hidden border-b border-border border-r border-r-border/20 last:border-r-0 bg-muted px-3 text-center text-[11px] font-medium text-muted-foreground';
+const bodyCellClass = 'h-12 overflow-hidden border-b border-border/60 border-r border-r-border/20 last:border-r-0 px-3 py-1 text-left align-middle';
 const numericColumns = new Set<EntryLibraryColumnId>(['last-read', 'reading-time', 'updated']);
 
 /** Both library layouts keep this table mounted, including its column and scroll state. */
-export function LibraryPaperTable({ active, entries, status, emptyMessage, readingStates, selectedEntryId, draggingEntryId, visibleColumns, pinnedEdges, reparseDisabled, getRowProps, onOpen, onOpenInSidePane, onReparse, onDelete }: LibraryPaperTableProps) {
-  const shownColumns = ENTRY_LIBRARY_COLUMNS.filter(column => visibleColumns.has(column.id));
+export function LibraryPaperTable({ workspaceRoot, active, entries, status, emptyMessage, readingStates, selectedEntryId, draggingEntryId, visibleColumns, fieldNames, fieldDefinitions, onEditField, pinnedEdges, reparseDisabled, getRowProps, onOpen, onRead, onOpenInSidePane, onReparse, onDelete, onToggleSourceHidden, externalEntryIds, sourceHiddenByEntry, sourceKindsByEntry, sourceChangedEntryIds, onReviewSourceChanges, pdfParseAction, deleteDisabled, onSelect, selection, sort, onSortChange }: LibraryPaperTableProps) {
+  const cloud = useEntryCloudStatus(workspaceRoot, active && visibleColumns.has('cloud'), entries);
+  const actions = { reparseDisabled, deleteDisabled, onOpen, onRead, onOpenInSidePane, onReparse, onDelete, onToggleSourceHidden, externalEntryIds, sourceHiddenByEntry, onSelect };
+  const dynamicColumns = [...visibleColumns].flatMap(id => { const name = fieldColumnName(id); return name && id === fieldColumnId(name, workspaceRoot) && (!fieldNames || fieldNames.includes(name)) ? [{ id, label: name }] : []; });
+  const columns = [...ENTRY_LIBRARY_COLUMNS.filter(column => column.id !== 'actions' && visibleColumns.has(column.id)), ...dynamicColumns, ...ENTRY_LIBRARY_COLUMNS.filter(column => column.id === 'actions' && visibleColumns.has(column.id))];
+  const { order } = useEntryLibraryColumnOrder(workspaceRoot, columns.map(column => column.id).filter(id => id !== 'title' && id !== 'actions'));
+  const shownColumns = resolveColumnOrder(columns, order);
   const leftPinnedColumnId = pinnedEdges.has('left') ? shownColumns[0]?.id ?? null : null;
   const lastColumnId = shownColumns[shownColumns.length - 1]?.id ?? null;
   const rightPinnedColumnId = pinnedEdges.has('right') && lastColumnId !== leftPinnedColumnId ? lastColumnId : null;
-  const { getColumnWidth, getResizeHandleProps, hasHorizontalOverflow, tableShellRef } = useEntryLibraryColumnWidths({ active, leftPinnedColumnId, rightPinnedColumnId, visibleColumns });
-  const tableWidth = Math.round(shownColumns.reduce((total, column) => total + getColumnWidth(column.id), 0));
+  const selectionWidth = selection?.enabled ? 42 : 0;
+  const actualColumns = useMemo(() => new Set(columns.map(column => column.id)), [visibleColumns, fieldNames, workspaceRoot]);
+  const { getColumnWidth, getResizeHandleProps, hasHorizontalOverflow, tableShellRef } = useEntryLibraryColumnWidths({ active, leftPinnedColumnId, rightPinnedColumnId, visibleColumns: actualColumns, reservedWidth: selectionWidth });
+  const tableWidth = selectionWidth + Math.round(shownColumns.reduce((total, column) => total + getColumnWidth(column.id), 0));
   const getPin = (id: EntryLibraryColumnId) => !hasHorizontalOverflow ? undefined : id === leftPinnedColumnId ? 'left' : id === rightPinnedColumnId ? 'right' : undefined;
   const alignment = (id: EntryLibraryColumnId) => numericColumns.has(id) ? 'text-right tabular-nums' : id === 'actions' ? 'text-center' : 'text-left';
 
-  return <div ref={tableShellRef} className="entry-library-table-shell min-h-0 min-w-0 flex-1 [&>[data-slot=table-container]]:isolate [&>[data-slot=table-container]]:h-full [&>[data-slot=table-container]]:overflow-auto [&>[data-slot=table-container]]:overscroll-contain">
+  return <div ref={tableShellRef}
+    style={{
+      '--library-scroll-left': `${hasHorizontalOverflow && leftPinnedColumnId ? getColumnWidth(leftPinnedColumnId) + selectionWidth : 0}px`,
+      '--library-scroll-right': `${hasHorizontalOverflow && rightPinnedColumnId ? getColumnWidth(rightPinnedColumnId) : 0}px`
+    } as CSSProperties}
+    onFocusCapture={event => {
+      const header = event.target.closest('th');
+      // Native focus scrolling does not account for the opaque pinned columns.
+      if (header && !header.dataset.pinned) event.target.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    }}
+    className="entry-library-table-shell min-h-0 min-w-0 flex-1 [&>[data-slot=table-container]]:isolate [&>[data-slot=table-container]]:h-full [&>[data-slot=table-container]]:overflow-auto [&>[data-slot=table-container]]:overscroll-contain [&>[data-slot=table-container]]:[scroll-padding-left:var(--library-scroll-left)] [&>[data-slot=table-container]]:[scroll-padding-right:var(--library-scroll-right)]">
     <Table aria-label="论文列表" className="table-fixed border-separate border-spacing-0 text-[13px]" data-layout-width={tableWidth}
       style={{ width: `max(100%, ${tableWidth}px)`, minWidth: `${tableWidth}px`, maxWidth: 'none' }}>
       <colgroup>
+        {selection?.enabled && <col style={{ width: selectionWidth }} />}
         {shownColumns.map(column => {
           const width = getColumnWidth(column.id);
           return <col key={column.id} style={{ width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }} />;
@@ -64,30 +112,47 @@ export function LibraryPaperTable({ active, entries, status, emptyMessage, readi
       </colgroup>
       <TableHeader className="sticky top-0 z-20 bg-muted">
         <TableRow>
-          {shownColumns.map(column =>
-            <TableHead key={column.id} aria-label={column.label} scope="col" className={cn(headCellClass, alignment(column.id), !getPin(column.id) && 'relative')} pin={getPin(column.id)}>
-              {column.label}<span {...getResizeHandleProps(column.id, column.label)} />
-            </TableHead>
-          )}
+          {selection?.enabled && <TableHead className="h-8 border-b border-border border-r border-r-border/20 last:border-r-0 bg-muted px-3 text-center [&:has([role=checkbox])]:pr-3" pin={hasHorizontalOverflow && pinnedEdges.has('left') ? 'left' : undefined}><Checkbox aria-label="全选当前结果" checked={selection.all || selection.some && 'indeterminate'} disabled={status !== 'ready' || !entries.length} onCheckedChange={selection.toggleAll} /></TableHead>}
+          {shownColumns.map(column => {
+            const sortable = column.id !== 'actions' && column.id !== 'cloud' && Boolean(onSortChange);
+            const direction = sortable && sort?.by === column.id ? sort.direction : undefined;
+            const nextSort = column.id === 'actions' || column.id === 'cloud' ? null : nextLibraryEntrySort(column.id as Exclude<EntryLibraryColumnId, 'actions' | 'cloud'>, sort);
+            const nextLabel = nextSort ? `按${column.label}${nextSort.direction === 'asc' ? '升序' : '降序'}排列` : '恢复默认排序';
+            const SortIcon = direction === 'asc' ? ArrowUp : direction === 'desc' ? ArrowDown : ArrowUpDown;
+            return <TableHead key={column.id} aria-label={column.label} scope="col"
+              aria-sort={sortable ? direction === 'asc' ? 'ascending' : direction === 'desc' ? 'descending' : 'none' : undefined}
+              className={cn(headCellClass, sortable && 'px-1', !getPin(column.id) && 'relative')} pin={getPin(column.id)} style={getPin(column.id) === 'left' ? { left: selectionWidth } : undefined}>
+              {sortable ? <Button type="button" size="xs" variant="ghost" disabled={status !== 'ready'}
+                className={cn('relative h-7 w-full px-5 text-[11px] focus-visible:ring-inset', direction && 'text-foreground')}
+                aria-label={nextLabel}
+                title={nextLabel}
+                onClick={() => onSortChange?.(nextSort)}>
+                <span className="truncate">{column.label}</span>
+                <SortIcon aria-hidden="true" className={cn('absolute right-1 size-3', !direction && 'text-muted-foreground/60')} />
+              </Button> : column.label}
+              <span {...getResizeHandleProps(column.id, column.label)} />
+            </TableHead>;
+          })}
         </TableRow>
       </TableHeader>
       <TableBody>
         {status !== 'ready' || !entries.length ? <TableRow>
-          <TableCell colSpan={shownColumns.length} role={status === 'error' ? 'alert' : undefined}
+          <TableCell colSpan={shownColumns.length + (selection?.enabled ? 1 : 0)} role={status === 'error' ? 'alert' : undefined}
             className={cn('whitespace-normal px-3 py-8 text-center text-xs', status === 'error' ? 'text-destructive' : 'text-muted-foreground')}>
             {status === 'loading' ? '正在打开条目库...' : status === 'error' ? '无法加载标签和论文，请重新打开工作区后重试。' : emptyMessage}
           </TableCell>
-        </TableRow> : entries.map(item => <LibraryPaperContextMenu key={item.id} entry={item}
-          reparseDisabled={reparseDisabled} onOpen={onOpen} onOpenInSidePane={onOpenInSidePane} onReparse={onReparse} onDelete={onDelete}>
+        </TableRow> : entries.map(item => <LibraryPaperContextMenu key={item.id} entry={item} {...actions}>
             <TableRow {...getRowProps(item)} tabIndex={0} data-entry-id={item.id} data-allow-context-menu="true"
-              data-state={item.id === selectedEntryId ? 'selected' : undefined}
-              className={cn('group cursor-pointer bg-card hover:bg-muted has-aria-expanded:bg-muted data-[state=selected]:bg-accent outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring', item.id === draggingEntryId && '[&>[data-slot=table-cell]>*]:opacity-55')}>
+              data-state={(selection?.enabled ? selection.ids.has(item.id) : item.id === selectedEntryId) ? 'selected' : undefined}
+              aria-selected={selection?.enabled ? selection.ids.has(item.id) : item.id === selectedEntryId}
+              className={cn('group cursor-pointer bg-card hover:bg-muted has-aria-expanded:bg-muted data-[state=selected]:bg-accent data-[state=selected]:hover:bg-accent data-[state=selected]:has-aria-expanded:bg-accent outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring', item.id === draggingEntryId && '[&>[data-slot=table-cell]>*]:opacity-55')}>
+              {selection?.enabled && <TableCell className={cn(bodyCellClass, 'px-3')} pin={hasHorizontalOverflow && pinnedEdges.has('left') ? 'left' : undefined}><LibrarySelectionCheckbox entryId={item.id} title={item.title} selection={selection} /></TableCell>}
               {shownColumns.map(column =>
-                <TableCell key={column.id} className={cn(bodyCellClass, alignment(column.id))} pin={getPin(column.id)}>
-                  {column.id === 'actions' ? <Button aria-label="移到回收站" title="移到回收站" size="icon-xs" variant="ghost"
-                    className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                    onClick={event => { event.stopPropagation(); onDelete(item); }}><Trash2 size={14} aria-hidden="true" /></Button>
-                    : <PaperCell column={column.id} entry={item} state={readingStates[item.id]} />}
+                <TableCell key={column.id} className={cn(bodyCellClass, alignment(column.id), column.id === 'actions' && 'px-2 py-2')} pin={getPin(column.id)} style={getPin(column.id) === 'left' ? { left: selectionWidth } : undefined}>
+                  {column.id === 'cloud' ? <span className="text-xs text-muted-foreground" title="核对已保存内容与云端确认版本；不代表未保存编辑或尚未接收的云端变更。状态定期刷新。">{(sourceKindsByEntry?.[item.id] ?? item.sourceInfo?.kinds)?.length ? entryCloudLabels.source : cloud?.error ? '状态暂不可用' : cloud?.states[item.id] ? entryCloudLabels[cloud.states[item.id]] : '正在核对…'}</span>
+                    : column.id === 'actions' ? <LibraryPaperRowActions width={getColumnWidth(column.id)} entry={item} pdfParseAction={pdfParseAction} {...actions} />
+                    : column.id === 'source' ? <div className="flex min-w-0 items-center gap-1"><div className="min-w-0 text-xs"><p className="truncate" title={libraryEntrySourceLabel(sourceKindsByEntry?.[item.id] ?? item.sourceInfo?.kinds)}>{libraryEntrySourceLabel(sourceKindsByEntry?.[item.id] ?? item.sourceInfo?.kinds)}</p>{item.sourceInfo?.local_copy_ids?.length ? <p className="truncate text-[11px] text-muted-foreground">本地已存在</p> : item.sourceInfo?.copied_from && <p className="truncate text-[11px] text-muted-foreground" title={`独立副本，复制自 ${item.sourceInfo.copied_from.source_title}`}>独立副本</p>}</div>{sourceChangedEntryIds?.has(item.id) && onReviewSourceChanges ? <Button size="xs" variant="ghost" className="shrink-0 px-1 text-warning" onClick={event => { event.stopPropagation(); onReviewSourceChanges(); }}>有更新</Button> : null}</div>
+                    : <PaperCell column={column.id} entry={item} state={readingStates[item.id]} definition={fieldDefinitions?.find(value => value.name === fieldColumnName(column.id))} onEditField={selection?.enabled || externalEntryIds?.has(item.id) || item.sourceInfo?.kinds?.length ? undefined : onEditField} />}
                 </TableCell>
               )}
             </TableRow>
@@ -97,18 +162,80 @@ export function LibraryPaperTable({ active, entries, status, emptyMessage, readi
   </div>;
 }
 
-function PaperCell({ column, entry, state }: { column: EntryLibraryColumnId; entry: LibraryEntry; state?: EntryReadingState }) {
+function PaperCell({ column, entry, state, definition, onEditField }: { column: EntryLibraryColumnId; entry: LibraryEntry; state?: EntryReadingState; definition?: FieldDefinition; onEditField?: LibraryPaperTableProps['onEditField'] }) {
+  const field = fieldColumnName(column);
+  if (field !== null) { const raw = entry.fields?.[field] ?? ''; let value = raw; if (definition?.kind === 'multi_select' && raw) { try { const values: unknown = JSON.parse(raw); if (Array.isArray(values) && values.every(item => typeof item === 'string')) value = values.join('、'); } catch { /* Preserve legacy text. */ } } else if (definition?.kind === 'boolean') value = raw === 'true' ? '是' : raw === 'false' ? '否' : raw; return definition && onEditField ? <EditableFieldCell entry={entry} definition={definition} display={value} onSave={onEditField} /> : <span className="block truncate text-xs" title={value}>{value || '—'}</span>; }
   switch (column) {
     case 'title': return <LibraryEntryTitle entry={entry} />;
     case 'reading-progress': return <ReadingProgressCell state={state} />;
     case 'last-read': return <span className="text-xs text-muted-foreground">{formatLastRead(state?.last_read_at)}</span>;
     case 'reading-time': return <span className="text-xs">{formatReadingDuration(state?.total_active_ms ?? 0)}</span>;
     case 'tags': return <TagBadges tags={entry.tags} compact />;
-    case 'file': return <AssetSummary entry={entry} compact />;
-    case 'parser': return <StatusBadge status={entry.status} />;
+    case 'file': return !entry.pdfFileName && entry.sourceInfo?.kinds.length && entry.sourceInfo.source_pdf_hash
+      ? <span className="text-xs text-muted-foreground">{entry.sourceInfo.local_copy_ids?.length ? 'PDF 在本地条目' : '来源 PDF'}</span> : <AssetSummary entry={entry} compact />;
+    case 'parser': return !entry.pdfFileName && entry.sourceInfo?.kinds.length && entry.sourceInfo.source_pdf_hash
+      ? <span className="text-xs text-muted-foreground">{entry.sourceInfo.local_copy_ids?.length ? '在本地条目解析' : '导入本地后解析'}</span> : <StatusBadge status={entry.status} />;
     case 'updated': return <span className="text-xs text-muted-foreground">{formatDate(entry.updatedAt)}</span>;
     default: return null;
   }
+}
+
+function EditableFieldCell({ entry, definition, display, onSave }: { entry: LibraryEntry; definition: FieldDefinition; display: string; onSave: NonNullable<LibraryPaperTableProps['onEditField']> }) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [expected, setExpected] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const busy = useRef(false);
+  const canceled = useRef(false);
+  const isChoice = definition.kind === 'select' || definition.kind === 'boolean';
+  const isMulti = definition.kind === 'multi_select';
+  const save = async (next: string, close: boolean) => {
+    if (busy.current) return;
+    const value = next.trim() || null;
+    if (value === expected) { if (close) setOpen(false); return; }
+    busy.current = true; setSaving(true); setError('');
+    try {
+      await onSave(entry, definition, expected, value);
+      setExpected(value); setDraft(value ?? '');
+      if (close) setOpen(false);
+    } catch (caught) {
+      if (isMulti) setDraft(expected ?? '');
+      setError(typeof caught === 'string' ? caught : caught instanceof Error ? caught.message : '保存失败，请重试。');
+    } finally { busy.current = false; setSaving(false); }
+  };
+  const changeOpen = (next: boolean) => {
+    if (busy.current) return;
+    if (next) {
+      const value = entry.fields?.[definition.name] ?? null;
+      canceled.current = false; setExpected(value); setDraft(value ?? ''); setError(''); setOpen(true);
+    } else if (!isChoice && !isMulti && draft.trim() !== (expected ?? '')) {
+      void save(draft, true);
+    } else setOpen(false);
+  };
+  const options = definition.kind === 'boolean' ? ['是', '否'] : definition.options;
+  const normalized = definition.kind === 'boolean' ? draft === 'true' ? '是' : draft === 'false' ? '否' : draft : draft;
+  const choices = normalized && !options.includes(normalized) ? [normalized, ...options] : options;
+  return <Popover open={open} onOpenChange={changeOpen}>
+    <PopoverTrigger asChild><button type="button" className="block w-full truncate rounded px-1 py-1 text-left text-xs hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring" aria-label={`编辑${entry.title}的${definition.name}`} title={`${display || '未填写'} · 点击编辑`} onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}>{display || '—'}</button></PopoverTrigger>
+    <PopoverContent align="start" className="w-64" onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}
+      onEscapeKeyDown={event => { if (!busy.current) { canceled.current = true; event.preventDefault(); setOpen(false); } }}
+      onBlurCapture={event => { if (!isChoice && !isMulti && !canceled.current && !event.currentTarget.contains(event.relatedTarget as Node | null) && draft.trim() !== (expected ?? '')) void save(draft, true); }}>
+      <div className="grid gap-2" onKeyDown={event => { if (!isChoice && !isMulti && event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); void save(draft, true); } }}>
+        <div className="min-w-0"><p className="font-medium">{definition.name}</p><p className="truncate text-xs text-muted-foreground" title={entry.title}>{entry.title}</p></div>
+        {isChoice ? <div className="grid max-h-64 gap-0.5 overflow-y-auto" role="group" aria-label={`${definition.name}选项`}>
+          <Button type="button" size="sm" variant="ghost" className={cn('justify-start', !draft && 'bg-accent text-accent-foreground')} disabled={saving} aria-pressed={!draft} onClick={() => void save('', true)}>留空</Button>
+          {choices.map(value => <Button key={value} type="button" size="sm" variant="ghost" className={cn('justify-start', normalized === value && 'bg-accent text-accent-foreground')} disabled={saving} aria-pressed={normalized === value} onClick={() => void save(value, true)}>{value}</Button>)}
+        </div> : <>
+          <FieldValue field={{ id: definition.name, key: definition.name, value: draft }} definition={definition} disabled={saving} onChange={value => { setDraft(value); if (isMulti) void save(value, false); }} />
+          <Button type="button" size="xs" variant="ghost" className="justify-start" disabled={saving || !draft} onClick={() => void save('', true)}>留空</Button>
+          {!isMulti && <p className="text-xs text-muted-foreground">按 Enter 或点击其他位置自动保存，按 Esc 放弃。</p>}
+        </>}
+        {saving && <p role="status" className="text-xs text-muted-foreground">正在保存…</p>}
+        {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+      </div>
+    </PopoverContent>
+  </Popover>;
 }
 
 function ReadingProgressCell({ state }: { state?: EntryReadingState }) {

@@ -6,13 +6,30 @@ import type { RequestRoute } from './requestRouter';
 // An explicit allowlist: unknown MCP effects and delegated agents cannot acquire
 // write access through a read-only planning turn.
 export const PLANNING_READ_TOOLS: ReadonlySet<string> = new Set([
+  'read_context_reference',
   'read_pdf_pages', 'search_pdf_text',
-  'search_papers', 'search_web', 'read_webpage', 'read_browser_tab',
+  'search_papers', 'arxiv_search', 'search_web', 'read_webpage', 'read_browser_tab',
   'read_current_note', 'read_note', 'read_entry_assistant_context', 'read_segment_content',
   'get_entry_outline', 'search_segments', 'search_library', 'search_sciverse_evidence', 'read_sciverse_content',
   'search_sciverse_metadata', 'get_sciverse_metadata_catalog',
   'search_sciverse_paper_schema', 'get_sciverse_paper_schema'
 ]);
+
+// Separate from permissions/replay: proposals and interactions are replayable but exclusive.
+// PDF memory bounds and remote-service rate limits remain authoritative below this scheduler.
+const PARALLEL_READ_TOOLS: ReadonlySet<string> = new Set([...PLANNING_READ_TOOLS]);
+export function canParallelAssistantTool(name: string, input?: unknown,
+  observations: ReadonlyArray<{ toolName: string; output: unknown }> = []): boolean {
+  if (!PARALLEL_READ_TOOLS.has(name)) return false;
+  if (name !== 'read_sciverse_content') return true;
+  // A same-turn search must finish before a content read can use its authorization.
+  const docId = input && typeof input === 'object' ? (input as Record<string, unknown>).doc_id : undefined;
+  return typeof docId === 'string' && observations.some(observation => {
+    if (observation.toolName !== 'search_sciverse_evidence') return false;
+    const output = observation.output as { evidence?: Array<{ doc_id?: unknown }> } | null;
+    return Array.isArray(output?.evidence) && output.evidence.some(item => item?.doc_id === docId);
+  });
+}
 
 /** Routing may narrow capabilities; grants and the Agent loop remain authoritative. */
 export function buildDirectExecution(settings: AgentRuntimeSettings, request: string, mode: 'act' | 'plan' = 'act', route?: RequestRoute) {

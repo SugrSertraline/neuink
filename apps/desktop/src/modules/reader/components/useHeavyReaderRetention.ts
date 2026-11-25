@@ -1,7 +1,8 @@
+import { readerRuntimeBudget } from '@/shared/lib/runtimeBudget';
 import { useEffect, useRef, useState } from 'react';
 import { surfaceKey, type WorkspaceSurfaceLayout } from '@/app/workspaceSurface';
 import { hasUnsavedSegmentEditors } from './segmentEditorDirtyRegistry';
-import { hasHeavyReaderIdleExpired, HEAVY_READER_SWEEP_INTERVAL_MS, isHeavyReaderSurface } from './readerRetention';
+import { HEAVY_READER_SWEEP_INTERVAL_MS, isHeavyReaderSurface } from './readerRetention';
 
 export function useHeavyReaderRetention(layout: WorkspaceSurfaceLayout) {
   const inactiveSince = useRef(new Map<string, number>());
@@ -17,7 +18,11 @@ export function useHeavyReaderRetention(layout: WorkspaceSurfaceLayout) {
       for (const key of heavyKeys) {
         if (!activeKeys.has(key) && !hasUnsavedSegmentEditors(key) && !inactiveSince.current.has(key)) inactiveSince.current.set(key, now);
       }
-      const next = new Set([...inactiveSince.current].filter(([, start]) => hasHeavyReaderIdleExpired(start, now)).map(([key]) => key));
+      const budget = readerRuntimeBudget();
+      const candidates = [...inactiveSince.current].sort((a, b) => b[1] - a[1]);
+      const next = new Set(candidates.filter(([, start], index) =>
+        index >= budget.retainedHiddenReaders || now - start >= budget.idleReaderMs
+      ).map(([key]) => key));
       setExpiredKeys((current) => current.size === next.size && [...current].every((key) => next.has(key)) ? current : next);
     };
     sweep();

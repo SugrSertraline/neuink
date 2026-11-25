@@ -12,7 +12,9 @@ import {
   MessageSquarePlus,
   PanelRightOpen,
   Pencil,
+  Pin,
   StickyNote,
+  ZoomIn,
 } from "lucide-react";
 
 import type { SourceSegment } from "@/shared/types/domain";
@@ -21,6 +23,8 @@ import type { SourceBacklink } from "../../types";
 import { segmentTypeLabel } from "./readerUtils";
 import { ViewportOverlay } from '@/components/ui/viewport-overlay';
 import { listItemAddress, listItemSegments } from '@/shared/lib/listItemSegments';
+import { useReaderPins } from '../pins/ReaderPinsContext';
+import { isVisualSegment } from './usePdfVisualDetail';
 
 export function SegmentActionMenu({
   canAddSourceLink,
@@ -41,6 +45,7 @@ export function SegmentActionMenu({
   onOpenSegmentAnnotation,
   onOpenSegmentNote,
   onOpenSegmentWorkspace,
+  onOpenVisualDetail,
   onHideSegment,
   sourceBacklinks,
   onOpenSourceBacklink,
@@ -65,11 +70,13 @@ export function SegmentActionMenu({
   onOpenSegmentAnnotation: (segment: SourceSegment) => void;
   onOpenSegmentNote: (segment: SourceSegment) => void;
   onOpenSegmentWorkspace?: (segment: SourceSegment) => void;
+  onOpenVisualDetail?: (segment: SourceSegment) => void;
   onHideSegment?: (segment: SourceSegment) => void;
   onOpenSourceBacklink: (backlink: SourceBacklink) => void;
   onClose: () => void;
 }) {
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const pins = useReaderPins();
   const [choice, setChoice] = useState<SourceSegment | null>(null);
   const segment = choice ?? initialSegment;
   const candidates = listItemSegments(initialSegment);
@@ -209,6 +216,11 @@ export function SegmentActionMenu({
           </div>
         </div>
       ) : null}
+      {onOpenVisualDetail && isVisualSegment(segment) ? (
+        <MenuButton disabled={false} icon={<ZoomIn size={13} aria-hidden="true" />} label="放大查看"
+          description="双击也可打开，支持缩放和拖动"
+          onClick={() => { onOpenVisualDetail(segment); onClose(); }} />
+      ) : null}
       <MenuButton
         disabled={false}
         icon={<StickyNote size={13} aria-hidden="true" />}
@@ -230,6 +242,10 @@ export function SegmentActionMenu({
           onClose();
         }}
       />
+      {pins ? <MenuButton disabled={false} icon={<Pin size={13} aria-hidden="true" />}
+        label={pins.has(segment.uid) ? '查看固钉' : '固定'}
+        description="固定在阅读区，滚动其他页面时继续对照"
+        onClick={() => { pins.pin(segment); onClose(); }} /> : null}
       {onOpenSegmentWorkspace ? (
         <>
           <div className="my-1 border-t" />
@@ -262,7 +278,7 @@ export function SegmentActionMenu({
         disabled={!onAddAssistantContext}
         icon={<MessageSquarePlus size={13} aria-hidden="true" />}
         label="附到助手对话"
-        description={onAddAssistantContext ? '附上此处原文，输入问题后再发送' : '当前阅读视图未连接助手'}
+        description={onAddAssistantContext ? '插入正在编辑的问题，保留原文引用，发送前可移除' : '当前阅读视图未连接助手'}
         onClick={() => {
           onAddAssistantContext?.(segment);
           onClose();

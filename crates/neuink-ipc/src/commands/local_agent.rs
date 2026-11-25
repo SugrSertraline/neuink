@@ -1,7 +1,7 @@
 //! Claude installation detection and opt-in execution. Detection never opens a session.
 mod installation;
 mod mcp;
-mod process;
+pub(crate) mod process;
 mod rpc;
 pub mod runtime;
 #[cfg(windows)]
@@ -15,6 +15,14 @@ use installation::{discover, AgentExecutable};
 use serde::{Deserialize, Serialize};
 use std::{process::Stdio, time::Duration};
 use tokio::io::AsyncReadExt;
+
+fn system_instructions() -> String {
+    format!(
+        "{}\n\n{}",
+        include_str!("../../prompts/qna_system.md"),
+        include_str!("local_agent/prompt.md")
+    )
+}
 
 #[derive(Debug, Serialize)]
 pub struct LocalAgentDetection {

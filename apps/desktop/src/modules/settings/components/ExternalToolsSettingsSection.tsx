@@ -1,11 +1,10 @@
 import { SettingsPage } from './SettingsPrimitives';
 import { SciverseSettingsSection } from '@/modules/sciverse/components/SciverseSettingsSection';
 import { ResearchSettingsSection } from './ResearchSettingsSection';
-import { AssistantDebugSetting } from './AssistantDebugSetting';
-import { LocalAgentSettingsSection } from './LocalAgentSettingsSection';
 import { RerankSettingsSection } from './RerankSettingsSection';
 import { VisualSettingsSection } from './VisualSettingsSection';
 import { ModelAccessSettings } from './ModelAccessSettings';
+import { ResearchComponentSettings } from './ResearchComponentSettings';
 
 import { AgentToolRuntimeSection } from './AgentSettingsSection';
 import { ADVANCED_ASSISTANT_SETTINGS_VISIBLE } from '../settingsCatalog';
@@ -19,23 +18,18 @@ export function ExternalToolsSettingsSection({
   const active = props.activeSettingsTab === 'external-tools';
 
   return (
-    <SettingsPage tab="external-tools" title="检索与工具" description="管理论文和网页检索、本地 Agent 及检索模型服务。">
-      <LocalAgentSettingsSection active={active} workspaceRoot={props.workspaceRoot} />
-      <ResearchSettingsSection active={active}>
-        <SciverseSettingsSection active={active} />
-      </ResearchSettingsSection>
+    <SettingsPage tab="external-tools" title="检索与工具" description="管理论文和网页检索及研究组件。">
+        <ResearchSettingsSection active={active}>
+          <SciverseSettingsSection active={active} />
+          <ResearchComponentSettings active={active} workspaceRoot={props.workspaceRoot} />
+        </ResearchSettingsSection>
       <ModelAccessSettings active={active} root={props.workspaceRoot ?? ''} />
       <VisualSettingsSection active={active} root={props.workspaceRoot ?? ''} />
       <RerankSettingsSection active={active} />
-      <AssistantDebugSetting />
-      {ADVANCED_ASSISTANT_SETTINGS_VISIBLE && (
-        <fieldset data-setting-id="tools-mcp" tabIndex={-1} disabled={props.runtimeUnavailable} className="min-w-0">
-          <AgentToolRuntimeSection
-            runtimeSettings={props.runtimeSettings}
-            onUpdateRuntimeSettings={props.onUpdateRuntimeSettings}
-          />
-        </fieldset>
-      )}
+        {ADVANCED_ASSISTANT_SETTINGS_VISIBLE && <fieldset data-setting-id="tools-mcp" tabIndex={-1} disabled={props.runtimeUnavailable} className="min-w-0"><AgentToolRuntimeSection
+          runtimeSettings={props.runtimeSettings}
+          onUpdateRuntimeSettings={props.onUpdateRuntimeSettings}
+        /></fieldset>}
     </SettingsPage>
   );
 }

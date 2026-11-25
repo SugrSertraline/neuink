@@ -33,6 +33,8 @@ pub struct Request {
     prompt: String,
     session_id: String,
     resume: bool,
+    #[serde(default)]
+    seed_policy: bool,
     tools: Vec<Tool>,
 }
 struct Control {
@@ -266,6 +268,7 @@ async fn execute(
             cwd,
             &request.session_id,
             request.resume,
+            request.seed_policy,
             &request.prompt,
             &format!("http://127.0.0.1:{port}/mcp"),
             &token,
@@ -301,7 +304,7 @@ async fn execute(
         .arg("--settings")
         .arg(json!({"permissions":{"ask":["Bash","Write","Edit"]}}).to_string())
         .arg("--append-system-prompt")
-        .arg(include_str!("prompt.md"))
+        .arg(super::system_instructions())
         .arg(if request.resume {
             "--resume"
         } else {

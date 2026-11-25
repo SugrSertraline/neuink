@@ -34,6 +34,7 @@ pub mod recommended_visual_models;
 pub mod recommended_text_models;
 pub mod visual_qwen;
 pub mod visual_runtime;
+mod visual_process;
 #[cfg(test)]
 mod rerank_batch_tests;
 
@@ -258,7 +259,7 @@ static SEARCH_BUILD_STATUS: OnceLock<Mutex<HashMap<String, SearchIndexBuildStatu
 static SEMANTIC_BUILD_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 static SEMANTIC_AUTO_REBUILD_KEYS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
-pub fn spawn_search_cache_workers<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+pub fn spawn_search_cache_workers<R: tauri::Runtime>(_app: tauri::AppHandle<R>) {
     // Keep cache eviction alive at startup. Legacy semantic snapshots are
     // rebuilt lazily in a detached worker on the first semantic request, so
     // keyword search remains available while the new index is prepared.
@@ -267,46 +268,7 @@ pub fn spawn_search_cache_workers<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
         .spawn(clean_search_caches_loop)
         .ok();
 
-    // Warm configured local retrieval models (and installed on-demand local visual
-    // service) shortly after startup so the first assistant query avoids cold load.
-    thread::Builder::new()
-        .name("neuink-retrieval-prewarm".to_string())
-        .spawn(move || prewarm_retrieval_models(app))
-        .ok();
-}
-
-fn prewarm_retrieval_models<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
-    use neuink_config::{
-        RerankMode, RerankTransport, TextEmbeddingProviderKind, VisualEmbeddingProviderKind,
-        VisualServiceStartup,
-    };
-
-    thread::sleep(Duration::from_millis(1500));
-    let Ok(saved) = crate::storage::read_settings(&app) else {
-        return;
-    };
-
-    if saved.text_model.provider == TextEmbeddingProviderKind::LocalOnnx {
-        if let Ok(provider) = text_provider_for_app(&app) {
-            if provider.status().available {
-                let _ = semantic_embedding_identity(provider.as_ref());
-                let _ = provider.embed(&[]);
-            }
-        }
-    }
-
-    if saved.rerank.mode == RerankMode::CrossEncoder
-        && saved.rerank.transport == RerankTransport::Local
-    {
-        let _ = resolve_rerank(&app);
-    }
-
-    if saved.visual.provider == VisualEmbeddingProviderKind::QwenLocal
-        && saved.visual.startup == VisualServiceStartup::OnDemand
-        && ready_visual_runtime(&app).is_some()
-    {
-        let _ = ensure_visual_service(&app);
-    }
+    // Load optional retrieval models only when a query or index build needs them.
 }
 
 #[tauri::command]
@@ -4553,11 +4515,11 @@ pub async fn start_visual_service<R: tauri::Runtime>(
         for _ in 0..180 {
             if visual_service_listening() {
                 visual::invalidate_provider_cache();
-                break;
+                return Ok(pid);
             }
             std::thread::sleep(std::time::Duration::from_secs(1));
         }
-        Ok(pid)
+        Err("视觉服务尚未就绪；进程仍在加载，请稍后重试".to_string())
     })
     .await
     .map_err(|error| error.to_string())?

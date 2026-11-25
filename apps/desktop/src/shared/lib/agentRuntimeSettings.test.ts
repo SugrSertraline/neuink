@@ -3,11 +3,48 @@ import { DEFAULT_AGENT_RUNTIME_SETTINGS, auditAgentToolPermissions, configuredAg
 import type { SubagentProfile } from '@/shared/types/agentRuntime';
 
 describe('agent capability policy', () => {
+  it('migrates the complete previous grant once while preserving later context-reader revocation', () => {
+    const old = structuredClone(DEFAULT_AGENT_RUNTIME_SETTINGS);
+    old.capabilityRevision = 4;
+    old.mainAssistant.enabledToolIds = old.mainAssistant.enabledToolIds.filter(id => id !== 'read_context_reference');
+    const migrated = normalizeAgentRuntimeSettings(old);
+    expect(migrated.mainAssistant.enabledToolIds).toContain('read_context_reference');
+    migrated.mainAssistant.enabledToolIds = migrated.mainAssistant.enabledToolIds.filter(id => id !== 'read_context_reference');
+    expect(normalizeAgentRuntimeSettings(migrated).mainAssistant.enabledToolIds).not.toContain('read_context_reference');
+  });
+  it('migrates old tool IDs without restoring revoked tools or changing external routes', () => {
+    const settings = structuredClone(DEFAULT_AGENT_RUNTIME_SETTINGS);
+    const raw = {
+      ...settings,
+      mainAssistant: { ...settings.mainAssistant,
+        enabledToolIds: ['read_note', 'note.propose_patch', 'note_propose_patch', 'app.set_appearance'] },
+      subagents: [{ ...settings.subagents[0], enabledToolIds: ['read_note', 'task.run_subagent'] }],
+      toolPackages: [{ id: 'native', name: 'Native', enabled: true, kind: 'native', description: '',
+        permissionMode: 'ask', allowedToolIds: ['note.propose_patch', 'mcp.server.read.item'] }]
+    };
+    const migrated = normalizeAgentRuntimeSettings(raw as never);
+    expect(migrated.mainAssistant.enabledToolIds).toEqual(['read_note', 'note_propose_patch', 'app_set_appearance']);
+    expect(migrated.subagents[0].enabledToolIds).toEqual(['read_note', 'task_run_subagent']);
+    expect(migrated.toolPackages[0].allowedToolIds).toEqual(['note_propose_patch', 'mcp.server.read.item']);
+    expect(normalizeAgentRuntimeSettings(migrated)).toEqual(migrated);
+  });
+
+  it('continues to reject every proposal tool when writing is disabled', () => {
+    const settings = structuredClone(DEFAULT_AGENT_RUNTIME_SETTINGS);
+    settings.mainAssistant.permissions.canWriteProposals = false;
+    const ids = ['note_propose_create', 'note_propose_patch', 'segment_note_propose_patch',
+      'entry_propose_meta_patch', 'tag_propose_change'];
+    const audit = auditAgentToolPermissions(ids, settings.mainAssistant, settings);
+    expect(audit.allowedToolIds).toEqual([]);
+    expect(audit.deniedTools).toEqual(ids.map(toolId => ({ toolId, reason: 'write proposals disabled' })));
+    expect(configuredAgentToolIds(settings, settings.mainAssistant)).not.toEqual(expect.arrayContaining(ids));
+  });
+
   it('migrates browser reads once only for the complete prior main grant', () => {
     const old = structuredClone(DEFAULT_AGENT_RUNTIME_SETTINGS); old.capabilityRevision = 2;
     old.mainAssistant.enabledToolIds = old.mainAssistant.enabledToolIds.filter(id => id !== 'read_browser_tab');
     const migrated = normalizeAgentRuntimeSettings(old);
-    expect(migrated.capabilityRevision).toBe(5);
+    expect(migrated.capabilityRevision).toBe(6);
     expect(migrated.mainAssistant.enabledToolIds).toContain('read_browser_tab');
     migrated.mainAssistant.enabledToolIds = migrated.mainAssistant.enabledToolIds.filter(id => id !== 'read_browser_tab');
     expect(normalizeAgentRuntimeSettings(migrated).mainAssistant.enabledToolIds).not.toContain('read_browser_tab');
@@ -31,14 +68,14 @@ describe('agent capability policy', () => {
     complete.capabilityRevision = 4;
     complete.mainAssistant.enabledToolIds = complete.mainAssistant.enabledToolIds.filter(id => id !== 'search_library');
     const migrated = normalizeAgentRuntimeSettings(complete);
-    expect(migrated.capabilityRevision).toBe(5);
+    expect(migrated.capabilityRevision).toBe(6);
     expect(migrated.mainAssistant.enabledToolIds.filter(id => id === 'search_library')).toHaveLength(1);
 
     const restricted = structuredClone(complete);
-    restricted.mainAssistant.enabledToolIds = restricted.mainAssistant.enabledToolIds.filter(id => id !== 'note.propose_create');
+    restricted.mainAssistant.enabledToolIds = restricted.mainAssistant.enabledToolIds.filter(id => id !== 'note_propose_create');
     expect(normalizeAgentRuntimeSettings(restricted).mainAssistant.enabledToolIds).not.toContain('search_library');
 
-    // Once at revision 5, a user's removal of search_library is their choice and is not reversed.
+    // Once at revision 6, a user's removal of search_library is their choice and is not reversed.
     const removedLater = structuredClone(migrated);
     removedLater.mainAssistant.enabledToolIds = removedLater.mainAssistant.enabledToolIds.filter(id => id !== 'search_library');
     expect(normalizeAgentRuntimeSettings(removedLater).mainAssistant.enabledToolIds).not.toContain('search_library');
@@ -99,7 +136,7 @@ describe('agent capability policy', () => {
   it('contains autonomous workers only, not fixed model tasks', () => {
     expect(DEFAULT_AGENT_RUNTIME_SETTINGS.subagents.map((agent) => agent.id)).toEqual(['evidence-agent']);
     expect(resolveAllowedSubagents(DEFAULT_AGENT_RUNTIME_SETTINGS, DEFAULT_AGENT_RUNTIME_SETTINGS.mainAssistant)).toEqual([]);
-    expect(configuredAgentToolIds(DEFAULT_AGENT_RUNTIME_SETTINGS, DEFAULT_AGENT_RUNTIME_SETTINGS.mainAssistant)).not.toContain('task.run_subagent');
+    expect(configuredAgentToolIds(DEFAULT_AGENT_RUNTIME_SETTINGS, DEFAULT_AGENT_RUNTIME_SETTINGS.mainAssistant)).not.toContain('task_run_subagent');
     expect(DEFAULT_AGENT_RUNTIME_SETTINGS.mainAssistant.enabledToolIds).not.toContain('skill.load');
   });
   it('does not restore revoked tools during normalization', () => {
@@ -123,7 +160,7 @@ describe('agent capability policy', () => {
     expect(migrated.mainAssistant.allowedSubagentIds).toEqual(['evidence-agent']);
     migrated.subagents[0].enabled = true;
     expect(normalizeAgentRuntimeSettings(migrated).subagents[0].enabled).toBe(true);
-    expect(configuredAgentToolIds(migrated, migrated.mainAssistant)).toContain('task.run_subagent');
+    expect(configuredAgentToolIds(migrated, migrated.mainAssistant)).toContain('task_run_subagent');
   });
   it('strips retired skill grants from saved runtime settings', () => {
     const legacy = structuredClone(DEFAULT_AGENT_RUNTIME_SETTINGS) as unknown as Record<string, unknown>;

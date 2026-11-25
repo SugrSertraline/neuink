@@ -1,5 +1,5 @@
 use super::*;
-fn server(status: &str, body: &str) -> (String, std::thread::JoinHandle<String>) {
+pub(crate) fn server(status: &str, body: &str) -> (String, std::thread::JoinHandle<String>) {
     use std::io::{Read, Write};
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let address = format!("http://{}/translate", listener.local_addr().unwrap());
@@ -166,4 +166,36 @@ fn removed_custom_provider_migrates_only_when_reading_saved_settings() {
     })).unwrap();
     assert_eq!(adapted.selection_translation.provider, Provider::Deepl);
     assert_eq!(adapted.selection_translation.endpoint, "https://api-free.deepl.com/v2/translate");
+}
+
+#[tokio::test]
+async fn niutrans_uses_post_json_and_rejects_business_errors_without_exposing_echoed_secrets() {
+    let (endpoint, thread) = server("200 OK", r#"{"tgt_text":"论文","apikey":"private-key"}"#);
+    let settings = Settings { provider: Provider::Niutrans, endpoint, ..Default::default() };
+    assert_eq!(translate(&settings, "test-key", "Paper").await.unwrap(), "论文");
+    let request = thread.join().unwrap();
+    assert!(request.starts_with("POST /translate HTTP/1.1"));
+    let body: Value = serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(body, json!({"from":"auto","to":"zh","apikey":"test-key","src_text":"Paper"}));
+    for code in ["10001", "10003", "13001", "13002", "13008", "unknown-private"] {
+        let error = extract(Provider::Niutrans, &json!({"error_code":code,"error_msg":"private source","apikey":"private-key","tgt_text":"partial"})).unwrap_err();
+        assert!(!error.contains("private"));
+    }
+}
+
+#[test]
+fn independent_service_registry_preserves_legacy_configuration_and_identity() {
+    let mut app: neuink_config::AppSettings = serde_json::from_value(json!({
+        "selection_translation":{"provider":"deepl","endpoint":"https://custom.example/translate"}
+    })).unwrap();
+    let previous = registry::configured(&app, Provider::Deepl).unwrap();
+    registry::upsert(&mut app, registry::preset(Provider::Niutrans));
+    assert_eq!(registry::configured(&app, Provider::Deepl).unwrap(), previous);
+    assert_eq!(registry::configured(&app, Provider::Niutrans).unwrap(), registry::preset(Provider::Niutrans));
+    let mut updated = previous.clone(); updated.endpoint.push_str("/new");
+    assert_ne!(registry::identity(&previous), registry::identity(&updated));
+    let persisted = serde_json::to_value(&app).unwrap();
+    assert!(persisted["selection_translation"].get("api_key").is_none());
+    assert!(persisted["translation_services"].as_array().unwrap().iter()
+        .all(|service| service.get("api_key").is_none()));
 }

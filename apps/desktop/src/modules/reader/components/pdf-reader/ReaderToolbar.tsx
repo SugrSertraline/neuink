@@ -1,3 +1,4 @@
+import { HoverContentSwitch } from './HoverContentSwitch';
 import {
   Columns2,
   ChevronDown,
@@ -8,21 +9,21 @@ import {
   Eye,
   ExternalLink,
   FolderOpen,
+  FileText,
   ListChecks,
   Loader2,
   MoreHorizontal,
   Pause,
   Play,
   Search,
-  Sparkles,
   RotateCcw,
   X
 } from 'lucide-react';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -44,10 +45,16 @@ import { useReadingSession } from '../../parallel-reading/ReadingSessionContext'
 import { PdfReadingModeControl } from './PdfReadingModeControl';
 import { PdfViewControls } from '../navigation/ReadingViewSession';
 import { PdfZoomControls } from './PdfZoomControls';
+import { PdfPreviewSizeControls } from './PdfPreviewSizeControls';
+import { RecommendedTagControls } from './RecommendedTagControls';
+import { EntryTitleConsistency } from '../EntryTitleConsistency';
 
 export function ReaderToolbar({
   navigation,
   entry,
+  workspaceRoot,
+  titleCheckReloadKey = 0,
+  onRefreshEntries,
   pageCount,
   segmentCount,
   recommendedTags,
@@ -55,6 +62,11 @@ export function ReaderToolbar({
   tagSuggestionBusy,
   tagSuggestionError,
   tagSuggestionsOpen,
+  tagSuggestionDisabledReason,
+  tagSuggestionGeneratedAt,
+  tagSuggestionPhase,
+  showTagSuggestionsInReader = true,
+  onGenerateRecommendedTags,
   translation,
   translationBusy,
   translationMessage,
@@ -92,6 +104,9 @@ export function ReaderToolbar({
   onZoomReset
 }: {
   navigation?: import('react').ReactNode;
+  workspaceRoot?: string | null;
+  titleCheckReloadKey?: number;
+  onRefreshEntries?: () => Promise<void>;
   entry: LibraryEntry;
   pageCount: number;
   segmentCount: number;
@@ -100,6 +115,11 @@ export function ReaderToolbar({
   tagSuggestionBusy: boolean;
   tagSuggestionError?: string | null;
   tagSuggestionsOpen: boolean;
+  tagSuggestionDisabledReason?: string | null;
+  tagSuggestionGeneratedAt?: string | null;
+  tagSuggestionPhase?: 'idle' | 'generating' | 'applying';
+  showTagSuggestionsInReader?: boolean;
+  onGenerateRecommendedTags?: () => void;
   translation: EntryTranslation | null;
   translationBusy: boolean;
   translationMessage?: string | null;
@@ -153,6 +173,12 @@ export function ReaderToolbar({
     onResumeTranslation={onResumeTranslation} translationPaused={translationPaused}
     onRetryPdfParse={onRetryPdfParse} onRevealPdf={onRevealPdf} onStartPdfParse={onStartPdfParse} />;
 
+  const tagControls = showTagSuggestionsInReader && entry.status === 'Parsed' && (onGenerateRecommendedTags || recommendedTags.length > 0 || tagSuggestionBusy || tagSuggestionError)
+    ? <RecommendedTagControls busy={tagSuggestionBusy} open={tagSuggestionsOpen} error={tagSuggestionError} appliedPaths={entry.tags}
+      recommendedTags={recommendedTags} selectedRecommendedTagPaths={selectedRecommendedTagPaths} onApply={onApplyRecommendedTags}
+      onDismiss={onDismissRecommendedTags} onOpenChange={onTagSuggestionsOpenChange} onToggleTag={onRecommendedTagToggle}
+      onGenerate={onGenerateRecommendedTags} disabledReason={tagSuggestionDisabledReason} generatedAt={tagSuggestionGeneratedAt} phase={tagSuggestionPhase} /> : null;
+
   // The parallel-reading frame already owns the title and PDF/reflow switch.
   if (readingSession) return <div data-guide="pdf-tools" aria-label="PDF 阅读工具" data-reader-compact-toolbar className="flex min-h-9 min-w-0 shrink-0 flex-wrap items-center gap-1 border-b bg-background px-2 py-1 text-xs">
     {pageNavigation}
@@ -160,6 +186,7 @@ export function ReaderToolbar({
     <PdfViewControls />
     <PdfReadingModeControl preferences={readerPreferences} onChange={onReaderPreferencesChange} />
     <PdfZoomControls zoom={zoom} onZoomIn={onZoomIn} onZoomOut={onZoomOut} onZoomReset={onZoomReset} />
+    {tagControls}
     <Popover>
       <PopoverTrigger asChild><Button size="sm" variant="outline" className="px-2 text-xs" aria-label="阅读显示" title="调整单页/双页与悬停预览">显示</Button></PopoverTrigger>
       <PopoverContent viewportAligned align="end" className="w-72 max-w-[calc(100vw-2rem)] space-y-3 text-xs">
@@ -168,10 +195,6 @@ export function ReaderToolbar({
           {readerPreferences.pageDisplayMode === 'dual' ? '切换为单页' : '切换为双页'}
         </Button>
         <HoverPreviewControls preferences={readerPreferences} onChange={onReaderPreferencesChange} />
-        {entry.status === 'Parsed' && recommendedTags.length > 0 ? <RecommendedTagControls busy={tagSuggestionBusy} open={tagSuggestionsOpen}
-          error={tagSuggestionError} appliedPaths={entry.tags}
-          recommendedTags={recommendedTags} selectedRecommendedTagPaths={selectedRecommendedTagPaths} onApply={onApplyRecommendedTags}
-          onDismiss={onDismissRecommendedTags} onOpenChange={onTagSuggestionsOpenChange} onToggleTag={onRecommendedTagToggle} /> : null}
         <p className="break-words text-muted-foreground">{entry.pdfFileName} · {segmentCount} 个区域</p>
         <StatusBadge status={entry.status} />
       </PopoverContent>
@@ -187,10 +210,29 @@ export function ReaderToolbar({
     <div data-guide="pdf-tools" className="pdf-reader-toolbar border-b bg-background">
       <EntryContentHeader
         className="border-b-0"
-        contentTitle="PDF 内容"
+        contentTitle={<div className="pdf-reader-document-heading">
+          <div className="flex min-w-0 items-center gap-2"><FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" /><span className="min-w-0 truncate" title={entry.title}>{entry.title}</span>
+            {onRefreshEntries ? <EntryTitleConsistency entryId={entry.id} entryTitle={entry.title}
+              pdfFileName={entry.pdfFileName} parsed={entry.status === 'Parsed'} root={workspaceRoot ?? null}
+              reloadKey={titleCheckReloadKey} onRefreshEntries={onRefreshEntries} /> : null}
+          </div>
+          <div className="pdf-reader-document-meta flex min-w-0 items-center gap-2 text-xs font-normal text-muted-foreground">
+            <span className="shrink-0" title={entry.pdfFileName ?? undefined}>PDF 内容</span><span className="shrink-0">{segmentCount} 个区域</span><StatusBadge status={entry.status} />
+            {translationBusy ? (
+              <span
+                aria-live="polite"
+                title={translationMessage || '正在翻译'}
+                className="pdf-reader-translation-status min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
+              >
+                <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden="true" />
+                <span className="truncate">{translationMessage || '正在翻译'}</span>
+              </span>
+            ) : null}
+          </div>
+        </div>}
         entryTitle={entry.title}
+        showEntryTitle={false}
       >
-        <PdfViewControls />
         {translationBusy ? (
           <ToolbarTooltip content="暂停当前翻译任务">
           <Button disabled={Boolean(translationStopPending)} aria-label="暂停翻译" className="pdf-reader-toolbar-overflow-action shrink-0" size="sm" type="button" variant="outline" onClick={onPauseTranslation}>
@@ -200,8 +242,8 @@ export function ReaderToolbar({
           </ToolbarTooltip>
         ) : null}
 
-        {translationPaused && onResumeTranslation ? <Button disabled={Boolean(translationStopPending)} className="pdf-reader-toolbar-overflow-action shrink-0" size="sm" onClick={onResumeTranslation}><Play size={14} aria-hidden="true" />继续翻译</Button> : null}
-        {(translationBusy || translationPaused) && onCancelTranslation ? <Button disabled={Boolean(translationStopPending)} className="pdf-reader-toolbar-overflow-action shrink-0" size="sm" variant="outline" onClick={onCancelTranslation}>取消翻译</Button> : null}
+        {translationPaused && onResumeTranslation ? <Button disabled={Boolean(translationStopPending)} className="pdf-reader-toolbar-overflow-action shrink-0" size="sm" aria-label="继续翻译" title="继续翻译" onClick={onResumeTranslation}><Play size={14} aria-hidden="true" /><span className="pdf-reader-toolbar-label">继续翻译</span></Button> : null}
+        {(translationBusy || translationPaused) && onCancelTranslation ? <Button disabled={Boolean(translationStopPending)} className="pdf-reader-toolbar-overflow-action shrink-0" size="sm" variant="outline" aria-label="取消翻译" title="取消翻译" onClick={onCancelTranslation}><X size={14} aria-hidden="true" /><span className="pdf-reader-toolbar-label">取消翻译</span></Button> : null}
 
         {onExportPaper && segmentCount > 0 ? (
           <ToolbarTooltip content="导出解析全文、中文译稿或中英对照，支持 Word、TXT 和图片资料包">
@@ -217,16 +259,6 @@ export function ReaderToolbar({
             <span className="pdf-reader-toolbar-label">导出</span>
           </Button>
           </ToolbarTooltip>
-        ) : null}
-
-        {translationBusy ? (
-          <span
-            aria-live="polite"
-            className="pdf-reader-translation-status min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
-          >
-            <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden="true" />
-            <span className="truncate">{translationMessage || '正在翻译'}</span>
-          </span>
         ) : null}
 
         {entry.status === 'Parsed' ? (
@@ -282,64 +314,40 @@ export function ReaderToolbar({
           </ToolbarTooltip>
         ) : null}
 
-        {entry.status === 'Parsed' && recommendedTags.length > 0 ? (
-          <RecommendedTagControls
-            error={tagSuggestionError}
-            appliedPaths={entry.tags}
-            busy={tagSuggestionBusy}
-            open={tagSuggestionsOpen}
-            recommendedTags={recommendedTags}
-            selectedRecommendedTagPaths={selectedRecommendedTagPaths}
-            onApply={onApplyRecommendedTags}
-            onDismiss={onDismissRecommendedTags}
-            onOpenChange={onTagSuggestionsOpenChange}
-            onToggleTag={onRecommendedTagToggle}
-          />
-        ) : null}
-
-        <HoverPreviewControls
-          preferences={readerPreferences}
-          onChange={onReaderPreferencesChange}
-        />
+        {tagControls}
 
         {overflowMenu()}
-
-        <PdfReadingModeControl preferences={readerPreferences} onChange={onReaderPreferencesChange} />
-
-        <Button
-          className="shrink-0"
-          aria-label={readerPreferences.pageDisplayMode === 'dual' ? '切换为单页' : '切换为双页'}
-          size="icon-sm"
-          title={readerPreferences.pageDisplayMode === 'dual' ? '切换为单页' : '切换为双页'}
-          type="button"
-          variant={readerPreferences.pageDisplayMode === 'dual' ? 'secondary' : 'outline'}
-          onClick={() =>
-            onReaderPreferencesChange({
-              ...readerPreferences,
-              pageDisplayMode:
-                readerPreferences.pageDisplayMode === 'dual' ? 'single' : 'dual',
-            })
-          }
-        >
-          <Columns2 size={14} aria-hidden="true" />
-        </Button>
-
-        <PdfZoomControls zoom={zoom} onZoomIn={onZoomIn} onZoomOut={onZoomOut} onZoomReset={onZoomReset} />
       </EntryContentHeader>
 
-      <div data-material="reader-toolbar-row" className="flex min-w-0 flex-wrap items-center gap-2 border-t bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground">
-        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-          {entry.pdfFileName ? (
-            <span className="min-w-0 truncate font-medium text-foreground" title={entry.pdfFileName}>
-              {entry.pdfFileName}
-            </span>
-          ) : null}
-          <span className="shrink-0">{segmentCount} 个区域</span>
-          <StatusBadge status={entry.status} />
+      <div data-material="reader-toolbar-row" className="pdf-reader-controls-row border-t bg-muted/20 text-xs text-muted-foreground">
+        <div className="pdf-reader-display-controls" role="group" aria-label="PDF 阅读显示">
+          <PdfViewControls />
+          <HoverPreviewControls
+            preferences={readerPreferences}
+            onChange={onReaderPreferencesChange}
+          />
+          <PdfReadingModeControl preferences={readerPreferences} onChange={onReaderPreferencesChange} />
+          <Button
+            className="shrink-0"
+            aria-label={readerPreferences.pageDisplayMode === 'dual' ? '切换为单页' : '切换为双页'}
+            size="icon-sm"
+            title={readerPreferences.pageDisplayMode === 'dual' ? '切换为单页' : '切换为双页'}
+            type="button"
+            variant={readerPreferences.pageDisplayMode === 'dual' ? 'secondary' : 'outline'}
+            onClick={() =>
+              onReaderPreferencesChange({
+                ...readerPreferences,
+                pageDisplayMode:
+                  readerPreferences.pageDisplayMode === 'dual' ? 'single' : 'dual',
+              })
+            }
+          >
+            <Columns2 size={14} aria-hidden="true" />
+          </Button>
+          <PdfZoomControls zoom={zoom} onZoomIn={onZoomIn} onZoomOut={onZoomOut} onZoomReset={onZoomReset} />
         </div>
-
-        {pageNavigation}
-        {searchControls}
+        <div className="pdf-reader-page-controls" role="group" aria-label="PDF 阅读导航">{pageNavigation}</div>
+        <div className="pdf-reader-search">{searchControls}</div>
       </div>
     </div>
   );
@@ -617,7 +625,7 @@ function PdfSearchControls({
           </Button>
         ) : null}
       </div>
-      <span aria-live="polite" className="min-w-12 text-center text-[11px] tabular-nums">
+      <span aria-live="polite" className={resultLabel ? 'shrink-0 text-center text-[11px] tabular-nums' : 'sr-only'}>
         {resultLabel}
       </span>
       <Button aria-label="上一个匹配" disabled={!hasMatches} size="icon-xs" title="上一个匹配（Shift+Enter）" type="button" variant="outline" onClick={onPrevious}>
@@ -627,115 +635,6 @@ function PdfSearchControls({
         <ChevronDown size={13} aria-hidden="true" />
       </Button>
     </form>
-  );
-}
-
-function RecommendedTagControls({
-  error,
-  appliedPaths,
-  busy,
-  open,
-  recommendedTags,
-  selectedRecommendedTagPaths,
-  onApply,
-  onDismiss,
-  onOpenChange,
-  onToggleTag
-}: {
-  error?: string | null;
-  appliedPaths: string[];
-  busy: boolean;
-  open: boolean;
-  recommendedTags: TagRecommendation[];
-  selectedRecommendedTagPaths: string[];
-  onApply: () => void;
-  onDismiss: () => void;
-  onOpenChange: (open: boolean) => void;
-  onToggleTag: (tag: TagRecommendation) => void;
-}) {
-  const selected = new Set(selectedRecommendedTagPaths);
-  const selectedCount = selected.size;
-
-  return (
-    <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverTrigger asChild>
-        <Button
-          aria-label={`推荐标签 ${recommendedTags.length} 项`}
-          className="shrink-0"
-          size="sm"
-          title="查看条目概览中生成的推荐标签"
-          type="button"
-          variant={open ? 'secondary' : 'outline'}
-        >
-          <Sparkles size={14} aria-hidden="true" />
-          <span className="pdf-reader-toolbar-label">推荐标签</span>
-          <Badge variant="outline">{recommendedTags.length}</Badge>
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-[24rem] p-3" side="bottom" sideOffset={8}>
-        <div className="grid gap-3">
-          <div>
-            <p className="font-medium">推荐标签</p>
-            <p className="mt-1 text-xs text-muted-foreground">结果与条目概览同步；需要更新时可在概览中重新生成。</p>
-          </div>
-
-          <div className="grid gap-2">
-            {recommendedTags.map((tag) => {
-              const active = selected.has(tag.path);
-              const applied = appliedPaths.includes(tag.path);
-              return (
-                <Button
-                  key={tag.path}
-                  className="h-auto justify-between px-3 py-2 text-left"
-                  size="sm"
-                  type="button"
-                  variant={active ? 'secondary' : 'outline'}
-                  disabled={busy}
-                  aria-pressed={active}
-                  onClick={() => onToggleTag(tag)}
-                >
-                  <span className="grid min-w-0 gap-0.5">
-                    <span className="truncate">{tag.path}</span>
-                    <span className="truncate text-[11px] text-muted-foreground">
-                      {tag.dimension} · {tag.reason}
-                    </span>
-                  </span>
-                  <Badge variant="outline">{applied ? '已添加' : `${Math.round(tag.confidence * 100)}%`}</Badge>
-                </Button>
-              );
-            })}
-          </div>
-
-          {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
-          <div className="flex items-center justify-between gap-2 border-t pt-3">
-            <Button
-              disabled={busy}
-              size="sm"
-              type="button"
-              variant="ghost"
-              onClick={onDismiss}
-            >
-              丢弃推荐
-            </Button>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">
-                已选 {selectedCount} 项
-              </span>
-              <Button
-                disabled={busy || selectedCount === 0}
-                size="sm"
-                type="button"
-                variant="default"
-                onClick={onApply}
-              >
-                {busy ? <Loader2 className="animate-spin" size={14} aria-hidden="true" /> : null}
-                保存推荐
-              </Button>
-            </div>
-          </div>
-        </div>
-      </PopoverContent>
-    </Popover>
   );
 }
 
@@ -767,7 +666,7 @@ export function HoverPreviewControls({
           className="shrink-0"
           aria-pressed={active}
           size="sm"
-          title="配置片段、逐句译文与批注悬停"
+          title="配置原文、译文粒度与批注悬停"
           type="button"
           variant={active ? 'secondary' : 'outline'}
         >
@@ -777,7 +676,7 @@ export function HoverPreviewControls({
       </PopoverTrigger>
       <PopoverContent
         align="end"
-        className="w-80 gap-0 p-2.5 duration-0"
+        className="max-h-[var(--radix-popover-content-available-height)] w-80 max-w-[calc(100vw-2rem)] gap-0 overflow-y-auto overscroll-contain p-2.5 duration-0"
         side="bottom"
         sideOffset={8}
       >
@@ -797,30 +696,25 @@ export function HoverPreviewControls({
               <div className="ml-2 grid gap-0.5 border-l pl-2">
                 {mode === 'pdf' ? <HoverPreviewToggle checked={preferences.hoverPreviewShowRegion} disabled={!enabled}
                   label="区域高亮" onClick={() => update({ hoverPreviewShowRegion: !preferences.hoverPreviewShowRegion })} /> : null}
-                <HoverPreviewToggle checked={preferences.hoverPreviewShowOriginal} disabled={!enabled}
-                  label="解析后原文" onClick={() => update({ hoverPreviewShowOriginal: !preferences.hoverPreviewShowOriginal })} />
-                <HoverPreviewToggle checked={preferences.hoverPreviewShowTranslation} disabled={!enabled}
-                  label={mode === 'pdf' ? '整段译文' : '译文'}
-                  onClick={() => update({ hoverPreviewShowTranslation: !preferences.hoverPreviewShowTranslation })} />
+                <HoverContentSwitch label="解析后原文" checked={preferences.hoverPreviewShowOriginal} disabled={!enabled}
+                  sentence={preferences.pdfSentenceHoverEnabled && preferences.pdfSentenceHoverShowOriginal}
+                  onVisibilityChange={checked => update({ hoverPreviewShowOriginal: checked })}
+                  onSentenceChange={mode === 'pdf' ? checked => update({ pdfSentenceHoverEnabled: true,
+                    pdfSentenceHoverShowTranslation: preferences.pdfSentenceHoverEnabled && preferences.pdfSentenceHoverShowTranslation,
+                    pdfSentenceHoverShowOriginal: checked }) : undefined} />
+                <HoverContentSwitch label="译文" checked={preferences.hoverPreviewShowTranslation} disabled={!enabled}
+                  sentence={preferences.pdfSentenceHoverEnabled && preferences.pdfSentenceHoverShowTranslation}
+                  onVisibilityChange={checked => update({ hoverPreviewShowTranslation: checked })}
+                  onSentenceChange={mode === 'pdf' ? checked => update({ pdfSentenceHoverEnabled: true,
+                    pdfSentenceHoverShowOriginal: preferences.pdfSentenceHoverEnabled && preferences.pdfSentenceHoverShowOriginal,
+                    pdfSentenceHoverShowTranslation: checked }) : undefined} />
                 <HoverPreviewToggle checked={preferences.hoverPreviewShowNote} disabled={!enabled}
                   label="片段笔记" onClick={() => update({ hoverPreviewShowNote: !preferences.hoverPreviewShowNote })} />
                 <HoverPreviewToggle checked={preferences.hoverPreviewShowAnnotation} disabled={!enabled}
                   label="悬停批注" onClick={() => update({ hoverPreviewShowAnnotation: !preferences.hoverPreviewShowAnnotation })} />
               </div>
             </section>
-            {mode === 'pdf' ? <section aria-label="PDF 逐句悬停" className="border-t pt-2">
-              <p className="px-2 text-xs font-medium text-muted-foreground">PDF 逐句</p>
-              <HoverPreviewToggle checked={preferences.pdfSentenceHoverEnabled} label="整句悬停"
-                onClick={() => update({ pdfSentenceHoverEnabled: !preferences.pdfSentenceHoverEnabled })} />
-              <div className="ml-2 grid gap-0.5 border-l pl-2">
-                <HoverPreviewToggle checked={preferences.pdfSentenceHoverShowOriginal}
-                  disabled={!preferences.pdfSentenceHoverEnabled} label="句子原文"
-                  onClick={() => update({ pdfSentenceHoverShowOriginal: !preferences.pdfSentenceHoverShowOriginal })} />
-                <HoverPreviewToggle checked={preferences.pdfSentenceHoverShowTranslation}
-                  disabled={!preferences.pdfSentenceHoverEnabled} label="逐句译文"
-                  onClick={() => update({ pdfSentenceHoverShowTranslation: !preferences.pdfSentenceHoverShowTranslation })} />
-              </div>
-            </section> : null}
+            {mode === 'pdf' && <PdfPreviewSizeControls preferences={preferences} onChange={onChange} />}
             <section aria-label="其他悬停" className="border-t pt-2">
               {mode === 'pdf' ? <HoverPreviewToggle checked={preferences.inlineAnnotationHoverEnabled}
                 label="行内批注" onClick={() => update({ inlineAnnotationHoverEnabled: !preferences.inlineAnnotationHoverEnabled })} /> : null}

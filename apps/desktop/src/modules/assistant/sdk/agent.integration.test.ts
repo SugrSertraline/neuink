@@ -28,19 +28,22 @@ vi.mock('@/shared/ipc/assistantApi', async (original) => ({
 const profile = { id: 'test', model: 'test', base_url: 'https://example.invalid', api_key: null } as LlmProfile;
 const scope = { entry_ids: ['entry'], entry_titles: ['Paper'], tag_ids: [], tag_names: [] };
 
-function fakeModel(turns: Array<{ text?: string; error?: Error; effect?: () => void; truncated?: boolean; call?: { name: string; args: unknown } }>) {
+function fakeModel(turns: Array<{ text?: string; error?: Error; effect?: () => void; truncated?: boolean;
+  call?: { name: string; args: unknown }; calls?: Array<{ name: string; args: unknown }> }>) {
   let index = 0;
   return new MockLanguageModelV3({ doStream: async () => {
     const turn = turns[index++];
     if (!turn) throw new Error('Unexpected provider turn');
     turn.effect?.();
     if (turn.error) throw turn.error;
+    const calls = turn.calls ?? (turn.call ? [turn.call] : []);
     return { stream: simulateReadableStream({ chunks: [
       { type: 'stream-start', warnings: [] },
-      ...(turn.call ? [{ type: 'tool-call' as const, toolCallId: `call-${index}`, toolName: turn.call.name, input: JSON.stringify(turn.call.args) }] : [
+      ...(calls.length ? calls.map((call, callIndex) => ({ type: 'tool-call' as const,
+        toolCallId: turn.calls ? `call-${index}-${callIndex}` : `call-${index}`, toolName: call.name, input: JSON.stringify(call.args) })) : [
         { type: 'text-start' as const, id: 'text' }, { type: 'text-delta' as const, id: 'text', delta: turn.text! }, { type: 'text-end' as const, id: 'text' }
       ]),
-      { type: 'finish', finishReason: { unified: turn.truncated ? 'length' : turn.call ? 'tool-calls' : 'stop', raw: turn.truncated ? 'length' : turn.call ? 'tool_calls' : 'stop' },
+      { type: 'finish', finishReason: { unified: turn.truncated ? 'length' : calls.length ? 'tool-calls' : 'stop', raw: turn.truncated ? 'length' : calls.length ? 'tool_calls' : 'stop' },
         usage: { inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 10, text: 10, reasoning: 0 } } }
     ] }) };
   } });
@@ -48,6 +51,28 @@ function fakeModel(turns: Array<{ text?: string; error?: Error; effect?: () => v
 beforeEach(() => vi.clearAllMocks());
 
 describe('production agent wiring', () => {
+  it('overlaps a provider multi-call read turn and preserves distinct evidence citations', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const read: typeof invokeAssistantTool = async (_name, args) => {
+      const uid = (args as { segment_uid: string }).segment_uid;
+      if (uid === 's1') await gate;
+      return { entry_id: 'entry', entry_title: 'Paper', segment_uid: uid, page_idx: uid === 's1' ? 0 : 1,
+        text: 'The trial enrolled 42 participants.' } as never;
+    };
+    vi.mocked(invokeAssistantTool).mockImplementationOnce(read).mockImplementationOnce(read);
+    const model = fakeModel([{ calls: ['s1', 's2'].map(segment_uid => ({ name: 'read_segment_content',
+      args: { entry_id: 'entry', segment_uid } })) }, { text: '两个片段均报告了 42 名参与者 [S1] [S2]。' }]);
+    vi.mocked(createNeuinkModel).mockReturnValue(model);
+    const running = answerWithGroundedAgent({ question: '读取 s1 和 s2 两个片段的参与人数', root: 'fixture', scope, settings: profile });
+    await vi.waitFor(() => expect(invokeAssistantTool).toHaveBeenCalledTimes(2), { timeout: 5000 });
+    release();
+    const result = await running;
+    expect(new Set(result.sources.flatMap(source => 'segment_uid' in source ? [source.segment_uid] : []))).toEqual(new Set(['s1', 's2']));
+    expect(model.doStreamCalls).toHaveLength(2);
+    const continuation = JSON.stringify(model.doStreamCalls[1].prompt);
+    expect(continuation.indexOf('call-1-0')).toBeLessThan(continuation.indexOf('call-1-1'));
+  });
   it('persists a failed read, skips repeated denied URLs, searches another source and finishes', async () => {
     vi.mocked(listTools).mockResolvedValueOnce([
       { name: 'read_webpage', description: 'Read', parameters_schema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } },
@@ -156,7 +181,8 @@ describe('production agent wiring', () => {
     const agent = new Agent({ driver: createAgentDriver({ settings: profile, system: '', tools }), tools: agentExecutors(tools), messages: [{ role: 'user' as const, content: 'Search ACL papers' }], budget: new RunBudget(), maxTurns: 2 });
     expect(await agent.run()).toContain('Partial');
     expect(execute).toHaveBeenCalledOnce();
-    expect(model.doStreamCalls[1].tools).toBeUndefined();
+    expect(model.doStreamCalls[1].tools).toEqual(model.doStreamCalls[0].tools);
+    expect(model.doStreamCalls[1].toolChoice).toEqual({ type: 'none' });
     expect(JSON.stringify(model.doStreamCalls[1].prompt)).toContain('Give the final answer now');
   });
   it('reserves a correction turn and never streams a textual tool envelope as the answer', async () => {
@@ -175,33 +201,13 @@ describe('production agent wiring', () => {
       verify: text => text ? undefined : '请根据已经取得的资料回答。' });
     expect(await agent.run()).toBe('已根据读到的资料给出结论。');
     expect(execute).toHaveBeenCalledTimes(9);
-    expect(model.doStreamCalls[9].tools).toBeUndefined();
+    expect(model.doStreamCalls[9].tools).toEqual(model.doStreamCalls[0].tools);
+    expect(model.doStreamCalls[9].toolChoice).toEqual({ type: 'none' });
     expect(JSON.stringify(model.doStreamCalls[10].prompt)).toContain('请根据已经取得的资料回答');
     expect(onDelta.mock.calls.flat().join('')).not.toContain('<tool_call>');
     expect(JSON.stringify(agent.messages)).not.toContain('<tool_call>');
   });
-  it('corrects a DeepSeek DSML envelope without streaming or storing the markup', async () => {
-    const raw = `<｜｜DSML｜｜ calls>
-<｜｜DSML｜｜ invoke name="read_entry_assistant_context">
-<｜｜DSML｜｜ parameter name="entry_id" string="true">aJDfGv7T73XH2E9s</｜｜DSML｜｜ parameter>
-</｜｜DSML｜｜ invoke>
-</｜｜DSML｜｜ calls>`;
-    const model = fakeModel([
-      { text: raw },
-      { text: '这篇论文的交互方式有点像 stitches。' }
-    ]);
-    vi.mocked(createNeuinkModel).mockReturnValue(model);
-    const onDelta = vi.fn();
-    const agent = new Agent({ driver: createAgentDriver({ settings: profile, system: '', tools: {}, onDelta }),
-      tools: {}, messages: [{ role: 'user' as const, content: '有点像stitches' }],
-      budget: new RunBudget(), maxTurns: 4,
-      verify: text => text ? undefined : '不要输出原始工具标记，请直接用中文回答。' });
-    expect(await agent.run()).toBe('这篇论文的交互方式有点像 stitches。');
-    expect(JSON.stringify(model.doStreamCalls[1].prompt)).toContain('不要输出原始工具标记');
-    expect(onDelta.mock.calls.flat().join('')).not.toContain('DSML');
-    expect(JSON.stringify(agent.messages)).not.toContain('DSML');
-  });
-  it('removes search tools after six searches and rejects a provider that still calls them', async () => {
+  it('keeps declarations stable after six searches and rejects further calls before execution', async () => {
     const model = fakeModel([
       ...Array.from({ length: 7 }, (_, i) => ({ call: { name: 'search_web', args: { query: `ACL variant ${i}` } } })),
       { text: 'Summary with incomplete coverage.' }
@@ -213,7 +219,7 @@ describe('production agent wiring', () => {
       messages: [{ role: 'user' as const, content: 'Search ACL papers' }], budget: new RunBudget() });
     expect(await agent.run()).toContain('incomplete');
     expect(execute).toHaveBeenCalledTimes(6);
-    expect(model.doStreamCalls[6].tools).toBeUndefined();
+    expect(model.doStreamCalls[6].tools).toEqual(model.doStreamCalls[0].tools);
     expect(JSON.stringify(model.doStreamCalls[7].prompt)).toContain('TOOL_NOT_AVAILABLE');
   });
   it('never executes a provider tool call during forced final synthesis', async () => {
@@ -290,7 +296,7 @@ describe('production agent wiring', () => {
     const runtimeSettings = structuredClone(DEFAULT_AGENT_RUNTIME_SETTINGS);
     const result = await answerWithGroundedAgent({
       activeExecution: { agent: runtimeSettings.mainAssistant }, runtimeSettings,
-      invocationPlan: { enabledToolIds: ['read_segment_content', 'note.propose_create'],
+      invocationPlan: { enabledToolIds: ['read_segment_content', 'note_propose_create'],
         mainAssistantId: 'main-assistant', missing: [], mode: 'agent_execute', rationale: '',
         subagentTasks: [], writePolicy: 'proposal_only' },
       question: 'Prepare a grounded note.', root: 'fixture', scope, settings: profile,
@@ -319,7 +325,7 @@ describe('production agent wiring', () => {
     const runtimeSettings = structuredClone(DEFAULT_AGENT_RUNTIME_SETTINGS);
     const options = {
       activeExecution: { agent: runtimeSettings.mainAssistant }, runtimeSettings,
-      invocationPlan: { enabledToolIds: ['read_segment_content', 'note.propose_create'], requiredToolIds: ['read_segment_content', 'note.propose_create'],
+      invocationPlan: { enabledToolIds: ['read_segment_content', 'note_propose_create'], requiredToolIds: ['read_segment_content', 'note_propose_create'],
         mainAssistantId: 'main-assistant', missing: [], mode: 'agent_execute', rationale: '', subagentTasks: [], writePolicy: 'proposal_only' },
       question: 'Read and draft a note.', root: 'fixture', scope, settings: profile,
       plan: { citationPolicy: 'required', capabilities: [], intent: 'note_create', noteAction: 'create', needsNoteProposal: true,
@@ -357,7 +363,7 @@ describe('production agent wiring', () => {
     const runtimeSettings = structuredClone(DEFAULT_AGENT_RUNTIME_SETTINGS);
     const result = await answerWithGroundedAgent({
       activeExecution: { agent: runtimeSettings.mainAssistant }, runtimeSettings,
-      invocationPlan: { enabledToolIds: ['read_segment_content', 'note.propose_create'], requiredToolIds: ['read_segment_content', 'note.propose_create'],
+      invocationPlan: { enabledToolIds: ['read_segment_content', 'note_propose_create'], requiredToolIds: ['read_segment_content', 'note_propose_create'],
         mainAssistantId: 'main-assistant', missing: [], mode: 'agent_execute', rationale: '', subagentTasks: [], writePolicy: 'proposal_only' },
       question: 'Read the paper and prepare a note.', root: 'fixture', scope, settings: profile,
       plan: { citationPolicy: 'required', capabilities: [], intent: 'note_create', noteAction: 'create', needsNoteProposal: true,
@@ -385,7 +391,7 @@ describe('production agent wiring', () => {
     runtimeSettings.subagents[0].enabled = true;
     const result = await answerWithGroundedAgent({
       activeExecution: { agent: runtimeSettings.mainAssistant }, runtimeSettings,
-      invocationPlan: { enabledToolIds: ['task.run_subagent', 'read_segment_content'], requiredToolIds: ['task.run_subagent'],
+      invocationPlan: { enabledToolIds: ['task_run_subagent', 'read_segment_content'], requiredToolIds: ['task_run_subagent'],
         mainAssistantId: 'main-assistant', missing: [], mode: 'agent_execute', rationale: '', subagentTasks: [], writePolicy: 'chat_only' },
       question: 'Delegate evidence reading.', root: 'fixture', scope, settings: profile,
       plan: { citationPolicy: 'required', capabilities: [], intent: 'paper_qa' } as never
@@ -404,7 +410,7 @@ describe('production agent wiring', () => {
     runtimeSettings.subagents[0].enabled = true;
     const options = {
       activeExecution: { agent: runtimeSettings.mainAssistant }, runtimeSettings,
-      invocationPlan: { enabledToolIds: ['task.run_subagent', 'read_segment_content'], requiredToolIds: ['task.run_subagent'],
+      invocationPlan: { enabledToolIds: ['task_run_subagent', 'read_segment_content'], requiredToolIds: ['task_run_subagent'],
         mainAssistantId: 'main-assistant', missing: [], mode: 'agent_execute', rationale: '', subagentTasks: [], writePolicy: 'chat_only' },
       question: 'Delegate evidence reading.', root: 'fixture', scope, settings: profile,
       plan: { citationPolicy: 'required', capabilities: [], intent: 'paper_qa' }

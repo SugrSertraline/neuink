@@ -6,6 +6,15 @@ import { initialWorkspaceSurfaceLayout, surfaceKey, workspaceSurfaceReducer, typ
 import { WorkspaceSurfaceDeck } from './WorkspaceSurfaceDeck';
 
 afterEach(cleanup);
+it('renders the empty workspace after the last tab closes, without rendering a hidden library', () => {
+  const empty = workspaceSurfaceReducer(initialWorkspaceSurfaceLayout, { type: 'close', pane: 'left', key: 'library' });
+  const renderSurface = vi.fn(surface => <p>{surface.kind}</p>);
+  const ui = render(<WorkspaceSurfaceDeck layout={empty} onFocus={() => {}} renderSurface={renderSurface} />);
+  expect(ui.getByText('empty')).toBeTruthy();
+  expect(ui.queryByText('library')).toBeNull();
+  expect(renderSurface).toHaveBeenCalledTimes(1);
+  expect(ui.container.firstElementChild?.getAttribute('data-workspace-tab-count')).toBe('0');
+});
 it('retains the reader and library nodes when moving the last swapped tab merges the panes', () => {
   const pdf: WorkspaceSurface = { kind: 'pdf', entryId: 'swapped', viewId: 'reading-copy' };
   let layout = workspaceSurfaceReducer(initialWorkspaceSurfaceLayout, { type: 'open', pane: 'right', surface: pdf });

@@ -1,0 +1,73 @@
+/* The dashboard owns scroll and hit targets. These finishes never transform chart coordinates. */
+:root[data-appearance="atelier"] .reading-chart-tile {
+  border-color: var(--atelier-control-edge);
+  border-radius: var(--atelier-control-radius);
+  background: var(--atelier-chart-panel);
+  box-shadow: inset 0 1px var(--atelier-chart-highlight), inset 1px 0 var(--atelier-highlight),
+    inset 0 -1px var(--atelier-shadow-soft), 0 2px 3px var(--atelier-shadow-faint);
+}
+:root[data-appearance="atelier"] .reading-chart-tile[data-primary-chart] {
+  box-shadow: inset 0 1px var(--atelier-chart-highlight), inset 1px 0 var(--atelier-highlight),
+    0 2px 0 var(--atelier-control-edge), 0 5px 8px var(--atelier-shadow-soft);
+}
+:root[data-appearance="atelier"] .reading-chart-title {
+  color: var(--foreground);
+  text-shadow: 0 1px var(--atelier-chart-highlight);
+}
+:root[data-appearance="atelier"] .reading-chart-preview {
+  --atelier-control-background: transparent;
+  --atelier-control-hover: inset 0 1px var(--atelier-chart-highlight), inset 0 0 0 1px var(--atelier-brass-edge);
+  --atelier-control-selected: inset 0 1px var(--atelier-shadow-soft), inset 0 0 0 1px var(--atelier-brass-edge);
+}
+:root[data-appearance="atelier"] .reading-plot-frame {
+  border-radius: var(--atelier-control-radius);
+  background: var(--atelier-chart-plot);
+  box-shadow: inset 0 1px 3px var(--atelier-shadow-soft), inset 0 0 0 1px var(--atelier-shadow-soft), 0 1px var(--atelier-chart-highlight);
+}
+:root[data-appearance="atelier"] .reading-heatmap-cell {
+  isolation: isolate;
+  position: relative;
+  border-radius: var(--atelier-control-radius);
+  background: var(--atelier-chart-well);
+  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000),
+    0 2px 0 var(--atelier-control-edge), 1px 3px 3px var(--atelier-shadow-soft);
+}
+:root[data-appearance="atelier"] .reading-heatmap-cell::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+  background: linear-gradient(135deg, var(--atelier-highlight), transparent 46%, var(--atelier-shadow-faint));
+  box-shadow: inset 0 1px var(--atelier-chart-highlight), inset 1px 0 var(--atelier-highlight), inset 0 -1px var(--atelier-shadow-soft);
+}
+:root[data-appearance="atelier"] .reading-heatmap-cell[data-empty] {
+  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), inset 0 1px 2px var(--atelier-shadow-soft), 0 1px var(--atelier-chart-highlight);
+}
+:root[data-appearance="atelier"] .reading-heatmap-cell[data-empty]::after { display: none; }
+:root[data-appearance="atelier"] .reading-heatmap-pigment {
+  background: color-mix(in srgb, var(--atelier-chart-heat) calc(var(--reading-heat-value) * 100%), var(--atelier-chart-well));
+  opacity: 1 !important;
+}
+:root[data-appearance="atelier"] .reading-heatmap-cell[data-intense] { color: var(--primary-foreground); }
+:root[data-appearance="atelier"] .reading-heatmap-number { z-index: 1; }
+:root[data-appearance="atelier"] .reading-heatmap-cell[aria-pressed="true"] { outline: 1px solid var(--foreground); outline-offset: 1px; }
+:root[data-appearance="atelier"] .reading-chart-tooltip {
+  border-radius: var(--atelier-control-radius);
+  border-color: var(--atelier-brass-edge);
+  background: var(--atelier-dialog);
+  box-shadow: inset 0 1px var(--atelier-chart-highlight), 0 3px 8px var(--atelier-shadow);
+}
+@media (forced-colors: active) {
+  :root[data-appearance="atelier"] :is(.reading-chart-tile, .reading-plot-frame, .reading-heatmap-cell, .reading-chart-tooltip) {
+    background: Canvas; box-shadow: none; color: CanvasText;
+  }
+  :root[data-appearance="atelier"] .reading-chart-depth,
+  :root[data-appearance="atelier"] .reading-heatmap-cell::after { display: none; }
+  :root[data-appearance="atelier"] .reading-plot-svg [filter] { filter: none; }
+  :root[data-appearance="atelier"] .reading-plot-svg :is(rect, ellipse, polyline, line) { stroke: CanvasText; }
+  :root[data-appearance="atelier"] .reading-plot-svg [data-chart-face] { fill: Canvas; }
+  :root[data-appearance="atelier"] .reading-plot-svg [data-chart-face][stroke="none"] { fill: CanvasText; }
+  :root[data-appearance="atelier"] .reading-plot-svg ellipse { fill: CanvasText; }
+  :root[data-appearance="atelier"] .reading-heatmap-pigment { background: Canvas; }
+  :root[data-appearance="atelier"] .reading-heatmap-cell[data-intense] { color: CanvasText; }
+  :root[data-appearance="atelier"] .reading-heatmap-cell { border: 1px solid CanvasText; }
+  :root[data-appearance="atelier"] .reading-heatmap-cell[data-empty] { border-style: dotted; }
+  :root[data-appearance="atelier"] .reading-heatmap-cell[aria-pressed="true"] { outline-color: Highlight; }
+}

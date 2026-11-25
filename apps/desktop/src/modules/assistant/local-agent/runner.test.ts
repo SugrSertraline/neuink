@@ -132,11 +132,10 @@ describe('Claude integration with production NeuInk tools', () => {
     const request = vi.mocked(runLocalAgent).mock.calls[1][0];
     expect(request).toMatchObject({resume:true,provider,conversationId:'c1',sessionId:session.sessionId});
     const prompt = JSON.parse(request.prompt);
-    expect(prompt.context.currentSurface).toEqual({
-      kind:'note',pane:'right',entryId:'entry2',noteId:'n2',segmentUid:null
-    });
-    expect(prompt.targets.note.noteId).toBe('n2');
-    expect(prompt.instructions).toContain('Preserve prior discussion');
+    expect(prompt.workspace_context.active_entry.id).toBe('entry2');
+    expect(prompt.workspace_context.active_note.id).toBe('n2');
+    expect(prompt.bootstrap).toBeUndefined();
+    expect(prompt.instructions).toBeUndefined();
   });
   it('replaces a resumed paper target with a browser target, then clears it when no reading target is selected', async () => {
     vi.mocked(runLocalAgent).mockResolvedValue({result:'请继续。'});
@@ -151,14 +150,35 @@ describe('Claude integration with production NeuInk tools', () => {
     const requests = vi.mocked(runLocalAgent).mock.calls.map(([request]) => request);
     expect(requests.slice(1).every(request => request.resume && request.sessionId === session.sessionId)).toBe(true);
     const browserPrompt = JSON.parse(requests[1].prompt);
-    expect(browserPrompt.context.currentSurface).toEqual({
-      kind:'browser',pane:'left',entryId:null,noteId:null,segmentUid:null
-    });
-    expect(browserPrompt.targets).toMatchObject({entry:null,note:null});
+    expect(browserPrompt.workspace_context.browser).toMatchObject({title:'Second page',url:'https://example.org/paper'});
+    expect(browserPrompt.workspace_context).toMatchObject({active_entry:null,active_note:null});
     const clearedPrompt = JSON.parse(requests[2].prompt);
-    expect(clearedPrompt.context.currentSurface).toBeNull();
-    expect(clearedPrompt.targets).toMatchObject({entry:null,note:null});
-    expect(clearedPrompt.instructions).toContain('never silently restore the previous one');
+    expect(clearedPrompt.workspace_context).toMatchObject({browser:null,active_entry:null,active_note:null});
+    expect(clearedPrompt.instructions).toBeUndefined();
+  });
+  it('sends unchanged native state once, without reading attached note bodies', async () => {
+    vi.mocked(runLocalAgent).mockResolvedValue({result:'你好。'});
+    const request = options({question:'你好',assistantContext:{items:[{kind:'entry',id:'note',entryId:'entry1',entryTitle:'Entry',
+      contentKind:'note',contentId:'n1',contentTitle:'Note',addedAt:''}]}});
+    const first = await runLocalAgentHarness(request,session,vi.fn());
+    await runLocalAgentHarness({...request,question:'继续'},first.localAgentSession!,vi.fn());
+    const payloads = vi.mocked(runLocalAgent).mock.calls.map(([value])=>JSON.parse(value.prompt));
+    expect(payloads[0].workspace_context.references[0]).toMatchObject({kind:'note',content_id:'n1'});
+    expect(payloads[1]).toEqual({request:'继续'});
+    expect(vi.mocked(runLocalAgent).mock.calls[1][0].seedPolicy).toBe(false);
+    expect(readNote).not.toHaveBeenCalled();
+    expect(getAssistantContextSnapshot).toHaveBeenCalledWith(expect.objectContaining({metadataOnly:true}));
+  });
+  it.each(['claude','codex'] as const)('resends the baseline after a %s compact notification', async provider => {
+    vi.mocked(runLocalAgent).mockImplementation(async (_request,_signal,event) => {
+      event({type:'message',value:provider === 'claude' ? {type:'system',subtype:'compact_boundary'}
+        : {method:'thread/compacted',params:{}}});
+      return {result:'你好。'};
+    });
+    const first = await runLocalAgentHarness(options({question:'你好'}),{...session,provider},vi.fn());
+    expect(first.localAgentSession?.contextState).toBeUndefined();
+    await runLocalAgentHarness(options({question:'继续'}),first.localAgentSession!,vi.fn());
+    expect(JSON.parse(vi.mocked(runLocalAgent).mock.calls[1][0].prompt).workspace_context).toBeDefined();
   });
   it.each(['claude','codex','opencode','partial'] as const)('%s reads bounded parsed paper chunks through the production host', async mode => {
     const provider = mode === 'partial' ? 'claude' : mode;
@@ -223,7 +243,7 @@ describe('Claude integration with production NeuInk tools', () => {
     vi.mocked(inspectPdfText).mockImplementation(async (_root,entry,start,count) => ({entry_id:entry,entry_title:'Paper',revision:'r1',
       page_count:21,pages:Array.from({length:count},(_,n) => ({page_idx:start+n-1,text:'Actual paper text',truncated:[2,3,8,20].includes(start+n)}))}));
     vi.mocked(runLocalAgent).mockImplementation(async (request,_signal,event,handle) => {
-      expect(request.prompt).toContain('Tool failures are observations');
+      expect(JSON.parse(request.prompt).instructions).toBeUndefined();
       for (const start of [1,6,11]) await call(handle,'read_pdf_pages',{entry_id:'entry1',start_page:start,page_count:5},`batch-${start}`);
       event({type:'message',value:{type:'assistant',message:{content:[{type:'tool_use',id:'invalid',name:'mcp__neuink__read_pdf_pages',
         input:{entry_id:'entry1',start_page:16,page_count:6}}]}}});
@@ -300,7 +320,11 @@ describe('Claude integration with production NeuInk tools', () => {
     expect(vi.mocked(runLocalAgent).mock.calls[0][0].resume).toBe(true);
   });
   it('normalizes citations using one shared marker namespace', async () => {
-    vi.mocked(runLocalAgent).mockResolvedValue({result:'第二来源 [S2]，第一来源 [S1]'});
+    vi.mocked(runLocalAgent).mockImplementation(async (request,_signal,_event,handle) => {
+      for(const ref of JSON.parse(request.prompt).workspace_context.pinned_segments)
+        await call(handle,'read_context_reference',{context_ref:ref.context_ref},ref.context_ref);
+      return {result:'第二来源 [S2]，第一来源 [S1]'};
+    });
     const result = await runLocalAgentHarness(options({assistantContext:{items:[1,2].map(n => ({kind:'segment' as const,id:`s${n}`,
       entryId:'entry1',entryTitle:'Entry',segmentUid:`s${n}`,pageIdx:n,text:`source ${n}`,addedAt:''}))}}),session,vi.fn());
     expect(result.answer).toBe('第二来源 [S1]，第一来源 [S2]');

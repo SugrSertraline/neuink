@@ -11,15 +11,19 @@ license.workspace = true
 pdfium-render = { version = "0.9.5", default-features = false, features = ["pdfium_8125", "image_025", "thread_safe"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 blake3.workspace = true
+sha2 = "0.10"
 base64.workspace = true
 chrono.workspace = true
 neuink-config = { path = "../neuink-config" }
+neuink-sync = { path = "../neuink-sync" }
+neuink-sync-protocol = { path = "../neuink-sync-protocol" }
 neuink-domain = { path = "../neuink-domain" }
 neuink-job = { path = "../neuink-job" }
 neuink-parser = { path = "../neuink-parser" }
 neuink-search = { path = "../neuink-search" }
 neuink-sciverse = { path = "../neuink-sciverse" }
 neuink-workspace = { path = "../neuink-workspace" }
+neuink-zotero = { path = "../neuink-zotero" }
 futures-util.workspace = true
 rayon.workspace = true
 reqwest.workspace = true
@@ -35,6 +39,7 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["sync", "process", "io-util", "time", "net"] }
 tokio-stream.workspace = true
 zip.workspace = true
+unrar = "0.5.8"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

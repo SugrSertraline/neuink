@@ -2,10 +2,10 @@ name: Documentation Pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, beta, alpha]
     paths: ['website/**', '.github/workflows/pages.yml', 'apps/desktop/src-tauri/logo_assets/neuink_logo_transparent_1024.png']
   pull_request:
-    branches: [main]
+    branches: [main, beta, alpha]
     paths: ['website/**', '.github/workflows/pages.yml', 'apps/desktop/src-tauri/logo_assets/neuink_logo_transparent_1024.png']
   workflow_dispatch:
 
@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   build:
-    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    if: github.event_name == 'pull_request' || contains(fromJSON('["main","beta","alpha"]'), github.ref_name)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -36,12 +36,12 @@ jobs:
           GUIDE_SOURCE_REF: ${{ github.head_ref || github.ref_name }}
       - run: npm run check --prefix website
       - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: contains(fromJSON('["main","beta","alpha"]'), github.ref_name) && github.event_name != 'pull_request'
         with:
           path: website/dist
 
   deploy:
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: contains(fromJSON('["main","beta","alpha"]'), github.ref_name) && github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10

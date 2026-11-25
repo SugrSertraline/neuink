@@ -1,5 +1,9 @@
 import { generateText } from 'ai';
+import { normalizeSelectionText } from './normalizeSelectionText';
+import { logTranslationFailure } from '@/shared/ipc/translationLogApi';
 import { translateSelectionService } from '@/shared/ipc/selectionTranslationApi';
+import { getTranslationRouting, resolvedTranslationSource } from '@/shared/ipc/translationRoutingApi';
+import { translationSourceProfile } from './translationSource';
 
 import { getLlmSettings, readEntryAssistantContext } from '@/shared/ipc/assistantApi';
 import {
@@ -15,7 +19,9 @@ import {
 import type { SourceSegment } from '@/shared/types/domain';
 import { runLocalBackgroundJob } from '@/shared/lib/localBackgroundJobs';
 
-import { createNeuinkModel, generationSettings } from '../../assistant/sdk/provider';
+import { createNeuinkModel } from '../../assistant/sdk/provider';
+import { translationModelSettings } from './translationModelSettings';
+import { translateSelectionWithProfile } from './modelSelectionTranslation';
 import { expandEnglishLigatures, singleEnglishWord, translateLocalEnglishWord } from './localEnglishLexicon';
 
 const MAX_PAPER_CONTEXT_BUDGET = 28_000;
@@ -44,13 +50,15 @@ export async function translateTextSelection({
   root: string | null;
   text: string;
 }) {
-  const expandedText = expandEnglishLigatures(text.trim());
+  const expandedText = expandEnglishLigatures(normalizeSelectionText(text));
   const word = singleEnglishWord(expandedText);
   const sourceText = word ?? expandedText;
   if (!/[\p{L}\p{N}]/u.test(sourceText)) {
     throw new Error('没有可翻译的文字。');
   }
-  const localTranslation = word ? await translateLocalEnglishWord(word) : null;
+  const routing = await getTranslationRouting();
+  const source = resolvedTranslationSource(routing, word ? 'word' : 'selection');
+  const localTranslation = word && routing.local_dictionary_first ? await translateLocalEnglishWord(word) : null;
   if (localTranslation) return localTranslation;
   return runLocalBackgroundJob({
     idPrefix: 'selection-translation',
@@ -60,38 +68,18 @@ export async function translateTextSelection({
     successMessage: `选区翻译完成：${entryTitle}`,
     failureMessage: '选区翻译未完成，请返回原选区重试。'
   }, async () => {
-    const serviceTranslation = await translateSelectionService(sourceText);
-    if (serviceTranslation !== null) return serviceTranslation;
+    if (source.kind === 'selection_service' || source.kind === 'service') {
+      const serviceTranslation = await (source.kind === 'service' ? translateSelectionService(sourceText, source.provider) : translateSelectionService(sourceText));
+      if (serviceTranslation !== null) return serviceTranslation;
+      if (source.kind === 'service') throw new Error('翻译服务未返回译文，请检查配置。');
+    }
     const settings = await getLlmSettings();
-    const profile = settings.translation_profile;
-    if (!profile) {
-      throw new Error('请先在模型设置里配置翻译模型。');
-    }
+    const profile = translationSourceProfile(settings, source.kind === 'selection_service' ? { kind: 'default_model' } : source);
 
-    const result = await generateText({
-      ...generationSettings(profile),
-      model: createNeuinkModel(profile),
-      system: word
-        ? 'Translate the single English word into concise Simplified Chinese dictionary meanings. Return the meanings only.'
-        : [
-          'You are an academic paper translator.',
-          'Translate the selected text into Simplified Chinese.',
-          'Preserve formulas, citations, numbers, abbreviations, code, and technical symbols.',
-          'Return the translation only. Do not return JSON, explanations, labels, or markdown fences.'
-        ].join('\n'),
-      prompt: word ? word : [
-        `Paper title: ${entryTitle}`,
-        context?.trim()
-          ? `Paragraph context:\n${trimToBudget(context.trim(), translationBudgets(profile.max_context_length).context)}`
-          : null,
-        `Selected text:\n${sourceText}`
-      ].filter(Boolean).join('\n\n')
+    return translateSelectionWithProfile(profile, {
+      sourceText, word, entryTitle,
+      context: context?.trim() ? trimToBudget(context.trim(), translationBudgets(profile.max_context_length).context) : null
     });
-    const translatedText = result.text.trim();
-    if (!translatedText) {
-      throw new Error('翻译模型没有返回可用译文。');
-    }
-    return translatedText;
   });
 }
 
@@ -110,11 +98,9 @@ export async function translateEntrySegments({
   strategy?: TranslationRunStrategy;
   segments: SourceSegment[];
 }) {
+  const routing = await getTranslationRouting();
   const settings = await getLlmSettings();
-  const profile = settings.translation_profile;
-  if (!profile) {
-    throw new Error('请先在模型设置里配置全文翻译模型。');
-  }
+  const profile = translationSourceProfile(settings, resolvedTranslationSource(routing, 'document'));
 
   const candidates = segments.filter(shouldTranslateSegment);
   const skipped = segments.filter((segment) => !shouldTranslateSegment(segment));
@@ -205,7 +191,7 @@ export async function translateEntrySegments({
   }
 
   const model = createNeuinkModel(profile);
-  const generationOptions = generationSettings(profile);
+  const generationOptions = translationModelSettings(profile);
   const budgets = translationBudgets(profile.max_context_length);
   const paperContext = response.translation?.paper_context
     ? {
@@ -220,7 +206,7 @@ export async function translateEntrySegments({
         model,
         root,
         segments
-      });
+      }).catch(async error => { await logTranslationFailure(profile, 'context_validation', error); throw error; });
 
   if (response.translation?.paper_context) {
     onProgress?.({
@@ -255,7 +241,10 @@ export async function translateEntrySegments({
         generationOptions,
         model,
         paperContext
-      });
+      }).catch(async error => { await logTranslationFailure(profile, 'batch_validation', error); throw error; });
+      if (batch.some(segment => !translated.get(segment.uid)?.trim())) {
+        await logTranslationFailure(profile, 'batch_validation', 'TEST_INCOMPLETE_TRANSLATION');
+      }
       response = await upsertTranslatedSegments(
         root,
         entryId,
@@ -322,7 +311,7 @@ async function buildPaperContextFromEntry({
   contextBudget: number;
   entryId: string;
   entryTitle: string;
-  generationOptions: ReturnType<typeof generationSettings>;
+  generationOptions: ReturnType<typeof translationModelSettings>;
   model: ReturnType<typeof createNeuinkModel>;
   root: string;
   segments: SourceSegment[];
@@ -382,7 +371,7 @@ async function buildPaperContext({
   contextBudget: number;
   documentMarkdown: string;
   entryTitle: string;
-  generationOptions: ReturnType<typeof generationSettings>;
+  generationOptions: ReturnType<typeof translationModelSettings>;
   model: ReturnType<typeof createNeuinkModel>;
   segments: SourceSegment[];
 }) {
@@ -426,7 +415,7 @@ async function translateBatch({
 }: {
   batch: SourceSegment[];
   entryTitle: string;
-  generationOptions: ReturnType<typeof generationSettings>;
+  generationOptions: ReturnType<typeof translationModelSettings>;
   model: ReturnType<typeof createNeuinkModel>;
   paperContext: { summary: string; terminology: TranslationTerm[] };
 }) {

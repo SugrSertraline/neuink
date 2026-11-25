@@ -17,7 +17,7 @@ it('remembers the display mode across restarts without sharing it with another v
   const copied = render(view('a', 'copy'));
   expect(copied.getByRole('button', { name: '原文' }).getAttribute('aria-pressed')).toBe('true');
 });
-it('keeps display mode local while same-document position linking has no switch', () => {
+it('keeps display mode local and leaves linking controls to the workspace toolbar', () => {
   const result = render(<><section data-testid="a"><ReadingViewSession workspaceRoot="w" active surface={{ kind: 'pdf', entryId: 'a' }}><PdfViewControls />A</ReadingViewSession></section><section data-testid="b"><ReadingViewSession workspaceRoot="w" active surface={{ kind: 'pdf', entryId: 'a', viewId: 'copy' }}><PdfViewControls />B</ReadingViewSession></section></>);
   expect(result.queryByLabelText('阅读视图设置')).toBeNull();
   const a = within(result.getByTestId('a')), b = within(result.getByTestId('b'));

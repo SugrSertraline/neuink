@@ -13,6 +13,9 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { useEditRecovery } from '@/shared/hooks/useEditRecovery';
+import { checkpointEditRecovery, recoveryDraftKey } from '@/shared/lib/editRecovery';
+import { EditRecoveryNotice } from '@/shared/components/EditRecoveryNotice';
 import {
   Dialog,
   DialogContent,
@@ -106,6 +109,7 @@ export function SegmentAnnotationEditor({
   workspaceRoot: string | null;
 }) {
   const ownerId = `segment-annotation:${useId()}`;
+  const editorElement = useRef<HTMLElement | null>(null);
   const [editorMode, setEditorMode] = useState<EditorMode>("idle");
   const [selectedAnnotationId, setSelectedAnnotationId] =
     useState<AnnotationId | null>(null);
@@ -239,6 +243,22 @@ export function SegmentAnnotationEditor({
     return JSON.stringify(baseline) !== JSON.stringify(draft);
   }, [draft, editingAnnotation, editorMode]);
   dirtyRef.current = dirty || savingDraft;
+  const recovery = useEditRecovery({ root: workspaceRoot, dirty, ready: Boolean(segment) && !busy,
+    draft: segment ? { key: recoveryDraftKey('annotation', sourceEntryId, draftScopeKey ?? '', segment.uid), kind: 'annotation',
+      ownerId: sourceEntryId, targetId: segment.uid, scopeKey: draftScopeKey ?? `segment-records:${sourceEntryId}`,
+      label: `批注 · 第 ${segment.page_idx + 1} 页`, payload: { ...draft, baseline: editingAnnotation ? draftFromAnnotation(editingAnnotation) : null } } : null,
+    restore: saved => {
+      const value = saved.payload;
+      if (typeof value.content !== 'string' || typeof value.kind !== 'string' || !['normal', 'important', 'core'].includes(String(value.importance))) throw new Error('Invalid annotation');
+      const annotationId = typeof value.annotationId === 'string' ? value.annotationId : null;
+      if (annotationId) {
+        const current = currentSegmentAnnotations.find(item => item.annotation_id === annotationId);
+        if (!current || JSON.stringify(draftFromAnnotation(current)) !== JSON.stringify(value.baseline)) throw new Error('Annotation has changed');
+      }
+      setSelectedAnnotationId(annotationId);
+      setEditorMode(annotationId ? 'edit' : 'create');
+      setDraft({ annotationId, content: value.content, kind: value.kind, importance: value.importance as AnnotationImportance });
+    } });
 
   const canSave = Boolean(
     segment && draft.kind.trim() && draft.content.trim() && dirty,
@@ -247,6 +267,7 @@ export function SegmentAnnotationEditor({
     ? (segmentByUid.get(selectedAnnotation.segment_uid) ?? segment)
     : segment;
   const startNewAnnotation = () => {
+    if (recovery.pending || recovery.loading) return;
     pendingSaveRef.current = null;
     setEditorMode("create");
     setSelectedAnnotationId(null);
@@ -254,6 +275,7 @@ export function SegmentAnnotationEditor({
   };
 
   const startEditAnnotation = (annotation: Annotation) => {
+    if (recovery.pending || recovery.loading) return;
     pendingSaveRef.current = null;
     setSelectedAnnotationId(annotation.annotation_id);
     setEditorMode("edit");
@@ -261,6 +283,7 @@ export function SegmentAnnotationEditor({
   };
 
   const cancelEditing = () => {
+    recovery.discard();
     pendingSaveRef.current = null;
     setEditorMode("idle");
     setDraft(emptyDraft());
@@ -318,6 +341,15 @@ export function SegmentAnnotationEditor({
   useEffect(() => {
     if (!draftScopeKey) return;
     return registerSegmentEditorCloseHandler(draftScopeKey, ownerId, {
+      label: () => `批注${segment ? ` · 第 ${segment.page_idx + 1} 页` : ''}`,
+      reveal: () => { editorElement.current?.scrollIntoView({ block: 'nearest' }); editorElement.current?.querySelector('textarea')?.focus(); },
+      recovery: () => recovery.reference,
+      isBusy: () => savingRef.current,
+      checkpoint: () => {
+        if (recovery.reference && segment && dirtyRef.current) checkpointEditRecovery(recovery.reference.root, {
+          key: recovery.reference.key, kind: 'annotation', ownerId: sourceEntryId, targetId: segment.uid, scopeKey: draftScopeKey,
+          label: `批注 · 第 ${segment.page_idx + 1} 页`, payload: { ...liveDraft.current.draft, baseline: editingAnnotation ? draftFromAnnotation(editingAnnotation) : null } });
+      },
       discard: cancelEditing,
       save: saveDraft,
       isDirty: () => dirtyRef.current || savingRef.current,
@@ -341,11 +373,12 @@ export function SegmentAnnotationEditor({
   };
 
   return (
-    <aside data-guide={segment ? 'annotation-editor' : undefined} className={cn(
+    <aside ref={editorElement} data-guide={segment ? 'annotation-editor' : undefined} className={cn(
       "grid min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden border-l bg-white",
       className,
     )}>
       <div className="min-w-0 border-b bg-muted/40 px-3 py-2">
+        <EditRecoveryNotice recovery={recovery} />
         <div className="flex min-w-0 items-center justify-between gap-2">
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold">当前片段批注</div>
@@ -481,7 +514,7 @@ export function SegmentAnnotationEditor({
               workspaceRoot={workspaceRoot}
             />
               <AnnotationForm
-                busy={busy}
+                busy={busy || recovery.loading || Boolean(recovery.pending)}
                 draft={draft}
                 paperProps={annotationPaperProps(editingAnnotation ?? draft)}
                 mode={editorMode}

@@ -23,7 +23,7 @@ import {
 
 export { isMineruImagePath } from './sourceSnapshotMath';
 
-export type SourceSnapshotImageSize = 'compact' | 'standard' | 'large' | 'full';
+export type SourceSnapshotImageSize = 'compact' | 'standard' | 'large' | 'full' | number;
 
 type SourceSnapshotPreviewProps = {
   /** Authored notes must not undergo heuristic MinerU/OCR text repair. */

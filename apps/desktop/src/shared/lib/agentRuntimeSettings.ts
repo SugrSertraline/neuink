@@ -11,6 +11,7 @@ import type {
   SubagentProfile
 } from '@/shared/types/agentRuntime';
 import type { AgentInvocationPlan, AssistantTaskPlan } from '@/shared/types/assistant';
+import { canonicalAssistantToolId, isProposalTool } from './assistantToolNames';
 
 const STORAGE_KEY = 'neuink.agentRuntime.v4';
 const LEGACY_MAIN_DESCRIPTION = 'Neuink 全局主助手，负责直接响应用户、选择技能和委派子 agent。';
@@ -19,10 +20,11 @@ const DEFAULT_MAIN_DESCRIPTION = 'Neuink 全局主助手，负责直接响应用
 const DEFAULT_MAIN_PROMPT = 'You are Neuink Main Assistant. Stay grounded in workspace evidence and create user-confirmable proposals for note or Entry metadata writes.';
 
 const DEFAULT_MAIN_TOOL_IDS: AgentToolId[] = [
+  'read_context_reference',
   'read_pdf_pages', 'search_pdf_text',
-  'search_papers', 'search_web', 'read_webpage', 'import_papers',
+  'search_papers', 'arxiv_search', 'search_web', 'read_webpage', 'import_papers',
   'read_browser_tab',
-  'app.set_appearance',
+  'app_set_appearance',
   'create_entry',
   'search_segments',
   'search_library',
@@ -33,12 +35,12 @@ const DEFAULT_MAIN_TOOL_IDS: AgentToolId[] = [
   'read_sciverse_content',
   'read_current_note',
   'read_note',
-  'note.propose_create',
-  'note.propose_patch',
-  'segment_note.propose_patch',
-  'entry.propose_meta_patch',
-  'tag.propose_change',
-  'task.run_subagent'
+  'note_propose_create',
+  'note_propose_patch',
+  'segment_note_propose_patch',
+  'entry_propose_meta_patch',
+  'tag_propose_change',
+  'task_run_subagent'
 ];
 
 const EVIDENCE_TOOL_IDS: AgentToolId[] = [
@@ -52,7 +54,7 @@ const EVIDENCE_TOOL_IDS: AgentToolId[] = [
   'read_sciverse_content'
 ];
 
-const CAPABILITY_REVISION = 5;
+const CAPABILITY_REVISION = 6;
 
 // Capability revision in which each tool joined a default grant. A tool not listed here was part
 // of the first grant (revision 0). A grant is complete at revision r when it holds every default
@@ -65,12 +67,14 @@ const MAIN_TOOL_ADDED_IN: Partial<Record<AgentToolId, number>> = {
   read_pdf_pages: 2,
   search_pdf_text: 2,
   read_browser_tab: 3,
-  get_entry_outline: 4,
-  search_library: 5
+  arxiv_search: 4,
+  read_context_reference: 5,
+  get_entry_outline: 6,
+  search_library: 6
 };
 const EVIDENCE_TOOL_ADDED_IN: Partial<Record<AgentToolId, number>> = {
-  get_entry_outline: 4,
-  search_library: 5
+  get_entry_outline: 6,
+  search_library: 6
 };
 
 /**
@@ -111,7 +115,7 @@ function createMainAssistant(partial: Partial<MainAssistantProfile>): MainAssist
     allowedMcpServerIds: partial.allowedMcpServerIds ?? [],
     description: partial.description && partial.description !== LEGACY_MAIN_DESCRIPTION
       ? partial.description : DEFAULT_MAIN_DESCRIPTION,
-    enabledToolIds: (partial.enabledToolIds ?? DEFAULT_MAIN_TOOL_IDS).filter(isActiveTool),
+    enabledToolIds: normalizeToolIds(partial.enabledToolIds ?? DEFAULT_MAIN_TOOL_IDS),
     id: 'main-assistant',
     kind: 'main_assistant',
     llmProfileId: partial.llmProfileId ?? null,
@@ -138,7 +142,7 @@ function createSubagent(
     allowedMcpServerIds: partial.allowedMcpServerIds ?? [],
     description: partial.description ?? '',
     enabled: partial.enabled ?? true,
-    enabledToolIds: (partial.enabledToolIds ?? EVIDENCE_TOOL_IDS).filter(isActiveTool),
+    enabledToolIds: normalizeToolIds(partial.enabledToolIds ?? EVIDENCE_TOOL_IDS),
     id: partial.id,
     kind: 'subagent',
     llmProfileId: partial.llmProfileId ?? null,
@@ -157,7 +161,7 @@ function createSubagent(
 }
 
 export const DEFAULT_AGENT_RUNTIME_SETTINGS: AgentRuntimeSettings = {
-  capabilityRevision: 5,
+  capabilityRevision: CAPABILITY_REVISION,
   mainAssistant: createMainAssistant({}),
   mcpServers: [],
   subagents: [
@@ -205,8 +209,8 @@ export function normalizeAgentRuntimeSettings(
   }
   const revision = settings.capabilityRevision ?? 0;
   return {
-    capabilityRevision: 5,
-    mainAssistant: normalizeMainAssistant(settings.mainAssistant, revision),
+    capabilityRevision: CAPABILITY_REVISION,
+    mainAssistant: normalizeMainAssistant(settings.mainAssistant, settings.capabilityRevision ?? 0),
     mcpServers: normalizeMcpServers(settings.mcpServers),
     subagents: normalizeSubagents(settings.subagents, revision),
     toolPackages: normalizeToolPackages(settings.toolPackages),
@@ -214,7 +218,7 @@ export function normalizeAgentRuntimeSettings(
   };
 }
 
-function normalizeMainAssistant(value: unknown, revision = 5) {
+function normalizeMainAssistant(value: unknown, revision = CAPABILITY_REVISION) {
   if (!value || typeof value !== 'object') {
     return DEFAULT_AGENT_RUNTIME_SETTINGS.mainAssistant;
   }
@@ -234,7 +238,7 @@ function normalizeMainAssistant(value: unknown, revision = 5) {
   };
 }
 
-function normalizeSubagents(value: unknown, revision = 5) {
+function normalizeSubagents(value: unknown, revision = CAPABILITY_REVISION) {
   const rawSubagents = Array.isArray(value) ? value : DEFAULT_AGENT_RUNTIME_SETTINGS.subagents;
   const hadLegacyPlanner = rawSubagents.some((agent) => agent.id === 'patch-planner-agent');
   const byId = new Map(rawSubagents.map((subagent) => [subagent.id, subagent]));
@@ -303,7 +307,7 @@ function normalizeToolPackages(value: unknown): AgentToolPackage[] {
     )
     .map((toolPackage) => ({
       allowedToolIds: Array.isArray(toolPackage.allowedToolIds)
-        ? (toolPackage.allowedToolIds.filter((item): item is AgentToolId => typeof item === 'string') as AgentToolId[])
+        ? [...new Set(toolPackage.allowedToolIds.filter((item): item is AgentToolId => typeof item === 'string').map(canonicalAssistantToolId))] as AgentToolId[]
         : [],
       description: typeof toolPackage.description === 'string' ? toolPackage.description : '',
       enabled: toolPackage.enabled ?? true,
@@ -344,7 +348,7 @@ export function configuredAgentToolIds(settings: AgentRuntimeSettings, agent: Ag
     .flatMap(server => server.allowedToolNames.map(name => `mcp.${server.id}.${name}` as AgentToolId));
   const hasAvailableWorker = resolveAllowedSubagents(settings, agent).length > 0;
   const configured = [...agent.enabledToolIds, ...external]
-    .filter(id => id !== 'task.run_subagent' || hasAvailableWorker);
+    .filter(id => id !== 'task_run_subagent' || hasAvailableWorker);
   return auditAgentToolPermissions(configured, agent, settings).allowedToolIds;
 }
 
@@ -416,10 +420,10 @@ function deniedToolReason(
     }
     return null;
   }
-  if (toolId.includes('.propose_') && !agent.permissions.canWriteProposals) {
+  if (isProposalTool(toolId) && !agent.permissions.canWriteProposals) {
     return 'write proposals disabled';
   }
-  if (toolId === 'task.run_subagent' && !agent.permissions.canInvokeSubagents) {
+  if (toolId === 'task_run_subagent' && !agent.permissions.canInvokeSubagents) {
     return 'subagent invocation disabled';
   }
   if (
@@ -472,6 +476,11 @@ export function subagentOutputLabel(_outputKind: SubagentOutputKind) {
 function unique<T>(value: T, index: number, array: T[]) {
   return array.indexOf(value) === index;
 }
+
+function normalizeToolIds(ids: readonly string[]): AgentToolId[] {
+  return [...new Set(ids.map(canonicalAssistantToolId))].filter(isActiveTool) as AgentToolId[];
+}
+
 
 function isActiveTool(id: string) {
   return id.startsWith('mcp.') || DEFAULT_MAIN_TOOL_IDS.includes(id as AgentToolId) ||

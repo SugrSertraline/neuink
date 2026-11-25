@@ -4,6 +4,7 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useVisiblePdfPages } from './useVisiblePdfPages';
+import * as renderQueue from './pdfRenderQueue';
 
 type ObserverRecord = {
   callback: IntersectionObserverCallback;
@@ -14,9 +15,24 @@ type ObserverRecord = {
 
 const observers: ObserverRecord[] = [];
 const originalIntersectionObserver = globalThis.IntersectionObserver;
+const originalElementFromPoint = Object.getOwnPropertyDescriptor(document, 'elementFromPoint');
+let frameId = 0;
+const frames = new Map<number, FrameRequestCallback>();
+const flushFrames = () => act(() => {
+  const callbacks = [...frames.values()];
+  frames.clear();
+  callbacks.forEach(callback => callback(0));
+});
 
 beforeEach(() => {
   observers.length = 0;
+  frames.clear();
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    const id = ++frameId;
+    frames.set(id, callback);
+    return id;
+  });
+  vi.stubGlobal('cancelAnimationFrame', (id: number) => { frames.delete(id); });
   globalThis.IntersectionObserver = class IntersectionObserverMock {
     readonly root = null;
     readonly rootMargin = '0px';
@@ -42,9 +58,34 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   globalThis.IntersectionObserver = originalIntersectionObserver;
+  if (originalElementFromPoint) {
+    Object.defineProperty(document, 'elementFromPoint', originalElementFromPoint);
+  } else {
+    Reflect.deleteProperty(document, 'elementFromPoint');
+  }
 });
 
 describe('useVisiblePdfPages', () => {
+  it('samples a scroll burst once per frame and preserves visible painting when hit testing finds a gap', () => {
+    const root = document.createElement('div');
+    const page = document.createElement('section');
+    page.dataset.pdfPageIndex = '0';
+    root.append(page);
+    const hitTest = vi.fn(() => null);
+    Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: hitTest });
+    vi.spyOn(root, 'getBoundingClientRect').mockReturnValue({ top: 0, left: 0, width: 800, height: 600 } as DOMRect);
+    const notify = vi.spyOn(renderQueue, 'notifyPdfInteraction');
+    const hook = renderHook(() => useVisiblePdfPages({ pageCount: 1, scrollRef: { current: root } }));
+    act(() => { for (let index = 0; index < 30; index += 1) root.dispatchEvent(new Event('scroll')); });
+    expect(hitTest).not.toHaveBeenCalled();
+    expect(frames.size).toBe(1);
+    flushFrames();
+    expect(hitTest).toHaveBeenCalledTimes(3);
+    expect(notify).toHaveBeenCalledExactlyOnceWith({ abortVisible: false, preservePreload: true });
+    act(() => root.dispatchEvent(new Event('scroll')));
+    hook.unmount();
+    expect(frames.size).toBe(0);
+  });
   it('retains the rendered pages when the window becomes hidden', () => {
     const root = document.createElement('div');
     const pages = [0, 1, 2].map((index) => {
@@ -165,6 +206,7 @@ describe('useVisiblePdfPages', () => {
       toJSON: () => ({})
     });
     act(() => root.dispatchEvent(new Event('scroll')));
+    flushFrames();
     expect([...hook.result.current.visiblePageIndexes]).toEqual([4]);
     Object.defineProperty(document, 'elementFromPoint', {
       configurable: true,
@@ -189,6 +231,7 @@ describe('useVisiblePdfPages', () => {
     expect([...hook.result.current.renderPageIndexes].sort()).toEqual([3, 4, 5]);
 
     act(() => root.dispatchEvent(new Event('scroll')));
+    flushFrames();
     for (const spy of rectSpies) expect(spy).not.toHaveBeenCalled();
   });
 });

@@ -104,7 +104,7 @@ it('saves fragments and notes before switching workspaces, and rejects failed sa
   const save = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true);
   dirtySegment(save);
   dirtyNote(async () => { clearMarkdownNoteDirty('a', 'note'); return true; });
-  await expect(saveEditsBeforeWorkspaceChange()).rejects.toThrow('已取消切换资料库');
+  await expect(saveEditsBeforeWorkspaceChange()).rejects.toThrow('已暂停当前操作');
   await expect(saveEditsBeforeWorkspaceChange()).resolves.toBeUndefined();
 });
 

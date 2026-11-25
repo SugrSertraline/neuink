@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { ToastContext } from '@/shared/hooks/useToast';
@@ -9,13 +9,45 @@ import type { SourceLink } from '@/shared/types/domain';
 import { MarkdownNoteEditor } from './MarkdownNoteEditor';
 import { discardSegmentEditorsBeforeClose, hasUnsavedSegmentEditors, saveSegmentEditorsBeforeClose } from '@/modules/reader/components/segmentEditorDirtyRegistry';
 
+const zoteroApi = vi.hoisted(() => ({ getZoteroNoteOrigin: vi.fn(), previewZoteroNote: vi.fn(), overwriteZoteroNote: vi.fn() }));
+vi.mock('@/shared/ipc/zoteroApi', () => zoteroApi);
+
 afterEach(cleanup);
+afterEach(() => { vi.clearAllMocks(); });
 beforeAll(() => {
   Object.defineProperty(Range.prototype, 'getClientRects', { configurable: true, value: () => [] });
   Object.defineProperty(Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => new DOMRect() });
 });
 
 describe('MarkdownNoteEditor dirty state', () => {
+  it('keeps a Zotero note local until the user previews and confirms an overwrite', async () => {
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+    zoteroApi.getZoteroNoteOrigin.mockResolvedValue({ note_key: 'ABCDEFGH', local_modified: true });
+    zoteroApi.previewZoteroNote.mockResolvedValue({ server_id: 'server', version: 5, html: '<p>Original note</p>' });
+    zoteroApi.overwriteZoteroNote.mockResolvedValue({ written: true });
+    const save = vi.fn(async (title: string, markdown: string, links: SourceLink[]) => ({ note_id: 'zotero-note', title, markdown, links, revision: '2' }));
+    render(<ToastContext.Provider value={{ dismiss: vi.fn(), notify: vi.fn(() => 'toast') }}><MarkdownNoteEditor
+      workspaceRoot="workspace" entryId="zotero-entry" noteId="zotero-note" fallbackTitle="Zotero note"
+      onLoadNote={async () => ({ note_id: 'zotero-note', title: 'Zotero note', markdown: 'Draft', links: [], revision: '1' })}
+      onSaveNote={save} /></ToastContext.Provider>);
+    await waitFor(() => expect(screen.getByText(/Zotero 来源笔记/)).toBeTruthy());
+    expect(screen.getByText(/本地改稿，尚未写回 Zotero/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Zotero note' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '文档笔记标题' }), { target: { value: 'Edited Zotero note' } });
+    await waitFor(() => expect(save).toHaveBeenCalledOnce(), { timeout: 1800 });
+    await waitFor(() => expect(screen.getByText('草稿已保存')).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /^保存$/ }));
+    expect(screen.queryByRole('button', { name: '比较并准备替换' })).toBeNull();
+    expect(zoteroApi.overwriteZoteroNote).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Zotero 原笔记' }).textContent).toContain('Original note'));
+    expect(screen.getByRole('region', { name: '拟写入 Zotero 的内容' }).textContent).toContain('Draft');
+    expect(screen.getByRole('region', { name: '逐行变化' }).textContent).toContain('Original note');
+    expect(zoteroApi.overwriteZoteroNote).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '确认替换 Zotero 笔记' }));
+    await waitFor(() => expect(zoteroApi.overwriteZoteroNote).toHaveBeenCalledOnce());
+    expect(save).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
+  });
   it('navigates its outline without dirtying the shared note or scheduling an autosave', async () => {
     vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
     const save = vi.fn();

@@ -51,9 +51,9 @@ it('cancels without writing, then uploads to an entry without a PDF', async () =
 it('shows a picker failure and allows retry', async () => {
   vi.mocked(open).mockRejectedValueOnce(new Error('文件选择失败')).mockResolvedValueOnce('C:/result.zip');
   const onImportMineruClientResult = vi.fn(); const view = render(<EntryPdfActions entry={entry} onImportMineruClientResult={onImportMineruClientResult} />);
-  fireEvent.click(view.getByRole('button', { name: '导入客户端解析结果' }));
+  fireEvent.click(view.getByRole('button', { name: '导入 MinerU ZIP/RAR' }));
   await waitFor(() => expect(view.getByRole('alert').textContent).toContain('文件选择失败'));
-  fireEvent.click(view.getByRole('button', { name: '导入客户端解析结果' }));
+  fireEvent.click(view.getByRole('button', { name: '导入 MinerU ZIP/RAR' }));
   await waitFor(() => expect(onImportMineruClientResult).toHaveBeenCalledWith(entry.id, 'C:/result.zip'));
 });
 
@@ -75,4 +75,55 @@ it('fetches only missing PDFs, prevents duplicate actions, and keeps failure ret
   expect(onFetchPdf).toHaveBeenCalledTimes(2);
   view.rerender(<EntryPdfActions entry={entry} onFetchPdf={onFetchPdf} />);
   expect(view.queryByRole('button', { name: '获取 PDF' })).toBeNull();
+});
+
+const replaceableEntry: LibraryEntry = { ...entry, pdfContentHash: 'hash-old' };
+
+it('shows a confirmation dialog for the chosen replacement and cancelling writes nothing', async () => {
+  vi.mocked(open).mockResolvedValue('C:/papers/revised.pdf');
+  const onReplaceReadingPdf = vi.fn().mockResolvedValue(undefined);
+  const view = render(<EntryPdfActions entry={replaceableEntry} onReplaceReadingPdf={onReplaceReadingPdf} />);
+  fireEvent.click(view.getByRole('button', { name: '替换阅读 PDF' }));
+  const dialog = await waitFor(() => view.getByRole('dialog'));
+  expect(dialog.textContent).toContain('revised.pdf');
+  expect(dialog.textContent).toContain('将替换当前阅读原件，保留 MinerU 解析/笔记/阅读进度');
+  expect(onReplaceReadingPdf).not.toHaveBeenCalled();
+  fireEvent.click(view.getByRole('button', { name: '取消' }));
+  await waitFor(() => expect(view.queryByRole('dialog')).toBeNull());
+  expect(onReplaceReadingPdf).not.toHaveBeenCalled();
+});
+
+it('replaces the reading PDF only after confirmation', async () => {
+  vi.mocked(open).mockResolvedValue('C:/papers/revised.pdf');
+  const onReplaceReadingPdf = vi.fn().mockResolvedValue(undefined);
+  const view = render(<EntryPdfActions entry={replaceableEntry} onReplaceReadingPdf={onReplaceReadingPdf} />);
+  fireEvent.click(view.getByRole('button', { name: '替换阅读 PDF' }));
+  await waitFor(() => view.getByRole('dialog'));
+  expect(onReplaceReadingPdf).not.toHaveBeenCalled();
+  fireEvent.click(view.getByRole('button', { name: '确认替换' }));
+  await waitFor(() => expect(onReplaceReadingPdf).toHaveBeenCalledWith(replaceableEntry.id, 'C:/papers/revised.pdf'));
+  await waitFor(() => expect(view.queryByRole('dialog')).toBeNull());
+  expect(onReplaceReadingPdf).toHaveBeenCalledTimes(1);
+});
+
+it('keeps the selected file and shows the error when replacement fails, so the user can retry', async () => {
+  vi.mocked(open).mockResolvedValue('C:/papers/revised.pdf');
+  const onReplaceReadingPdf = vi.fn()
+    .mockRejectedValueOnce(new Error('原始 PDF 未通过校验：页数不一致'))
+    .mockResolvedValueOnce(undefined);
+  const view = render(<EntryPdfActions entry={replaceableEntry} onReplaceReadingPdf={onReplaceReadingPdf} />);
+  fireEvent.click(view.getByRole('button', { name: '替换阅读 PDF' }));
+  await waitFor(() => view.getByRole('dialog'));
+  fireEvent.click(view.getByRole('button', { name: '确认替换' }));
+  await waitFor(() => expect(view.getByRole('alert').textContent).toContain('页数不一致'));
+  expect(view.getByRole('dialog').textContent).toContain('revised.pdf');
+  fireEvent.click(view.getByRole('button', { name: '确认替换' }));
+  await waitFor(() => expect(view.queryByRole('dialog')).toBeNull());
+  expect(onReplaceReadingPdf).toHaveBeenCalledTimes(2);
+  expect(onReplaceReadingPdf).toHaveBeenLastCalledWith(replaceableEntry.id, 'C:/papers/revised.pdf');
+});
+
+it('disables replacement until the entry is parsed', () => {
+  const view = render(<EntryPdfActions entry={{ ...replaceableEntry, status: 'Parsing' }} onReplaceReadingPdf={vi.fn()} />);
+  expect((view.getByRole('button', { name: '替换阅读 PDF' }) as HTMLButtonElement).disabled).toBe(true);
 });

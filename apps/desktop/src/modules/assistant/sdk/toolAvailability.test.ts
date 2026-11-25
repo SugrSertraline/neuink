@@ -44,6 +44,21 @@ describe('authoritative per-turn tool availability', () => {
     expect(selected.instructions).toContain('search budget is reached');
     expect(tools.search_sciverse_evidence).toBeDefined();
   });
+  it('caps local searches after restoration while retaining reads and an independent external budget', () => {
+    const localTools = { ...tools, search_segments: definition(), search_pdf_text: definition(),
+      read_pdf_pages: definition(), read_segment_content: definition() };
+    const messages = Array.from({ length: 6 }, (_, i) => result(i % 2 ? 'search_segments' : 'search_pdf_text'));
+    const selected = availableTurnTools(localTools, JSON.parse(JSON.stringify(messages)));
+    expect(selected.tools).not.toHaveProperty('search_segments');
+    expect(selected.tools).not.toHaveProperty('search_pdf_text');
+    expect(selected.tools).toHaveProperty('read_pdf_pages');
+    expect(selected.tools).toHaveProperty('read_segment_content');
+    expect(selected.tools).toHaveProperty('note_propose_create');
+    expect(selected.tools).toHaveProperty('search_sciverse_evidence');
+    expect(selected.finish).toBe(false);
+    expect(selected.instructions).toContain('local search budget is reached');
+    expect(availableTurnTools(localTools, messages.slice(0, 5)).tools).toHaveProperty('search_segments');
+  });
   it('stops paging through parsed text at the task read limit while preserving targeted search', () => {
     const messages = [result('read_entry_assistant_context'), result('read_entry_assistant_context')];
     const selected = availableTurnTools(tools, messages, false, 2);

@@ -92,6 +92,8 @@ pub fn run() {
                     .blocking_show();
                 return Err(std::io::Error::other(error).into());
             }
+            neuink_ipc::translation_log::initialize(app.handle());
+            neuink_ipc::initialize_arxiv_gate(app.handle());
             if let Some(windows) = portable_windows {
                 let paths = app.state::<neuink_ipc::storage::PortablePaths>();
                 for window in windows {
@@ -149,8 +151,13 @@ pub fn run() {
         });
     let builder = neuink_ipc::register_commands(builder);
 
-    if let Err(error) = builder.run(context) {
-        eprintln!("error while running tauri application: {error}");
+    match builder.build(context) {
+        Ok(app) => app.run(|_, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                neuink_ipc::commands::deep_research::shutdown();
+            }
+        }),
+        Err(error) => eprintln!("error while running tauri application: {error}"),
     }
     #[cfg(windows)]
     drop(process_guard);

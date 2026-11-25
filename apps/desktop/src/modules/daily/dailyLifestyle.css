@@ -1,0 +1,9 @@
+.meal-picker { width: 100%; max-width: 320px; min-width: 0; margin-inline: auto; }
+.meal-machine { display: flex; flex-direction: column; gap: 10px; align-items: stretch; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--muted); }
+.meal-reel { position: relative; height: 96px; min-width: 0; flex: none; overflow: hidden; border: 1px solid var(--border); border-radius: 3px; background: var(--card); }
+.meal-reel::before { content: ''; position: absolute; top: 32px; height: 32px; left: 0; right: 0; border-block: 1px solid var(--border); pointer-events: none; z-index: 1; }
+.meal-reel::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(var(--card), transparent 36% 64%, var(--card)); border-block: 1px solid var(--border); }
+.meal-reel-item { height: 32px; line-height: 32px; padding: 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; color: var(--foreground); font-size: 13px; font-weight: 500; }
+.meal-reel-item[data-center="true"] { font-weight: 600; background: var(--muted); }
+:root[data-appearance="atelier"] .meal-machine { background: var(--atelier-metal); box-shadow: var(--atelier-control-face); border-color: var(--atelier-control-edge); }
+:root[data-appearance="atelier"] .meal-reel { background: var(--atelier-note-paper); box-shadow: inset 0 3px 5px var(--atelier-shadow), inset 0 -3px 5px var(--atelier-shadow); }

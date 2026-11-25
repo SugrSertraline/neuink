@@ -7,6 +7,7 @@ import { ResearchPaperAction, ResearchPaperActionsProvider } from './ResearchPap
 import { getAssistantBackgroundRuns, setAssistantBackgroundRun, stopAssistantBackgroundRun } from './assistantBackgroundRuns';
 import { ChatMessage } from './ChatMessage';
 import { setAssistantDebug } from '@/shared/lib/assistantDebug';
+import type { PaperLibraryEntry } from '../research/libraryPaperMatch';
 
 vi.mock('@/shared/ipc/researchApi', async original => ({
   ...await original<typeof import('@/shared/ipc/researchApi')>(),
@@ -49,7 +50,8 @@ it('renders the selected paper inside the answer with its own confirmed import a
   const other = { ...paper, id: 'other', title: '未被推荐的候选' };
   const message = { message_id: 'structured', role: 'assistant' as const, created_at: '', source_links: [],
     content: '推荐如下：\n```neuink-papers\n{"items":[{"ref":"research:paper","group":"视觉方向","reason":"与问题相关，但会议归属待核实。"}]}\n```\n覆盖范围有限。',
-    parts: [{ type: 'tool-result' as const, id: 'search', toolName: 'search_papers', summary: '', researchPapers: [other, paper] }] };
+    parts: [{ type: 'tool-call' as const, id: 'search', toolName: 'search_papers', status: 'done' as const },
+      { type: 'tool-result' as const, id: 'search', toolName: 'search_papers', summary: '', researchPapers: [other, paper] }] };
   const view = render(<ToastContext.Provider value={{ notify, dismiss: vi.fn() }}><ResearchPaperActionsProvider root="root">
     <ChatMessage message={message} streaming={false} onOpenSource={vi.fn()} />
   </ResearchPaperActionsProvider></ToastContext.Provider>);
@@ -115,7 +117,7 @@ it.each([{ papers: [] as ResearchPaper[] }, { papers: [{ ...paper, pdf_url: null
   await waitFor(() => expect(view.getByRole('alert')).toBeTruthy());
   expect(runResearchTool).not.toHaveBeenCalled();
 });
-it('shares Sciverse confirmation and completion across chat and reading views', async () => {
+it('shares Sciverse confirmation and completion across chat and reading views after opening candidates', async () => {
   const add = vi.fn().mockResolvedValue({ entryId: 'entry', status: 'created_metadata_only', message: '仅保存元数据，PDF 不可用。HTTP 503 Authorization: Bearer sk-private <html>REMOTE_BODY</html>' });
   const message = { message_id: 'reply', content: '论文 [S1]', role: 'assistant' as const, created_at: '',
     source_links: [{ provider: 'sciverse' as const, doc_id: 'remote', title: '论文', quote: '证据' }] };
@@ -123,6 +125,8 @@ it('shares Sciverse confirmation and completion across chat and reading views', 
     <ChatMessage message={message} streaming={false} onOpenSource={vi.fn()} onAddSciverseSource={add} />
     <ChatMessage message={message} streaming={false} reading onOpenSource={vi.fn()} onAddSciverseSource={add} />
   </ResearchPaperActionsProvider></ToastContext.Provider>);
+  for (const summary of view.getAllByText('检索候选（1）')) fireEvent.click(summary);
+  await waitFor(() => expect(view.getAllByRole('button', { name: '一键加入文库' })).toHaveLength(2));
   fireEvent.click(view.getAllByRole('button', { name: '一键加入文库' })[0]);
   expect(view.getAllByRole('button', { name: '确认添加' })).toHaveLength(2);
   expect(add).not.toHaveBeenCalled();
@@ -156,4 +160,57 @@ it('allows a confirmed import to finish after the view closes and releases its b
   await act(async () => finish({ results: [{ id: 'paper', status: 'imported' }] }));
   expect(getAssistantBackgroundRuns()).toHaveLength(0);
   expect(notify).toHaveBeenCalledTimes(1);
+});
+
+const localEntry: PaperLibraryEntry = { id: 'local-entry', title: '本地改过名字的论文', fields: { research_id: paper.id },
+  pdf: { file_name: 'paper.pdf', content_hash: '', imported_at: '', parse: { status: 'not_started', updated_at: '', message: null, task_id: null, endpoint: null } } };
+function localUi(entries: PaperLibraryEntry[], open: (id: string) => void, status: 'loading' | 'ready' | 'error' = 'ready') {
+  return <ToastContext.Provider value={{ notify, dismiss: vi.fn() }}>
+    <ResearchPaperActionsProvider root="root" entries={entries} libraryStatus={status} onOpenEntry={open}><ResearchPaperAction paper={paper} variant="card" /></ResearchPaperActionsProvider>
+  </ToastContext.Provider>;
+}
+
+it('recognizes cached recommendations already in the catalog and opens them without preview or download', () => {
+  const open = vi.fn(), view = render(localUi([localEntry], open));
+  expect(view.getByText('已在本地')).toBeTruthy();
+  expect(view.queryByRole('button', { name: '添加到本地' })).toBeNull();
+  fireEvent.click(view.getByRole('button', { name: '打开论文' }));
+  expect(open).toHaveBeenCalledExactlyOnceWith('local-entry');
+  expect(previewResearchImport).not.toHaveBeenCalled(); expect(runResearchTool).not.toHaveBeenCalled();
+  view.rerender(localUi([{ ...localEntry, pdf: null }], open));
+  expect(view.getByText('已在本地 · 暂无 PDF')).toBeTruthy();
+  fireEvent.click(view.getByRole('button', { name: '打开条目' }));
+  expect(open).toHaveBeenCalledTimes(2);
+  view.rerender(localUi([], open));
+  expect(view.getByRole('button', { name: '添加到本地' }).hasAttribute('disabled')).toBe(false);
+  view.rerender(localUi([localEntry], open));
+  expect(view.getByRole('button', { name: '打开论文' })).toBeTruthy();
+});
+
+it('does not claim absence or allow import before the catalog is ready', () => {
+  const open = vi.fn(), view = render(localUi([], open, 'loading'));
+  expect(view.getByRole('button', { name: '正在检查本地…' }).hasAttribute('disabled')).toBe(true);
+  view.rerender(localUi([], open, 'error'));
+  expect(view.getByRole('button', { name: '本地状态暂不可用' }).hasAttribute('disabled')).toBe(true);
+  view.rerender(localUi([localEntry], open));
+  expect(view.getByText('已在本地')).toBeTruthy(); expect(previewResearchImport).not.toHaveBeenCalled();
+});
+
+it('rechecks presence when the catalog changes during import confirmation', async () => {
+  const open = vi.fn(), view = render(localUi([], open)); await prepare(view);
+  view.rerender(localUi([localEntry], open));
+  expect(view.queryByRole('button', { name: '确认添加' })).toBeNull();
+  expect(view.getByRole('button', { name: '打开论文' })).toBeTruthy();
+  expect(approveResearchImport).not.toHaveBeenCalled(); expect(runResearchTool).not.toHaveBeenCalled();
+});
+
+it('hands completed import presence back to the live catalog so deleting it does not leave a stale badge', async () => {
+  vi.mocked(runResearchTool).mockResolvedValue({ results: [{ id: paper.id, status: 'imported', entry_id: localEntry.id }] });
+  const open = vi.fn(), view = render(localUi([], open)); await prepare(view);
+  fireEvent.click(view.getByRole('button', { name: '确认添加' }));
+  await view.findByRole('button', { name: '已在本地' });
+  view.rerender(localUi([localEntry], open));
+  expect(view.getByRole('button', { name: '打开论文' })).toBeTruthy();
+  view.rerender(localUi([], open));
+  expect(view.getByRole('button', { name: '添加到本地' }).hasAttribute('disabled')).toBe(false);
 });

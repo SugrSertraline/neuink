@@ -1,20 +1,50 @@
 use super::*;
+use crate::translation_log::{self, Details, Stage};
 
 #[cfg(test)]
 mod tests;
 
 impl LlmClient {
     pub(super) async fn generate_text(&self, system: &str, prompt: &str) -> Result<String, String> {
-        match self.generate_text_streaming(system, prompt).await {
+        let started = Instant::now();
+        let stream = self.generate_text_streaming(system, prompt).await;
+        if let Err(error) = &stream {
+            translation_log::best_effort(
+                &self.profile,
+                Stage::Stream,
+                &error.to_string(),
+                Details {
+                    elapsed_ms: started.elapsed().as_millis() as u64,
+                    input_chars: Some(system.chars().count() + prompt.chars().count()),
+                    ..Details::default()
+                },
+            );
+        }
+        match stream {
             Ok(text) => Ok(text),
             Err(RequestError::RateLimited) => Err(RequestError::RateLimited.to_string()),
-            Err(stream_error) => self
-                .generate_text_once(system, prompt)
-                .await
-                .map_err(|error| match error {
-                    RequestError::RateLimited => error.to_string(),
-                    _ => format!("{error}（流式回退前错误：{stream_error}）"),
-                }),
+            Err(RequestError::Other(error)) if response::terminal(&error) => Err(error),
+            Err(stream_error) => {
+                let started = Instant::now();
+                self.generate_text_once(system, prompt)
+                    .await
+                    .map_err(|error| {
+                        translation_log::best_effort(
+                            &self.profile,
+                            Stage::NonStreaming,
+                            &error.to_string(),
+                            Details {
+                                elapsed_ms: started.elapsed().as_millis() as u64,
+                                input_chars: Some(system.chars().count() + prompt.chars().count()),
+                                ..Details::default()
+                            },
+                        );
+                        match error {
+                            RequestError::RateLimited => error.to_string(),
+                            _ => format!("{error}（流式回退前错误：{stream_error}）"),
+                        }
+                    })
+            }
         }
     }
 
@@ -24,9 +54,10 @@ impl LlmClient {
             system,
             prompt,
             crate::commands::llm_http::ChatFallbacks {
-                max_tokens: Some(8_192),
-                temperature: Some(0.2),
-                top_p: Some(1.0),
+                max_tokens: (self.profile.api_protocol == neuink_config::LlmApiProtocol::Anthropic)
+                    .then_some(4_096),
+                temperature: None,
+                top_p: None,
             },
         )?;
         // 超时最多重试 3 次并逐步放宽；429 在共享请求入口等待重试，耗尽后不切换传输方式。
@@ -51,12 +82,33 @@ impl LlmClient {
                 Err(error) => return Err(error),
             };
             let status = response.status();
-            let body = response.text().await.map_err(|error| error.to_string())?;
+            let body = match timeout(timeout_duration, response.text()).await {
+                Ok(Ok(body)) => body,
+                Ok(Err(error)) => return Err(error.without_url().to_string().into()),
+                Err(_) => {
+                    last_timeout_error = format!(
+                        "LLM response body timed out after {} seconds.",
+                        timeout_duration.as_secs()
+                    );
+                    continue;
+                }
+            };
             if !status.is_success() {
-                return Err(format!("LLM request failed ({status}): {body}").into());
+                let error = format!("LLM request failed ({status})");
+                let mut details = translation_log::response_details(&body);
+                details.http_status = Some(status.as_u16());
+                details.attempt = Some(attempt + 1);
+                translation_log::best_effort(&self.profile, Stage::NonStreaming, &error, details);
+                return Err(error.into());
             }
-            let text =
-                crate::commands::llm_http::parse_chat_response(self.profile.api_protocol, &body)?;
+            let text = response::parse(self.profile.api_protocol, &body).inspect_err(|error| {
+                translation_log::best_effort(
+                    &self.profile,
+                    Stage::NonStreaming,
+                    error,
+                    translation_log::response_details(&body),
+                );
+            })?;
             if let Some(output) = &self.output {
                 output(&text);
             }
@@ -68,9 +120,8 @@ impl LlmClient {
         ).into())
     }
 
-    /// SSE 流式接收一次 LLM 调用。空闲超时（连续 {timeout} 秒收不到任何字节）
-    /// 与整体超时同样触发递增重试；已收到部分内容后中断则直接报错，
-    /// 由上层回退到非流式重试。
+    /// SSE 流式接收一次 LLM 调用。空闲与整体生成时间都有上限；
+    /// 超时后由上层尝试非流式请求，不能因心跳或推理流无限等待。
     async fn generate_text_streaming(
         &self,
         system: &str,
@@ -81,9 +132,10 @@ impl LlmClient {
             system,
             prompt,
             crate::commands::llm_http::ChatFallbacks {
-                max_tokens: Some(8_192),
-                temperature: Some(0.2),
-                top_p: Some(1.0),
+                max_tokens: (self.profile.api_protocol == neuink_config::LlmApiProtocol::Anthropic)
+                    .then_some(4_096),
+                temperature: None,
+                top_p: None,
             },
         )?;
 
@@ -110,7 +162,12 @@ impl LlmClient {
             let status = response.status();
             if !status.is_success() {
                 let body = response.text().await.unwrap_or_default();
-                return Err(format!("LLM request failed ({status}): {body}").into());
+                let error = format!("LLM request failed ({status})");
+                let mut details = translation_log::response_details(&body);
+                details.http_status = Some(status.as_u16());
+                details.attempt = Some(attempt + 1);
+                translation_log::best_effort(&self.profile, Stage::Stream, &error, details);
+                return Err(error.into());
             }
 
             let mut stream = response.bytes_stream();
@@ -118,28 +175,36 @@ impl LlmClient {
             let mut line_buffer = Vec::new();
             let mut raw_body = Vec::new();
             let mut saw_sse_data = false;
+            let mut saw_reasoning = false;
             let mut received_chars = 0usize;
+            let response_deadline = Instant::now() + STREAM_RESPONSE_TIMEOUT;
             loop {
-                let chunk =
-                    match timeout(idle_timeout, tokio_stream::StreamExt::next(&mut stream)).await {
-                        Ok(chunk) => chunk,
-                        Err(_) => {
-                            // 空闲超时：还没收到任何内容就升级超时重试；已有内容则报错，
-                            // 让上层用非流式路径重新完整请求。
-                            if received_chars == 0 {
-                                last_timeout_error = format!(
-                                    "LLM stream idle after {} seconds.",
-                                    idle_timeout.as_secs()
-                                );
-                                break;
-                            }
-                            return Err(format!(
-                                "LLM stream stalled after {received_timeout} seconds of silence.",
-                                received_timeout = idle_timeout.as_secs()
-                            )
-                            .into());
+                let remaining = response_deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return Err(RequestError::Timeout);
+                }
+                let chunk = match timeout(
+                    idle_timeout.min(remaining),
+                    tokio_stream::StreamExt::next(&mut stream),
+                )
+                .await
+                {
+                    Ok(chunk) => chunk,
+                    Err(_) => {
+                        if Instant::now() >= response_deadline {
+                            return Err(RequestError::Timeout);
                         }
-                    };
+                        // 没收到正文就转为非流式请求；已有部分输出也不能无限等待。
+                        if received_chars == 0 {
+                            return Err(RequestError::Timeout);
+                        }
+                        return Err(format!(
+                            "LLM stream stalled after {received_timeout} seconds of silence.",
+                            received_timeout = idle_timeout.as_secs()
+                        )
+                        .into());
+                    }
+                };
                 let Some(chunk) = chunk else {
                     break;
                 };
@@ -153,10 +218,11 @@ impl LlmClient {
                     let line = std::str::from_utf8(&bytes).map_err(|error| error.to_string())?;
                     if let Some(data) = line.trim_end().strip_prefix("data:") {
                         saw_sse_data = true;
-                        crate::commands::llm_http::append_chat_stream_delta(
+                        response::append(
                             self.profile.api_protocol,
                             data,
                             &mut accumulated,
+                            &mut saw_reasoning,
                         )?;
                     }
                 }
@@ -172,10 +238,11 @@ impl LlmClient {
             let tail = std::str::from_utf8(&line_buffer).map_err(|error| error.to_string())?;
             if let Some(data) = tail.trim().strip_prefix("data:") {
                 saw_sse_data = true;
-                crate::commands::llm_http::append_chat_stream_delta(
+                response::append(
                     self.profile.api_protocol,
                     data,
                     &mut accumulated,
+                    &mut saw_reasoning,
                 )?;
                 if let Some(output) = &self.output {
                     output(&accumulated);
@@ -193,9 +260,15 @@ impl LlmClient {
             // 就地解析，避免非流式路径再完整请求一遍（否则每次调用耗时翻倍）。
             if !saw_sse_data && !raw_body.is_empty() {
                 let body = std::str::from_utf8(&raw_body).map_err(|error| error.to_string())?;
-                let text = crate::commands::llm_http::parse_chat_response(
-                    self.profile.api_protocol,
-                    body.trim(),
+                let text = response::parse(self.profile.api_protocol, body.trim()).inspect_err(
+                    |error| {
+                        translation_log::best_effort(
+                            &self.profile,
+                            Stage::Stream,
+                            error,
+                            translation_log::response_details(body),
+                        );
+                    },
                 )?;
                 if let Some(output) = &self.output {
                     output(&text);
@@ -204,6 +277,9 @@ impl LlmClient {
             }
             if !last_timeout_error.is_empty() {
                 continue;
+            }
+            if saw_reasoning {
+                return Err(response::REASONING_ONLY.to_string().into());
             }
             return Err("LLM stream ended without content.".to_string().into());
         }

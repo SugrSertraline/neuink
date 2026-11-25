@@ -18,6 +18,35 @@ function deferred<T>() {
 beforeEach(() => vi.resetModules());
 
 describe('window-local background task projection', () => {
+  it('projects pause and resume without creating another job or losing progress', async () => {
+    const registry = await import('./localBackgroundJobs');
+    await registry.runLocalBackgroundJob(options, async report => {
+      const id = registry.getLocalBackgroundJobs()[0].id;
+      const progress = { current: 2, total: 5, percent: 40 };
+      report(progress, { status: 'paused', message: '阅读详略已暂停' });
+      expect(registry.getLocalBackgroundJobs()[0]).toMatchObject({ id, status: 'paused', progress });
+      report(progress, { status: 'processing', message: '正在生成阅读详略' });
+      expect(registry.getLocalBackgroundJobs()).toHaveLength(1);
+      expect(registry.getLocalBackgroundJobs()[0]).toMatchObject({ id, status: 'processing', progress });
+    });
+    expect(registry.getLocalBackgroundJobs()[0].status).toBe('succeeded');
+  });
+  it('reports measured batch progress and distinguishes cancellation from failure', async () => {
+    const registry = await import('./localBackgroundJobs');
+    await expect(registry.runLocalBackgroundJob(options, async report => {
+      report({ current: 1, total: 3, percent: 33 });
+      expect(registry.getLocalBackgroundJobs()[0].progress.current).toBe(1);
+      throw new DOMException('Canceled', 'AbortError');
+    })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(registry.getLocalBackgroundJobs()[0]).toMatchObject({ status: 'canceled', error: null, progress: { current: 1, total: 3 } });
+  });
+  it('records a declined duplicate PDF as cancellation', async () => {
+    const registry = await import('./localBackgroundJobs');
+    const error = new Error('已取消添加重复的 PDF');
+    error.name = 'PdfDuplicateCancelledError';
+    await expect(registry.runLocalBackgroundJob(options, async () => { throw error; })).rejects.toBe(error);
+    expect(registry.getLocalBackgroundJobs()[0]).toMatchObject({ status: 'canceled', error: null, message: '已取消添加重复的 PDF' });
+  });
   it('tracks real lifetime with stable snapshots, scoped identity and no guessed percentage', async () => {
     const registry = await import('./localBackgroundJobs');
     const task = deferred<string>();
@@ -74,4 +103,30 @@ describe('window-local background task projection', () => {
     expect(registry.getLocalBackgroundJobs()).toHaveLength(24);
     expect(registry.getLocalBackgroundJobs().every(row => row.status === 'succeeded')).toBe(true);
   });
+});
+
+ it('ignores a late progress callback after completion', async () => {
+   const registry = await import('./localBackgroundJobs');
+   let late!: import('./localBackgroundJobs').LocalJobReporter;
+   await registry.runLocalBackgroundJob(options, async report => { late = report; });
+   late({ current: 1, total: 2, percent: 50 }, { status: 'processing' });
+   expect(registry.getLocalBackgroundJobs()[0].status).toBe('succeeded');
+ });
+
+it('coalesces progress bursts but publishes completion immediately', async () => {
+  vi.useFakeTimers();
+  try {
+    const registry = await import('./localBackgroundJobs');
+    const observer = vi.fn();
+    const unsubscribe = registry.subscribeLocalBackgroundJobs(observer);
+    await registry.runLocalBackgroundJob(options, async report => {
+      for (let current = 1; current <= 200; current++) report({ current, total: 200, percent: current / 2 });
+      expect(observer).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(100);
+      expect(observer).toHaveBeenCalledTimes(2);
+    });
+    expect(observer).toHaveBeenCalledTimes(3);
+    expect(registry.getLocalBackgroundJobs()[0].status).toBe('succeeded');
+    unsubscribe();
+  } finally { vi.useRealTimers(); }
 });

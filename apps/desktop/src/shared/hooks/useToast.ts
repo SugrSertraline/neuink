@@ -16,6 +16,7 @@ export type ToastMessage = {
 };
 
 export type ToastInput = {
+  navigation?: { kind: 'cloud-sync'; root: string };
   action?: ReactNode;
   durationMs?: number;
   onDismiss?: () => void;

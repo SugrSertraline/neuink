@@ -5,7 +5,7 @@ const { spawnSync } = require('node:child_process');
 const logFile = process.env.NEUINK_DEV_LOG_FILE;
 const log = logFile ? openSync(logFile, 'a') : null;
 const report = message => log === null ? console.log(message) : writeSync(log, `${message}\n`, null, 'utf8');
-const dataDirectory = path.resolve(process.env.NEUINK_DEV_DATA_DIR || 'D:\\NeuInk\\data');
+const dataDirectory = path.resolve(process.env.NEUINK_DEV_DATA_DIR || path.join(__dirname, '..', '..', '..', 'portable', 'data'));
 try {
 if (!existsSync(path.join(dataDirectory, 'library'))) {
   report(`开发数据目录缺少 library：${dataDirectory}`);

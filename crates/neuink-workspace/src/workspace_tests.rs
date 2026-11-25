@@ -91,6 +91,45 @@ fn imports_pdf_once() {
 }
 
 #[test]
+fn import_pdf_bytes_writes_the_given_bytes_hash_and_file_name() {
+    let root = std::env::temp_dir().join(format!("neuink_workspace_{}", unique_suffix()));
+    let workspace = Workspace::create(&root).unwrap();
+    let entry = workspace.create_entry("A paper").unwrap();
+    let bytes = b"%PDF-1.7 verified candidate";
+
+    let updated = workspace
+        .import_pdf_bytes(&entry.id, "paper-final.pdf", bytes)
+        .unwrap();
+
+    let pdf = updated.pdf.as_ref().unwrap();
+    assert_eq!(pdf.file_name, "paper-final.pdf");
+    assert_eq!(pdf.content_hash, blake3::hash(bytes).to_hex().to_string());
+    assert_eq!(fs::read(workspace.layout.entry_pdf_file(&entry.id)).unwrap(), bytes);
+    assert!(workspace.import_pdf_bytes(&entry.id, "again.pdf", bytes).is_err());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn verified_pdf_bytes_preserve_duplicate_confirmation() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = Workspace::create(root.path()).unwrap();
+    let first = workspace.create_entry("Existing paper").unwrap();
+    let second = workspace.create_entry("Confirmed copy").unwrap();
+    let bytes = b"%PDF-1.7 verified candidate";
+    workspace.import_pdf_bytes(&first.id, "original.pdf", bytes).unwrap();
+
+    let error = workspace.import_pdf_bytes(&second.id, "copy.pdf", bytes).unwrap_err();
+    assert!(matches!(error, WorkspaceError::PdfContentDuplicate(_)));
+    assert!(!workspace.layout.entry_pdf_file(&second.id).exists());
+    let hash = blake3::hash(bytes).to_hex().to_string();
+    let updated = workspace.import_pdf_bytes_with_confirmation(
+        &second.id, "copy.pdf", bytes, Some(&hash),
+    ).unwrap();
+    assert_eq!(updated.pdf.unwrap().content_hash, hash);
+    assert_eq!(fs::read(workspace.layout.entry_pdf_file(&second.id)).unwrap(), bytes);
+}
+
+#[test]
 fn renames_pdf_display_name_without_moving_the_pdf_or_parse_state() {
     let root = std::env::temp_dir().join(format!("neuink_workspace_{}", unique_suffix()));
     let source_pdf = root.with_extension("pdf");
@@ -434,6 +473,58 @@ fn creates_note_source_link_sidecar() {
     assert_eq!(link.sources.len(), 1);
     assert!(links_path.exists());
     fs::remove_file(source_pdf).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn account_parse_result_does_not_replace_another_task() {
+    let root = std::env::temp_dir().join(format!("neuink_account_parse_{}", unique_suffix()));
+    let source_pdf = root.with_extension("pdf");
+    fs::write(&source_pdf, b"%PDF-1.7").unwrap();
+    let workspace = Workspace::create(&root).unwrap();
+    let entry = workspace.create_entry("A paper").unwrap();
+    workspace.import_pdf(&entry.id, &source_pdf).unwrap();
+    for status in [neuink_domain::PdfParseStatus::Queued, neuink_domain::PdfParseStatus::Uploading, neuink_domain::PdfParseStatus::Uploaded] {
+        workspace.set_pdf_parse_state(&entry.id, status, None).unwrap();
+    }
+    workspace.set_pdf_parse_state_with_task(&entry.id, neuink_domain::PdfParseStatus::Parsing, None, Some("current".into()), Some("account".into())).unwrap();
+    assert!(workspace.update_account_parse_state_if_current(&entry.id, "old", "account", neuink_domain::PdfParseStatus::Parsing, neuink_domain::PdfParseStatus::Failed, None).is_err());
+    assert!(workspace.update_account_parse_state_if_current(&entry.id, "current", "different", neuink_domain::PdfParseStatus::Parsing, neuink_domain::PdfParseStatus::Failed, None).is_err());
+    assert!(workspace.update_account_parse_state_if_current(&entry.id, "current", "account", neuink_domain::PdfParseStatus::Uploading, neuink_domain::PdfParseStatus::Failed, None).is_err());
+    assert!(workspace.apply_account_parse_result(&entry.id, "old", "account", b"not a zip", &[]).is_err());
+    assert!(workspace.apply_account_parse_result(&entry.id, "current", "different", b"not a zip", &[]).is_err());
+    assert_eq!(workspace.read_entry(&entry.id).unwrap().pdf.unwrap().parse.task_id.as_deref(), Some("current"));
+    assert!(!workspace.layout().entry_mineru_output_zip(&entry.id).exists());
+    fs::remove_file(source_pdf).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn account_parse_reservation_and_acknowledgement_are_guarded() {
+    use neuink_domain::PdfParseStatus as S;
+    let root = std::env::temp_dir().join(format!("neuink_parse_reservation_{}", unique_suffix()));
+    let source = root.with_extension("pdf");
+    fs::write(&source, b"%PDF-1.7").unwrap();
+    let workspace = Workspace::create(&root).unwrap();
+    let entry = workspace.create_entry("Paper").unwrap();
+    workspace.import_pdf(&entry.id, &source).unwrap();
+    workspace.set_pdf_parse_state(&entry.id, S::Queued, None).unwrap();
+    workspace.set_pdf_parse_state(&entry.id, S::Uploading, None).unwrap();
+    workspace.reserve_account_parse_task(&entry.id, "one", "account").unwrap();
+    workspace.reserve_account_parse_task(&entry.id, "one", "account").unwrap();
+    assert!(workspace.reserve_account_parse_task(&entry.id, "two", "account").is_err());
+    assert!(workspace.reserve_account_parse_task(&entry.id, "one", "other").is_err());
+    workspace.update_account_parse_state_if_current(&entry.id, "one", "account", S::Uploading, S::Parsing, None).unwrap();
+    assert!(workspace.update_account_parse_state_if_current(&entry.id, "one", "account", S::Uploading, S::Parsing, None).is_err());
+    assert_eq!(workspace.read_entry(&entry.id).unwrap().pdf.unwrap().parse.status, S::Parsing);
+    workspace.set_pdf_parse_state(&entry.id, S::Failed, None).unwrap();
+    workspace.set_pdf_parse_state(&entry.id, S::Queued, None).unwrap();
+    workspace.set_pdf_parse_state(&entry.id, S::Uploading, None).unwrap();
+    workspace.reserve_account_parse_task(&entry.id, "old-version", "account").unwrap();
+    workspace.set_pdf_parse_state(&entry.id, S::Uploaded, None).unwrap();
+    assert!(workspace.update_account_parse_state_if_current(&entry.id, "wrong", "account", S::Uploaded, S::Parsing, None).is_err());
+    workspace.update_account_parse_state_if_current(&entry.id, "old-version", "account", S::Uploaded, S::Parsing, None).unwrap();
+    fs::remove_file(source).unwrap();
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -1326,6 +1417,7 @@ fn search_records_include_notes_but_only_succeeded_segments() {
     workspace
         .set_pdf_parse_state(&parsed.id, neuink_domain::PdfParseStatus::Succeeded, None)
         .unwrap();
+    fs::write(&source_pdf, b"%PDF-1.7\npending paper").unwrap();
     workspace.import_pdf(&pending.id, &source_pdf).unwrap();
 
     let parsed_segment = neuink_domain::SourceSegment::new(

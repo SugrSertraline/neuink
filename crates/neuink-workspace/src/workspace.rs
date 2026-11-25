@@ -1,3 +1,5 @@
+#[path = "reading_snapshot.rs"]
+pub(crate) mod reading_snapshot;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     fs,
@@ -79,7 +81,7 @@ impl Workspace {
             ));
         }
         workspace.ensure_layout()?;
-        drop(workspace.begin_tag_safe_mutation()?);
+        workspace.migrate_imported_field_names()?;
         Ok(workspace)
     }
 
@@ -99,6 +101,8 @@ impl Workspace {
     ) -> Result<EntryMeta, WorkspaceError> {
         let mut entry = EntryMeta::new(title)?;
         let _guard = self.begin_tag_safe_mutation()?;
+        let mut fields = fields;
+        neuink_domain::entry_fields::normalize_entry_fields(&mut fields);
         entry.fields = fields;
         entry.tags = self.normalize_entry_tags(tags)?;
         entry.validate()?;
@@ -135,14 +139,17 @@ impl Workspace {
         if !entry_dir.exists() {
             return Err(WorkspaceError::EntryMissing(entry_id.to_string()));
         }
+        if crate::entry_sources::is_source_managed_dir(&entry_dir)? {
+            return Err(WorkspaceError::SourceManagedEntry);
+        }
         let trashed_entry_dir = self.layout.trashed_entry_dir(entry_id);
         if trashed_entry_dir.exists() {
             return Err(WorkspaceError::EntryAlreadyExists(entry_id.to_string()));
         }
-        self.mark_entry_trashed(entry_id)?;
-        fs::create_dir_all(self.layout.trashed_entries_dir())?;
-        fs::rename(entry_dir, trashed_entry_dir)?;
-        Ok(())
+        self.move_entry_with_intent(
+            entry_id,
+            crate::entry_lifecycle::EntryLifecycleAction::Delete,
+        )
     }
 
     pub fn restore_entry(&self, entry_id: &EntryId) -> Result<EntryMeta, WorkspaceError> {
@@ -155,11 +162,10 @@ impl Workspace {
         if !trashed_entry_dir.exists() {
             return Err(WorkspaceError::EntryMissing(entry_id.to_string()));
         }
-        fs::rename(trashed_entry_dir, entry_dir)?;
-        let marker = self.layout.entry_dir(entry_id).join(".trashed.json");
-        if marker.exists() {
-            fs::remove_file(marker)?;
-        }
+        self.move_entry_with_intent(
+            entry_id,
+            crate::entry_lifecycle::EntryLifecycleAction::Restore,
+        )?;
         self.read_entry(entry_id)
     }
 
@@ -168,6 +174,9 @@ impl Workspace {
         let trashed_entry_dir = self.layout.trashed_entry_dir(entry_id);
         if !trashed_entry_dir.exists() {
             return Err(WorkspaceError::EntryMissing(entry_id.to_string()));
+        }
+        if crate::entry_sources::is_source_managed_dir(&trashed_entry_dir)? {
+            return Err(WorkspaceError::SourceManagedEntry);
         }
         fs::remove_dir_all(trashed_entry_dir)?;
         Ok(())
@@ -204,10 +213,22 @@ impl Workspace {
             frontmatter_title,
             title
         );
-        atomic_write(note_path, body.as_bytes())?;
+        let note_change = self.content_change(
+            crate::content_transaction::ContentTarget::NoteBody {
+                entry_id: entry_id.clone(),
+                note_id: note_id.clone(),
+            },
+            body.into_bytes(),
+        )?;
         entry.contents.push(ContentItem::Note { note_id, title });
         entry.updated_at = Utc::now();
-        atomic_write_json(self.layout.entry_meta_file(entry_id), &entry)?;
+        let meta_change = self.content_change(
+            crate::content_transaction::ContentTarget::EntryMeta {
+                entry_id: entry_id.clone(),
+            },
+            serde_json::to_vec_pretty(&entry)?,
+        )?;
+        self.commit_content_transaction(vec![note_change, meta_change])?;
         Ok(entry)
     }
 
@@ -278,22 +299,59 @@ impl Workspace {
         entry_id: &EntryId,
         src_path: impl Into<PathBuf>,
     ) -> Result<EntryMeta, WorkspaceError> {
-        let _guard = self.begin_tag_safe_mutation()?;
+        self.import_pdf_with_confirmation(entry_id, src_path, None)
+    }
+
+    pub fn import_pdf_with_confirmation(
+        &self,
+        entry_id: &EntryId,
+        src_path: impl Into<PathBuf>,
+        confirmed_hash: Option<&str>,
+    ) -> Result<EntryMeta, WorkspaceError> {
         let src_path = src_path.into();
+        let bytes = fs::read(&src_path)?;
+        let file_name = src_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("paper.pdf")
+            .to_string();
+        self.import_pdf_bytes_with_confirmation(entry_id, &file_name, &bytes, confirmed_hash)
+    }
+
+    /// Writes `bytes` as the entry's PDF. Callers that verified a candidate pass
+    /// the exact bytes they checked, so the file written is the file verified.
+    pub fn import_pdf_bytes(
+        &self,
+        entry_id: &EntryId,
+        file_name: &str,
+        bytes: &[u8],
+    ) -> Result<EntryMeta, WorkspaceError> {
+        self.import_pdf_bytes_with_confirmation(entry_id, file_name, bytes, None)
+    }
+
+    pub fn import_pdf_bytes_with_confirmation(
+        &self,
+        entry_id: &EntryId,
+        file_name: &str,
+        bytes: &[u8],
+        confirmed_hash: Option<&str>,
+    ) -> Result<EntryMeta, WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         let mut entry = self.read_entry_meta(entry_id)?;
         if entry.pdf.is_some() {
             return Err(WorkspaceError::PdfAlreadyExists(entry_id.to_string()));
         }
 
-        let bytes = fs::read(&src_path)?;
-        atomic_write(self.layout.entry_pdf_file(entry_id), &bytes)?;
+        let content_hash = blake3::hash(bytes).to_hex().to_string();
+        if confirmed_hash != Some(content_hash.as_str()) {
+            if let Some(duplicate) = self.find_pdf_duplicate(&content_hash)? {
+                return Err(WorkspaceError::PdfContentDuplicate(duplicate.title));
+            }
+        }
+        atomic_write(self.layout.entry_pdf_file(entry_id), bytes)?;
         entry.pdf = Some(PdfAsset {
-            file_name: src_path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("paper.pdf")
-                .to_string(),
-            content_hash: blake3::hash(&bytes).to_hex().to_string(),
+            file_name: file_name.to_string(),
+            content_hash,
             imported_at: Utc::now(),
             parse: PdfParseState::not_started(),
         });
@@ -373,17 +431,66 @@ impl Workspace {
         Ok(entry)
     }
 
+    /// Apply a network response only while the same account task still owns the entry.
+    pub fn update_account_parse_state_if_current(
+        &self, entry_id: &EntryId, task_id: &str, endpoint: &str,
+        expected: PdfParseStatus, status: PdfParseStatus, message: Option<String>,
+    ) -> Result<EntryMeta, WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
+        let mut entry = self.read_entry_meta(entry_id)?;
+        let pdf = entry.pdf.as_mut().ok_or_else(|| WorkspaceError::PdfMissing(entry_id.to_string()))?;
+        if pdf.parse.status != expected || pdf.parse.task_id.as_deref() != Some(task_id)
+            || pdf.parse.endpoint.as_deref() != Some(endpoint) {
+            return Err(WorkspaceError::InvalidPdfParseTransition("解析任务已变化，请重新读取状态".into()));
+        }
+        // Submission and its acknowledgement form one durable transition; an
+        // intermediate Uploaded state would strand the task after a crash.
+        if expected != status && !PdfParseState::can_transition(expected, status)
+            && !(expected == PdfParseStatus::Uploading && status == PdfParseStatus::Parsing) {
+            return Err(WorkspaceError::InvalidPdfParseTransition(format!("{expected:?} -> {status:?}")));
+        }
+        pdf.parse.status = status;
+        pdf.parse.updated_at = Utc::now();
+        pdf.parse.message = message;
+        entry.updated_at = Utc::now();
+        atomic_write_json(self.layout.entry_meta_file(entry_id), &entry)?;
+        Ok(entry)
+    }
+
+    /// Reserve the request identity before upload, without replacing another task.
+    pub fn reserve_account_parse_task(&self, entry_id: &EntryId, task_id: &str, endpoint: &str) -> Result<EntryMeta, WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
+        let mut entry = self.read_entry_meta(entry_id)?;
+        let pdf = entry.pdf.as_mut().ok_or_else(|| WorkspaceError::PdfMissing(entry_id.to_string()))?;
+        if pdf.parse.status != PdfParseStatus::Uploading
+            || (pdf.parse.task_id.is_some() && (pdf.parse.task_id.as_deref() != Some(task_id) || pdf.parse.endpoint.as_deref() != Some(endpoint)))
+            || (pdf.parse.task_id.is_none() && pdf.parse.endpoint.is_some()) {
+            return Err(WorkspaceError::InvalidPdfParseTransition("解析任务已变化，请重新读取状态".into()));
+        }
+        pdf.parse.task_id = Some(task_id.to_string());
+        pdf.parse.endpoint = Some(endpoint.to_string());
+        pdf.parse.message = Some("准备上传到账号解析服务".into());
+        pdf.parse.updated_at = Utc::now();
+        entry.updated_at = Utc::now();
+        atomic_write_json(self.layout.entry_meta_file(entry_id), &entry)?;
+        Ok(entry)
+    }
+
     pub fn write_segments(
         &self,
         entry_id: &EntryId,
         segments: &[SourceSegment],
     ) -> Result<(), WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         self.read_entry_meta(entry_id)?;
-        atomic_write_json(self.layout.entry_segments_file(entry_id), &segments)
+        atomic_write_json(self.layout.entry_segments_file(entry_id), &segments)?;
+        reading_snapshot::invalidate(self, entry_id)
     }
 
     pub fn clear_segments(&self, entry_id: &EntryId) -> Result<(), WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         self.read_entry_meta(entry_id)?;
+        reading_snapshot::invalidate(self, entry_id)?;
         let path = self.layout.entry_segments_file(entry_id);
         if path.exists() {
             fs::remove_file(path)?;
@@ -409,8 +516,16 @@ impl Workspace {
         entry_id: &EntryId,
         translation: &EntryTranslation,
     ) -> Result<(), WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         self.read_entry_meta(entry_id)?;
-        atomic_write_json(self.layout.entry_translation_file(entry_id), translation)
+        if &translation.entry_id != entry_id {
+            return Err(WorkspaceError::ContentTransaction("译文所属条目不一致".into()));
+        }
+        let change = self.content_change(
+            crate::content_transaction::ContentTarget::EntryTranslation { entry_id: entry_id.clone() },
+            serde_json::to_vec_pretty(translation)?,
+        )?;
+        self.commit_content_transaction(vec![change])
     }
 
     pub fn write_mineru_output_zip(
@@ -425,6 +540,25 @@ impl Workspace {
         atomic_write(self.layout.entry_mineru_output_zip(entry_id), zip_bytes)?;
         self.extract_mineru_output_zip(entry_id, zip_bytes)?;
         self.promote_mineru_output_artifacts(entry_id)
+    }
+
+    /// Apply only to the task that still owns this entry. The metadata lock
+    /// prevents a concurrent retry or cancellation from replacing its identity.
+    pub fn apply_account_parse_result(&self, entry_id: &EntryId, task_id: &str, endpoint: &str,
+        zip_bytes: &[u8], segments: &[SourceSegment]) -> Result<EntryMeta, WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
+        let mut entry = self.read_entry_meta(entry_id)?;
+        let pdf = entry.pdf.as_mut().ok_or_else(|| WorkspaceError::PdfMissing(entry_id.to_string()))?;
+        if pdf.parse.status != PdfParseStatus::Parsing || pdf.parse.task_id.as_deref() != Some(task_id)
+            || pdf.parse.endpoint.as_deref() != Some(endpoint) {
+            return Err(WorkspaceError::PdfQueue("解析任务已变化，未覆盖结果".into()));
+        }
+        pdf.parse.status = PdfParseStatus::Succeeded;
+        pdf.parse.updated_at = Utc::now();
+        pdf.parse.message = Some(format!("解析完成：{} 个片段", segments.len()));
+        entry.updated_at = Utc::now();
+        self.commit_account_parse_result(entry_id, zip_bytes, &entry, segments)?;
+        Ok(entry)
     }
 
     pub fn write_mineru_output_response(
@@ -479,6 +613,9 @@ impl Workspace {
         entry_id: &EntryId,
     ) -> Result<Option<Value>, WorkspaceError> {
         self.read_entry_meta(entry_id)?;
+        if reading_snapshot::is_normalized(self, entry_id)? {
+            return Ok(None);
+        }
         let path = self
             .layout
             .entry_mineru_output_dir(entry_id)
@@ -509,8 +646,10 @@ impl Workspace {
         }
         let bytes = fs::read(path)?;
         let mut segments: Vec<SourceSegment> = serde_json::from_slice(&bytes)?;
-        self.enrich_segments_with_empty_mineru_regions(entry_id, &mut segments);
-        self.enrich_segments_with_mineru_assets(entry_id, &mut segments);
+        if !reading_snapshot::is_normalized(self, entry_id)? {
+            self.enrich_segments_with_empty_mineru_regions(entry_id, &mut segments);
+            self.enrich_segments_with_mineru_assets(entry_id, &mut segments);
+        }
         Ok(segments)
     }
 
@@ -631,6 +770,7 @@ impl Workspace {
         importance: AnnotationImportance,
         text_selection: Option<AnnotationTextSelection>,
     ) -> Result<Vec<Annotation>, WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         let mut annotations = self.read_annotations(entry_id)?;
         let annotation = match text_selection {
             Some(selection)
@@ -663,6 +803,7 @@ impl Workspace {
         content: String,
         importance: AnnotationImportance,
     ) -> Result<Vec<Annotation>, WorkspaceError> {
+        let _guard = self.begin_tag_safe_mutation()?;
         let mut annotations = self.read_annotations(entry_id)?;
         let annotation_index = annotations
             .iter()
@@ -695,16 +836,15 @@ impl Workspace {
         entry_id: &EntryId,
         annotation_id: &AnnotationId,
     ) -> Result<Vec<Annotation>, WorkspaceError> {
-        let mut annotations = self.read_annotations(entry_id)?;
+        let _guard = self.begin_tag_safe_mutation()?;
+        let annotations = self.read_annotations(entry_id)?;
         let deleted = annotations
             .iter()
             .find(|annotation| annotation.annotation_id == *annotation_id)
             .cloned()
             .ok_or_else(|| WorkspaceError::AnnotationMissing(annotation_id.to_string()))?;
         self.store_deleted_annotation(entry_id, deleted)?;
-        annotations.retain(|annotation| annotation.annotation_id != *annotation_id);
-        atomic_write_json(self.layout.entry_annotations_file(entry_id), &annotations)?;
-        Ok(annotations)
+        self.read_annotations(entry_id)
     }
 
     pub fn upsert_segment_note(
@@ -783,16 +923,14 @@ impl Workspace {
     ) -> Result<Vec<SegmentBlockNote>, WorkspaceError> {
         let _guard = self.begin_tag_safe_mutation()?;
         let segment_uid = self.resolve_source_segment(entry_id, &segment_uid)?.uid;
-        let mut notes = self.read_segment_notes(entry_id)?;
+        let notes = self.read_segment_notes(entry_id)?;
         let deleted = notes
             .iter()
             .find(|note| note.segment_uid == segment_uid)
             .cloned()
             .ok_or_else(|| WorkspaceError::SegmentMissing(segment_uid.to_string()))?;
         self.store_deleted_segment_note(entry_id, deleted)?;
-        notes.retain(|note| note.segment_uid != segment_uid);
-        atomic_write_json(self.layout.entry_segment_notes_file(entry_id), &notes)?;
-        Ok(notes)
+        self.read_segment_notes(entry_id)
     }
 
     pub fn entry_pdf_path(&self, entry_id: &EntryId) -> Result<PathBuf, WorkspaceError> {
@@ -839,39 +977,7 @@ impl Workspace {
             .read_empty_mineru_paragraph_regions(entry_id)
             .unwrap_or_default();
 
-        for empty_region in empty_regions {
-            if segments.iter().any(|segment| {
-                segment.page_idx == empty_region.page_idx
-                    && segment.segment_type == SegmentType::Paragraph
-                    && (bboxes_match(segment.bbox, Some(empty_region.bbox))
-                        || non_empty_segment_overlaps_empty_region(segment, empty_region.bbox))
-            }) {
-                continue;
-            }
-
-            segments.push(SourceSegment {
-                uid: SegmentUid::from_string(format!(
-                    "mineru-empty-v2-p{}-{:.0}-{:.0}-{:.0}-{:.0}",
-                    empty_region.page_idx,
-                    empty_region.bbox[0],
-                    empty_region.bbox[1],
-                    empty_region.bbox[2],
-                    empty_region.bbox[3]
-                )),
-                segment_type: SegmentType::Paragraph,
-                page_idx: empty_region.page_idx,
-                bbox: Some(empty_region.bbox),
-                text: String::new(),
-                markdown: None,
-                asset_path: None,
-                raw_type: Some("paragraph".to_string()),
-                sub_type: None,
-                block_role: None,
-                mineru_metadata: Default::default(),
-                continuation_group_id: None,
-                visual_group_id: None,
-            });
-        }
+        reading_snapshot::add_empty_regions(segments, empty_regions);
     }
 
     fn read_empty_mineru_paragraph_regions(
@@ -911,49 +1017,7 @@ impl Workspace {
     ) {
         let asset_refs = self.read_mineru_asset_refs(entry_id).unwrap_or_default();
 
-        for segment in segments.iter_mut() {
-            if segment.asset_path.is_none() {
-                segment.asset_path = mineru_asset_path_from_text(
-                    segment.markdown.as_deref().unwrap_or(segment.text.as_str()),
-                );
-            }
-            let existing_asset_path = segment.asset_path.clone();
-
-            let best = asset_refs
-                .iter()
-                .filter(|asset_ref| {
-                    asset_ref.page_idx == segment.page_idx
-                        && asset_ref.segment_type == segment.segment_type
-                        && existing_asset_path
-                            .as_deref()
-                            .is_none_or(|path| path == asset_ref.asset_path)
-                })
-                .filter_map(|asset_ref| {
-                    asset_ref
-                        .match_score(segment)
-                        .map(|score| (score, asset_ref))
-                })
-                .min_by_key(|(score, _)| *score);
-
-            if let Some((_, asset_ref)) = best {
-                if segment.asset_path.is_none() {
-                    segment.asset_path = Some(asset_ref.asset_path.clone());
-                }
-                if segment.raw_type.is_none() {
-                    segment.raw_type = Some(asset_ref.raw_type.clone());
-                }
-                if segment.sub_type.is_none() {
-                    segment.sub_type = asset_ref.sub_type.clone();
-                }
-                if segment.block_role.is_none() {
-                    segment.block_role = Some("body".to_string());
-                }
-                if segment.visual_group_id.is_none() {
-                    segment.visual_group_id = asset_ref.visual_group_id();
-                }
-                enrich_visual_segment_text(segment, asset_ref);
-            }
-        }
+        reading_snapshot::add_assets(segments, asset_refs);
     }
 
     fn read_mineru_asset_refs(
@@ -1064,60 +1128,63 @@ impl Workspace {
     }
 
     fn promote_mineru_output_artifacts(&self, entry_id: &EntryId) -> Result<(), WorkspaceError> {
-        let output_dir = self.layout.entry_mineru_output_dir(entry_id);
+        self.promote_mineru_output_directory(&self.layout.entry_mineru_output_dir(entry_id))
+    }
+
+    pub(crate) fn promote_mineru_output_directory(&self, output_dir: &std::path::Path) -> Result<(), WorkspaceError> {
         if !output_dir.exists() {
             return Ok(());
         }
 
         promote_first_matching_file(
-            &output_dir,
+            output_dir,
             &output_dir.join("paper.md"),
             &[".md"],
             &["_layout.pdf", "_span.pdf"],
         )?;
         promote_first_matching_file(
-            &output_dir,
+            output_dir,
             &output_dir.join("paper_middle.json"),
             &["_middle.json"],
             &[],
         )?;
         promote_first_matching_file(
-            &output_dir,
+            output_dir,
             &output_dir.join("paper_model.json"),
             &["_model.json"],
             &[],
         )?;
         promote_first_matching_file(
-            &output_dir,
+            output_dir,
             &output_dir.join("paper_content_list.json"),
             &["_content_list.json"],
             &["_content_list_v2.json"],
         )?;
         promote_first_matching_file(
-            &output_dir,
+            output_dir,
             &output_dir.join("paper_content_list_v2.json"),
             &["_content_list_v2.json"],
             &[],
         )?;
         promote_first_matching_file(
-            &output_dir,
+            output_dir,
             &output_dir.join("paper_layout.pdf"),
             &["_layout.pdf"],
             &[],
         )?;
         promote_first_matching_file(
-            &output_dir,
+            output_dir,
             &output_dir.join("paper_span.pdf"),
             &["_span.pdf"],
             &[],
         )?;
         promote_first_matching_file(
-            &output_dir,
+            output_dir,
             &output_dir.join("paper_origin.pdf"),
             &["_origin.pdf"],
             &[],
         )?;
-        promote_images_to_root(&output_dir)?;
+        promote_images_to_root(output_dir)?;
 
         Ok(())
     }
@@ -1830,7 +1897,7 @@ fn non_empty(value: String) -> Option<String> {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct WorkspaceFile {
     #[serde(default)]
-    schema_version: u16,
+    pub(crate) schema_version: u16,
     #[serde(default)]
     pub(crate) tags: Vec<TagMeta>,
     #[serde(default)]

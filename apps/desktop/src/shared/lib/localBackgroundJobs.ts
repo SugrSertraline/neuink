@@ -1,4 +1,4 @@
-import type { Job, JobScope } from '@/shared/ipc/workspaceApi';
+import type { Job, JobProgress, JobScope } from '@/shared/ipc/workspaceApi';
 import { assistantErrorDiagnostic } from './assistantDebug';
 import { recentBackgroundJobs } from './backgroundJobs';
 
@@ -12,6 +12,8 @@ type LocalJobOptions = {
   failureMessage: string;
 };
 
+export type LocalJobReporter = (progress: JobProgress, update?: { status?: 'processing' | 'paused'; message?: string }) => void;
+
 // A window-local projection, not another executor or persistent task queue.
 // Keeping it outside a reader component lets an in-flight selection outlive its toolbar.
 let jobs: Job[] = [];
@@ -24,15 +26,26 @@ export function subscribeLocalBackgroundJobs(listener: () => void): () => void {
   return () => { listeners.delete(listener); };
 }
 
-function publish(job: Job): void {
-  jobs = recentBackgroundJobs([job, ...jobs.filter(current => current.id !== job.id)], 24);
+let notificationTimer: ReturnType<typeof setTimeout> | undefined;
+function notifyListeners() {
+  if (notificationTimer !== undefined) clearTimeout(notificationTimer);
+  notificationTimer = undefined;
   for (const listener of [...listeners]) {
-    // A disposed/broken display subscriber must never cancel the real operation.
-    try { listener(); } catch { /* Task state is available to the next subscriber. */ }
+    try { listener(); } catch { /* A display subscriber cannot cancel the real operation. */ }
+  }
+}
+export function publishLocalBackgroundJob(job: Job): void {
+  const previous = jobs.find(current => current.id === job.id);
+  jobs = recentBackgroundJobs([job, ...jobs.filter(current => current.id !== job.id)], 24);
+  // Keep true state immediately readable, while limiting progress-only UI updates to 10 Hz.
+  if (!previous || previous.status !== job.status || !['processing', 'queued'].includes(job.status)) {
+    notifyListeners();
+  } else if (notificationTimer === undefined) {
+    notificationTimer = setTimeout(notifyListeners, 100);
   }
 }
 
-export async function runLocalBackgroundJob<T>(options: LocalJobOptions, execute: () => Promise<T>): Promise<T> {
+export async function runLocalBackgroundJob<T>(options: LocalJobOptions, execute: (report: LocalJobReporter) => Promise<T>): Promise<T> {
   const now = new Date().toISOString();
   let job: Job = {
     id: `${options.idPrefix ?? 'local-task'}:${crypto.randomUUID()}`,
@@ -45,17 +58,25 @@ export async function runLocalBackgroundJob<T>(options: LocalJobOptions, execute
     created_at: now,
     updated_at: now
   };
-  publish(job);
+  let finished = false;
+  publishLocalBackgroundJob(job);
   try {
-    const result = await execute();
+    const result = await execute((progress, update) => {
+      if (finished) return;
+      job = { ...job, ...update, progress, updated_at: new Date().toISOString() };
+      publishLocalBackgroundJob(job);
+    });
     job = { ...job, status: 'succeeded', message: options.successMessage };
     return result;
   } catch (error) {
     // Only an allowlisted category/status survives in the task registry. The
     // owning UI still receives its original exception and applies its own policy.
-    job = { ...job, status: 'failed', message: options.failureMessage, error: assistantErrorDiagnostic(error) };
+    const duplicateCanceled = error instanceof Error && error.name === 'PdfDuplicateCancelledError';
+    const canceled = (error instanceof DOMException && error.name === 'AbortError') || duplicateCanceled;
+    job = { ...job, status: canceled ? 'canceled' : 'failed', message: duplicateCanceled ? '已取消添加重复的 PDF' : canceled ? '操作已停止，已完成的内容保留' : options.failureMessage, error: canceled ? null : assistantErrorDiagnostic(error) };
     throw error;
   } finally {
-    publish({ ...job, updated_at: new Date().toISOString() });
+    finished = true;
+    publishLocalBackgroundJob({ ...job, updated_at: new Date().toISOString() });
   }
 }
