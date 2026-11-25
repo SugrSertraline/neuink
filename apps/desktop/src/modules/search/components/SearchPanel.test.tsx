@@ -10,7 +10,21 @@ import { SearchPanel } from './SearchPanel';
 const mocks = vi.hoisted(() => ({
   rebuildSearchIndex: vi.fn(),
   getVisualIndexStatus: vi.fn(),
-  prepareVisualSearchIndex: vi.fn()
+  prepareVisualSearchIndex: vi.fn(),
+  searchIndexStatus: {
+    scope: 'global' as const,
+    semantic_status: 'needs_build' as const,
+    document_count: 10,
+    semantic_document_count: 10,
+    records_fingerprint: 'fingerprint',
+    keyword_memory_cache_ready: false,
+    semantic_memory_cache_ready: false,
+    semantic_disk_cache_ready: false,
+    semantic_disk_cache_path: 'semantic.vectors.json',
+    semantic_disk_cache_record_count: null as number | null,
+    semantic_disk_cache_modified_at_ms: null as number | null,
+    message: '待构建向量 · 10'
+  }
 }));
 
 vi.mock('@/shared/ipc/workspaceApi', async (importOriginal) => ({
@@ -41,26 +55,27 @@ vi.mock('../hooks/useGlobalSearch', () => ({
 vi.mock('../hooks/useSearchIndexStatus', () => ({
   useSearchIndexStatus: () => ({
     searchIndexError: null,
-    searchIndexStatus: {
-      scope: 'global',
-      semantic_status: 'needs_build',
-      document_count: 10,
-      semantic_document_count: 10,
-      records_fingerprint: 'fingerprint',
-      keyword_memory_cache_ready: false,
-      semantic_memory_cache_ready: false,
-      semantic_disk_cache_ready: false,
-      semantic_disk_cache_path: 'semantic.vectors.json',
-      semantic_disk_cache_record_count: null,
-      semantic_disk_cache_modified_at_ms: null,
-      message: '待构建向量 · 10'
-    },
+    searchIndexStatus: mocks.searchIndexStatus,
     setSearchIndexError: vi.fn(),
     setSearchIndexStatus: vi.fn()
   })
 }));
 
 beforeEach(() => {
+  mocks.searchIndexStatus = {
+    scope: 'global',
+    semantic_status: 'needs_build',
+    document_count: 10,
+    semantic_document_count: 10,
+    records_fingerprint: 'fingerprint',
+    keyword_memory_cache_ready: false,
+    semantic_memory_cache_ready: false,
+    semantic_disk_cache_ready: false,
+    semantic_disk_cache_path: 'semantic.vectors.json',
+    semantic_disk_cache_record_count: null,
+    semantic_disk_cache_modified_at_ms: null,
+    message: '待构建向量 · 10'
+  };
   mocks.rebuildSearchIndex.mockReset();
   mocks.getVisualIndexStatus.mockReset();
   mocks.getVisualIndexStatus.mockResolvedValue({ built: false, snapshot_count: 0, updated_at_ms: null });
@@ -126,5 +141,57 @@ describe('SearchPanel vector build consent', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '开始构建视觉索引' }));
     await waitFor(() => expect(mocks.prepareVisualSearchIndex).toHaveBeenCalledWith('D:\\workspace'));
+  });
+
+  it('offers an incremental update when a same-model cache already exists', () => {
+    mocks.searchIndexStatus = {
+      ...mocks.searchIndexStatus,
+      document_count: 743,
+      semantic_document_count: 743,
+      semantic_disk_cache_record_count: 699,
+      semantic_disk_cache_modified_at_ms: 1,
+      message: '待增量更新 · 已缓存 699/743'
+    };
+
+    render(
+      <ToastContext.Provider value={{ dismiss: vi.fn(), notify: vi.fn(() => 'toast') }}>
+        <SearchPanel root={'D:\\workspace'} status="ready" onOpenResult={vi.fn()} />
+      </ToastContext.Provider>
+    );
+
+    expect(screen.queryByRole('button', { name: '构建' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '更新' }));
+    expect(screen.getByText(/已有 699 条本地向量缓存，将增量补齐至 743 条/)).toBeTruthy();
+    expect(screen.queryByText(/首次构建可能需要数分钟/)).toBeNull();
+    expect(screen.getByRole('button', { name: '开始更新' })).toBeTruthy();
+  });
+
+  it('does not announce a successful build when the index still needs work', async () => {
+    const notify = vi.fn(() => 'toast');
+    mocks.rebuildSearchIndex.mockResolvedValue({
+      rebuilt_vector_count: 743,
+      status: {
+        ...mocks.searchIndexStatus,
+        document_count: 743,
+        semantic_document_count: 743,
+        semantic_disk_cache_record_count: 699,
+        message: '待增量更新 · 已缓存 699/743'
+      }
+    });
+
+    render(
+      <ToastContext.Provider value={{ dismiss: vi.fn(), notify }}>
+        <SearchPanel root={'D:\\workspace'} status="ready" onOpenResult={vi.fn()} />
+      </ToastContext.Provider>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '构建' }));
+    fireEvent.click(screen.getByRole('button', { name: '开始构建' }));
+    await waitFor(() => expect(notify).toHaveBeenCalled());
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({
+      tone: 'info',
+      title: '资料库在构建期间有新变更'
+    }));
   });
 });

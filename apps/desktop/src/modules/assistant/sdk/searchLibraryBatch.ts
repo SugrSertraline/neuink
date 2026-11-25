@@ -2,8 +2,10 @@ import type { ConversationSourceLink } from '@/shared/ipc/assistantApi';
 import {
   searchSegmentsBatch,
   searchUnified,
+  searchUnifiedBatch,
   type SearchResults,
   type SearchSegmentsBatchItem,
+  type UnifiedSearchRequest,
   type UnifiedSearchResponse
 } from '@/shared/ipc/workspaceApi';
 import { formatSearchSegmentsOutput } from './toolSupport';
@@ -12,8 +14,8 @@ import type { TaskSearchItem, TaskSearchOutcome, TaskSearchRequest } from './sea
 /**
  * Host opt-in for composed retrieval (`search_unified`): document routing, named carrier
  * binding, the visual sidecar vote, and evidence inside the routed documents.
- * Absent keeps the batch path. One native call runs per task; the backend caches the
- * prepared index, so the repeated preparation stays a cache hit.
+ * Absent keeps the segment batch path. Several unified tasks share one
+ * `search_unified_batch` call. A single task stays on `search_unified`.
  */
 export type UnifiedRetrievalConfig = {
   headUnits?: number;
@@ -172,26 +174,40 @@ export function createSearchLibraryBatch({
     if (requests.length === 0) return [];
     abortSignal?.throwIfAborted();
     if (unifiedRetrieval) {
+      const toUnified = (request: TaskSearchRequest): UnifiedSearchRequest => ({
+        question: request.query,
+        ...(request.routing_query ? { routing_question: request.routing_query } : {}),
+        english_query: request.english_query,
+        sub_questions: request.sub_queries ?? [],
+        scope_entry_ids: request.scope_entry_ids ?? [],
+        mandated_entry_ids: request.mandated_entry_ids ?? [],
+        section_filter: request.section_filter,
+        segment_types: request.segment_types ?? [],
+        mode: 'hybrid',
+        top_k: request.top_k,
+        head_units: unifiedRetrieval.headUnits,
+        max_documents: request.max_documents ?? unifiedRetrieval.maxDocuments,
+        bind_carriers: unifiedRetrieval.bindCarriers
+      });
+      if (requests.length > 1) {
+        const responses = await raceWithAbort(
+          searchUnifiedBatch(root, requests.map(toUnified)),
+          abortSignal
+        );
+        abortSignal?.throwIfAborted();
+        return requests.map((request, index) => {
+          const response = responses[index];
+          return {
+            task_id: request.task_id,
+            outcome: response
+              ? outcomeFromUnified(response, request, addSource, abortSignal)
+              : MALFORMED_RESULT
+          };
+        });
+      }
       const pairs = await Promise.all(
         requests.map(async (request) => {
-          const response = await raceWithAbort(
-            searchUnified(root, {
-              question: request.query,
-              ...(request.routing_query ? { routing_question: request.routing_query } : {}),
-              english_query: request.english_query,
-              sub_questions: request.sub_queries ?? [],
-              scope_entry_ids: request.scope_entry_ids ?? [],
-              mandated_entry_ids: request.mandated_entry_ids ?? [],
-              section_filter: request.section_filter,
-              segment_types: request.segment_types ?? [],
-              mode: 'hybrid',
-              top_k: request.top_k,
-              head_units: unifiedRetrieval.headUnits,
-              max_documents: request.max_documents ?? unifiedRetrieval.maxDocuments,
-              bind_carriers: unifiedRetrieval.bindCarriers
-            }),
-            abortSignal
-          );
+          const response = await raceWithAbort(searchUnified(root, toUnified(request)), abortSignal);
           return { request, response };
         })
       );

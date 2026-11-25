@@ -1304,6 +1304,16 @@ export function searchUnified(
   });
 }
 
+/** Several composed searches that share one index preparation and one visual channel. */
+export function searchUnifiedBatch(
+  root: string,
+  tasks: UnifiedSearchRequest[]
+): Promise<UnifiedSearchResponse[]> {
+  return invoke<UnifiedSearchResponse[]>('search_unified_batch', {
+    request: { root, tasks }
+  });
+}
+
 /** How visual votes enter the document order. */
 export type VisualFusionMode = 'weighted' | 'append_gated';
 

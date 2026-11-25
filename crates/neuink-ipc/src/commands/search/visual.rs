@@ -140,6 +140,8 @@ impl VisualRecall for VisualChannel {
 
 const VISUAL_PROVIDER_CACHE_TTL: Duration = Duration::from_secs(60);
 const VISUAL_UNAVAILABLE_CACHE_TTL: Duration = Duration::from_secs(30);
+/// After a query embed times out or fails, skip further HTTP for this model.
+const VISUAL_QUERY_COOLDOWN: Duration = Duration::from_secs(30);
 const FAST_INDEX_MISSING_PROVIDER: &str = "visual-index-missing";
 
 /// Cheap local stat check (`cache/search/visual-*.vectors.{bin,json}`) used by query
@@ -191,11 +193,16 @@ pub fn index_missing_provider() -> Arc<dyn VisualEmbeddingProvider> {
     Arc::new(IndexMissingVisualProvider)
 }
 
-/// Clears cached visual providers (both positive and negative entries).
-/// Called when visual settings change or the local visual sidecar is started.
+/// Clears cached visual providers (both positive and negative entries) and the
+/// query-embed cooldown, so a settings change or a service start is probed at once.
 pub fn invalidate_provider_cache() {
     if let Some(cache) = VISUAL_PROVIDER_CACHE.get() {
         if let Ok(mut guard) = cache.lock() {
+            guard.clear();
+        }
+    }
+    if let Some(failures) = VISUAL_QUERY_FAILURES.get() {
+        if let Ok(mut guard) = failures.lock() {
             guard.clear();
         }
     }
@@ -216,6 +223,34 @@ struct ProviderCacheEntry {
 
 static VISUAL_PROVIDER_CACHE: OnceLock<Mutex<HashMap<ProviderCacheKey, ProviderCacheEntry>>> =
     OnceLock::new();
+
+/// Identity → time of the last failed query embed. Cleared with the provider cache.
+static VISUAL_QUERY_FAILURES: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+
+fn visual_query_failures() -> &'static Mutex<HashMap<String, Instant>> {
+    VISUAL_QUERY_FAILURES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn visual_query_on_cooldown(identity: &str) -> bool {
+    let Ok(failures) = visual_query_failures().lock() else {
+        return false;
+    };
+    failures
+        .get(identity)
+        .is_some_and(|failed_at| failed_at.elapsed() < VISUAL_QUERY_COOLDOWN)
+}
+
+fn note_visual_query_failure(identity: &str) {
+    if let Ok(mut failures) = visual_query_failures().lock() {
+        failures.insert(identity.to_string(), Instant::now());
+    }
+}
+
+fn visual_query_cooldown_error() -> neuink_search::SearchError {
+    neuink_search::SearchError::EmbeddingUnavailable(
+        "视觉查询处于短冷却期，本次跳过视觉编码。".to_string(),
+    )
+}
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct VisualIndexCacheKey {
@@ -1092,6 +1127,9 @@ fn query_vector(
             return Ok(vector.clone());
         }
     }
+    if visual_query_on_cooldown(identity) {
+        return Err(visual_query_cooldown_error());
+    }
 
     let (slot, is_leader) = {
         let Ok(mut in_flight) = in_flight_queries().lock() else {
@@ -1123,6 +1161,12 @@ fn query_vector(
         slot: Arc::clone(&slot),
         completed: false,
     };
+    if visual_query_on_cooldown(identity) {
+        guard.completed = true;
+        let error = visual_query_cooldown_error();
+        slot.finish(Err(error.to_string()));
+        return Err(error);
+    }
     let result = provider.embed_query_text(question);
     match result {
         Ok(vector) => {
@@ -1139,6 +1183,7 @@ fn query_vector(
         Err(error) => {
             guard.completed = true;
             slot.finish(Err(error.to_string()));
+            note_visual_query_failure(identity);
             Err(error)
         }
     }
@@ -1622,5 +1667,76 @@ mod tests {
             assert_eq!(handle.join().expect("join"), vec![0.5, 0.5, 0.5]);
         }
         assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn query_vector_cools_down_after_an_embed_failure_until_the_cache_is_cleared() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct FailingProvider {
+            calls: AtomicUsize,
+        }
+
+        impl VisualEmbeddingProvider for FailingProvider {
+            fn status(&self) -> neuink_search::VisualProviderStatus {
+                neuink_search::VisualProviderStatus {
+                    available: true,
+                    provider: "failing".to_string(),
+                    model_name: None,
+                    dimensions: Some(2),
+                    message: None,
+                }
+            }
+
+            fn identity(&self) -> Option<String> {
+                Some("cooldown".to_string())
+            }
+
+            fn dimensions(&self) -> Option<usize> {
+                Some(2)
+            }
+
+            fn embed_assets(
+                &self,
+                _assets: &[neuink_search::VisualAssetInput],
+                _on_progress: &dyn Fn(usize, usize),
+            ) -> neuink_search::SearchResult<Vec<Vec<f32>>> {
+                Ok(Vec::new())
+            }
+
+            fn embed_query_text(&self, _text: &str) -> neuink_search::SearchResult<Vec<f32>> {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                Err(neuink_search::SearchError::EmbeddingUnavailable(
+                    "视觉编码请求失败：timeout".to_string(),
+                ))
+            }
+        }
+
+        let identity = format!(
+            "cooldown-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        );
+        let other = format!("{identity}-other");
+        let provider = FailingProvider {
+            calls: AtomicUsize::new(0),
+        };
+        assert!(query_vector(&provider, &identity, "first").is_err());
+        assert!(query_vector(&provider, &other, "first").is_err());
+        let started = Instant::now();
+        let cooled = query_vector(&provider, &identity, "second");
+        assert!(
+            started.elapsed() < Duration::from_millis(50),
+            "cooldown should skip HTTP, took {:?}",
+            started.elapsed()
+        );
+        assert!(cooled.is_err());
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 2);
+        invalidate_provider_cache();
+        assert!(query_vector(&provider, &identity, "third").is_err());
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 3);
+        invalidate_provider_cache();
     }
 }

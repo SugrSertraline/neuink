@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react';
 import type { ReactNode } from 'react';
 
-export type ToastTone = 'default' | 'success' | 'danger';
+export type ToastTone = 'default' | 'info' | 'success' | 'danger';
 
 export type ToastMessage = {
   action?: ReactNode;

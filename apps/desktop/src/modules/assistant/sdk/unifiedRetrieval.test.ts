@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { searchUnified, type SearchResults, type UnifiedSearchResponse } from '@/shared/ipc/workspaceApi';
+import { searchUnified, searchUnifiedBatch, type SearchResults, type UnifiedSearchResponse } from '@/shared/ipc/workspaceApi';
 import { createSearchLibraryBatch } from './searchLibraryBatch';
 import type { TaskSearchRequest } from './searchLibrary';
 
 vi.mock('@/shared/ipc/workspaceApi', () => ({
   searchSegmentsBatch: vi.fn(),
-  searchUnified: vi.fn()
+  searchUnified: vi.fn(),
+  searchUnifiedBatch: vi.fn()
 }));
 
 const request: TaskSearchRequest = {
@@ -180,6 +181,37 @@ describe('unified retrieval batch', () => {
       })([request])
     ).rejects.toThrow();
     expect(searchUnified).not.toHaveBeenCalled();
+    expect(searchUnifiedBatch).not.toHaveBeenCalled();
+  });
+
+  it('sends several unified tasks through one batch call', async () => {
+    const second = { ...request, task_id: 'q2', query: '数据？' };
+    vi.mocked(searchUnifiedBatch).mockReset().mockResolvedValue([
+      unified(),
+      unified({ question: '数据？' })
+    ]);
+    const items = await createSearchLibraryBatch({
+      root: 'root',
+      addSource: () => 1,
+      unifiedRetrieval: { headUnits: 12, maxDocuments: 8, bindCarriers: true }
+    })([request, second]);
+
+    expect(searchUnified).not.toHaveBeenCalled();
+    expect(searchUnifiedBatch).toHaveBeenCalledTimes(1);
+    expect(searchUnifiedBatch).toHaveBeenCalledWith('root', [
+      expect.objectContaining({
+        question: '方法？',
+        scope_entry_ids: ['a'],
+        top_k: 5,
+        head_units: 12,
+        max_documents: 8,
+        bind_carriers: true,
+        mode: 'hybrid'
+      }),
+      expect.objectContaining({ question: '数据？', scope_entry_ids: ['a'] })
+    ]);
+    expect(items.map((item) => item.task_id)).toEqual(['q1', 'q2']);
+    expect(items.every((item) => item.outcome.status === 'ok')).toBe(true);
   });
 });
 

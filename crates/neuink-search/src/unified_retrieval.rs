@@ -465,11 +465,21 @@ fn visual_vote(
     if plan.visual_weight <= 0.0 {
         return Ok((Vec::new(), Vec::new()));
     }
-    let scores = visual.recall(
+    let scores = match visual.recall(
         question,
         &request.allowed_entries,
         plan.limits.route_window.max(1),
-    )?;
+    ) {
+        Ok(scores) => scores,
+        Err(_) => {
+            // A ready channel whose query embed times out must not fail the search.
+            push_unique(
+                degradations,
+                Degradation::VisualUnavailable("model_unavailable"),
+            );
+            return Ok((Vec::new(), Vec::new()));
+        }
+    };
     let parents = aggregate_parents(&scores);
     let entries = parent_entry_order(&parents, plan.limits.head_units.max(1));
     Ok((entries, parents))
@@ -843,6 +853,43 @@ mod tests {
             .degradations
             .iter()
             .any(|code| code.code().starts_with("visual_")));
+    }
+
+    #[test]
+    fn a_visual_recall_error_degrades_to_text_instead_of_failing_the_search() {
+        struct FailingVisual;
+
+        impl VisualRecall for FailingVisual {
+            fn status(&self) -> VisualChannelStatus {
+                VisualChannelStatus::Ready
+            }
+
+            fn recall(
+                &mut self,
+                _question: &str,
+                _entries: &[String],
+                _limit: usize,
+            ) -> SearchResult<Vec<VisualScore>> {
+                Err(SearchError::EmbeddingUnavailable(
+                    "视觉编码请求失败：timeout".to_string(),
+                ))
+            }
+        }
+
+        let mut text = ScriptedText::new(&[("a", 3.0), ("b", 2.0)]);
+        let mut visual = FailingVisual;
+        let output = run_unified(
+            &mut text,
+            &mut visual,
+            &UnifiedPlan::default(),
+            &request("q"),
+        )
+        .expect("text search survives a visual timeout");
+        assert_eq!(output.routing.documents, ["a", "b"]);
+        assert!(output
+            .degradations
+            .contains(&Degradation::VisualUnavailable("model_unavailable")));
+        assert_eq!(output.routing.visual_entries, 0);
     }
 
     #[test]

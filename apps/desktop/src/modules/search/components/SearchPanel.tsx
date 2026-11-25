@@ -79,6 +79,9 @@ export function SearchPanel({ buildStatus = null, root, status, onOpenResult, on
     status === 'ready' &&
     Boolean(searchIndexStatus?.semantic_document_count);
   const needsBuild = searchIndexStatus?.semantic_status === 'needs_build';
+  const cachedVectorCount = searchIndexStatus?.semantic_disk_cache_record_count ?? 0;
+  const hasPartialCache = needsBuild && cachedVectorCount > 0;
+  const coldBuild = needsBuild && !hasPartialCache;
   const pendingVectorCount = searchIndexStatus?.semantic_document_count ?? 0;
   const rebuilding =
     rebuildRequested || buildStatus?.state === 'queued' || buildStatus?.state === 'running';
@@ -95,11 +98,19 @@ export function SearchPanel({ buildStatus = null, root, status, onOpenResult, on
     try {
       const response = await rebuildSearchIndex(root);
       setSearchIndexStatus(response.status);
-      notify({
-        tone: 'success',
-        title: needsBuild ? '向量索引已构建' : '向量索引已更新',
-        description: `已处理 ${response.rebuilt_vector_count} 个向量。`
-      });
+      if (response.status.semantic_status === 'needs_build') {
+        notify({
+          tone: 'info',
+          title: '资料库在构建期间有新变更',
+          description: `已处理 ${response.rebuilt_vector_count} 个向量。`
+        });
+      } else {
+        notify({
+          tone: 'success',
+          title: needsBuild ? '向量索引已构建' : '向量索引已更新',
+          description: `已处理 ${response.rebuilt_vector_count} 个向量。`
+        });
+      }
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : String(caught);
       setSearchIndexError(message);
@@ -197,19 +208,19 @@ export function SearchPanel({ buildStatus = null, root, status, onOpenResult, on
                 className="shrink-0"
                 disabled={rebuilding}
                 size="xs"
-                title={needsBuild ? '构建向量索引' : '增量更新向量索引'}
+                title={coldBuild ? '构建向量索引' : '增量更新向量索引'}
                 type="button"
                 variant="ghost"
                 onClick={() => setBuildConfirmOpen(true)}
               >
                 {rebuilding ? (
                   <Loader2 className="animate-spin" size={12} aria-hidden="true" />
-                ) : needsBuild ? (
+                ) : coldBuild ? (
                   <Hammer size={12} aria-hidden="true" />
                 ) : (
                   <RefreshCw size={12} aria-hidden="true" />
                 )}
-                {needsBuild ? '构建' : '更新'}
+                {coldBuild ? '构建' : '更新'}
               </Button>
             ) : null}
           </div>
@@ -244,24 +255,32 @@ export function SearchPanel({ buildStatus = null, root, status, onOpenResult, on
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangle size={16} aria-hidden="true" />
-              {needsBuild ? '构建向量索引' : '更新向量索引'}
+              {coldBuild ? '构建向量索引' : '更新向量索引'}
             </DialogTitle>
             <DialogDescription>
-              {needsBuild
-                ? `将为 ${pendingVectorCount} 条内容生成语义向量，用于语义与混合搜索。`
-                : '将为新增或变更的内容补充语义向量，通常只需几秒到几十秒。'}
+              {hasPartialCache
+                ? `已有 ${cachedVectorCount} 条本地向量缓存，将增量补齐至 ${pendingVectorCount} 条（复用已有缓存，通常只需几秒）。`
+                : needsBuild
+                  ? `将为 ${pendingVectorCount} 条内容生成语义向量，用于语义与混合搜索。`
+                  : '将为新增或变更的内容补充语义向量，通常只需几秒到几十秒。'}
             </DialogDescription>
           </DialogHeader>
           <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm leading-6 text-amber-800 dark:text-amber-200">
-            构建过程会占用大量 CPU，应用可能暂时卡顿；首次构建可能需要数分钟。构建期间关键词搜索不受影响，可随时继续使用。
+            {hasPartialCache
+              ? '只会计算新增或变更的内容，已有缓存会直接复用。构建期间关键词搜索不受影响，可随时继续使用。'
+              : '构建过程会占用大量 CPU，应用可能暂时卡顿；首次构建可能需要数分钟。构建期间关键词搜索不受影响，可随时继续使用。'}
           </div>
           <DialogFooter>
             <Button disabled={rebuilding} type="button" variant="outline" onClick={() => setBuildConfirmOpen(false)}>
               取消
             </Button>
             <Button disabled={rebuilding} type="button" onClick={confirmBuild}>
-              <Hammer size={14} aria-hidden="true" />
-              {needsBuild ? '开始构建' : '开始更新'}
+              {coldBuild ? (
+                <Hammer size={14} aria-hidden="true" />
+              ) : (
+                <RefreshCw size={14} aria-hidden="true" />
+              )}
+              {coldBuild ? '开始构建' : '开始更新'}
             </Button>
           </DialogFooter>
         </DialogContent>

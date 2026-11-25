@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { runLocalAgent } from '@/shared/ipc/localAgentApi';
 import { getAssistantContextSnapshot, getEntryOutlineTool, invokeAssistantTool, loadAgentRuntimeSettings, listTools, readEntryAssistantContext } from '@/shared/ipc/assistantApi';
-import { readNote, searchSegmentsBatch, searchUnified } from '@/shared/ipc/workspaceApi';
+import { readNote, searchSegmentsBatch, searchUnified, searchUnifiedBatch } from '@/shared/ipc/workspaceApi';
 import { DEFAULT_AGENT_RUNTIME_SETTINGS } from '@/shared/lib/agentRuntimeSettings';
 import { setLocalAgentEnabled } from '@/shared/lib/localAgentSettings';
 import { runLocalAgentHarness } from './runner';
@@ -15,7 +15,7 @@ vi.mock('@/shared/ipc/agentExecutionApi', () => ({ saveAgentExecution: vi.fn(asy
 vi.mock('@/shared/ipc/localAgentApi', () => ({runLocalAgent:vi.fn()}));
 vi.mock('@/shared/ipc/assistantApi', async original => ({...await original<typeof import('@/shared/ipc/assistantApi')>(),
   getAssistantContextSnapshot:vi.fn(), getEntryOutlineTool:vi.fn(), readEntryAssistantContext:vi.fn(), loadAgentRuntimeSettings:vi.fn(), listTools:vi.fn(), invokeAssistantTool:vi.fn()}));
-vi.mock('@/shared/ipc/workspaceApi', () => ({readNote:vi.fn(), searchSegmentsBatch:vi.fn(), searchUnified:vi.fn()}));
+vi.mock('@/shared/ipc/workspaceApi', () => ({readNote:vi.fn(), searchSegmentsBatch:vi.fn(), searchUnified:vi.fn(), searchUnifiedBatch:vi.fn()}));
 vi.mock('@/shared/ipc/pdfTextApi', async original => ({...await original<typeof import('@/shared/ipc/pdfTextApi')>(),inspectPdfText:vi.fn()}));
 const session = {type:'local-agent',provider:'claude',sessionId:'550e8400-e29b-41d4-a716-446655440000',initialized:false} as const;
 function options(extra:Partial<RunAssistantHarnessOptions> = {}): RunAssistantHarnessOptions {
@@ -465,7 +465,20 @@ describe('Claude integration with production NeuInk tools', () => {
     expect(runLocalAgent).toHaveBeenCalledTimes(1);
     const batchCalls = vi.mocked(searchSegmentsBatch).mock.calls;
     const unifiedCalls = vi.mocked(searchUnified).mock.calls;
-    if (unifiedCalls.length > 0) {
+    const unifiedBatchCalls = vi.mocked(searchUnifiedBatch).mock.calls;
+    if (unifiedBatchCalls.length > 0) {
+      expect(searchUnified).not.toHaveBeenCalled();
+      expect(unifiedBatchCalls).toHaveLength(1);
+      expect(unifiedBatchCalls[0][1]).toHaveLength(2);
+      expect(unifiedBatchCalls[0][1][0]).toMatchObject({
+        top_k: 12,
+        english_query: 'HiKEY abstract performance improvement over baselines'
+      });
+      expect(unifiedBatchCalls[0][1][1]).toMatchObject({
+        top_k: 12,
+        english_query: 'HiKEY main results table strongest baseline M3DocVQA FRAMES'
+      });
+    } else if (unifiedCalls.length > 0) {
       expect(unifiedCalls).toHaveLength(2);
       expect(unifiedCalls[0][1]).toMatchObject({
         top_k: 12,

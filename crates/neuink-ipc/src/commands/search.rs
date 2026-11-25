@@ -158,7 +158,7 @@ pub struct SearchSegmentsTaskError {
     pub message: &'static str,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct SearchIndexStatusRequest {
     pub root: PathBuf,
     #[serde(default)]
@@ -1115,13 +1115,23 @@ fn get_search_index_status_impl(
         .and_then(|metadata| metadata.modified().ok())
         .and_then(|modified| modified.duration_since(SystemTime::UNIX_EPOCH).ok())
         .map(|duration| duration.as_millis() as u64);
-    let semantic_disk_cache_record_count = disk_cache.map(|status| status.record_count);
+    // A different model or representation cannot be reused, so its record count
+    // must not be shown as an incremental cache.
+    let semantic_disk_cache_record_count = disk_cache.as_ref().and_then(|status| {
+        status
+            .compatible_with(identity.as_deref())
+            .then_some(status.record_count)
+    });
     let semantic_status = semantic_index_state(
         semantic_document_count,
         semantic_memory_cache_ready,
         semantic_disk_cache_ready,
     );
-    let message = search_index_status_message(semantic_document_count, &semantic_status);
+    let message = search_index_status_message(
+        semantic_document_count,
+        &semantic_status,
+        semantic_disk_cache_record_count.unwrap_or(0),
+    );
 
     Ok(SearchIndexStatus {
         scope,
@@ -1137,6 +1147,80 @@ fn get_search_index_status_impl(
         semantic_disk_cache_modified_at_ms,
         message,
     })
+}
+
+fn build_search_scope(
+    workspace: &Workspace,
+    root: &PathBuf,
+    provider: Arc<dyn EmbeddingProvider>,
+    options: &WorkspaceSearchOptions,
+    include: &SearchInclude,
+    shared_vectors: &mut HashMap<String, Vec<f32>>,
+) -> Result<usize, String> {
+    // Each scope must fingerprint the exact record set its searches use,
+    // otherwise the disk snapshot never matches at query time.
+    let records = workspace
+        .collect_search_records(options.clone())
+        .map_err(|error| error.to_string())?;
+    let documents = records
+        .iter()
+        .cloned()
+        .filter_map(search_document)
+        .collect::<Vec<_>>();
+    let document_count = documents.len();
+    if documents.is_empty() {
+        return Ok(document_count);
+    }
+
+    let records_fingerprint = records_fingerprint(&records);
+    let semantic_fingerprint = semantic_records_fingerprint(&records);
+    let keyword_index = cached_index(root, options, records_fingerprint, documents.clone())?;
+    let _ = keyword_index.generation();
+    let scope = if options.include_segments && !options.include_entry_meta {
+        "segments"
+    } else {
+        "global"
+    };
+    let semantic_index = cached_semantic_index(
+        root,
+        options,
+        semantic_fingerprint,
+        include,
+        &documents,
+        provider,
+        Some(scope),
+        shared_vectors.clone(),
+    )
+    .map_err(|error| error.to_string())?;
+    shared_vectors.extend(semantic_index.export_vectors());
+    Ok(document_count)
+}
+
+/// Scopes whose snapshot no longer matches the library. `false` is global.
+fn scopes_still_needing_build(
+    root: &PathBuf,
+    segments_only: bool,
+    provider: Arc<dyn EmbeddingProvider>,
+) -> Result<Vec<bool>, String> {
+    let candidates = if segments_only {
+        vec![true]
+    } else {
+        vec![false, true]
+    };
+    let mut pending = Vec::new();
+    for segments_only in candidates {
+        let status = get_search_index_status_impl(
+            SearchIndexStatusRequest {
+                root: root.clone(),
+                segments_only,
+            },
+            provider.clone(),
+        )?;
+        if matches!(status.semantic_status, SemanticIndexState::NeedsBuild) {
+            pending.push(segments_only);
+        }
+    }
+    Ok(pending)
 }
 
 pub fn rebuild_search_index_impl(
@@ -1157,56 +1241,77 @@ pub fn rebuild_search_index_impl(
     };
     let mut semantic_document_count = 0;
     let mut shared_vectors: HashMap<String, Vec<f32>> = HashMap::new();
-    for (options, include) in scopes {
-        // Each scope must fingerprint the exact record set its searches use,
-        // otherwise the disk snapshot never matches at query time.
-        let records = workspace
-            .collect_search_records(options.clone())
-            .map_err(|error| error.to_string())?;
-        let documents = records
-            .iter()
-            .cloned()
-            .filter_map(search_document)
-            .collect::<Vec<_>>();
-        semantic_document_count = semantic_document_count.max(documents.len());
-        if documents.is_empty() {
-            continue;
-        }
-
-        let records_fingerprint = records_fingerprint(&records);
-        let semantic_fingerprint = semantic_records_fingerprint(&records);
-        let keyword_index = cached_index(
+    for (options, include) in &scopes {
+        semantic_document_count = semantic_document_count.max(build_search_scope(
+            &workspace,
             &request.root,
-            &options,
-            records_fingerprint,
-            documents.clone(),
-        )?;
-        let _ = keyword_index.generation();
-        let semantic_index = cached_semantic_index(
-            &request.root,
-            &options,
-            semantic_fingerprint,
-            &include,
-            &documents,
             provider.clone(),
-            Some(if options.include_segments && !options.include_entry_meta {
-                "segments"
-            } else {
-                "global"
-            }),
-            shared_vectors.clone(),
-        )
-        .map_err(|error| error.to_string())?;
-        shared_vectors.extend(semantic_index.export_vectors());
+            options,
+            include,
+            &mut shared_vectors,
+        )?);
+    }
+
+    // An import during the first pass can leave an earlier scope behind the
+    // records just embedded for a later scope. Two extra passes reuse
+    // `shared_vectors` and then stop, so a stream of imports cannot extend
+    // the build. A provider with no model identity can never report ready.
+    let mut caught_up = false;
+    if semantic_embedding_identity(provider.as_ref()).is_some() {
+        for _round in 0..2 {
+            let pending = scopes_still_needing_build(
+                &request.root,
+                request.segments_only,
+                provider.clone(),
+            )?;
+            if pending.is_empty() {
+                break;
+            }
+            caught_up = true;
+            for segments_only in pending {
+                let (options, include) = search_scope_options(segments_only);
+                semantic_document_count = semantic_document_count.max(build_search_scope(
+                    &workspace,
+                    &request.root,
+                    provider.clone(),
+                    &options,
+                    &include,
+                    &mut shared_vectors,
+                )?);
+            }
+        }
     }
 
     let status = get_search_index_status_impl(
         SearchIndexStatusRequest {
-            root: request.root,
+            root: request.root.clone(),
             segments_only: request.segments_only,
         },
         provider,
     )?;
+    if caught_up && !matches!(status.semantic_status, SemanticIndexState::NeedsBuild) {
+        let previous = load_search_build_status(&request.root)
+            .unwrap_or_else(|_| idle_search_build_status(&request.root));
+        store_search_build_status(
+            &request.root,
+            SearchIndexBuildStatus {
+                root: request.root.display().to_string(),
+                state: SearchIndexBuildState::Ready,
+                scope: if request.segments_only {
+                    "segments".to_string()
+                } else {
+                    "global".to_string()
+                },
+                phase: "complete".to_string(),
+                completed: status.semantic_document_count,
+                total: status.semantic_document_count,
+                message: status.message.clone(),
+                error: None,
+                started_at_ms: previous.started_at_ms,
+                updated_at_ms: unix_time_ms(),
+            },
+        );
+    }
     Ok(RebuildSearchIndexResponse {
         status,
         rebuilt_vector_count: semantic_document_count,
@@ -2242,6 +2347,7 @@ fn semantic_index_state(
 fn search_index_status_message(
     semantic_document_count: usize,
     semantic_status: &SemanticIndexState,
+    compatible_cached_count: usize,
 ) -> String {
     match semantic_status {
         SemanticIndexState::Empty => "暂无可向量化内容".to_string(),
@@ -2249,6 +2355,9 @@ fn search_index_status_message(
             format!("向量已就绪 · {semantic_document_count}")
         }
         SemanticIndexState::ReadyDisk => format!("磁盘缓存 · {semantic_document_count}"),
+        SemanticIndexState::NeedsBuild if compatible_cached_count > 0 => {
+            format!("待增量更新 · 已缓存 {compatible_cached_count}/{semantic_document_count}")
+        }
         SemanticIndexState::NeedsBuild => {
             format!("待构建向量 · {semantic_document_count}")
         }
@@ -2490,13 +2599,240 @@ mod tests {
         assert!(!status.current_for(9, Some("model-b")));
         assert!(!status.current_for(9, None));
         assert!(!status.current_for(8, Some("model-a")));
+        assert!(status.compatible_with(Some("model-a")));
+        assert!(!status.compatible_with(Some("model-b")));
+        assert!(!status.compatible_with(None));
+        let stale_fingerprint = super::SemanticDiskCacheStatus {
+            fingerprint: 8,
+            ..status.clone()
+        };
+        assert!(stale_fingerprint.compatible_with(Some("model-a")));
+        assert!(!stale_fingerprint.current_for(9, Some("model-a")));
 
         let identityless = super::SemanticDiskCacheStatus {
             embedding_identity: None,
-            ..status
+            ..status.clone()
         };
         assert!(!identityless.current_for(9, None));
         assert!(!identityless.current_for(9, Some("model-a")));
+    }
+
+    #[test]
+    fn rebuild_catches_up_an_entry_imported_during_global_embedding() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Mutex;
+
+        use neuink_search::{EmbeddingInput, EmbeddingProviderStatus, EmbeddingVector};
+        use neuink_workspace::Workspace;
+
+        struct InjectingProvider {
+            root: std::path::PathBuf,
+            embedded: Mutex<Vec<String>>,
+            injected: AtomicBool,
+        }
+
+        impl EmbeddingProvider for InjectingProvider {
+            fn status(&self) -> EmbeddingProviderStatus {
+                EmbeddingProviderStatus {
+                    available: true,
+                    provider: "test".to_string(),
+                    dimensions: Some(2),
+                    ..EmbeddingProviderStatus::default()
+                }
+            }
+
+            fn cache_identity(&self) -> Option<String> {
+                Some("catch-up-weights".to_string())
+            }
+
+            fn prefixes(&self) -> neuink_search::EmbeddingPrefixes {
+                neuink_search::EmbeddingPrefixes::none()
+            }
+
+            fn embed(
+                &self,
+                inputs: &[EmbeddingInput],
+            ) -> neuink_search::SearchResult<Vec<EmbeddingVector>> {
+                self.embed_with_progress(inputs, &|_, _| {})
+            }
+
+            fn embed_with_progress(
+                &self,
+                inputs: &[EmbeddingInput],
+                on_progress: &dyn Fn(usize, usize),
+            ) -> neuink_search::SearchResult<Vec<EmbeddingVector>> {
+                if self
+                    .injected
+                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok()
+                {
+                    Workspace::open(&self.root)
+                        .expect("workspace")
+                        .create_entry("imported-during-build")
+                        .expect("entry imported during embedding");
+                }
+                self.embedded
+                    .lock()
+                    .expect("embed log")
+                    .extend(inputs.iter().map(|input| input.id.clone()));
+                on_progress(inputs.len(), inputs.len());
+                Ok(inputs
+                    .iter()
+                    .map(|_| EmbeddingVector::new(vec![1.0, 0.0]))
+                    .collect())
+            }
+        }
+
+        let root = std::env::temp_dir().join(format!(
+            "neuink-search-catchup-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let workspace = Workspace::create(&root).expect("workspace");
+        workspace
+            .create_entry("already-present")
+            .expect("initial entry");
+        let concrete = Arc::new(InjectingProvider {
+            root: root.clone(),
+            embedded: Mutex::new(Vec::new()),
+            injected: AtomicBool::new(false),
+        });
+        let provider: Arc<dyn EmbeddingProvider> = concrete.clone();
+
+        let response = super::rebuild_search_index_impl(
+            provider,
+            super::RebuildSearchIndexRequest {
+                root: root.clone(),
+                segments_only: false,
+            },
+        )
+        .expect("rebuild");
+
+        assert!(
+            matches!(
+                response.status.semantic_status,
+                super::SemanticIndexState::ReadyMemory
+            ),
+            "concurrent import must be caught up, got {:?}",
+            response.status.semantic_status
+        );
+        assert_eq!(response.status.semantic_document_count, 2);
+        let embedded = concrete.embedded.lock().expect("embed log").clone();
+        let mut counts = std::collections::HashMap::<String, usize>::new();
+        for id in &embedded {
+            *counts.entry(id.clone()).or_insert(0) += 1;
+        }
+        assert_eq!(counts.len(), 2, "both titles are embedded: {embedded:?}");
+        assert!(
+            counts.values().all(|count| *count == 1),
+            "already computed vectors must be reused: {embedded:?}"
+        );
+        let build_status = load_search_build_status(&root).expect("build status");
+        assert!(matches!(
+            build_status.state,
+            SearchIndexBuildState::Ready
+        ));
+        assert_eq!(build_status.completed, 2);
+        assert_eq!(build_status.total, 2);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn stale_same_model_cache_is_an_incremental_update() {
+        use neuink_search::EmbeddingProviderStatus;
+        use neuink_workspace::Workspace;
+
+        struct IdentityProvider {
+            identity: &'static str,
+        }
+
+        impl EmbeddingProvider for IdentityProvider {
+            fn status(&self) -> EmbeddingProviderStatus {
+                EmbeddingProviderStatus {
+                    available: true,
+                    provider: "test".to_string(),
+                    dimensions: Some(2),
+                    ..EmbeddingProviderStatus::default()
+                }
+            }
+
+            fn cache_identity(&self) -> Option<String> {
+                Some(self.identity.to_string())
+            }
+
+            fn prefixes(&self) -> neuink_search::EmbeddingPrefixes {
+                neuink_search::EmbeddingPrefixes::none()
+            }
+
+            fn embed(
+                &self,
+                _inputs: &[neuink_search::EmbeddingInput],
+            ) -> neuink_search::SearchResult<Vec<neuink_search::EmbeddingVector>> {
+                Ok(Vec::new())
+            }
+        }
+
+        let root = std::env::temp_dir().join(format!(
+            "neuink-search-incremental-status-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let workspace = Workspace::create(&root).expect("workspace");
+        workspace.create_entry("one").expect("entry");
+        workspace.create_entry("two").expect("entry");
+        let provider = Arc::new(IdentityProvider {
+            identity: "status-weights",
+        });
+        let provider: Arc<dyn EmbeddingProvider> = provider;
+        let request = super::SearchIndexStatusRequest {
+            root: root.clone(),
+            segments_only: false,
+        };
+        let cold = super::get_search_index_status_impl(request.clone(), provider.clone())
+            .expect("cold status");
+        assert_eq!(cold.message, "待构建向量 · 2");
+        assert_eq!(cold.semantic_disk_cache_record_count, None);
+
+        let identity = neuink_search::semantic_embedding_identity(provider.as_ref())
+            .expect("identity");
+        let path = std::path::PathBuf::from(&cold.semantic_disk_cache_path);
+        fs::create_dir_all(path.parent().expect("cache parent")).expect("cache dir");
+        let snapshot = serde_json::json!({
+            "version": super::SEMANTIC_INDEX_FORMAT_VERSION,
+            "fingerprint": 1,
+            "representation_version": neuink_search::EMBEDDING_REPRESENTATION_VERSION,
+            "embedding_identity": identity,
+            "records": [{}],
+        });
+        fs::write(&path, serde_json::to_vec(&snapshot).expect("snapshot")).expect("write cache");
+
+        let stale = super::get_search_index_status_impl(request.clone(), provider.clone())
+            .expect("stale status");
+        assert!(matches!(
+            stale.semantic_status,
+            super::SemanticIndexState::NeedsBuild
+        ));
+        assert_eq!(stale.semantic_disk_cache_record_count, Some(1));
+        assert_eq!(stale.message, "待增量更新 · 已缓存 1/2");
+
+        let other = serde_json::json!({
+            "version": super::SEMANTIC_INDEX_FORMAT_VERSION,
+            "fingerprint": 1,
+            "representation_version": neuink_search::EMBEDDING_REPRESENTATION_VERSION,
+            "embedding_identity": "other-model",
+            "records": [{}],
+        });
+        fs::write(&path, serde_json::to_vec(&other).expect("snapshot")).expect("write cache");
+        let foreign = super::get_search_index_status_impl(request, provider).expect("foreign");
+        assert_eq!(foreign.semantic_disk_cache_record_count, None);
+        assert_eq!(foreign.message, "待构建向量 · 2");
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -3030,7 +3366,7 @@ struct SemanticDiskCacheSnapshot {
     records: Vec<IgnoredAny>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct SemanticDiskCacheStatus {
     version: u32,
     fingerprint: u64,
@@ -3040,14 +3376,19 @@ struct SemanticDiskCacheStatus {
 }
 
 impl SemanticDiskCacheStatus {
+    /// Same model and representation. The fingerprint may differ, which is an
+    /// incremental update rather than a reusable-as-ready snapshot.
+    fn compatible_with(&self, identity: Option<&str>) -> bool {
+        self.version == SEMANTIC_INDEX_FORMAT_VERSION
+            && self.representation_version == neuink_search::EMBEDDING_REPRESENTATION_VERSION
+            && identity.is_some()
+            && self.embedding_identity.as_deref() == identity
+    }
+
     /// A snapshot is ready only for the exact model identity. An unknown identity
     /// (`None`) never matches, so an identity-less snapshot cannot report Ready.
     fn current_for(&self, fingerprint: u64, identity: Option<&str>) -> bool {
-        self.version == SEMANTIC_INDEX_FORMAT_VERSION
-            && self.representation_version == neuink_search::EMBEDDING_REPRESENTATION_VERSION
-            && self.fingerprint == fingerprint
-            && identity.is_some()
-            && self.embedding_identity.as_deref() == identity
+        self.fingerprint == fingerprint && self.compatible_with(identity)
     }
 }
 
@@ -3149,6 +3490,41 @@ pub async fn search_unified<R: tauri::Runtime>(
             visual::index_missing_provider()
         };
         unified::run_unified_search(
+            provider,
+            visual_provider,
+            fusion,
+            rerank_settings,
+            rerank_provider,
+            scope_judge,
+            listwise,
+            multivector,
+            request,
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// Several composed searches that share one index preparation and one visual channel.
+#[tauri::command]
+pub async fn search_unified_batch<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    request: unified::UnifiedSearchBatchRequest,
+) -> Result<Vec<UnifiedSearchResponse>, String> {
+    let provider = text_provider_for_app(&app)?;
+    let saved = crate::storage::read_settings(&app)?;
+    let settings = saved.visual;
+    let fusion = settings.fusion;
+    let visual_settings = settings.clone();
+    let multivector = saved.retrieval.multivector;
+    let (rerank_settings, rerank_provider, scope_judge, listwise) = resolve_rerank(&app)?;
+    tokio::task::spawn_blocking(move || {
+        let visual_provider = if visual::has_visual_snapshot(&request.root) {
+            visual::provider_for_query(&visual_settings)
+        } else {
+            visual::index_missing_provider()
+        };
+        unified::run_unified_search_batch(
             provider,
             visual_provider,
             fusion,

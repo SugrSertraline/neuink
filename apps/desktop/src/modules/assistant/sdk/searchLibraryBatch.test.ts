@@ -11,7 +11,8 @@ import type { TaskSearchRequest } from './searchLibrary';
 
 vi.mock('@/shared/ipc/workspaceApi', () => ({
   searchSegmentsBatch: vi.fn(),
-  searchUnified: vi.fn()
+  searchUnified: vi.fn(),
+  searchUnifiedBatch: vi.fn()
 }));
 
 const request: TaskSearchRequest = {

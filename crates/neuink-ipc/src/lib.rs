@@ -156,6 +156,7 @@ pub fn register_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
             commands::search::search_segments,
             commands::search::search_segments_batch,
             commands::search::search_unified,
+            commands::search::search_unified_batch,
             commands::search::prepare_visual_search_index,
             commands::search::get_visual_index_status,
             commands::search::get_visual_embedding_settings,

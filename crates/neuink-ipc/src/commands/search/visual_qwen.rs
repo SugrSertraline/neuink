@@ -24,6 +24,9 @@ use neuink_search::{
 use serde::Deserialize;
 
 const PROVIDER_NAME: &str = "qwen-service";
+/// Online query embeds must fail fast when the GPU is busy. Index builds keep the full timeout.
+const QUERY_TIMEOUT_CAP: Duration = Duration::from_millis(3500);
+const QUERY_CONNECT_TIMEOUT: Duration = Duration::from_millis(500);
 
 #[derive(Clone, Debug, Deserialize)]
 struct Health {
@@ -57,7 +60,10 @@ struct EmbedPagesResponse {
 
 pub struct QwenVisualServiceProvider {
     endpoint: String,
+    /// Index and page embeds. Uses `settings.timeout_ms` (default 60s).
     client: reqwest::blocking::Client,
+    /// Query embeds. Capped at 3.5s so a busy GPU degrades instead of stalling search.
+    query_client: reqwest::blocking::Client,
     api_key: Option<String>,
     /// Only a local service can read a local PDF path.
     allow_pages: bool,
@@ -86,16 +92,13 @@ impl QwenVisualServiceProvider {
         loopback_only: bool,
     ) -> Self {
         let endpoint = endpoint.trim_end_matches('/').to_string();
-        let mut builder = reqwest::blocking::Client::builder().timeout(timeout);
-        if loopback_only {
-            builder = builder.no_proxy();
-        }
-        let client = match builder.build() {
+        let client = match blocking_client(timeout, None, loopback_only) {
             Ok(client) => client,
             Err(error) => {
                 return Self {
                     endpoint,
                     client: reqwest::blocking::Client::new(),
+                    query_client: reqwest::blocking::Client::new(),
                     api_key,
                     allow_pages: loopback_only,
                     health: OnceLock::from(None),
@@ -106,6 +109,12 @@ impl QwenVisualServiceProvider {
                 }
             }
         };
+        let query_client = blocking_client(
+            timeout.min(QUERY_TIMEOUT_CAP),
+            Some(QUERY_CONNECT_TIMEOUT),
+            loopback_only,
+        )
+        .unwrap_or_else(|_| client.clone());
         let probe_client = if loopback_only {
             reqwest::blocking::Client::builder()
                 .connect_timeout(Duration::from_millis(350))
@@ -139,6 +148,7 @@ impl QwenVisualServiceProvider {
         Self {
             endpoint,
             client,
+            query_client,
             api_key,
             allow_pages: loopback_only,
             health: OnceLock::from(health),
@@ -166,9 +176,19 @@ impl QwenVisualServiceProvider {
         &self,
         texts: &[String],
         images: &[String],
-    ) -> SearchResult<Vec<Vec<f32>>> {        self.require_available()?;
+    ) -> SearchResult<Vec<Vec<f32>>> {
+        self.embed_with_client(&self.client, texts, images)
+    }
+
+    fn embed_with_client(
+        &self,
+        client: &reqwest::blocking::Client,
+        texts: &[String],
+        images: &[String],
+    ) -> SearchResult<Vec<Vec<f32>>> {
+        self.require_available()?;
         let body = serde_json::json!({ "texts": texts, "images": images });
-        let mut request = self.client.post(format!("{}/embed", self.endpoint)).json(&body);
+        let mut request = client.post(format!("{}/embed", self.endpoint)).json(&body);
         if let Some(key) = self.api_key.as_deref() {
             request = request.bearer_auth(key);
         }
@@ -252,7 +272,7 @@ impl VisualEmbeddingProvider for QwenVisualServiceProvider {
     }
 
     fn embed_query_text(&self, text: &str) -> SearchResult<Vec<f32>> {
-        let mut vectors = self.embed_request(&[text.to_string()], &[])?;
+        let mut vectors = self.embed_with_client(&self.query_client, &[text.to_string()], &[])?;
         vectors.pop().ok_or_else(|| {
             SearchError::EmbeddingUnavailable("视觉编码服务未返回查询向量".to_string())
         })
@@ -261,6 +281,22 @@ impl VisualEmbeddingProvider for QwenVisualServiceProvider {
     fn page_source(&self) -> Option<&dyn VisualPageEmbedding> {
         self.allow_pages.then_some(self as &dyn VisualPageEmbedding)
     }
+}
+
+fn blocking_client(
+    timeout: Duration,
+    connect_timeout: Option<Duration>,
+    loopback_only: bool,
+) -> Result<reqwest::blocking::Client, reqwest::Error> {
+    let mut builder = reqwest::blocking::Client::builder().timeout(timeout);
+    if let Some(connect_timeout) = connect_timeout {
+        builder = builder.connect_timeout(connect_timeout);
+    }
+    // A configured HTTP_PROXY would turn a loopback request into a proxy error.
+    if loopback_only {
+        builder = builder.no_proxy();
+    }
+    builder.build()
 }
 
 /// Pages per request. Four pages is twenty sources with crops: enough to amortise the

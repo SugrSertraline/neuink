@@ -57,6 +57,64 @@ pub struct UnifiedSearchRequest {
     pub bind_carriers: Option<bool>,
 }
 
+/// One sub-task inside `search_unified_batch`. Same fields as a single search, without `root`.
+#[derive(Debug, Deserialize)]
+pub struct UnifiedSearchBatchItem {
+    pub question: String,
+    #[serde(default)]
+    pub routing_question: Option<String>,
+    #[serde(default)]
+    pub english_query: Option<String>,
+    #[serde(default)]
+    pub sub_questions: Vec<String>,
+    #[serde(default)]
+    pub scope_entry_ids: Vec<EntryId>,
+    #[serde(default)]
+    pub mandated_entry_ids: Vec<EntryId>,
+    #[serde(default)]
+    pub section_filter: Option<String>,
+    #[serde(default)]
+    pub segment_types: Vec<String>,
+    #[serde(default)]
+    pub mode: SearchMode,
+    #[serde(default)]
+    pub top_k: Option<usize>,
+    #[serde(default)]
+    pub head_units: Option<usize>,
+    #[serde(default)]
+    pub max_documents: Option<usize>,
+    #[serde(default)]
+    pub bind_carriers: Option<bool>,
+}
+
+impl UnifiedSearchBatchItem {
+    fn into_request(self, root: PathBuf) -> UnifiedSearchRequest {
+        UnifiedSearchRequest {
+            root,
+            question: self.question,
+            routing_question: self.routing_question,
+            english_query: self.english_query,
+            sub_questions: self.sub_questions,
+            scope_entry_ids: self.scope_entry_ids,
+            mandated_entry_ids: self.mandated_entry_ids,
+            section_filter: self.section_filter,
+            segment_types: self.segment_types,
+            mode: self.mode,
+            top_k: self.top_k,
+            head_units: self.head_units,
+            max_documents: self.max_documents,
+            bind_carriers: self.bind_carriers,
+        }
+    }
+}
+
+/// Several unified searches that share one prepared index and one visual channel.
+#[derive(Debug, Deserialize)]
+pub struct UnifiedSearchBatchRequest {
+    pub root: PathBuf,
+    pub tasks: Vec<UnifiedSearchBatchItem>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct UnifiedSearchResponse {
     pub question: String,
@@ -114,11 +172,6 @@ pub fn run_unified_search(
     multivector: neuink_config::MultivectorPoolSettings,
     request: UnifiedSearchRequest,
 ) -> Result<UnifiedSearchResponse, String> {
-    let question = request.question.trim().to_string();
-    if question.is_empty() {
-        return Err("query is required".into());
-    }
-    let requested_top_k = request.top_k.unwrap_or(20).clamp(1, 20);
     let pool_provider = provider.clone();
     let prepared = prepare_search(
         provider,
@@ -126,6 +179,85 @@ pub fn run_unified_search(
         true,
         request.mode != SearchMode::Keyword,
     )?;
+    let mut visual = super::visual::visual_channel(&request.root, visual_provider);
+    run_unified_search_with_prepared(
+        &prepared,
+        &mut visual,
+        pool_provider,
+        fusion,
+        rerank,
+        rerank_provider,
+        scope_judge,
+        listwise,
+        multivector,
+        request,
+    )
+}
+
+/// Runs every task on one prepared index and one visual channel.
+///
+/// Preparation (workspace open, record scan, cache fingerprint) and the visual
+/// channel happen once. A failure inside one task still fails that task's result
+/// the same way `search_unified` would.
+#[allow(clippy::too_many_arguments)]
+pub fn run_unified_search_batch(
+    provider: Arc<dyn neuink_search::EmbeddingProvider>,
+    visual_provider: Arc<dyn neuink_search::VisualEmbeddingProvider>,
+    fusion: neuink_config::VisualFusionSettings,
+    rerank: neuink_config::RerankSettings,
+    rerank_provider: Option<Arc<dyn neuink_search::RerankProvider>>,
+    scope_judge: Option<Arc<dyn neuink_search::ScopeJudgeProvider>>,
+    listwise: Option<Arc<dyn neuink_search::ListwiseRerankProvider>>,
+    multivector: neuink_config::MultivectorPoolSettings,
+    request: UnifiedSearchBatchRequest,
+) -> Result<Vec<UnifiedSearchResponse>, String> {
+    if request.tasks.is_empty() {
+        return Ok(Vec::new());
+    }
+    let needs_semantic = request
+        .tasks
+        .iter()
+        .any(|task| task.mode != SearchMode::Keyword);
+    let pool_provider = provider.clone();
+    let prepared = prepare_search(provider, &request.root, true, needs_semantic)?;
+    let mut visual = super::visual::visual_channel(&request.root, visual_provider);
+    let root = request.root;
+    let mut responses = Vec::with_capacity(request.tasks.len());
+    for task in request.tasks {
+        responses.push(run_unified_search_with_prepared(
+            &prepared,
+            &mut visual,
+            pool_provider.clone(),
+            fusion,
+            rerank.clone(),
+            rerank_provider.clone(),
+            scope_judge.clone(),
+            listwise.clone(),
+            multivector.clone(),
+            task.into_request(root.clone()),
+        )?);
+    }
+    Ok(responses)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn run_unified_search_with_prepared(
+    prepared: &PreparedSearch,
+    visual: &mut super::visual::VisualChannel,
+    pool_provider: Arc<dyn neuink_search::EmbeddingProvider>,
+    fusion: neuink_config::VisualFusionSettings,
+    rerank: neuink_config::RerankSettings,
+    rerank_provider: Option<Arc<dyn neuink_search::RerankProvider>>,
+    scope_judge: Option<Arc<dyn neuink_search::ScopeJudgeProvider>>,
+    listwise: Option<Arc<dyn neuink_search::ListwiseRerankProvider>>,
+    multivector: neuink_config::MultivectorPoolSettings,
+    request: UnifiedSearchRequest,
+) -> Result<UnifiedSearchResponse, String> {
+    let question = request.question.trim().to_string();
+    if question.is_empty() {
+        return Err("query is required".into());
+    }
+    let requested_top_k = request.top_k.unwrap_or(20).clamp(1, 20);
     let english_query_for_visual = request.english_query.clone();
     let section_filter_for_visual = request.section_filter.clone();
     let segment_types_for_visual = parse_segment_types(&request.segment_types);
@@ -195,10 +327,9 @@ pub fn run_unified_search(
         ..UnifiedPlan::default()
     };
 
-    let mut text = evidence_channel(&prepared);
-    // The visual channel inspects the snapshot and the model only; it never encodes an
-    // asset here. A missing model or snapshot degrades to the text channel.
-    let mut visual = super::visual::visual_channel(&request.root, visual_provider);
+    let mut text = evidence_channel(prepared);
+    // The caller opened the visual channel once. A missing model or snapshot already
+    // degraded to the text channel; this call only reads that status and votes.
     let visual_status = visual.status_code();
     let mut evidence_sub_questions = Vec::new();
     if !request.sub_questions.is_empty() {
@@ -216,7 +347,7 @@ pub fn run_unified_search(
     }
     let output = run_unified(
         &mut text,
-        &mut visual,
+        visual,
         &plan,
         &UnifiedRequest {
             question: question.clone(),
@@ -700,6 +831,97 @@ fn carrier_kind_code(kind: neuink_search::CarrierKind) -> &'static str {
 mod tests {
     use super::*;
     use neuink_search::CarrierKind;
+
+    struct IdleProvider;
+
+    impl neuink_search::EmbeddingProvider for IdleProvider {
+        fn status(&self) -> neuink_search::EmbeddingProviderStatus {
+            neuink_search::EmbeddingProviderStatus {
+                available: false,
+                provider: "idle".to_string(),
+                model_name: None,
+                model_path: None,
+                dimensions: None,
+                message: None,
+            }
+        }
+
+        fn embed(
+            &self,
+            _inputs: &[neuink_search::EmbeddingInput],
+        ) -> neuink_search::SearchResult<Vec<neuink_search::EmbeddingVector>> {
+            Ok(Vec::new())
+        }
+    }
+
+    fn keyword_item(question: &str) -> UnifiedSearchBatchItem {
+        UnifiedSearchBatchItem {
+            question: question.to_string(),
+            routing_question: None,
+            english_query: None,
+            sub_questions: Vec::new(),
+            scope_entry_ids: Vec::new(),
+            mandated_entry_ids: Vec::new(),
+            section_filter: None,
+            segment_types: Vec::new(),
+            mode: SearchMode::Keyword,
+            top_k: Some(5),
+            head_units: None,
+            max_documents: None,
+            bind_carriers: Some(false),
+        }
+    }
+
+    fn idle_batch(
+        request: UnifiedSearchBatchRequest,
+    ) -> Result<Vec<UnifiedSearchResponse>, String> {
+        let mut rerank = neuink_config::RerankSettings::default();
+        rerank.mode = neuink_config::RerankMode::Off;
+        rerank.listwise.enabled = false;
+        run_unified_search_batch(
+            Arc::new(IdleProvider),
+            Arc::new(neuink_search::NoVisualProvider::default()),
+            neuink_config::VisualFusionSettings::default(),
+            rerank,
+            None,
+            None,
+            None,
+            neuink_config::MultivectorPoolSettings::default(),
+            request,
+        )
+    }
+
+    #[test]
+    fn an_empty_unified_batch_does_not_open_the_workspace() {
+        let responses = idle_batch(UnifiedSearchBatchRequest {
+            root: PathBuf::from("this-root-must-not-be-opened"),
+            tasks: Vec::new(),
+        })
+        .expect("empty batch");
+        assert!(responses.is_empty());
+    }
+
+    #[test]
+    fn a_unified_batch_returns_one_response_per_task_from_one_workspace() {
+        let root = std::env::temp_dir().join(format!(
+            "neuink-unified-batch-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("root");
+        let _workspace = neuink_workspace::Workspace::create(&root).expect("workspace");
+        let responses = idle_batch(UnifiedSearchBatchRequest {
+            root: root.clone(),
+            tasks: vec![keyword_item("first question"), keyword_item("second question")],
+        })
+        .expect("batch");
+        assert_eq!(responses.len(), 2);
+        assert_eq!(responses[0].question, "first question");
+        assert_eq!(responses[1].question, "second question");
+        std::fs::remove_dir_all(&root).ok();
+    }
 
     #[test]
     fn skip_and_carrier_codes_are_stable() {
