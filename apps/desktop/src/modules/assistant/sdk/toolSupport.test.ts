@@ -4,13 +4,16 @@ import {
   formatSearchSegmentsOutput,
   formatSciverseSearchOutput,
   applyMarkdownPatchPreview,
+  entryIdOrSingleScope,
   markdownPatchOperations,
   noteProposalAction,
   noteProposalInputSchema,
   normalizeToolInput,
   prependMarkdownPreview,
+  scopedEntryIds,
   sourcesFromMarkers
 } from './toolSupport';
+import type { ScopeSnapshot } from '@/shared/ipc/assistantApi';
 
 describe('local search degradation', () => {
   it.each(['semantic_fallback_keyword', 'hybrid_fallback_keyword', 'keyword'])(
@@ -230,5 +233,38 @@ describe('Sciverse assistant tools', () => {
       page: 999, page_size: 0, query: 'benchmark'
     }, { root: 'workspace', scope })).toEqual({ page: 100, page_size: 1, query: 'benchmark' });
     expect(normalizeToolInput('get_sciverse_metadata_catalog', {}, { root: 'workspace', scope })).toEqual({});
+  });
+});
+
+const frozenScope: ScopeSnapshot = {
+  tag_ids: [],
+  tag_names: [],
+  entry_ids: ['Kk7-HVa15guV-M2X', 'MeZ6gjESjMdVABhs', 'c6RD33rP-Jg3kGQA'],
+  entry_titles: [
+    '3830397.3841887.pdf-1933de06-bc45-4c67-960b-c28664d93a10',
+    '2026.acl-long.818.pdf',
+    '2026.acl-long.818'
+  ],
+  scope_intent: 'selection'
+};
+
+describe('frozen entry id resolution', () => {
+  it('maps a unique in-scope title to the real entry id', () => {
+    expect(entryIdOrSingleScope('3830397.3841887.pdf-1933de06-bc45-4c67-960b-c28664d93a10', frozenScope))
+      .toBe('Kk7-HVa15guV-M2X');
+    expect(scopedEntryIds(['2026.acl-long.818.pdf', 'c6RD33rP-Jg3kGQA'], frozenScope))
+      .toEqual(['MeZ6gjESjMdVABhs', 'c6RD33rP-Jg3kGQA']);
+  });
+
+  it('rejects a title outside the frozen scope and an ambiguous title', () => {
+    expect(() => entryIdOrSingleScope('not-in-scope.pdf', frozenScope))
+      .toThrow(/outside the frozen Assistant scope/);
+    const tied: ScopeSnapshot = {
+      ...frozenScope,
+      entry_ids: ['a', 'b'],
+      entry_titles: ['Same Paper', 'Same Paper']
+    };
+    expect(() => scopedEntryIds(['Same Paper'], tied)).toThrow(/超出冻结范围/);
+    expect(() => entryIdOrSingleScope('Same Paper', tied)).toThrow(/outside the frozen Assistant scope/);
   });
 });

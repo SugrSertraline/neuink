@@ -80,6 +80,7 @@ export function assistantErrorDiagnostic(error: unknown): string {
     [/network|fetch failed|connection|网络|连接/i, '连接未完成'],
     [/conflict|revision|changed|冲突|版本|已变更/i, '目标版本冲突'],
     [/not found|does not exist|missing|不存在|缺失|未找到/i, '目标或配置不可用'],
+    [/outside the frozen Assistant scope|超出冻结范围|entry_id is required|target_out_of_scope/i, '条目 ID 无效或超出当前范围（请使用 Current Scope 中的 entry_id，而非论文标题）'],
     [/citation|source marker|inline source|引用|溯源/i, '引用或来源校验未通过'],
     [/mind map|diagram|\bnode\b|图表|节点/i, '图表结构校验未通过'],
     [/invalid|validation|schema|参数|校验|格式/i, '输入或结果校验未通过'],

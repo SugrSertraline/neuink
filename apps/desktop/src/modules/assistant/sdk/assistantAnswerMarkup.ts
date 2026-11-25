@@ -1,3 +1,5 @@
+import { hasDsmlClose, matchDsmlSlice } from './modelToolCallMarkup';
+
 const CONTROL_TAGS = new Set(['tools', 'tool', 'tool_call', 'tool_calls', 'tool_use', 'function_call', 'function_calls']);
 
 /** Hide model-generated tool-control markup while keeping Markdown code examples intact. */
@@ -42,13 +44,20 @@ export function hasAssistantToolMarkup(answer: string) {
 function controlTagInLine(line: string): { prefix: string; closing: boolean; complete: boolean; closedLater: boolean } | null {
   for (let start = line.indexOf('<'); start >= 0; start = line.indexOf('<', start + 1)) {
     if (((line.slice(0, start).match(/(?<!\\)`/g) ?? []).length % 2) !== 0) continue;
-    const match = /^<(\/)?([a-z_]+)(?:\s[^<>]*)?(>)?/i.exec(line.slice(start));
-    if (!match) continue;
-    const name = match[2].toLowerCase();
-    const complete = Boolean(match[3]);
-    if (!CONTROL_TAGS.has(name) && !(name.length >= 2 && !complete && [...CONTROL_TAGS].some(tag => tag.startsWith(name)))) continue;
-    return { prefix: line.slice(0, start), closing: Boolean(match[1]), complete,
-      closedLater: complete && line.slice(start + match[0].length).toLowerCase().includes(`</${name}>`) };
+    const slice = line.slice(start);
+    const ascii = /^<(\/)?([a-z_]+)(?:\s[^<>]*)?(>)?/i.exec(slice);
+    if (ascii) {
+      const name = ascii[2].toLowerCase();
+      const complete = Boolean(ascii[3]);
+      if (CONTROL_TAGS.has(name) || (name.length >= 2 && !complete && [...CONTROL_TAGS].some(tag => tag.startsWith(name)))) {
+        return { prefix: line.slice(0, start), closing: Boolean(ascii[1]), complete,
+          closedLater: complete && slice.slice(ascii[0].length).toLowerCase().includes(`</${name}>`) };
+      }
+    }
+    const dsml = matchDsmlSlice(slice);
+    if (!dsml) continue;
+    return { prefix: line.slice(0, start), closing: dsml.closing, complete: dsml.complete,
+      closedLater: dsml.complete && hasDsmlClose(slice.slice(dsml.raw.length)) };
   }
   return null;
 }

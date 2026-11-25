@@ -13,6 +13,7 @@ import {
   type ScopeKind
 } from './retrievalPlanning';
 import {
+  resolveAllowedEntryIds,
   resolveSearchScope,
   type FrozenScope,
   type LibraryEntryRef,
@@ -140,7 +141,7 @@ const BATCH_UNAVAILABLE_OUTCOME: TaskSearchOutcome = {
 
 const TARGET_OUT_OF_SCOPE: { code: string; message: string } = {
   code: 'target_out_of_scope',
-  message: '指定论文不在本次检索范围内，该子问题未检索。'
+  message: '指定论文 ID 不在本次检索范围内，该子问题未检索。请使用 Current Scope 中列出的 entry_id（而非论文标题或文件名），或省略 target_entry_ids 以检索当前范围。'
 };
 
 const TASK_MISSING_RESULT: { code: string; message: string } = {
@@ -412,6 +413,7 @@ export async function runSearchLibrary({
   }
 
   const allowedSet = new Set(allowedIds);
+  const allowedEntries = allowedIds.map((id) => ({ id, title: titleById.get(id) ?? id }));
   const results = new Map<string, TaskResult>();
   const sources: ConversationSourceLink[] = [];
   const seenSources = new Set<string>();
@@ -420,9 +422,15 @@ export async function runSearchLibrary({
     const pending: Array<{ task: RetrievalTask; targets: string[]; allowed: string[] }> = [];
     const requests: TaskSearchRequest[] = [];
     for (const task of batchTasks) {
-      const targets = [...new Set(task.target_entry_ids)];
-      const base = { task_id: task.id, question: task.question, target_entry_ids: targets, evidence: [], warnings: [] };
-      if (targets.some((id) => !allowedSet.has(id))) {
+      const targets = resolveAllowedEntryIds(task.target_entry_ids, allowedEntries);
+      const base = {
+        task_id: task.id,
+        question: task.question,
+        target_entry_ids: targets ?? [...new Set(task.target_entry_ids)],
+        evidence: [],
+        warnings: []
+      };
+      if (!targets) {
         results.set(task.id, { ...base, status: 'failed', error: TARGET_OUT_OF_SCOPE });
         continue;
       }

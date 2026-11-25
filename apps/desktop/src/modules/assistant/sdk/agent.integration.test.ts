@@ -180,6 +180,27 @@ describe('production agent wiring', () => {
     expect(onDelta.mock.calls.flat().join('')).not.toContain('<tool_call>');
     expect(JSON.stringify(agent.messages)).not.toContain('<tool_call>');
   });
+  it('corrects a DeepSeek DSML envelope without streaming or storing the markup', async () => {
+    const raw = `<｜｜DSML｜｜ calls>
+<｜｜DSML｜｜ invoke name="read_entry_assistant_context">
+<｜｜DSML｜｜ parameter name="entry_id" string="true">aJDfGv7T73XH2E9s</｜｜DSML｜｜ parameter>
+</｜｜DSML｜｜ invoke>
+</｜｜DSML｜｜ calls>`;
+    const model = fakeModel([
+      { text: raw },
+      { text: '这篇论文的交互方式有点像 stitches。' }
+    ]);
+    vi.mocked(createNeuinkModel).mockReturnValue(model);
+    const onDelta = vi.fn();
+    const agent = new Agent({ driver: createAgentDriver({ settings: profile, system: '', tools: {}, onDelta }),
+      tools: {}, messages: [{ role: 'user' as const, content: '有点像stitches' }],
+      budget: new RunBudget(), maxTurns: 4,
+      verify: text => text ? undefined : '不要输出原始工具标记，请直接用中文回答。' });
+    expect(await agent.run()).toBe('这篇论文的交互方式有点像 stitches。');
+    expect(JSON.stringify(model.doStreamCalls[1].prompt)).toContain('不要输出原始工具标记');
+    expect(onDelta.mock.calls.flat().join('')).not.toContain('DSML');
+    expect(JSON.stringify(agent.messages)).not.toContain('DSML');
+  });
   it('removes search tools after six searches and rejects a provider that still calls them', async () => {
     const model = fakeModel([
       ...Array.from({ length: 7 }, (_, i) => ({ call: { name: 'search_web', args: { query: `ACL variant ${i}` } } })),

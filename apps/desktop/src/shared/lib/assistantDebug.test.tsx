@@ -85,6 +85,14 @@ describe('safe assistant error presentation', () => {
     expect(stringify).not.toHaveBeenCalled();
     expect(() => assistantErrorDiagnostic({ get message() { throw new Error(raw); } })).not.toThrow();
   });
+  it('classifies a frozen-scope entry id failure instead of an unknown exception', () => {
+    expect(assistantErrorDiagnostic(
+      'Entry 3830397.3841887.pdf-1933de06 is outside the frozen Assistant scope. Allowed Entry ids: Kk7-HVa15guV-M2X.'
+    )).toBe('条目 ID 无效或超出当前范围（请使用 Current Scope 中的 entry_id，而非论文标题）');
+    expect(assistantErrorDiagnostic('检索条目超出冻结范围，不能自动扩大到其他论文。'))
+      .toBe('条目 ID 无效或超出当前范围（请使用 Current Scope 中的 entry_id，而非论文标题）');
+    expect(assistantErrorDiagnostic('arbitrary remote sentence')).toBe('未分类异常');
+  });
   it('explains citation and diagram validation using fixed safe categories', () => {
     expect(assistantErrorDiagnostic('Answer has no inline citation: Authorization: Bearer sk-private'))
       .toBe('引用或来源校验未通过');

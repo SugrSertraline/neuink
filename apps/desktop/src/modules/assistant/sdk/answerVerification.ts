@@ -17,7 +17,7 @@ export function answerVerification({ answer, question, plan, sources, events, ob
 }): { message: string; correction: string } | undefined {
   if (isRawModelToolCall(answer)) return {
     message: ASSISTANT_READ_FAILURES.contract,
-    correction: '上一次输出的是原始工具调用标记，不是回答。请根据已有工具结果直接回答用户，并按实际来源添加引用；不要输出 <tool_call> 标记。'
+    correction: '上一次输出的是原始工具调用标记，不是回答。请根据已有工具结果直接回答用户，并按实际来源添加引用；不要输出 <tool_call> 或 <｜DSML｜...> 等任何原始工具调用标记。'
   };
   const records = paperRecords(events.flatMap(event => event.status === 'done' ? event.researchPapers ?? [] : []), [...sources.values()]);
   const presentationError = paperPresentationError(answer, records);
@@ -40,7 +40,7 @@ export function answerVerification({ answer, question, plan, sources, events, ob
     message: toolMarkup ? '模型返回了不完整的工具标签，未能形成最终回答。'
       : invalidCitation || uncited ? ASSISTANT_READ_FAILURES.citation : ASSISTANT_READ_FAILURES.contract,
     correction: taskVerificationCorrection(question, [
-      presentationError ?? '', toolMarkup ? 'Do not print tool-control tags or partial tool calls. Use only the declared tool API, or give a normal user-facing answer from verified observations.' : '',
+      presentationError ?? '', toolMarkup ? 'Do not print tool-control tags or partial tool calls, including <tool_call> and <｜DSML｜...> markup. Use only the declared tool API, or give a normal user-facing answer from verified observations.' : '',
       missing.length ? `Call these required tools before answering: ${missing.join(', ')}.` : '',
       invalidCitation || uncited ? citationCorrection(sources.keys(), externalUrls) : '',
       !answer.trim() && !hasProposals ? 'Complete the requested answer or proposal using the actual observations above.' : ''

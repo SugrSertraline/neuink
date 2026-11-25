@@ -788,15 +788,14 @@ export async function createAssistantTools({
 
     tools.search_library = tool<unknown, unknown>({
       description:
-        'Search the library for evidence answering a question. Supports optional caller-supplied question_types and planned_tasks so an agent can submit decomposed sub-questions directly in one batch; otherwise the host planner splits multi-target or cross-paper questions when configured. Returns evidence per sub-question with each task status (retrieved, empty, or failed).',
+        'Search the library for evidence answering a question. Supports optional caller-supplied question_types and planned_tasks so an agent can submit decomposed sub-questions directly in one batch; otherwise the host planner splits multi-target or cross-paper questions when configured. Returns evidence per sub-question with each task status (retrieved, empty, or failed). When one turn needs several papers, send one search_library call and set target_entry_ids on each planned_tasks item instead of several serial search_library calls.',
       inputSchema: jsonSchema<unknown>({
         type: 'object',
         additionalProperties: false,
-        required: ['question'],
         properties: {
-          question: { type: 'string', description: 'The question to search for.' },
-          scope_entry_ids: { type: 'array', items: { type: 'string' }, description: 'Optional Entry ids; omit for the current scope. An empty array searches nothing.' },
-          target_entry_ids: { type: 'array', items: { type: 'string' }, description: 'Optional alias for scope_entry_ids; omit for the current scope.' },
+          question: { type: 'string', description: 'The question to search for. Optional when planned_tasks contain non-empty questions; the host derives it from those sub-questions.' },
+          scope_entry_ids: { type: 'array', items: { type: 'string' }, description: 'Optional. Exact entry_id from Current Scope (not the paper title or filename). Omit for the current scope. An empty array searches nothing.' },
+          target_entry_ids: { type: 'array', items: { type: 'string' }, description: 'Optional alias for scope_entry_ids. Exact entry_id from Current Scope (not the paper title or filename). Omit for the current scope.' },
           use_planning: { type: 'boolean', description: 'Optional; keep true (default) unless explicitly searching one atomic query without planning.' },
           question_types: {
             type: 'array',
@@ -806,7 +805,7 @@ export async function createAssistantTools({
           planned_tasks: {
             type: 'array',
             maxItems: MAX_RETRIEVAL_TASKS,
-            description: 'Optional decomposed retrieval sub-tasks executed in one batch (preferred over nested planning for multi-aspect, cross-paper, or global questions).',
+            description: 'Optional decomposed retrieval sub-tasks executed in one batch (preferred over nested planning for multi-aspect, cross-paper, or global questions). For several papers in one turn, put each paper in its own item via target_entry_ids instead of issuing separate search_library calls.',
             items: {
               type: 'object',
               additionalProperties: false,
@@ -816,7 +815,7 @@ export async function createAssistantTools({
                 question: { type: 'string', description: 'Focused sub-question preserving necessary entities and constraints.' },
                 english_query: { type: 'string', description: 'Optional English academic query for this sub-question.' },
                 constraints: { type: 'array', items: { type: 'string' }, description: 'Optional short atomic constraints.' },
-                target_entry_ids: { type: 'array', items: { type: 'string' }, description: 'Optional paper entry ids from the allowed catalog for this sub-question.' }
+                target_entry_ids: { type: 'array', items: { type: 'string' }, description: 'Optional. Exact entry_id from Current Scope (not the paper title or filename) for this sub-question.' }
               }
             }
           },
@@ -832,7 +831,7 @@ export async function createAssistantTools({
         let fingerprint: string | undefined;
         try {
           const object = asObject(input);
-          const question = toolPreflight(() => requiredString(object.question, 'question'));
+          const question = toolPreflight(() => resolveSearchLibraryQuestion(object));
           const rawScopeEntryIds = object.scope_entry_ids ?? object.target_entry_ids;
           const scopeRequest = toolPreflight(() => scopeRequestFromToolInput(rawScopeEntryIds));
           const topK = clampTopK(object.top_k);
@@ -1184,6 +1183,26 @@ function assertToolPrerequisites(
 const CALLER_QUESTION_TYPE_SET = new Set<string>(
   QUESTION_TYPES.filter((kind) => kind !== 'dependent_multihop')
 );
+
+const SEARCH_LIBRARY_QUESTION_LIMIT = 240;
+
+/** Top-level `question`, or a stable question synthesized from `planned_tasks`. */
+function resolveSearchLibraryQuestion(object: JsonObject): string {
+  const explicit = optionalString(object.question);
+  if (explicit) return explicit;
+  const questions = (Array.isArray(object.planned_tasks) ? object.planned_tasks : []).flatMap((entry) => {
+    const question = optionalString(asObject(entry).question);
+    return question ? [question] : [];
+  });
+  if (questions.length === 0) {
+    throw new Error('question is required (or provide non-empty planned_tasks).');
+  }
+  if (questions.length === 1) return questions[0];
+  const joined = questions.slice(0, 3).join('；');
+  return joined.length > SEARCH_LIBRARY_QUESTION_LIMIT
+    ? joined.slice(0, SEARCH_LIBRARY_QUESTION_LIMIT)
+    : joined;
+}
 
 /**
  * Validates optional caller-supplied `question_types` / `planned_tasks` on `search_library`

@@ -82,6 +82,33 @@ describe('search_library tool wiring', () => {
     })]);
   });
 
+  it('runs every planned sub-task when the top-level question is omitted', async () => {
+    vi.mocked(searchSegmentsBatch).mockReset().mockImplementation(async (_root, tasks) => emptyBatch(tasks));
+    const { output } = await runSearchLibraryTool({
+      planned_tasks: [
+        { id: 'j1', question: 'Jelly 的交互模型是什么？', target_entry_ids: ['entry-allowed'] },
+        { id: 'j2', question: 'Jelly 如何绑定拖拽？', target_entry_ids: ['entry-allowed'] }
+      ]
+    });
+    expect(output).not.toMatchObject({ code: 'TOOL_INVALID_ARGUMENTS' });
+    expect(searchSegmentsBatch).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(searchSegmentsBatch).mock.calls[0][1].map((task) => task.query)).toEqual([
+      'Jelly 的交互模型是什么？',
+      'Jelly 如何绑定拖拽？'
+    ]);
+  });
+
+  it('rejects search_library when question and planned_tasks are both empty', async () => {
+    vi.mocked(searchSegmentsBatch).mockReset();
+    await expect(runSearchLibraryTool({})).rejects.toMatchObject({
+      code: 'TOOL_INVALID_ARGUMENTS'
+    });
+    await expect(runSearchLibraryTool({ question: '   ', planned_tasks: [{ question: '  ' }] })).rejects.toThrow(
+      /question is required/
+    );
+    expect(searchSegmentsBatch).not.toHaveBeenCalled();
+  });
+
   it('turns planning off only for an explicit false', async () => {
     vi.mocked(searchSegmentsBatch).mockReset().mockImplementation(async (_root, tasks) => emptyBatch(tasks));
     const { output } = await runSearchLibraryTool({ question: '论文 A 使用什么数据集？', use_planning: false });

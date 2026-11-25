@@ -7,6 +7,7 @@ import { researchImportResult } from './researchImportResult';
 import { formatSciverseSearchOutput } from './sciverseOutput';
 export { formatSciverseSearchOutput } from './sciverseOutput';
 import { isPdfTool, runPdfTool } from './pdfTools';
+import { resolveAllowedEntryId, type LibraryEntryRef } from './searchScope';
 import { entryContextWindow, formatReadEntryOutput, ENTRY_CONTEXT_MAX_CHARS } from './entryContext';
 import { selectDiverseEvidence } from './evidenceDiversity';
 export { formatReadEntryOutput } from './entryContext';
@@ -1540,13 +1541,14 @@ export function modelInputSchema(descriptor: AssistantToolDescriptor): JSONSchem
 
   describeProperty(objectSchema, 'query', 'Search phrase or question. Use a concise query relevant to this tool.');
   describeProperty(objectSchema, 'mode', 'Search mode. Prefer hybrid for content lookup; use keyword for exact terms.');
-  describeProperty(objectSchema, 'scope_entry_ids', 'Optional Entry ids. Omit this to use the current Neuink scope.');
+  describeProperty(objectSchema, 'scope_entry_ids', 'Optional. Exact entry_id from Current Scope (not the paper title or filename). Omit this to use the current Neuink scope.');
+  describeProperty(objectSchema, 'entry_ids', 'Exact entry_id values from Current Scope (not the paper title or filename).');
   describeProperty(objectSchema, 'top_k', 'Optional maximum number of segment hits to return.');
   describeProperty(objectSchema, 'english_query', 'Optional English academic query. For a Chinese question about an English paper, provide this in the same search_segments call.');
   describeProperty(objectSchema, 'sub_queries', 'Optional additional focused queries, at most three.');
   describeProperty(objectSchema, 'section_filter', 'Optional section id or case-insensitive section path fragment.');
   describeProperty(objectSchema, 'segment_types', 'Optional segment types such as paragraph, table, figure, math, or heading.');
-  describeProperty(objectSchema, 'entry_id', 'Required Entry id for explicit Entry or segment reads.');
+  describeProperty(objectSchema, 'entry_id', 'Required. Exact entry_id from Current Scope (not the paper title or filename).');
   describeProperty(objectSchema, 'segment_uid', 'Segment uid returned by search_library or search_segments.');
   describeProperty(objectSchema, 'doc_id', 'Sciverse document id returned by search_sciverse_evidence.');
   describeProperty(objectSchema, 'offset', 'Optional Unicode character offset for Sciverse content.');
@@ -1605,6 +1607,13 @@ export function toolDescription(descriptor: AssistantToolDescriptor) {
   return descriptor.description;
 }
 
+function allowedEntriesFromScope(scope: ScopeSnapshot): LibraryEntryRef[] {
+  return scope.entry_ids.map((id, index) => ({
+    id,
+    title: scope.entry_titles[index] ?? ''
+  }));
+}
+
 export function scopedEntryIds(value: unknown, scope: ScopeSnapshot) {
   const requested = stringArray(value);
 
@@ -1616,11 +1625,20 @@ export function scopedEntryIds(value: unknown, scope: ScopeSnapshot) {
     return scope.entry_ids;
   }
 
-  const allowed = new Set(scope.entry_ids);
-  if (requested.some(entryId => !allowed.has(entryId))) {
-    throw new Error('检索条目超出冻结范围，不能自动扩大到其他论文。');
+  const allowedEntries = allowedEntriesFromScope(scope);
+  const resolved: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of requested) {
+    const id = resolveAllowedEntryId(raw, allowedEntries);
+    if (!id) {
+      throw new Error('检索条目超出冻结范围，不能自动扩大到其他论文。');
+    }
+    if (!seen.has(id)) {
+      seen.add(id);
+      resolved.push(id);
+    }
   }
-  return requested;
+  return resolved;
 }
 
 export function entryIdOrSingleScope(value: unknown, scope: ScopeSnapshot) {
@@ -1628,12 +1646,13 @@ export function entryIdOrSingleScope(value: unknown, scope: ScopeSnapshot) {
   if (!entryId) {
     throw new Error('entry_id is required for explicit Entry reads.');
   }
-  if (!scope.entry_ids.includes(entryId)) {
+  const resolved = resolveAllowedEntryId(entryId, allowedEntriesFromScope(scope));
+  if (!resolved) {
     throw new Error(
       `Entry ${entryId} is outside the frozen Assistant scope. Allowed Entry ids: ${scope.entry_ids.join(', ') || 'none'}. Resolve [C] markers from the Typed Mention Map before retrying.`
     );
   }
-  return entryId;
+  return resolved;
 }
 
 export function clampTopK(value: unknown) {

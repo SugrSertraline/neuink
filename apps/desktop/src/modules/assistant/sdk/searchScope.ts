@@ -31,6 +31,44 @@ export type ResolvedSearchScope =
 
 const SCOPE_INTENTS: ReadonlySet<string> = new Set(['library', 'selection', 'unresolved']);
 
+const ENTRY_ID_HINT = '请使用 Current Scope 中的 entry_id，而非论文标题或文件名。';
+const NOT_IN_LIBRARY = `检索条目不在当前资料库中，未检索。${ENTRY_ID_HINT}`;
+const OUTSIDE_FROZEN = `检索条目超出冻结范围，不能自动扩大到其他论文。${ENTRY_ID_HINT}`;
+
+/**
+ * Map a model-supplied token to one allowed entry. An exact id wins. A title
+ * matches only when it is unique inside `allowedEntries`. Nothing outside that
+ * list is considered, `.pdf` is not stripped, and any tie returns null.
+ */
+export function resolveAllowedEntryId(raw: string, allowedEntries: readonly LibraryEntryRef[]): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (allowedEntries.some((entry) => entry.id === trimmed)) return trimmed;
+  const exact = allowedEntries.filter((entry) => entry.title.trim() === trimmed);
+  if (exact.length === 1) return exact[0]?.id ?? null;
+  if (exact.length > 1) return null;
+  const folded = allowedEntries.filter((entry) => entry.title.trim().toLowerCase() === trimmed.toLowerCase());
+  return folded.length === 1 ? folded[0]?.id ?? null : null;
+}
+
+/** Resolve every token, or return null when any token is missing or ambiguous. */
+export function resolveAllowedEntryIds(
+  rawIds: readonly string[],
+  allowedEntries: readonly LibraryEntryRef[]
+): string[] | null {
+  const resolved: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of rawIds) {
+    const id = resolveAllowedEntryId(raw, allowedEntries);
+    if (!id) return null;
+    if (!seen.has(id)) {
+      seen.add(id);
+      resolved.push(id);
+    }
+  }
+  return resolved;
+}
+
 function uniqueNonEmpty(ids: readonly string[]) {
   return [...new Set(ids.map((id) => id.trim()).filter(Boolean))];
 }
@@ -83,13 +121,27 @@ export function resolveSearchScope(
     // Explicitly empty scope: report no results, never fall back to the library.
     return { status: 'empty', scope_kind: request.kind };
   }
-  if (requested.some((id) => !libraryIds.has(id))) {
-    return { status: 'invalid', message: '检索条目不在当前资料库中，未检索。' };
+  const allowedEntries = frozenIds
+    ? libraryEntries.filter((entry) => frozenIds.includes(entry.id))
+    : libraryEntries;
+  const resolved: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of requested) {
+    const id = resolveAllowedEntryId(raw, allowedEntries);
+    if (id) {
+      if (!seen.has(id)) {
+        seen.add(id);
+        resolved.push(id);
+      }
+      continue;
+    }
+    const libraryHit = resolveAllowedEntryId(raw, libraryEntries);
+    if (frozenIds && libraryHit && !frozenIds.includes(libraryHit)) {
+      return { status: 'invalid', message: OUTSIDE_FROZEN };
+    }
+    return { status: 'invalid', message: NOT_IN_LIBRARY };
   }
-  if (frozenIds && requested.some((id) => !frozenIds.includes(id))) {
-    return { status: 'invalid', message: '检索条目超出冻结范围，不能自动扩大到其他论文。' };
-  }
-  return { status: 'resolved', scope_kind: scopeKindFor(requested), entry_ids: requested };
+  return { status: 'resolved', scope_kind: scopeKindFor(resolved), entry_ids: resolved };
 }
 
 /** Map the raw `scope_entry_ids` tool argument to an explicit scope request. */

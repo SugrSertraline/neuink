@@ -204,7 +204,56 @@ describe('runSearchLibrary task binding and statuses', () => {
     const [task] = result.modelOutput.task_results;
     expect(task.status).toBe('failed');
     expect(task.error?.code).toBe('target_out_of_scope');
+    expect(task.error?.message).toContain('entry_id');
+    expect(task.error?.message).toContain('论文标题');
     expect(result.modelOutput.summary.failed_tasks).toEqual(['q1']);
+  });
+
+  it('normalizes a unique in-scope title onto the real entry id before searching', async () => {
+    const library = [
+      { id: 'Kk7-HVa15guV-M2X', title: '3830397.3841887.pdf-1933de06-bc45-4c67-960b-c28664d93a10' },
+      { id: 'MeZ6gjESjMdVABhs', title: '2026.acl-long.818.pdf' }
+    ];
+    const searchBatch = batchReturning(() => okOutcome('Kk7-HVa15guV-M2X', 's'));
+    const result = await run({
+      libraryEntries: library,
+      frozenScope: { intent: 'selection', entry_ids: library.map((entry) => entry.id) },
+      plan: async () => planned(multiTaskPlan({
+        retrieval_tasks: [{
+          id: 'q1',
+          question: '交互式创建有什么启发？',
+          constraints: [],
+          depends_on: [],
+          target_entry_ids: ['3830397.3841887.pdf-1933de06-bc45-4c67-960b-c28664d93a10']
+        }]
+      })),
+      searchBatch
+    });
+    expect(searchBatch.mock.calls[0]?.[0][0]?.scope_entry_ids).toEqual(['Kk7-HVa15guV-M2X']);
+    expect(result.modelOutput.task_results[0]?.target_entry_ids).toEqual(['Kk7-HVa15guV-M2X']);
+    expect(result.modelOutput.task_results[0]?.status).not.toBe('failed');
+  });
+
+  it('rejects an unknown target string with a corrective out-of-scope message', async () => {
+    const searchBatch = batchReturning(() => okOutcome('a', 's'));
+    const result = await run({
+      frozenScope: { intent: 'selection', entry_ids: ['a', 'b'] },
+      plan: async () => planned(multiTaskPlan({
+        retrieval_tasks: [{
+          id: 'q1',
+          question: '未知论文？',
+          constraints: [],
+          depends_on: [],
+          target_entry_ids: ['not-a-paper.pdf']
+        }]
+      })),
+      searchBatch
+    });
+    expect(searchBatch).not.toHaveBeenCalled();
+    expect(result.modelOutput.task_results[0]?.error).toMatchObject({
+      code: 'target_out_of_scope',
+      message: expect.stringContaining('entry_id')
+    });
   });
 
   it('reports planner-named papers missing from scope as unresolved warnings', async () => {

@@ -433,7 +433,7 @@ function buildSelectedContextEntryNote(assistantContext?: AssistantContext | nul
   return [
     'Selected context entries were explicitly added by the user and are the document-level research scope, not individual excerpts.',
     ...entries.map((entry) =>
-      `- ${entry.entryTitle}${entry.contentKind && entry.contentKind !== 'entry' ? ` / ${entry.contentTitle ?? entry.contentKind}` : ''} (${entry.entryId})`
+      `- entry_id: ${entry.entryId} | title: ${entry.entryTitle}${entry.contentKind && entry.contentKind !== 'entry' ? ` / ${entry.contentTitle ?? entry.contentKind}` : ''}`
     ),
     'Use read_entry_assistant_context with these entry IDs, or search_library scoped to these entry IDs, before synthesizing from them.'
   ].join('\n');
@@ -575,13 +575,15 @@ function buildScopeContext(scope: ScopeSnapshot) {
   const entries = scope.entry_ids
     .map((entryId, index) => {
       const title = scope.entry_titles[index] ?? entryId;
-      return `- ${title} (${entryId})`;
+      return `- entry_id: ${entryId} | title: ${title}`;
     })
     .slice(0, 30);
 
   return [
     scope.tag_names.length > 0 ? `Tags: ${scope.tag_names.join(' / ')}` : '',
-    entries.length > 0 ? `Entries:\n${entries.join('\n')}` : 'Entries: none in the frozen scope; do not expand to other papers.'
+    entries.length > 0
+      ? `Entries (use the exact entry_id in tool calls, never the title or filename):\n${entries.join('\n')}`
+      : 'Entries: none in the frozen scope; do not expand to other papers.'
   ]
     .filter(Boolean)
     .join('\n');
@@ -593,7 +595,7 @@ function buildCurrentNoteContext(contextSnapshot?: AssistantContextSnapshot | nu
   if (hydratedNote) {
     return [
       'A Markdown note was explicitly selected and backend-hydrated.',
-      `Entry: ${hydratedNote.entry_title} (${hydratedNote.entry_id})`,
+      `Entry: ${hydratedNote.entry_title} (entry_id: ${hydratedNote.entry_id})`,
       `Note: ${hydratedNote.note_title} (${hydratedNote.note_id})`,
       `Markdown chars: ${hydratedNote.markdown_char_count}`,
       `Source links: ${hydratedNote.source_link_count}`,
