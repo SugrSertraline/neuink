@@ -2,6 +2,9 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { DailySidebar } from './DailySidebar';
+// Resolve the real lazy module during collection, outside findByRole's UI timeout.
+// Production keeps code splitting; these assertions verify the rendered sidebar.
+import './DailyCalendar';
 const state = vi.hoisted(() => ({ root: null as string | null, loading: false, error: null as string | null, refresh: vi.fn(), recommendations: vi.fn(),
   horoscopePhase: 'ready' as 'ready' | 'loading' | 'error', horoscopeRefresh: vi.fn() }));
 vi.mock('./DailyContext', () => ({ useDaily: () => ({ root: state.root, today: '2026-10-27' }) }));
