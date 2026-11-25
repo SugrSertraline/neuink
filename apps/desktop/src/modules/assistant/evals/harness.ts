@@ -85,6 +85,7 @@ export async function runScenario(
     const result = await answerWithGroundedAgent({
       root: 'eval-workspace',
       scope: scenario.setup?.scope ?? SCOPE,
+      retrievalScope: scenario.setup?.scope ?? SCOPE,
       settings,
       profiles: [settings],
       runtimeSettings,
@@ -98,7 +99,9 @@ export async function runScenario(
       contextSnapshot: scenario.setup?.contextSnapshot ?? null,
       currentNote: scenario.setup?.currentNote ?? null,
       currentEntry: scenario.setup?.currentEntry ?? null,
-      availableEntries: scenario.setup?.availableEntries ?? [],
+      availableEntries: scenario.setup?.availableEntries ?? Object.values(ENTRIES).map(entry => ({
+        ...entry, description: `Synthetic entry ${entry.title}`, updatedAt: '2026-01-01T00:00:00.000Z'
+      })),
       question: scenario.prompt,
       abortSignal: AbortSignal.timeout(options.timeoutMs ?? (scenario.slow ? 300_000 : 180_000))
     });

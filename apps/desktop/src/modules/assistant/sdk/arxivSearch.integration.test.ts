@@ -41,7 +41,7 @@ it('migrates only complete older default grants, respects restrictions, revocati
   old.mainAssistant.enabledToolIds = old.mainAssistant.enabledToolIds.filter(id => id !== 'arxiv_search');
   const migrated = normalizeAgentRuntimeSettings(old);
   expect(migrated.mainAssistant.enabledToolIds).toContain('arxiv_search');
-  expect(migrated.capabilityRevision).toBe(5);
+  expect(migrated.capabilityRevision).toBe(6);
   const revoked = structuredClone(migrated);
   revoked.mainAssistant.enabledToolIds = revoked.mainAssistant.enabledToolIds.filter(id => id !== 'arxiv_search');
   expect(normalizeAgentRuntimeSettings(revoked).mainAssistant.enabledToolIds).not.toContain('arxiv_search');

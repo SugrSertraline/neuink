@@ -83,6 +83,15 @@ export async function workspaceApiFactory(importOriginal: ImportOriginal) {
   const actual = await importOriginal<typeof import('@/shared/ipc/workspaceApi')>();
   return {
     ...actual,
+    searchSegmentsBatch: async (...[, tasks]: Parameters<typeof actual.searchSegmentsBatch>) => {
+      const { evalState, fixtureMissing } = await import('./evalState');
+      const handler = evalState.invoke.get('search_segments');
+      if (!handler) return fixtureMissing('invoke', 'search_segments');
+      return Promise.all(tasks.map(async task => ({
+        task_id: task.task_id,
+        results: await handler(task) as import('@/shared/ipc/workspaceApi').SearchResults
+      })));
+    },
     readNote: async (_root: string, entryId: string, noteId: string) => {
       const { evalState, fixtureMissing } = await import('./evalState');
       const note = evalState.notes.get(`${entryId}:${noteId}`);

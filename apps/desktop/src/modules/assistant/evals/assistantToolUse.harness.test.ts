@@ -145,7 +145,7 @@ describe('evaluation harness wiring', () => {
 
   it('keeps model drafts, tool events and source markers after citation verification fails', async () => {
     script.turns = [
-      { call: { name: 'search_segments', args: { query: 'BLEU WMT big model' } } },
+      { call: { name: 'search_library', args: { use_planning: false, question: 'BLEU WMT big model' } } },
       ...Array.from({ length: 3 }, () => ({ text: 'The model achieved 28.4 BLEU [S999].' }))
     ];
     const result = await runScenario(SCENARIOS.find(item => item.id === 'local-lookup')!, profile);
@@ -171,7 +171,7 @@ describe('evaluation harness wiring', () => {
   });
 
   it('preserves raw tool markup that the production driver correctly hides from the answer', async () => {
-    const raw = '<tool_call>{"name":"search_segments","arguments":{"query":"BLEU"}}</tool_call>';
+    const raw = '<tool_call>{"name":"search_library","arguments":{"question":"BLEU"}}</tool_call>';
     script.turns = Array.from({ length: 3 }, () => ({ text: raw }));
     const result = await runScenario(SCENARIOS.find(item => item.id === 'no-tool')!, profile);
     expect(result.passed).toBe(false);
@@ -181,21 +181,21 @@ describe('evaluation harness wiring', () => {
 
   it('records stable declarations while the host enforces the local search budget', async () => {
     script.turns = [
-      ...Array.from({ length: 6 }, (_, i) => ({ call: { name: 'search_segments',
-        args: { query: `BLEU WMT result ${i}` } } })),
+      ...Array.from({ length: 6 }, (_, i) => ({ call: { name: 'search_library',
+        args: { use_planning: false, question: `BLEU WMT result ${i}` } } })),
       { text: 'The model achieved 28.4 BLEU [S1].' }
     ];
     const base = SCENARIOS.find(item => item.id === 'local-lookup')!;
-    const result = await runScenario({ ...base, expect: { required: ['search_segments'] } }, profile);
+    const result = await runScenario({ ...base, expect: { required: ['search_library'] } }, profile);
     expect(result.passed).toBe(true);
-    expect(result.run.turns[5].declaredTools).toContain('search_segments');
+    expect(result.run.turns[5].declaredTools).toContain('search_library');
     expect(result.run.turns[6].declaredTools).toEqual(result.run.turns[5].declaredTools);
     expect(result.run.turns[6].declaredTools).toContain('read_segment_content');
   });
 
   it('preserves an already generated proposal when final verification fails', async () => {
     script.turns = [
-      { call: { name: 'search_segments', args: { query: 'BLEU WMT big model' } } },
+      { call: { name: 'search_library', args: { use_planning: false, question: 'BLEU WMT big model' } } },
       { call: { name: 'note_propose_create', args: { action: 'create', title: '实验',
         markdown: 'Big model achieved 28.4 BLEU [S1].' } } },
       ...Array.from({ length: 3 }, () => ({ text: 'Prepared a pending proposal [S999].' }))
@@ -208,7 +208,7 @@ describe('evaluation harness wiring', () => {
 
   it('allows empty-search recovery through other consistently empty local readers', async () => {
     script.turns = [
-      { call: { name: 'search_segments', args: { query: 'SQuAD EM' } } },
+      { call: { name: 'search_library', args: { use_planning: false, question: 'SQuAD EM' } } },
       { call: { name: 'read_entry_assistant_context', args: { entry_id: 'paper-attn' } } },
       { call: { name: 'search_pdf_text', args: { entry_id: 'paper-attn', query: 'SQuAD', page_count: 5 } } },
       { text: '没有找到可用证据，无法核实这篇论文是否报告了该分数。' }
@@ -230,7 +230,7 @@ describe('evaluation harness wiring', () => {
 
   it('rejects remote evidence substitution in explicitly local-only empty-search recovery', async () => {
     script.turns = [
-      { call: { name: 'search_segments', args: { query: 'SQuAD EM' } } },
+      { call: { name: 'search_library', args: { use_planning: false, question: 'SQuAD EM' } } },
       { call: { name: 'search_sciverse_evidence', args: { query: 'SQuAD EM' } } },
       { text: '无法核实该分数，外部检索仅返回了不相关材料 [S1]。' }
     ];
@@ -283,15 +283,15 @@ describe('evaluation harness wiring', () => {
   });
   it('passes a scenario when the scripted agent selects the right tool', async () => {
     script.turns = [
-      { call: { name: 'search_segments', args: { query: 'WMT 2014 big model BLEU' } } },
+      { call: { name: 'search_library', args: { use_planning: false, question: 'WMT 2014 big model BLEU' } } },
       { text: 'The big Transformer model achieved 28.4 BLEU on WMT 2014 English-to-German [S1].' }
     ];
     const scenario = SCENARIOS.find(item => item.id === 'local-lookup')!;
     const result = await runScenario(scenario, profile);
     expect(result.checks.filter(check => !check.ok)).toEqual([]);
     expect(result.passed).toBe(true);
-    expect(result.run.calls.map(call => call.name)).toEqual(['search_segments']);
-    expect(result.run.turns[0].declaredTools).toContain('search_segments');
+    expect(result.run.calls.map(call => call.name)).toEqual(['search_library']);
+    expect(result.run.turns[0].declaredTools).toContain('search_library');
   });
 
   it('fails a scenario when the scripted agent calls a forbidden tool', async () => {
@@ -309,7 +309,7 @@ describe('evaluation harness wiring', () => {
 
   it('drives the note-proposal tool through reviewable state', async () => {
     script.turns = [
-      { call: { name: 'search_segments', args: { query: 'BLEU 28.4 WMT big model' } } },
+      { call: { name: 'search_library', args: { use_planning: false, question: 'BLEU 28.4 WMT big model' } } },
       {
         call: {
           name: 'note_propose_create',

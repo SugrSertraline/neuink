@@ -376,7 +376,7 @@ describe('Claude integration with production NeuInk tools', () => {
     await expect(runLocalAgentHarness(options({requestToolApproval:requestToolApproval('fixture','c1'),requestUserInput:requestUserInput('fixture','c1')}),session,vi.fn())).rejects.toThrow('CLI disconnected');
     await vi.waitFor(() => {expect(getToolApprovals()).toHaveLength(0);expect(getUserInputs()).toHaveLength(0);});
   });
-  it('routes single-paper local-agent questions through search_library with an outline instead of preloading full paper text', async () => {
+  it('exposes single-paper retrieval with frozen metadata without preloading paper text or outlines', async () => {
     vi.mocked(getEntryOutlineTool).mockResolvedValue({
       entry_id: 'entry1',
       entry_title: 'Entry',
@@ -384,17 +384,12 @@ describe('Claude integration with production NeuInk tools', () => {
       sections: []
     } as never);
     vi.mocked(runLocalAgent).mockImplementation(async request => {
-      const payload = JSON.parse(request.prompt) as {
-        context: { documentOutline?: string };
-        pinnedEvidence: string;
-        instructions: string;
-      };
-      expect(payload.context.documentOutline).toContain('2. Method');
-      expect(payload.pinnedEvidence).not.toContain('preloaded by the host');
-      expect(payload.instructions).toContain('call search_library first');
-      expect(payload.instructions).toContain('batch multiple follow-up reads in one parallel turn');
-      expect(payload.instructions).not.toContain('TOOL_NO_PUBLIC_PDF');
-      expect(payload.instructions).not.toContain('raw Mermaid code fence');
+      const payload = JSON.parse(request.prompt);
+      expect(payload.workspace_context.active_entry).toEqual({ id: 'entry1', title: 'Entry' });
+      expect(payload.workspace_context.scope.entries).toEqual([{ id: 'entry1', title: 'Entry' }]);
+      expect(payload).not.toHaveProperty('pinnedEvidence');
+      expect(request.prompt).not.toContain('2. Method');
+      expect(request.tools.find(tool => tool.name === 'search_library')?.description).toContain('planned_tasks');
       return { result: '已通过检索作答。' };
     });
     await runLocalAgentHarness(
@@ -403,7 +398,7 @@ describe('Claude integration with production NeuInk tools', () => {
       vi.fn()
     );
     expect(readEntryAssistantContext).not.toHaveBeenCalled();
-    expect(getEntryOutlineTool).toHaveBeenCalledWith({ entryId: 'entry1', root: 'C:/fixture' });
+    expect(getEntryOutlineTool).not.toHaveBeenCalled();
   });
   it('gives decomposition rules directly to local agent and executes planned_tasks without spawning a second local agent', async () => {
     const fakeResults = {
@@ -442,10 +437,10 @@ describe('Claude integration with production NeuInk tools', () => {
     } as never);
 
     vi.mocked(runLocalAgent).mockImplementation(async (request, _signal, _event, handle) => {
-      const payload = JSON.parse(request.prompt) as { instructions: string };
-      expect(payload.instructions).toContain('planned_tasks');
-      expect(payload.instructions).toContain('multi_target');
-      expect(payload.instructions).toContain('cross_paper');
+      const descriptor = request.tools.find(tool => tool.name === 'search_library');
+      expect(descriptor?.description).toContain('planned_tasks');
+      expect(JSON.stringify(descriptor?.inputSchema)).toContain('multi_target');
+      expect(JSON.stringify(descriptor?.inputSchema)).toContain('cross_paper');
       const searchOut = await call(
         handle,
         'search_library',

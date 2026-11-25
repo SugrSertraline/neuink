@@ -159,16 +159,16 @@ export const SCENARIOS: Scenario[] = [
       currentEntry: { id: ENTRIES.attention.id, title: ENTRIES.attention.title }
     },
     expect: {
-      anyOf: [['search_segments', 'read_entry_assistant_context']],
+      anyOf: [['search_library', 'read_entry_assistant_context']],
       forbidden: ['search_web', 'search_papers', 'read_webpage'],
       arguments: [
         {
-          tool: 'search_segments',
+          tool: 'search_library',
           description: 'search query is non-empty',
-          check: input => typeof input.query === 'string' && input.query.trim().length > 0
+          check: input => typeof input.question === 'string' && input.question.trim().length > 0
         },
         {
-          tool: 'search_segments',
+          tool: 'search_library',
           description: 'search stays inside the frozen scope',
           check: input => scopeCheck(input)
         }
@@ -189,8 +189,8 @@ export const SCENARIOS: Scenario[] = [
       currentEntry: { id: ENTRIES.attention.id, title: ENTRIES.attention.title }
     },
     expect: {
-      required: ['search_segments', 'read_segment_content'],
-      ordered: ['search_segments', 'read_segment_content'],
+      required: ['search_library', 'read_segment_content'],
+      ordered: ['search_library', 'read_segment_content'],
       arguments: [
         {
           tool: 'read_segment_content',
@@ -222,7 +222,7 @@ export const SCENARIOS: Scenario[] = [
       currentEntry: { id: ENTRIES.diffusion.id, title: ENTRIES.diffusion.title }
     },
     expect: {
-      anyOf: [['read_entry_assistant_context', 'search_segments']],
+      anyOf: [['read_entry_assistant_context', 'search_library']],
       forbidden: ['search_web', 'search_papers', 'read_webpage'],
       arguments: [
         {
@@ -231,7 +231,7 @@ export const SCENARIOS: Scenario[] = [
           check: input => input.entry_id === ENTRIES.diffusion.id
         },
         {
-          tool: 'search_segments',
+          tool: 'search_library',
           description: 'never widens the requested Entry scope',
           check: input => scopeCheck(input, [ENTRIES.diffusion.id])
         }
@@ -249,7 +249,7 @@ export const SCENARIOS: Scenario[] = [
       '检索公开论文，列出 3 篇 2023 年及以后关于 retrieval augmented generation 的论文，并给出来源链接。',
     expect: {
       anyOf: [['search_papers', 'search_sciverse_evidence']],
-      forbidden: ['search_segments', 'read_entry_assistant_context', 'read_pdf_pages'],
+      forbidden: ['search_library', 'read_entry_assistant_context', 'read_pdf_pages'],
       arguments: [
         {
           tool: 'search_papers',
@@ -279,7 +279,7 @@ export const SCENARIOS: Scenario[] = [
       '读一下这篇公开网页 https://example.org/transformer-survey ，总结它的三条要点，并用返回的链接标注来源。',
     expect: {
       required: ['read_webpage'],
-      forbidden: ['search_segments', 'search_papers', 'read_entry_assistant_context'],
+      forbidden: ['search_library', 'search_papers', 'read_entry_assistant_context'],
       arguments: [
         {
           tool: 'read_webpage',
@@ -435,7 +435,7 @@ export const SCENARIOS: Scenario[] = [
     },
     expect: {
       required: ['read_current_note'],
-      forbidden: ['search_segments', 'read_pdf_pages', 'search_web', 'search_papers'],
+      forbidden: ['search_library', 'read_pdf_pages', 'search_web', 'search_papers'],
       answerIncludes: ['28.4', '1.2', '3.85'],
       maxToolCalls: 3
     }
@@ -486,7 +486,7 @@ export const SCENARIOS: Scenario[] = [
       '用 Sciverse 检索 retrieval augmented generation 的可引用证据，并保留检索结果里的引用标记。',
     expect: {
       required: ['search_sciverse_evidence'],
-      forbidden: ['search_segments', 'search_papers'],
+      forbidden: ['search_library', 'search_papers'],
       arguments: [
         {
           tool: 'search_sciverse_evidence',
@@ -519,7 +519,7 @@ export const SCENARIOS: Scenario[] = [
     },
     expect: {
       required: ['read_note'],
-      forbidden: ['read_current_note', 'search_segments', 'read_pdf_pages'],
+      forbidden: ['read_current_note', 'search_library', 'read_pdf_pages'],
       arguments: [
         {
           tool: 'read_note',
@@ -565,7 +565,7 @@ export const SCENARIOS: Scenario[] = [
             run.calls.some(
               call =>
                 call.phase === 'subagent' &&
-                (call.name === 'search_segments' || call.name === 'read_entry_assistant_context')
+                (call.name === 'search_library' || call.name === 'read_entry_assistant_context')
             )
         }
       ],
@@ -581,7 +581,7 @@ export const SCENARIOS: Scenario[] = [
       '分别从《Attention Is All You Need》和《Diffusion Models Beat GANs on Image Synthesis》取出各自的代表性结果' +
       '（BLEU 与 FID），用表格对比，并分别标注出处。',
     expect: {
-      anyOf: [['search_segments', 'read_entry_assistant_context']],
+      anyOf: [['search_library', 'read_entry_assistant_context']],
       answerIncludes: ['28.4', '3.85'],
       extra: [
         {
@@ -624,7 +624,7 @@ export const SCENARIOS: Scenario[] = [
       currentEntry: { id: ENTRIES.attention.id, title: ENTRIES.attention.title }
     },
     expect: {
-      anyOf: [['search_segments', 'read_entry_assistant_context']],
+      anyOf: [['search_library', 'read_entry_assistant_context']],
       answerIncludes: ['28.4', '27.3'],
       answerMatches: /不一致|差异|不同|附录|appendix|tokeni/i,
       extra: [
@@ -664,7 +664,7 @@ export const SCENARIOS: Scenario[] = [
       }
     },
     expect: {
-      anyOf: [['search_segments', 'read_entry_assistant_context', 'search_pdf_text', 'read_pdf_pages']],
+      anyOf: [['search_library', 'read_entry_assistant_context', 'search_pdf_text', 'read_pdf_pages']],
       forbidden: [
         'search_web',
         'search_papers',
@@ -702,7 +702,7 @@ export const SCENARIOS: Scenario[] = [
           check: input => input.entry_id === ENTRIES.attention.id
         },
         {
-          tool: 'search_segments',
+          tool: 'search_library',
           description: 'never passes Entry ids outside the frozen scope',
           check: input => scopeCheck(input, [ENTRIES.attention.id])
         }
