@@ -1,4 +1,4 @@
-const { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } = require('node:fs');
+const { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } = require('node:fs');
 const { copyOptionalResources, assertEmbeddingResources, writeAvailabilityManifest } = require('./onboarding-resources.cjs');
 const { DEFAULT_SOURCE: browserReaderSource, verifyResources: verifyBrowserReader,
   copyResources: copyBrowserReader } = require('./browser-reader-resources.cjs');
@@ -62,8 +62,6 @@ async function main() {
   assertFile(executableSource, '未找到编译后的 neuink-desktop.exe');
   assertGuiExecutable(executableSource);
   assertFile(envExampleSource, '未找到根目录 .env.example');
-  assertFile(path.join(modelSource, 'onnx', 'model.onnx'), '未找到 embedding 的 ONNX 模型');
-  assertFile(path.join(modelSource, 'tokenizer.json'), '未找到 embedding 的 tokenizer.json');
 
   const timestamp = formatTimestamp(new Date());
   const folderName = `Neuink-portable-${timestamp}`;
@@ -80,6 +78,13 @@ async function main() {
   await copyPortableResources(executableSource, portableRoot, runtimeSource);
   mkdirSync(path.join(portableRoot, 'resources'), { recursive: true });
   copyFileSync(path.join(desktopRoot, 'src-tauri/resources/unrar-license.txt'), path.join(portableRoot, 'resources/unrar-license.txt'));
+  copyFileSync(path.join(desktopRoot, 'src-tauri/resources/pdfium.dll'), path.join(portableRoot, 'resources/pdfium.dll'));
+  cpSync(path.join(desktopRoot, 'src-tauri/resources/pdfium-licenses'), path.join(portableRoot, 'resources/pdfium-licenses'), { recursive: true });
+  const visualDestination = path.join(portableRoot, 'resources/scripts/qwen-visual-service');
+  mkdirSync(visualDestination, { recursive: true });
+  for (const name of ['service.py', 'README.md']) {
+    copyFileSync(path.join(desktopRoot, 'src-tauri/resources/scripts/qwen-visual-service', name), path.join(visualDestination, name));
+  }
   copyBrowserReader(browserReaderSource, path.join(portableRoot, 'resources', 'browser-reader'));
   copyReaderLicenses(readerLicenseSource, path.join(portableRoot, 'resources', 'reader-licenses'));
   researchComponent.copyResources(researchComponent.DEFAULT_SOURCE, path.join(portableRoot, 'resources', 'research-component'));
@@ -114,10 +119,7 @@ async function main() {
   assertFile(path.join(portableRoot, '.env.example'), '便携版配置模板复制失败');
   assertFile(path.join(portableRoot, 'msvcp140.dll'), 'Visual C++ 运行库复制失败');
   assertFile(path.join(portableRoot, 'msvcp140_1.dll'), 'Visual C++ 运行库复制失败');
-  assertFile(
-    path.join(portableRoot, 'embedding-models', 'default', 'onnx', 'model.onnx'),
-    '便携版模型复制失败',
-  );
+  assertEmbeddingResources(path.join(portableRoot, 'embedding-models', 'default'));
 
   console.log('步骤 3/3：压缩 ZIP…');
   await run(

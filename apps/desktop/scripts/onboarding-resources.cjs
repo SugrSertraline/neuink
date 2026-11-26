@@ -100,7 +100,10 @@ function assertEmbeddingResources(directory = DEFAULT_MODEL_SOURCE) {
   // The bundled encoder is interchangeable, so the weight file name is not fixed:
   // e5 ships `onnx/model.onnx` while the bge-m3 int8 export ships `onnx/model_int8.onnx`.
   const modelFiles = ['onnx/model.onnx', 'onnx/model_int8.onnx', 'model.onnx'];
-  if (!modelFiles.some(name => existsSync(path.join(directory, name)))) {
+  if (!modelFiles.some(name => {
+    const file = path.join(directory, name);
+    return existsSync(file) && statSync(file).isFile() && statSync(file).size > 0;
+  })) {
     throw new Error(
       `缺少必需 embedding 资源：${path.join(directory, modelFiles[0])}；不能仅凭 README 或缓存目录生成安装包。`,
     );

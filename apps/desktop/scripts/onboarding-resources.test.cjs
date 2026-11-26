@@ -39,6 +39,79 @@ function models(directory) {
   return modelSource;
 }
 
+for (const weight of ['onnx/model.onnx', 'onnx/model_int8.onnx']) {
+  test(`portable assembly accepts ${weight} and includes the visual runtime resources`, async t => {
+    const fs = require('node:fs');
+    const root = fixture(t);
+    const scripts = path.join(root, 'apps/desktop/scripts');
+    const resources = path.join(root, 'apps/desktop/src-tauri/resources');
+    const model = path.join(resources, 'embedding-models/default');
+    fs.cpSync(models(root), model, { recursive: true });
+    fs.rmSync(path.join(model, 'onnx/model.onnx'));
+    fs.writeFileSync(path.join(model, weight), 'fixture ONNX');
+    for (const [name, content] of Object.entries({
+      'unrar-license.txt': 'unrar license', 'pdfium.dll': 'PDFium fixture',
+      'pdfium-licenses/pdfium.txt': 'original license',
+      'scripts/qwen-visual-service/service.py': 'service fixture',
+      'scripts/qwen-visual-service/README.md': 'service instructions',
+    })) {
+      fs.mkdirSync(path.dirname(path.join(resources, name)), { recursive: true });
+      fs.writeFileSync(path.join(resources, name), content);
+    }
+    fs.mkdirSync(path.join(root, 'target/release'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'target/release/neuink-desktop.exe'), 'exe fixture');
+    fs.writeFileSync(path.join(root, '.env.example'), 'template');
+    const errors = [];
+    const sandbox = {
+      __dirname: scripts, console: { log() {}, error: message => errors.push(String(message)) },
+      process: { platform: 'win32', argv: ['node', 'build-portable.cjs', '--skip-build'], env: {}, exitCode: 0 },
+      require: name => {
+        if (name === './onboarding-resources.cjs') return require(name);
+        if (name === './portable-layout.cjs') return require(name);
+        if (name === './windows-runtime.cjs') return { findVcRuntimeDir: () => root };
+        if (name === './windows-pe-subsystem.cjs') return { assertGuiExecutable() {} };
+        if (name.endsWith('-resources.cjs') || name === './reader-licenses.cjs' || name === './research-component.cjs') {
+          return { verifyResources() {}, copyResources() {} };
+        }
+        return require(name);
+      },
+    };
+    // Replace only native build/copy/zip operations; run the actual assembly and resource checks.
+    const nativeStubs = `
+      async function copyPortableResources(executableSource, portableRoot) {
+        copyFileSync(executableSource, path.join(portableRoot, 'Neuink.exe'));
+        copyFileSync(envExampleSource, path.join(portableRoot, '.env.example'));
+        cpSync(modelSource, path.join(portableRoot, 'embedding-models/default'), { recursive: true });
+        for (const file of ['msvcp140.dll', 'msvcp140_1.dll']) writeFileSync(path.join(portableRoot, file), 'runtime');
+      }
+      async function run() {
+        for (const name of readdirSync(releaseRoot)) writeFileSync(path.join(releaseRoot, name + '.zip'), 'zip fixture');
+      }
+    `;
+    const source = readFileSync(path.join(__dirname, 'build-portable.cjs'), 'utf8')
+      .replace('void main().catch', 'globalThis.completion = main().catch');
+    runInNewContext(source + nativeStubs, sandbox);
+    await sandbox.completion;
+    assert.equal(sandbox.process.exitCode, 0, errors.join('\n'));
+    const folder = readdirSync(path.join(root, 'release')).find(name => !name.endsWith('.zip'));
+    const output = path.join(root, 'release', folder);
+    assertEmbeddingResources(path.join(output, 'embedding-models/default'));
+    for (const name of ['pdfium.dll', 'pdfium-licenses/pdfium.txt', 'scripts/qwen-visual-service/service.py']) {
+      assert.deepEqual(readFileSync(path.join(output, 'resources', name)), readFileSync(path.join(resources, name)));
+    }
+  });
+}
+
+test('embedding rejects an empty weight or a directory named like a weight', t => {
+  const model = models(fixture(t));
+  const weight = path.join(model, 'onnx/model.onnx');
+  writeFileSync(weight, '');
+  assert.throws(() => assertEmbeddingResources(model), /必需 embedding/);
+  rmSync(weight);
+  mkdirSync(weight);
+  assert.throws(() => assertEmbeddingResources(model), /必需 embedding/);
+});
+
 test('installer base config has no mandatory demo paths or empty optional globs', () => {
   const config = JSON.parse(readFileSync(path.resolve(__dirname, '../src-tauri/tauri.conf.json'), 'utf8'));
   assert.deepEqual(config.bundle.resources, BASE_RESOURCES);
